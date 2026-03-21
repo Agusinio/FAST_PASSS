@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: NOU / ACTUALITZAR / OBRIR (v12 - VERSIÓ ULTRA-LIPO)
+ * WORKFLOW: MAIN BUTTON (v15 - SESSIÓ I CICLE DE VIDA)
  * ============================================================================
  * Aquest workflow orquestra la creació, actualització i obertura de temes.
  * Totes les decisions de cerca i importació s'han delegat a LOGIC (Scanner i Project_Logic).
@@ -16,10 +16,10 @@
 
     const log = (m) => utils.log(m, "DEBUG");
 
-    FASTPASS_UI.Workflows.Nou = {
+    FASTPASS_UI.Workflows.MainButton = {
 
         /**
-         * Dispatcher principal de l'acció segons l'estat de la UI.
+         * runMainAction: Acció principal que orquestra la sesión segons l'estat del Context.
          */
         runMainAction: async function (action, data) {
             log("⏯️ Iniciant workflow: [" + action + "]");

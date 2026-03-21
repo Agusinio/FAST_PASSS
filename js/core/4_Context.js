@@ -81,22 +81,22 @@
                 case 'UPDATE':
                     btn.innerText = "ACTUALITZAR";
                     btn.className = "square-large btn-update";
-                    btn.onclick = () => FASTPASS_UI.Workflows.Nou.runMainAction('UPDATE', data);
+                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('UPDATE', data);
                     break;
                 case 'GO':
                     btn.innerText = "ANAR-HI";
                     btn.className = "square-large btn-go";
-                    btn.onclick = () => FASTPASS_UI.Workflows.Nou.runMainAction('GO', data);
+                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('GO', data);
                     break;
                 case 'LOAD':
                     btn.innerText = "OBRIR";
                     btn.className = "square-large btn-load";
-                    btn.onclick = () => FASTPASS_UI.Workflows.Nou.runMainAction('LOAD', data);
+                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('LOAD', data);
                     break;
                 case 'NEW':
                     btn.innerText = "NOU";
                     btn.className = "square-large btn-new";
-                    btn.onclick = () => FASTPASS_UI.Workflows.Nou.runMainAction('NEW', data);
+                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('NEW', data);
                     break;
                 case 'WAITING':
                     btn.innerText = data.msg || "ESPERANT...";

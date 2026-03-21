@@ -41,6 +41,10 @@ El mòdul **`4_Context.js`** recull els informes dels 3 Inspectors i decideix l'
 | Mòdul | Àtom Principal | Funció a l'API de Premiere |
 | :--- | :--- | :--- |
 | **`1_System.jsx`** | `jsx_isReady` | Verificació de salut del motor. |
+### A. FLUX: MAIN ACTION (`flow_mainButton.js`)
+1. **Workflow**: `runMainAction(action, data)`
+2. **Logic**: `Project_Logic.createFromTemplate(...)` o `Project_Logic.openProject(...)`
+3. **Bridge**: `jsx_openProject(path)` ↔ `jsx_overwriteClip(name, track, time)`
 | **`2_IO.jsx`** | `jsx_importFiles` | Ingesta massiva amb anclatge a Bin. |
 | **`3_Project.jsx`** | `jsx_listSequences` | Recuperació d'indices de seqüència. |
 | **`6_Clips.jsx`** | `jsx_getClipDataByTime`| Dades del clip sota el cabezal (CTI). |
