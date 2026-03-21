@@ -8,14 +8,13 @@ $.global.FASTPASS = $.global.FASTPASS || {};
 function jsx_BOOTSTRAP(extensionRootPath) {
     try {
         var root = extensionRootPath.replace(/\\/g, "/");
-        var load = function(name) {
+        var load = function (name) {
             var f = new File(root + "/jsx/modules/" + name);
             if (!f.exists) throw new Error("No existe: " + name);
             $.evalFile(f);
         };
-        
+
         load("1_System.jsx");
-        load("13_Timeline.jsx");
         load("2_IO.jsx");
         load("3_Project.jsx");
         load("4_Sequences.jsx");
@@ -26,9 +25,10 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         load("9_Render.jsx");
         load("11_Context.jsx");
         load("12_Diagnostic.jsx");
+        load("13_Timeline.jsx");
 
         return "OK_BOOT";
-    } catch(e) { return "ERR: " + e.message; }
+    } catch (e) { return "ERR: " + e.message; }
 }
 
 function jsx_isReady() { return "READY"; }

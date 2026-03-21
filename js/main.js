@@ -31,9 +31,9 @@ var isUserDraggingSlider = false;
             utils.isJsxReady = true; 
 
             // 📍 PASO C: Inicialización de la lógica
-            if (FASTPASS_UI.Logic && FASTPASS_UI.Logic.init) {
-                utils.log("🧠 Vinculando lógica de estado...");
-                FASTPASS_UI.Logic.init(); 
+            if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.init) {
+                utils.log("🧠 Vinculando lógica de estado (Inspectores)...");
+                FASTPASS_UI.Core.Context.init(); 
             }
         } else {
             console.error("❌ El motor JSX no ha respondido correctamente: " + result);
@@ -142,11 +142,11 @@ var isUserDraggingSlider = false;
         if(FASTPASS_UI.Config && FASTPASS_UI.Config.loadSelection) FASTPASS_UI.Config.loadSelection();
 
         const progInicial = document.getElementById('programa').value;
-        if (progInicial && FASTPASS_UI.Logic.updateConductorSelector) {
-            FASTPASS_UI.Logic.updateConductorSelector(progInicial);
+        if (progInicial && FASTPASS_UI.Core.Context.updateConductorSelector) {
+            FASTPASS_UI.Core.Context.updateConductorSelector(progInicial);
         }
 
-        callStateManager();
+        callContextAudit();
         FASTPASS_UI.Utils.log("✅ TODOS LOS BOTONES VINCULADOS");
     }
 
@@ -160,16 +160,16 @@ var isUserDraggingSlider = false;
     }
 
     function handleSelectionChange(e) {
-        if (e.target.id === 'programa' && FASTPASS_UI.Logic.updateConductorSelector) {
-            FASTPASS_UI.Logic.updateConductorSelector(e.target.value);
+        if (e.target.id === 'programa' && FASTPASS_UI.Core.Context.updateConductorSelector) {
+            FASTPASS_UI.Core.Context.updateConductorSelector(e.target.value);
         }
         if(FASTPASS_UI.Config) FASTPASS_UI.Config.saveSelection(e.target); 
-        callStateManager();
+        callContextAudit();
     }
 
-    function callStateManager() {
-        if (FASTPASS_UI.Logic && FASTPASS_UI.Logic.StateManager) {
-            FASTPASS_UI.Logic.StateManager.checkContext();
+    function callContextAudit() {
+        if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.checkContext) {
+            FASTPASS_UI.Core.Context.checkContext();
         }
     }
 

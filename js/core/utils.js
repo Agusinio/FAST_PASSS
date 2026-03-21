@@ -1,6 +1,8 @@
-/* =================================================================================
-   Utils.js - VERSIÓN OPTIMIZADA (Lipo-Ready)
-================================================================================= */
+/** 
+ * =================================================================================
+ * Utils.js - VERSIÓ ULTRA-ATÒMICA (Pla LIPO)
+ * =================================================================================
+ */
 (function() {
     var csInterface = new CSInterface();
     window.FASTPASS_UI = window.FASTPASS_UI || {};
@@ -9,12 +11,16 @@
         isJsxReady: false,
         csInterface: csInterface,
 
-        log: function(msg) { console.log("🟢 [UTILS]: " + msg); },
+        log: function(msg, level) { 
+            const colors = { "INFO": "🔵", "DEBUG": "🟢", "ERROR": "🔴", "WARN": "🟡" };
+            console.log(`${colors[level || "INFO"]} [FASTPASS]: ${msg}`); 
+        },
 
-        // --- COMUNICACIÓN ASÍNCRONA ---
+        /**
+         * Pont asíncron cap al motor ExtendScript (JSX).
+         */
         callJSX: function(script) {
             return new Promise(function(resolve) {
-                // El try/catch aquí es vital para que JS no se quede esperando una promesa que nunca cierra
                 var safeScript = "try{" + script + "}catch(e){'ERR:'+e.message}";
                 csInterface.evalScript(safeScript, function(res) {
                     if (!res || res === "undefined") resolve("");
@@ -23,41 +29,33 @@
             });
         },
 
-        // --- IMPORTACIÓN CON LÓGICA SUBIDA ---
-        importList: async function(fileList, binName) {
-            if (!fileList || !fileList.length) return;
+        /**
+         * Ingesta massiva de fitxers. Atòmic: Rep rutes i les envia.
+         * La preparació de rutes es fa a la capa de Lògica/Inspectors.
+         */
+        importList: async function(pathList, binName) {
+            if (!pathList || !pathList.length) return;
+            this.log(`Important ${pathList.length} ítems a '${binName}'...`, "DEBUG");
             
-            this.log("Iniciando importación de " + fileList.length + " ítems.");
-            
-            // Subimos la lógica: Scanner prepara las rutas (UNC, barras, etc.)
-            const cleanPaths = FASTPASS_UI.Logic.Scanner.preparePathsForImport(fileList);
-            const payload = JSON.stringify(cleanPaths);
-            
+            const payload = JSON.stringify(pathList);
             try {
-                // Llamamos al puente global que definimos en el 2_IO.jsx anterior
-                const res = await this.callJSX("jsx_importFiles('" + payload + "', '" + binName + "')");
-                
-                if (res.indexOf("ERR") === 0) throw new Error(res);
-                
-                this.log("✅ Importación completada en Premiere.");
-                await this.delay(500);
+                const res = await this.callJSX(`jsx_importFile('${payload}', '${binName}')`);
+                if (res && res.indexOf("ERR") === 0) throw new Error(res);
+                await this.delay(300);
             } catch (e) {
-                this.log("❌ Error en importList: " + e.message);
+                this.log(`❌ Error importList: ${e.message}`, "ERROR");
             }
         },
 
         sanitizeName: function(str) {
             if (!str) return "Unnamed_Item";
-            // Quitamos caracteres prohibidos en rutas y nombres de Premiere
             var pattern = new RegExp('[<>:"/\\\\|?*#]', 'g'); 
-            return str.replace(pattern, "").trim().substring(0, 60); // Limitamos longitud
+            return str.replace(pattern, "").trim().substring(0, 60);
         },
 
         delay: function(ms) { 
             return new Promise(resolve => setTimeout(resolve, ms)); 
         },
-
-        // --- LÓGICA DE NEGOCIO MIGRADA DESDE JSX (SYSTEM) ---
 
         getFormattedDate: function() {
             var d = new Date();
@@ -67,20 +65,21 @@
             return day + "_" + month + "_" + year;
         },
 
-        validatePaths: function(routes) {
-            if (!routes) return [];
-            var failed = [];
-            for (var key in routes) {
-                var path = routes[key];
-                // cep.fs.stat devuelve el código 0 si existe
-                var result = window.cep.fs.stat(path);
-                if (result.err !== 0) failed.push(key);
-            }
-            return failed;
+        handleError: function(e, context) {
+            this.log(`💥 [${context}] Error: ${e.message}`, "ERROR");
+            this.status(`Error en ${context}`, "error");
+        },
+
+        status: function(msg, type) {
+            const el = document.getElementById('estado');
+            if (!el) return;
+            el.innerText = msg;
+            el.className = "status-" + (type || "debug");
+        },
+
+        updateUIState: function(state) {
+            const main = document.getElementById('main-content');
+            if (main) main.classList.toggle('busy', state === 'BUSY');
         }
     };
 })();
-
-// --- ALIAS GLOBALES (Para mayor comodidad en workflows) ---
-var log = function(m) { window.FASTPASS_UI.Utils.log(m); };
-var callJSX = function(s) { return window.FASTPASS_UI.Utils.callJSX(s); };
