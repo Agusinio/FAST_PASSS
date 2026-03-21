@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuració - FAST >>> PASS</title>
+    <script src="./lib/CSInterface.js"></script>
+    <style>
+        :root {
+            --bg-color: #2a2a2a;
+            --bg-secondary: #333;
+            --text-color: #d4d4d4;
+            --border-color: #444;
+            --input-bg: #1e1e1e;
+            --accent-color: #007acc;
+            --button-hover: #005f9e;
+            --danger-color: #d9534f;
+            --success-color: #5cb85c;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0; padding: 15px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-size: 12px;
+            display: flex; flex-direction: column; height: 95vh;
+        }
+
+        h2 { margin-top: 0; font-size: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; color: var(--accent-color); }
+        
+        .section { margin-bottom: 20px; }
+        
+        .input-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 4px; font-weight: 600; color: #aaa; }
+        
+        input[type="text"], input[type="number"] {
+            width: 100%; padding: 6px;
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 3px; box-sizing: border-box;
+        }
+        
+        .input-number-small { text-align: center; width: 50px !important; }
+        
+        .number-control { display: flex; align-items: center; gap: 5px; }
+        .btn-mini {
+            width: 30px; height: 30px;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            cursor: pointer; border-radius: 3px;
+            font-weight: bold; font-size: 16px;
+        }
+        .btn-mini:hover { background-color: var(--border-color); }
+        
+        .path-control { display: flex; gap: 5px; }
+        .btn-browse {
+            width: 30px; flex-shrink: 0;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            cursor: pointer; border-radius: 3px;
+        }
+
+        .footer {
+            margin-top: auto;
+            display: flex; justify-content: flex-end; gap: 10px;
+            padding-top: 15px; border-top: 1px solid var(--border-color);
+        }
+        
+        button.primary { background-color: var(--accent-color); color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; }
+        button.secondary { background-color: transparent; color: var(--text-color); border: 1px solid var(--border-color); padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+        button.danger { background-color: transparent; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: auto; }
+        button:hover { opacity: 0.9; }
+
+        .content-scroll { flex-grow: 1; overflow-y: auto; padding-right: 5px; }
+    </style>
+</head>
+<body>
+    <div class="content-scroll">
+        
+        <div class="section">
+            <h2>General</h2>
+            <div class="input-group">
+                <label for="val-autor">Autor (Nick d'usuari):</label>
+                <input type="text" id="val-autor" placeholder="Ex: AGUS">
+            </div>
+            
+            <div class="input-group">
+                <label for="val-guarda">Guarda (Hores enrere):</label>
+                <div class="number-control">
+                    <button class="btn-mini" id="btn-dec">-</button>
+                    <input type="number" id="val-guarda" value="23" class="input-number-small">
+                    <button class="btn-mini" id="btn-inc">+</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Rutes d'Entrada</h2>
+            <div class="input-group"><label>Plantilla (.prproj):</label><div class="path-control"><input type="text" id="path-plantilla"><button class="btn-browse" onclick="browseFile('path-plantilla')">📂</button></div></div>
+            <div class="input-group"><label>Vídeos i SRT (MP4/SRT):</label><div class="path-control"><input type="text" id="path-vertical"><button class="btn-browse" onclick="browseFolder('path-vertical')">📂</button></div></div>
+            <div class="input-group"><label>Rètols (Wott/MOV):</label><div class="path-control"><input type="text" id="path-chyrons"><button class="btn-browse" onclick="browseFolder('path-chyrons')">📂</button></div></div>
+            <div class="input-group"><label>Conductors (MOV):</label><div class="path-control"><input type="text" id="path-conductors"><button class="btn-browse" onclick="browseFolder('path-conductors')">📂</button></div></div>
+            <div class="input-group"><label>Destí Projectes:</label><div class="path-control"><input type="text" id="path-desti"><button class="btn-browse" onclick="browseFolder('path-desti')">📂</button></div></div>
+        </div>
+
+        <div class="section">
+            <h2>Rutes de Sortida (Render)</h2>
+            <div class="input-group">
+                <label>Render Vídeo 1 (Principal):</label>
+                <div class="path-control">
+                    <input type="text" id="path-render-1">
+                    <button class="btn-browse" onclick="browseFolder('path-render-1')">📂</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Render Vídeo 2 (Còpia/Seguretat):</label>
+                <div class="path-control">
+                    <input type="text" id="path-render-2">
+                    <button class="btn-browse" onclick="browseFolder('path-render-2')">📂</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Exportació Portada (PNG):</label>
+                <div class="path-control">
+                    <input type="text" id="path-portada">
+                    <button class="btn-browse" onclick="browseFolder('path-portada')">📂</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <button class="danger" onclick="resetConfig()">Restablir</button>
+        <button class="secondary" onclick="window.close()">Cancel·lar</button>
+        <button class="primary" onclick="saveSetup()">Desar Canvis</button>
+    </div>
+
+    <script>
+        const csInterface = new CSInterface();
+
+        function init() {
+            // Cargamos de localStorage o usamos tus rutas por defecto (fallbacks)
+            document.getElementById('val-autor').value = localStorage.getItem('fp_cfg_nick') || "AGUS";
+            document.getElementById('val-guarda').value = localStorage.getItem('fp_cfg_guarda') || "22";
+            
+            // Rutes Entrada
+            document.getElementById('path-plantilla').value = localStorage.getItem('fp_cfg_plantilla_net') || "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj";
+            document.getElementById('path-vertical').value = localStorage.getItem('fp_cfg_verticalitzacio') || "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\";
+            document.getElementById('path-chyrons').value = localStorage.getItem('fp_cfg_chyrons') || "\\\\192.168.147.199\\public\\00_CHYRONS AUTOMATICS\\3CatInfo\\VERTICALITZACIO\\";
+            document.getElementById('path-conductors').value = localStorage.getItem('fp_cfg_conductors') || "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\";
+            document.getElementById('path-desti').value = localStorage.getItem('fp_cfg_destinoBase') || "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\";
+            
+            // Rutes Sortida (Render)
+            document.getElementById('path-render-1').value = localStorage.getItem('fp_cfg_path_render_1') || "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\EXPORTS PROVISIONALS";
+            document.getElementById('path-render-2').value = localStorage.getItem('fp_cfg_path_render_2') || "\\\\svftpccma\\videos\\MP4_3CATINFO_VERTICAL\\CONVERTITS_1080-1920\\608-1080";
+            document.getElementById('path-portada').value = localStorage.getItem('fp_cfg_path_portada') || "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\AAA_PORTADES";
+        }
+
+        function saveSetup() {
+            localStorage.setItem('fp_cfg_nick', document.getElementById('val-autor').value);
+            localStorage.setItem('fp_cfg_guarda', document.getElementById('val-guarda').value);
+            
+            localStorage.setItem('fp_cfg_plantilla_net', document.getElementById('path-plantilla').value);
+            localStorage.setItem('fp_cfg_verticalitzacio', document.getElementById('path-vertical').value);
+            localStorage.setItem('fp_cfg_chyrons', document.getElementById('path-chyrons').value);
+            localStorage.setItem('fp_cfg_conductors', document.getElementById('path-conductors').value);
+            localStorage.setItem('fp_cfg_destinoBase', document.getElementById('path-desti').value);
+            
+            localStorage.setItem('fp_cfg_path_render_1', document.getElementById('path-render-1').value);
+            localStorage.setItem('fp_cfg_path_render_2', document.getElementById('path-render-2').value);
+            localStorage.setItem('fp_cfg_path_portada', document.getElementById('path-portada').value);
+            
+            alert("Configuració desada correctament.");
+            
+            // Notificar a Premiere que algo ha cambiado
+            csInterface.dispatchEvent(new CSXSEvent('FASTPASS_CONFIG_UPDATED', 'APPLICATION'));
+            window.close();
+        }
+
+        function resetConfig() {
+            if (confirm("Segur que vols restablir totes les rutes per defecte?")) {
+                const keys = [
+                    'fp_cfg_nick', 'fp_cfg_guarda', 'fp_cfg_plantilla_net', 
+                    'fp_cfg_verticalitzacio', 'fp_cfg_chyrons', 'fp_cfg_conductors', 
+                    'fp_cfg_destinoBase', 'fp_cfg_path_render_1', 'fp_cfg_path_render_2', 'fp_cfg_path_portada'
+                ];
+                keys.forEach(k => localStorage.removeItem(k));
+                init(); // Recarga los valores por defecto en los inputs
+                alert("Rutes restablertes.");
+            }
+        }
+
+        document.getElementById('btn-dec').onclick = function() { var el=document.getElementById('val-guarda'); el.value = Math.max(1, (parseInt(el.value)||0)-1); };
+        document.getElementById('btn-inc').onclick = function() { var el=document.getElementById('val-guarda'); el.value = (parseInt(el.value)||0)+1; };
+
+        window.browseFolder = function(id) { 
+            var r = window.cep.fs.showOpenDialog(false, true, "Tria Carpeta", null); 
+            if(r.data.length) document.getElementById(id).value = r.data[0]; 
+        };
+        window.browseFile = function(id) { 
+            var r = window.cep.fs.showOpenDialog(false, false, "Tria Arxiu", null, ["prproj"]); 
+            if(r.data.length) document.getElementById(id).value = r.data[0]; 
+        };
+
+        init();
+    </script>
+</body>
+</html>

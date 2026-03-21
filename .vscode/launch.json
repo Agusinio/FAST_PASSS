@@ -1,0 +1,21 @@
+// launch.json
+
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "extendscript-debug",
+            "request": "attach",
+            "name": "Debug JSX en Premiere",
+            "hostAppSpecifier": "premierepro",
+            "engineName": "NewWorld" // <--- Añade esto para que coincida con tu #targetengine
+        },
+        {
+            "type": "extendscript-debug",
+            "request": "launch",
+            "name": "Lanzar Script Atómico (script.jsx)",
+            "hostAppSpecifier": "premierepro-25.0",
+            "engineName": "NewWorld"
+        }
+    ]
+}

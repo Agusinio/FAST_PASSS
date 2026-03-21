@@ -1,0 +1,7 @@
+<ExtensionList>
+    <Extension Id="com.test.debug.panel">
+        <HostList>
+            <Host Name="PPRO" Port="8907"/>
+        </HostList>
+    </Extension>
+</ExtensionList>

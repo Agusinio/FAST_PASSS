@@ -1,0 +1,16 @@
+[0] Opacity
+   -> [0] Opacity
+   -> [1] Blend Mode
+   -> [2] Blend Mode
+[1] Motion
+   -> [0] Position
+   -> [1] Scale
+   -> [2] Scale Width
+   -> [3] Uniform Scale
+   -> [4] Rotation
+   -> [5] Anchor Point
+   -> [6] Anti-flicker Filter
+   -> [7] Crop Left
+   -> [8] Crop Top
+   -> [9] Crop Right
+   -> [10] Crop Bottom

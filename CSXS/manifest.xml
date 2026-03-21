@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="6.0" ExtensionBundleId="com.test.debug" ExtensionBundleVersion="9.0.0" ExtensionBundleName="FAST_PASSS">
+    
+    <ExtensionList>
+        <Extension Id="com.test.debug.panel" Version="8.0.0"/>
+        <HostList>
+            <Host Name="PPRO" Port="8907"/>
+        </HostList>
+    </ExtensionList>
+    
+    <ExecutionEnvironment>
+        <HostList>
+            <Host Name="PPRO" Version="[14.0,99.0]"/>
+        </HostList>
+        <LocaleList>
+            <Locale Code="All"/>
+        </LocaleList>
+        <NodeJSEnabled>true</NodeJSEnabled>
+    </ExecutionEnvironment>
+    
+    <DispatchInfoList>
+        <Extension Id="com.test.debug.panel">
+            <DispatchInfo>
+                <Resources>
+                    <MainPath>./index.html</MainPath>
+                    <ScriptPath>./jsx/main.jsx</ScriptPath>
+                </Resources>
+                <Lifecycle>
+                    <AutoVisible>true</AutoVisible>
+                </Lifecycle>
+                <UI>
+                    <Type>Panel</Type>
+                    <Menu>FAST >>> PASS</Menu>
+                    <Geometry>
+                        <Size>
+                            <Height>400</Height>
+                            <Width>350</Width>
+                        </Size>
+                    </Geometry>
+                </UI>
+            </DispatchInfo>
+        </Extension>
+    </DispatchInfoList>
+</ExtensionManifest>

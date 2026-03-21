@@ -1,0 +1,269 @@
+PROJECTE: FAST >>> PASS
+VERSIÓ DE LÒGICA: 6.11.0 (Especificació Funcional - Layout Vertical Compacte)
+DOCUMENT: Especificació funcional detallada per a CEP (index.html) i JSX (main.jsx).
+
+================================================================================
+1. ARQUITECTURA TÈCNICA CLAU
+================================================================================
+
+1.1. Entorn d'execució:
+El panell s'executarà en un context de scripting ES3 (JavaScript de 1999) de Premiere Pro. Totes les funcions de 'main.jsx' han de ser compatibles amb ES3.
+
+1.2. Separació de Lògica (Arquitectura CEP/JSX):
+- CEP (index.html): Actua com el "cervell". Gestiona TOTA la lògica complexa, fluxos de treball, estat de la UI, gestió d'esdeveniments, connexions a BBDD (futures), parsing d'arxius (SRT) i orquestració. Utilitza JavaScript modern (ES5/ES6).
+- JSX (main.jsx): Actua com els "braços". Conté NOMÉS funcions atòmiques i "tontes" (ex: jsx_insertClip, jsx_moveClip, jsx_getCTI, jsx_executeCommand) que són cridades per CEP. No conté cap lògica de flux (if/else complexos, bucles, etc.).
+
+1.3. Obtenció de Metadades (El gran repte d'ES3):
+És impossible llegir de manera fiable `item.mediaDuration` o metadades XMP d'un `ProjectItem` (clip al panell de projecte) en ES3.
+- Solució "Insertar i Mesurar" (Pendent v6.5.21): Per obtenir la durada de qualsevol clip (ex: Chyrons de Conductor, Titol-Tema), s'ha d'utilitzar una pista de servei (V8, índex 7).
+- Flux de Mesura (realitzat per una funció helper a CEP, ex: `getDurationFromServiceTrack_v21`):
+    1. CEP crida `jsx_clearTrack(7)`.
+    2. CEP crida `jsx_insertClip(7, "nom_clip_a_mesurar", 0.0)`.
+    3. CEP sondeja (`pollForClipCount(7, 1)`) fins que el clip apareix.
+    4. CEP crida `jsx_getClipDurationOnTimeline(7, 0)` per obtenir la durada real (això SÍ funciona en ES3).
+    5. CEP crida `jsx_clearTrack(7)`.
+    6. CEP rep la durada i continua la seva lògica.
+
+================================================================================
+2. DISPOSICIÓ DEL LAYOUT (v6.11.0 - Etiquetes Verticals)
+================================================================================
+
+El panell és una única finestra vertical amb scroll i disseny compacte.
+
+- CAPÇALERA:
+    - Títol: "FAST >>> PASS".
+    - `Icona Setup` (Roda dentada, a la dreta): Icona d'estat (VERMELL/VERD).
+
+- SECCIÓ 1: SET UP (Etiqueta vertical)
+    - `PROG:` (etiqueta) + [Llista desplegable 'programa'].
+    - `BLOC:` (etiqueta) + [Llista desplegable 'bloc'].
+    - `NOU`: Botó quadrat (60x60px).
+
+- SECCIÓ 2: VIDEO (Etiqueta vertical)
+    - Fila 1: `IN` (botó 45x45px), `SCENE` (botó ample x 45px), `OUT` (botó 45x45px).
+    - Fila 2: `◀` (botó 45x45px), `MOVE` (slider horitzontal), `▶` (botó 45x45px), `KEY` (botó 45x45px).
+
+- SECCIÓ 3: CHYRONS (Etiqueta vertical)
+    - `PLACE CHYRONS`: Botó quadrat (60x60px).
+
+- SECCIÓ 4: GRAPH (Etiqueta vertical)
+    - `PLACE 16:9`: Botó quadrat (60x60px).
+
+- SECCIÓ 5: SRT (Etiqueta vertical)
+    - `WORK` (botó quadrat 45x45px).
+    - `INICI:` (etiqueta) + [Camp de text 'txt-srt-in'].
+    - `CUA:` (etiqueta) + [Camp de text 'txt-srt-out'].
+    - `TIME ADJUST`: Botó quadrat (60x60px).
+
+- SECCIÓ 6: RENDER (Etiqueta vertical)
+    - `VIDEO` (botó 60x60px), `PORTADA` (botó 60x60px).
+
+- PEU DE PÀGINA:
+    - Finestra de log `Debug Console`.
+
+================================================================================
+3. FLUX DE TREBALL I LÒGICA DE CONTROLS
+================================================================================
+
+---
+A. FLUX D'INICIALITZACIÓ
+---
+
+1.  **En Obrir Panell:**
+    - `index.html` es carrega.
+    - `initPanel()` s'executa.
+    - `updateUIState('INIT')` -> Tots els controls (excepte `PROG`, `BLOC`, `SETUP`) es desactiven.
+    - `Icona Setup` es posa en VERMELL (desconnectat).
+    - `loadSelection()` recupera les últimes seleccions de `PROG` i `BLOC` del `localStorage`.
+    - `runContextCheck()` s'executa.
+
+2.  **En Canviar `PROG` o `BLOC`:**
+    - `onSelectionChange()` es dispara.
+    - `saveSelection()` desa el canvi a `localStorage`.
+    - `runContextCheck()` s'executa.
+
+3.  **Lògica `runContextCheck()` (El Cervell de Context):**
+    - Obté `programa` i `bloc` seleccionats. Si falta algun, `updateUIState('INIT')` i surt.
+    - Crida `const projectesObertsJSON = await callJSXPromise('jsx_getOpenProjects()');`
+    - (CEP) `const projectesOberts = JSON.parse(projectesObertsJSON);`
+    - (CEP) Busca un projecte obert que coincideixi amb el nom estandarditzat (ex: `Pruebas_PROGRAMA_..._BLOC_...`).
+    - **Cas 1 (Sense projectes coincidents):**
+        - `updateUIState('READY', { context: 'CREAR' });`
+        - El botó `NOU` es posa en blau i text "NOU".
+    - **Cas 2 (Projecte coincident trobat):**
+        - `updateUIState('READY', { context: 'ACTUALITZAR', projecte: 'nom_projecte.prproj' });`
+        - El botó `NOU` es posa en blau i text "ACTUALITZAR" (o icona).
+
+4.  **`Icona Setup` (Botó):**
+    - Obre la finestra `setup.html`.
+    - `setup.html` gestiona el login/pass.
+    - (Futur) En cas d'èxit:
+        - `setup.html` desa el *TOKEN* (no la contrasenya) a `localStorage`.
+        - `setup.html` envia l'esdeveniment global: `csInterface.dispatchEvent('FASTPASS_LOGIN_SUCCESS')`.
+        - `setup.html` es tanca.
+    - `index.html` (que està escoltant) rep l'esdeveniment `onLoginSuccess`.
+    - `btnSetup` canvia a VERD.
+
+---
+B. LÒGICA PER SECCIÓ
+---
+
+**SECCIÓ 1: SET UP**
+
+- **Botó `NOU` (Context: CREAR):**
+    - `updateUIState('BUSY')`.
+    - 1. `await callJSXPromise('jsx_openTemplate("...PROJECTE 3CatInfo_NET.prproj")');`
+    - 2. `const prepData = await callJSXPromise(`jsx_prepFlowData("${programa}", "${bloc}")`);`
+    - 3. (Futur BBDD) Ara: Importar arxius (`.mov`, `.srt`, `.mp4`) dels repositoris: `await callJSXPromise(`jsx_importFiles(...)`);`
+    - 4. `await pollForImports(llistaArxius);`
+    - 5. `const knownSeq = await callJSXPromise('jsx_getSequenceList()');`
+    - 6. `await callJSXPromise('jsx_cloneSequence("OTT VERTICAL")');`
+    - 7. `const clonedName = await pollForNewSequence(knownSeq);`
+    - 8. `await callJSXPromise(`jsx_renameSequence("${clonedName}", "${prepData.newSeqName}")`);`
+    - 9. `await pollForSequence(prepData.newSeqName);`
+    - 10. `await callJSXPromise(`jsx_saveProjectAs("${prepData.projectPath}")`);`
+    - 11. Col·locar vídeo V2: `await callJSXPromise(`jsx_insertClip(1, "${prepData.videoClipName}", 0.0)`);` (V2=índex 1)
+    - 12. **Col·locar Titol (V4, índex 3):** (Flux v6.5.21)
+        - a. `const titolFullDuration = await getDurationFromServiceTrack_v21(prepData.themeClipName);`
+        - b. `await callJSXPromise(`jsx_insertClip(3, "${prepData.themeClipName}", 0.0)`);`
+        - c. `await pollForClipCount(3, 1);`
+        - d. `await callJSXPromise(`jsx_adjustClipPoints(3, 0, 0.0, 6.8, ${titolFullDuration})`);`
+        - e. `await callJSXPromise(`jsx_insertClip(3, "${prepData.themeClipName}", 6.8)`);`
+        - f. `await pollForClipCount(3, 2);`
+        - g. `await callJSXPromise(`jsx_adjustClipPoints(3, 1, 6.8, 99999, ${titolFullDuration})`);`
+        - h. `await callJSXPromise(`jsx_enableTimeRemapping(3, 1)`);`
+        - i. `await delay(500);`
+        - j. `await callJSXPromise(`jsx_stretchClip(3, 1, ${targetEndTimeSeconds})`);`
+    - 13. `await callJSXPromise('jsx_saveProject()');`
+    - `updateUIState('READY')`.
+
+- **Botó `NOU` (Context: ACTUALITZAR):**
+    - `updateUIState('BUSY')`.
+    - 1. `const projectName = btnNou.getAttribute('data-project');`
+    - 2. `await callJSXPromise(`jsx_activateProject("${projectName}")`);`
+    - 3. (Lògica "Actualitzar Arxius") Importar nous arxius com a duplicats i informar l'usuari.
+    - 4. `const seqExists = await callJSXPromise(`jsx_sequenceExists("${prepData.newSeqName}")`);`
+    - 5. Si `seqExists == true`: `await callJSXPromise(`jsx_openSequence("${prepData.newSeqName}")`);`
+    - 6. Si `seqExists == false`: Executar passos 4-13 del flux "NOU PROJECTE" (clonar, reanomenar, desar, col·locar...).
+    - 7. `await callJSXPromise('jsx_saveProject()');`
+    - `updateUIState('READY')`.
+
+**SECCIÓ 2: VIDEO**
+
+- **`IN` (Botó):**
+    - 1. `const ctiTime = await callJSXPromise('jsx_getCTI()');`
+    - 2. `await callJSXPromise(`jsx_rippleTrimClipStart(1, 0, ${ctiTime}, "video")`);` (V2)
+    - 3. `await callJSXPromise(`jsx_rippleTrimClipStart(0, 0, ${ctiTime}, "audio")`);` (A1)
+    - 4. `await callJSXPromise(`jsx_rippleTrimClipStart(1, 0, ${ctiTime}, "audio")`);` (A2)
+    - 5. `await callJSXPromise('jsx_moveClipToTime(1, 0, 0.0, "video")');`
+    - 6. `await callJSXPromise('jsx_moveClipToTime(0, 0, 0.0, "audio")');`
+    - 7. `await callJSXPromise('jsx_moveClipToTime(1, 0, 0.0, "audio")');`
+
+- **`SCENE` (Botó):**
+    - 1. `const SCENE_DETECT_CMD_ID = 4014;` (ID pot variar)
+    - 2. `await callJSXPromise('jsx_selectClipOnTrack(1, 0, "video")');` (V2 = índex 1)
+    - 3. `await callJSXPromise('jsx_executeCommand(' + SCENE_DETECT_CMD_ID + ')');`
+
+- **`OUT` (Botó):**
+    - 1. `const ctiTime = await callJSXPromise('jsx_getCTI()');`
+    - 2. `await callJSXPromise(`jsx_trimClipEnd(1, 0, ${ctiTime}, "video")`);` (i A1, A2)
+    - 3. `const newDuration = await callJSXPromise('jsx_getClipDurationOnTimeline(1, 0)');`
+    - 4. `await callJSXPromise(`jsx_setSequenceInOut(0.0, ${newDuration - 0.04})`);` ( -1 frame)
+    - 5. `await callJSXPromise('jsx_toggleTrackLock("audio", 0, true)');` (i A2)
+    - 6. `await callJSXPromise(`jsx_stretchClip(3, 1, ${newDuration})`);` (Ajustar Titol V4, clip índex 1)
+    - 7. **Lògica v6.11.0:** Activar "Follow Playhead".
+    -    `await callJSXPromise('jsx_setTrackFocus("video", 1)');` (Pista V2)
+    -    `const FOLLOW_PLAYHEAD_CMD_ID = 4050;` (ID pot variar)
+    -    `await callJSXPromise('jsx_executeCommand(' + FOLLOW_PLAYHEAD_CMD_ID + ')');`
+    - 8. `await callJSXPromise('jsx_saveProject()');`
+
+- **`◀` (Botó "Clip Anterior"):**
+    - 1. `await callJSXPromise('jsx_jumpToClip("previous", "center", 1)');` (V2=índex 1)
+
+- **`▶` (Botó "Clip Següent"):**
+    - 1. `await callJSXPromise('jsx_jumpToClip("next", "center", 1)');` (V2=índex 1)
+
+- **`MOVE` (Slider):**
+    - (Futur) `const xPos = sliderMove.value;` -> Mapejar valor -> `callJSXPromise(`jsx_setClipVideoEffectProperty(...)`);`
+
+- **`KEY` (Botó):**
+    - (Futur) `const ctiTime = await callJSXPromise('jsx_getCTI()');` -> `callJSXPromise(`jsx_addKeyframe(...)`);` -> (Futur) Lògica Easy In/Out/Bezier.
+
+**SECCIÓ 3: CHYRONS**
+
+- **`PLACE CHYRONS` (Botó):**
+    - 1. `const ctiTime = await callJSXPromise('jsx_getCTI()');`
+    - 2. **Lògica Conductor:** `if (ctiTime > 0.1)`:
+        - a. `const duration = await getDurationFromServiceTrack_v21("Conduct_Nom.mov");`
+        - b. `await callJSXPromise('jsx_insertClip(4, "Conduct_Nom.mov", 6.44)');` (V5=índex 4)
+        - c. `await pollForClipCount(4, ...);`
+        - d. `await callJSXPromise(`jsx_adjustClipPoints(4, ..., 0.0, 99999, duration)`);`
+    - 3. **Lògica Chyrons (Futur BBDD):**
+        - a. (CEP) `const chyrons = await fetch("http://bbdd/api?...");`
+        - b. (CEP) Bucle `for (chyron of chyrons)`:
+            - `tc_final = chyron.tc_in + ctiTime;`
+            - `if (chyron.clipName.includes('_Lloc-data_'))` -> `jsx_insertClip(5, ...)` (V6=índex 5)
+            - `else` -> `jsx_insertClip(4, ...)` (V5=índex 4)
+
+**SECCIÓ 4: GRAPH**
+
+- **`PLACE 16:9` (Botó):**
+    - 1. `const clipInfo = await callJSXPromise('jsx_getSelectedClip("video")');` (Retorna { trackIndex, clipIndex, start, end })
+    - 2. `await callJSXPromise('jsx_applyGraph16_9_Preset(clipInfo.trackIndex, clipInfo.clipIndex)');` (Valors futurs)
+    - 3. `const pngName = "Fons_16_9_TBD.png";` (Caldrà importar-lo o tenir-lo a la plantilla)
+    - 4. `await callJSXPromise(`jsx_insertClip(0, "${pngName}", ${clipInfo.start})`);` (V1=índex 0)
+    - 5. `await pollForClipCount(0, 1);`
+    - 6. `await callJSXPromise(`jsx_adjustClipPoints(0, 0, 0.0, 99999, clipInfo.end - clipInfo.start)`);`
+
+**SECCIÓ 5: SRT**
+
+- **`WORK` (Botó - Clic 1 "Activar"):**
+    - `btnSrtWork.textContent = "STOP";`
+    - 1. Bloquejar V1, V2, A1, A2... (`jsx_toggleTrackLock(...)`).
+    - 2. `await callJSXPromise('jsx_createSubtitleTrack()');` (Crea SRT2).
+    - 3. `const srtPath = await findOrImportSRT();` (Lògica helper de CEP).
+    - 4. (CEP) `const srtContent = await window.cep.fs.readFile(srtPath);`
+    - 5. (CEP) `const filterIn = txtSrtIn.value;`, `const filterOut = txtSrtOut.value;`
+    - 6. (CEP) Parsejar i Filtrar SRT (si filtres buits, agafar tot).
+    - 7. (CEP) Bucle `for (sub of filteredSubtitles)`: `await callJSXPromise('jsx_createSubtitle(sub.text, sub.in, sub.out, 0)');` (Pista SRT1).
+
+- **`WORK` (Botó - Clic 2 "Desactivar"):**
+    - `btnSrtWork.textContent = "WORK";`
+    - 1. Desbloquejar pistes de vídeo. Mantenir àudio bloquejat.
+
+- **`TIME ADJUST` (Botó):**
+    - 1. `const clipsJSON = await callJSXPromise('jsx_getSelectedSubtitleClips()');`
+    - 2. `const clips = JSON.parse(clipsJSON);`
+    - 3. (CEP) `const durActual = (clips[clips.length - 1].outTime - clips[0].inTime) + (clips.length * (3 * 0.04));`
+    - 4. (CEP) Determinar `durIdeal`:
+        - `const ctiTime = await callJSXPromise('jsx_getCTI()');`
+        - `const nextClipIn = await callJSXPromise('jsx_findNextClipOnTrack(pistaOposada, clips[0].inTime)');`
+        - `if (ctiTime > clips[0].inTime && (ctiTime < nextClipIn || nextClipIn === 0))` -> `durIdeal = ctiTime - clips[0].inTime;`
+        - `else if (nextClipIn > 0)` -> `durIdeal = nextClipIn - clips[0].inTime;`
+        - `else` -> `showStatus("Error: Posa el cabezal on vols que acabi...", "error"); return;`
+    - 5. (CEP) `const ratio = durIdeal / durActual;`
+    - 6. (CEP) Recalcular durades, ajustar sobras/faltas (al clip més llarg/curt).
+    - 7. (CEP) Bucle `for (clip of nousClips)`: `await callJSXPromise('jsx_createSubtitle(..., pistaOposada)');`
+    - 8. (CEP) Bucle `for (clip of vellsClips)`: `await callJSXPromise('jsx_deleteClipByID(clip.id)');`
+
+**SECCIÓ 6: RENDER**
+
+- **`VIDEO` (Botó):**
+    - 1. `const AME_QUEUE_CMD_ID = 3804;` (ID pot variar)
+    - 2. `await callJSXPromise('jsx_executeCommand(' + AME_QUEUE_CMD_ID + ')');`
+    - 3. (Futur) `await callJSXPromise('jsx_executeCommand(ID_COMANDO_AME_START)');`
+
+- **`PORTADA` (Botó):**
+    - 1. `const SNAPSHOT_CMD_ID = 3381;` (ID pot variar)
+    - 2. `const ctiTime = await callJSXPromise('jsx_getCTI()');`
+    - 3. Desactivar pistes (V2, SRTs, V5, V6...): `await callJSXPromise('jsx_toggleTrackEnable(1, false)');` ...
+    - 4. `const targetTime = ctiTime - 2.0;`
+    - 5. `const originalPosJSON = await callJSXPromise('jsx_getAllClipPositionsOnTrack(3)');` (V4=índex 3)
+    - 6. `const originalPos = JSON.parse(originalPosJSON);`
+    - 7. `const offset = targetTime - originalPos[0].startTime;`
+    - 8. `await callJSXPromise(`jsx_moveAllClipsOnTrack(3, ${offset})`);`
+    - 9. `await callJSXPromise('jsx_executeCommand(' + SNAPSHOT_CMD_ID + ')');`
+    - 10. **Desfer:**
+        - a. `await callJSXPromise(`jsx_setAllClipPositions(3, '${originalPosJSON}')`);`
+        - b. `await callJSXPromise('jsx_toggleTrackEnable(1, true)');` ... (reactivar pistes)
+    - 11. `await callJSXPromise('jsx_saveProject()');`
