@@ -8,11 +8,15 @@ The goal is to move all business logic to JavaScript (JS) and leave ExtendScript
 3. **Atomic JSX**: Each JSX function should do ONE thing (e.g., "import this file", "set this clip's start time").
 4. **JSON exchange**: Pass data as JSON strings between environments.
 
-## Phase 0: Standardization & JS Audit (CRITICAL)
-- [ ] **Audit all `callJSX`**: Redirect direct module calls (e.g., `FASTPASS.Project.saveAs`) to bridges (e.g., `jsx_saveProjectAs`).
-- [ ] **Fix `jsx_checkContextState`**: This bridge is currently commented out in `main.jsx`, breaking the UI status (NOU/OBRIR).
-- [ ] **Unify naming**: Ensure JS calls `jsx_importFiles` (plural) as defined in the mapping, and that JSX accepts the JSON payload.
-- [ ] **Path Normalization**: Move path cleaning (slashes, UNC) from `2_IO.jsx` to `js/logic/scanner.js` (`preparePathsForImport`).
+## 🎯 OBJECTIUS COMPLETATS (v2.0)
+
+- [x] **1. ATOMITZACIÓ JSX**: Totes les accions de Premiere ara són Àtoms purs (1 acció = 1 funció).
+- [x] **2. ERA DELS INSPECTORS**: S'ha creat la capa de descobriment (Source, App, Session) separada de la decisió.
+- [x] **3. SÍNTESI CORE**: El `Context_Logic` ara és el motor de decisió central (Core) i orquestra els Inspectors.
+- [x] **4. WORKFLOWS NETS**: Els fitxers `flow_*.js` ja no tenen ni Àtoms ni Lògica pesada, només orquestració.
+
+---
+✅ **PLA LIPO FINALITZAT AMB ÈXIT.** (21/03/2026)
 
 ## Phase 2: Project Management (`3_Project.jsx`)
 - **Current State**: `activateProject` contains complex sequence searching and "surgical cleaning" of tabs.

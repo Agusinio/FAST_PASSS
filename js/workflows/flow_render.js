@@ -1,113 +1,95 @@
-/*
- * =================================================================================
- * PROJECTE: FAST >>> PASS
- * ARXIU: flow_render.js (WORKFLOW: EXPORTACIÓ)
- * =================================================================================
+/**
+ * ============================================================================
+ * WORKFLOW: RENDER (EXPORTACIÓ) (v11 - VERSIÓ ULTRA-LIPO)
+ * ============================================================================
  */
 
 (function () {
-    window.FASTPASS_UI = window.FASTPASS_UI || {};
-    const FASTPASS_UI = window.FASTPASS_UI || {};
+    var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
-    const utils = FASTPASS_UI.Utils;
+
+    const utils = window.FASTPASS_UI.Utils;
+    const renderLogic = window.FASTPASS_UI.Logic.Render;
+    const log = (m) => utils.log(m, "DEBUG");
+    const callJSX = (s) => utils.callJSX(s);
 
     FASTPASS_UI.Workflows.Render = {
 
         /**
-         * Envia la seqüència activa a Adobe Media Encoder per renderitzar el vídeo.
+         * Envia la seqüència activa a AME.
          */
         runVideo: async function () {
-            utils.log("Botó 'RENDER VIDEO' clicat.", "DEBUG");
+            log("🚀 Preparant enviament a AME...");
             const config = FASTPASS_UI.Config.get();
 
             try {
-                // 1. Validar Ruta de sortida
-                let outputDir = FASTPASS_UI.State.projectFolderPath;
-                if (!outputDir) {
-                    outputDir = await utils.callJSX("jsx_getProjectFolder()");
-                    if (!outputDir) outputDir = config.export.video1 || "C:\\Users\\Public";
-                }
+                // 1. Obtenir ruta del projecte o rutes per defecte
+                let outputDir = await callJSX("jsx_getProjectFolder()");
+                if (!outputDir) outputDir = config.rutas.destinoBase || "C:\\Temp";
+                
+                utils.status("Processant nom...", "procesando");
 
-                utils.status("Enviant a AME...", "procesando");
-
-                // 2. Generar Nom del Fitxer
-                const seqName = await utils.callJSX('jsx_getActiveSequenceName()');
-                // Format seqName: Prog_Bloque_Tema -> Render: Prog_Tema_HH_MM
-                const parts = seqName.split("_");
-                const prog = parts[0] || "PROG";
-                const tema = parts.slice(2).join("_") || "TEMA";
-
-                const now = new Date();
-                const hh_mm = ("0" + now.getHours()).slice(-2) + "_" + ("0" + now.getMinutes()).slice(-2);
-                const fileName = `${prog}_${tema}_${hh_mm}.mp4`;
-
-                // 3. Preset (.epr)
-                const extPath = FASTPASS_UI.csInterface.getSystemPath(SystemPath.EXTENSION);
-                const presetPath = extPath + "/presets/H264_2Pass_Vertical.epr";
-                const presetSafe = presetPath.replace(/\\/g, '\\\\');
-
-                utils.log(`🚀 Renderitzant: ${fileName}`, "INFO");
-
-                // 4. Execució del Render via Logic
-                const res = await FASTPASS_UI.Logic.Render.queueRender(presetSafe, outputDir, fileName);
-
-                if (res.indexOf("OK") === 0) {
-                    utils.status(`Render: ${fileName}`, "exito");
-                    utils.log("✅ Enviat correctament a Adobe Media Encoder.", "INFO");
-                    // Guardem l'últim nom per a la portada
-                    FASTPASS_UI.State.lastRenderName = fileName.replace(".mp4", "");
-                } else {
-                    throw new Error("No s'ha pogut iniciar AME: " + res);
-                }
-
-            } catch (e) {
-                utils.handleError(e, "RenderVideo");
-            } finally {
-                utils.setBusy(false);
-            }
-        },
-
-        /**
-         * Exporta un snapshot (PNG) del frame actual com a portada.
-         */
-        runPortada: async function () {
-            utils.log("Botó 'PORTADA' clicat.", "DEBUG");
-            try {
-                const config = FASTPASS_UI.Config.get();
-                if (!config.export.portada) {
-                    utils.status("Configura ruta portada!", "error");
-                    utils.setBusy(false);
-                    return;
-                }
-
-                let nameBase = FASTPASS_UI.State.lastRenderName;
-                if (!nameBase) {
-                    const seqName = await utils.callJSX('jsx_getActiveSequenceName()');
+                // 2. Càlcul del nom de sortida basat en la seqüència
+                const seqName = await callJSX('jsx_getActiveSequenceName()');
+                let fileName = "Export_TBD.mp4";
+                
+                if (seqName) {
                     const parts = seqName.split("_");
                     const prog = parts[0] || "PROG";
                     const tema = parts.slice(2).join("_") || "TEMA";
                     const now = new Date();
-                    const hh_mm = ("0" + now.getHours()).slice(-2) + "_" + ("0" + now.getMinutes()).slice(-2);
-                    nameBase = `${prog}_${tema}_${hh_mm}`;
+                    const timeStr = ("0" + now.getHours()).slice(-2) + "_" + ("0" + now.getMinutes()).slice(-2);
+                    fileName = `${prog}_${tema}_${timeStr}.mp4`;
                 }
 
-                const name = `${nameBase}.png`;
-                const fullPath = `${config.export.portada}\\${name}`;
+                // 3. Ruta del Preset (.epr)
+                const extRoot = window.FASTPASS_UI.csInterface.getSystemPath(SystemPath.EXTENSION);
+                const presetPath = `${extRoot}/presets/H264_2Pass_Vertical.epr`.replace(/\\/g, '\\\\');
 
-                utils.log(`📸 Exportant portada orquestrada a: ${fullPath}`, "INFO");
-                const res = await FASTPASS_UI.Logic.Render.exportSnapshot(fullPath);
+                log(`📤 Destí: ${outputDir}\\${fileName}`);
+
+                // 4. Execució delegada a la Lògica
+                const res = await renderLogic.queueRender(presetPath, outputDir, fileName);
+
+                if (res && res.indexOf("OK") === 0) {
+                    utils.status(`Render OK: ${fileName}`, "exito");
+                    log("✅ Enviat a Media Encoder correctament.", "INFO");
+                    // Guardem la referència per a la portada
+                    FASTPASS_UI.State.lastRenderName = fileName.replace(".mp4", "");
+                } else {
+                    throw new Error("Error en el pont AME: " + res);
+                }
+
+            } catch (e) { utils.handleError(e, "RenderVideo"); }
+        },
+
+        /**
+         * Exporta un PNG del frame actual (Portada).
+         */
+        runPortada: async function () {
+            log("📸 Generant Portada...");
+            try {
+                const config = FASTPASS_UI.Config.get();
+                const targetDir = config.rutas.portadas || "C:\\Temp";
+
+                let nameBase = FASTPASS_UI.State.lastRenderName;
+                if (!nameBase) {
+                    const seqName = await callJSX('jsx_getActiveSequenceName()');
+                    nameBase = seqName ? seqName : "Portada_TBD";
+                }
+
+                const fullPath = `${targetDir}\\${nameBase}.png`;
+                log(`📍 Destí Portada: ${fullPath}`);
+
+                const res = await renderLogic.exportSnapshot(fullPath);
 
                 if (res.success) {
-                    utils.log("✅ Portada generada amb èxit via JS Logic.", "INFO");
+                    log("✅ Portada exportada amb èxit.", "INFO");
                     utils.status("Portada OK", "exito");
                 } else {
-                    throw new Error(res.log || "Error desconegut en la captura de portada.");
+                    throw new Error(res.log || "Error capturant snapshot.");
                 }
-            } catch (e) {
-                utils.handleError(e, "RenderPortada");
-            } finally {
-                utils.setBusy(false);
-            }
+            } catch (e) { utils.handleError(e, "RenderPortada"); }
         }
     };
 

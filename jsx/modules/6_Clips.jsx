@@ -45,6 +45,21 @@ FASTPASS.Clips = {
         } catch(e) { return null; }
     },
 
+    getDataByTime: function(trackIdx, timeSec, type) {
+        try {
+            var track = this._getTrack(trackIdx, type || "video");
+            var targetTime = (timeSec === -1) ? app.project.activeSequence.getPlayerPosition().seconds : parseFloat(timeSec);
+            
+            for (var i = 0; i < track.clips.numItems; i++) {
+                var clip = track.clips[i];
+                if (clip.start.seconds <= targetTime && clip.end.seconds > targetTime) {
+                    return this.getDataByIndex(trackIdx, i, type);
+                }
+            }
+            return "null";
+        } catch(e) { return "null"; }
+    },
+
     remove: function(trackIdx, clipIdx, type) {
         try {
             var track = this._getTrack(trackIdx, type);
@@ -134,5 +149,30 @@ FASTPASS.Clips = {
             app.project.activeSequence.performSceneEditDetectionOnSelection();
             return "OK_DETECT_REQUESTED";
         } catch (e) { return "ERR: " + e.message; }
+    },
+
+    getSelectedSubtitleClips: function() {
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq) return "[]";
+            var results = [];
+            for (var t = 0; t < seq.subtitleTracks.numItems; t++) {
+                var track = seq.subtitleTracks[t];
+                for (var i = 0; i < track.clips.numItems; i++) {
+                    var c = track.clips[i];
+                    if (c.isSelected()) {
+                        results.push({
+                            trackIndex: t,
+                            clipIndex: i,
+                            name: c.name,
+                            start: c.start.seconds,
+                            end: c.end.seconds,
+                            duration: c.duration.seconds
+                        });
+                    }
+                }
+            }
+            return JSON.stringify(results);
+        } catch(e) { return "[]"; }
     }
 };

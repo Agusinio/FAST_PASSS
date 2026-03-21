@@ -39,7 +39,7 @@ var FASTPASS_WorkProject = null;
 
 // --- 1. IO & SYSTEM ---
 function jsx_scanDirectory(path) { return FASTPASS.IO.getRawFiles(path); }
-function jsx_importFile(path) { return FASTPASS.IO.importFiles(JSON.stringify([path])); }
+function jsx_importFiles(jsonPaths, binName) { return FASTPASS.IO.importFiles(jsonPaths, binName); }
 
 // --- 2. PROJECT ---
 function jsx_listItems(binName, projectPath) { return FASTPASS.Project.listItems(binName, projectPath); }
@@ -49,6 +49,7 @@ function jsx_saveProjectAs(path, projectPath) { return FASTPASS.Project.saveAs(p
 function jsx_openProject(path) { return FASTPASS.Project.openProject(path) ? "true" : "false"; }
 function jsx_cloneSequence(source, target, projectPath) { return FASTPASS.Project.cloneSequence(source, target, projectPath); }
 function jsx_openSequence(name, projectPath) { return FASTPASS.Project.openSequence(name, projectPath) ? "true" : "false"; }
+function jsx_getSequences(projectPath) { return FASTPASS.Project.listSequences(projectPath); }
 function jsx_createBin(name, projectPath) { var bin = FASTPASS.Project.createBin(name, projectPath); return bin ? bin.name : "root"; }
 
 // --- 3. TIMELINE & TRACKS ---
@@ -59,12 +60,16 @@ function jsx_getTrackCount(type) { return FASTPASS.Tracks.getTrackCount(type); }
 function jsx_setTrackMute(idx, m, type) { return FASTPASS.Tracks.setMute(idx - 1, m, type); }
 function jsx_setTrackLock(idx, l, type) { return FASTPASS.Tracks.setLock(idx - 1, l, type); }
 function jsx_setTrackTarget(idx, t, type) { return FASTPASS.Tracks.setTarget(idx - 1, t, type); }
+function jsx_getProjectFolder() { return app.project.path ? (new File(app.project.path)).parent.fsName : ""; }
+function jsx_getActiveSequenceName() { return app.project.activeSequence ? app.project.activeSequence.name : ""; }
 
 // --- 4. CLIPS (SOPORTE TOTAL V/A/S) ---
 function jsx_getClipCount(trackIdx, type) { return FASTPASS.Clips.getCount(trackIdx - 1, type || "video"); }
 function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { return FASTPASS.Clips.getDataByIndex(trackIdx - 1, clipIdx, type || "video"); }
 function jsx_removeClip(trackIdx, clipIdx, type) { return FASTPASS.Clips.remove(trackIdx - 1, clipIdx, type || "video"); }
 function jsx_overwriteClip(name, trackIdx, time, type) { return FASTPASS.Clips.overwrite(name, trackIdx - 1, time, type); }
+function jsx_getClipDataByTime(ti, t, type) { return FASTPASS.Clips.getDataByTime(ti, t, type); }
+function jsx_getSelectedSubtitleClips() { return FASTPASS.Clips.getSelectedSubtitleClips(); }
 function jsx_detectScenes(trackIdx) { return FASTPASS.Clips.detectScenes(trackIdx - 1); }
 function jsx_setClipStart(ti, ci, t, type) { return FASTPASS.Clips.setStart(ti - 1, ci, t, type); }
 function jsx_setClipEnd(ti, ci, t, type) { return FASTPASS.Clips.setEnd(ti - 1, ci, t, type); }
@@ -73,6 +78,7 @@ function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Cl
 
 // --- 5. MOTION & KF ---
 function jsx_getXPosition() { return FASTPASS.KF.getXPosition(); }
+function jsx_setClipXPosition(val, isFinal) { return FASTPASS.KF.setXPosition(val, isFinal); }
 function jsx_addKey(ti, ci, comp, prop, time) { return FASTPASS.KF.addKey(ti - 1, ci, comp, prop, time); }
 function jsx_removeKey(ti, ci, comp, prop, time) { return FASTPASS.KF.removeKey(ti - 1, ci, comp, prop, time); }
 function jsx_setKeyValue(ti, ci, comp, prop, time, val) { return FASTPASS.KF.setKeyValue(ti - 1, ci, comp, prop, time, val); }

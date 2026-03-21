@@ -1,35 +1,38 @@
-# 🗺️ MAPA D'ARQUITECTURA (FAST >>> PASS)
+# 🗺️ MAPA D'ARQUITECTURA (FAST >>> PASS) - v2.0 "LIPO-PRO"
 
-Aquest document detalla la relació entre les diferents capes del projecte seguint el **PLA LIPO** (Atomització i Separació de Responsabilitats).
+Aquest document detalla la nova jerarquia de 5 capes establerta després del **PLA LIPO FINAL** (Atomització Total i Era dels Inspectors).
 
 ---
 
-## 🏗️ L'ESTRUCTURA EN 4 CAPES
+## 🏗️ L'ESTRUCTURA DE 5 CAPES (TIERED ARCHITECTURE)
 
 | Capa | Ubicació | Responsabilitat | Comentari |
 | :--- | :--- | :--- | :--- |
-| **1. WORKFLOW** | `js/workflows/` | Orquestració d'alt nivell (Què fa el botó?) | Decideix els passos del procés. |
-| **2. LOGIC** | `js/logic/` | Intel·ligència de domini i decisions. | No executa, només "pensa" i ordena. |
-| **3. BRIDGE** | `jsx/main.jsx` | Passarel·la de comunicació JS ↔ JSX. | Punt d'entrada únic al motor. |
-| **4. ATOM** | `jsx/modules/` | Execució física mínima i pura. | Només sap fer UNA cosa a la vegada. |
+| **1. WORKFLOW** | `js/workflows/` | **Orquestració**. (El Director) | Decideix els passos del negoci (Nou, Cut, Srt). |
+| **2. ACTION LOGIC** | `js/logic/` | **Execució**. (Les Mans) | Calcula transformacions, ripple-trims i muntatges. |
+| **3. INSPECTORS** | `js/inspectors/`| **Descobriment**. (Els Ulls) | Recullen dades pures sense judici (Fitxers, App, Projecte). |
+| **4. CORE** | `js/core/` | **Fonaments**. (El Cervell) | `Context` (sintetitza l'estat), `State`, `Config` i `Utils`. |
+| **5. SYSTEM (JSX)** | `jsx/` | **Atoms**. (El Múscul) | Ponts (`main.jsx`) i Modules (`*.jsx`) que toquen Premiere. |
 
 ---
 
-## 🔄 TRAÇABILITAT DE FLUXOS (Exemples)
+## 👁️ ERA DELS INSPECTORS (Discovery Layer)
 
-### A. FLUX: NOU TEMA (`flow_nou.js`)
-1. **Workflow**: `_runNew()`
-2. **Logic**: `Scanner.findTemaData(ctx)` + `Project_Logic.createFromTemplate(...)`
-3. **Bridge**: `jsx_openProject(path)` ↔ `jsx_overwriteClip(name, track, time)`
-4. **Atom**: `FASTPASS.Project.openProject` ↔ `FASTPASS.Clips.overwrite`
-5. **Premiere API**: `app.openDocument(path)` ↔ `track.overwriteClip(item, time)`
+| Inspector | Responsabilitat | Dades que retorna (JSON) |
+| :--- | :--- | :--- |
+| **`1_SourceAssets`** | **Extern**. Mira el servidor/xarxa/discos. | Llista de Wotts, dates de modificació. |
+| **`2_App`** | **App-Level**. Mira l'estat de Premiere Pro. | Projectes oberts, nom del projecte actiu. |
+| **`3_Session`** | **Session-Level**. Mira dins del projecte actiu. | Clips a la línia, seqüències, contingut de Bins. |
 
-### B. FLUX: NETEJA I ACABATS (`flow_cut.js`)
-1. **Workflow**: `runCutOut()`
-2. **Logic**: `Clips_Logic.clearMultipleTracksAfter(val, tracks)`
-3. **Bridge**: `jsx_getClipCount(track)` ↔ `jsx_removeClip(track, index)`
-4. **Atom**: `FASTPASS.Clips.getCount` ↔ `FASTPASS.Clips.remove`
-5. **Premiere API**: `track.clips.numItems` ↔ `clip.remove(true, true)`
+---
+
+## 🧠 SÍNTESI DE CONTEXT (The Core Brain)
+
+El mòdul **`4_Context.js`** recull els informes dels 3 Inspectors i decideix l'estat global:
+*   **NEW**: No hi ha res preparat.
+*   **UPDATE**: El projecte està obert i actiu.
+*   **GO**: El projecte està obert però no és l'actiu.
+*   **LOAD**: El projecte existeix en disc però cal obrir-lo.
 
 ---
 
@@ -37,35 +40,20 @@ Aquest document detalla la relació entre les diferents capes del projecte segui
 
 | Mòdul | Àtom Principal | Funció a l'API de Premiere |
 | :--- | :--- | :--- |
-| **`3_Project.jsx`** | `findItem` | Cerca recursiva en `rootItem.children` |
-| | `openSequence` | `app.project.openSequence(id)` |
-| **`5_Tracks.jsx`** | `setMute` | `track.setMute(boolean)` |
-| | `getTrackCount` | `videoTracks.numTracks` / `audioTracks.numTracks` |
-| **`6_Clips.jsx`** | `overwrite` | `track.overwriteClip(item, time)` |
-| | `setProperty` | `clip.components[n].properties[m].setValue(val)` |
-| | `detectScenes` | `sequence.performSceneEditDetectionOnSelection()` |
-| **`11_Context.jsx`** | `getActiveName` | `app.project.name` |
-| **`13_Timeline.jsx`**| `setCTI` | `app.project.activeSequence.setPlayerPosition(time)` |
+| **`1_System.jsx`** | `jsx_isReady` | Verificació de salut del motor. |
+| **`2_IO.jsx`** | `jsx_importFiles` | Ingesta massiva amb anclatge a Bin. |
+| **`3_Project.jsx`** | `jsx_listSequences` | Recuperació d'indices de seqüència. |
+| **`6_Clips.jsx`** | `jsx_getClipDataByTime`| Dades del clip sota el cabezal (CTI). |
+| **`7_KF.jsx`** | `jsx_setClipXPosition`| Manipulació de la propietat Posi (Motion). |
 
 ---
 
-## 🧠 LÒGICA CENTRALITZADA (JS)
+## 🚦 FILOSOFIA DE COMUNICACIÓ (JS ↔ JSX)
 
-| Lògica | Decisions Clau |
-| :--- | :--- |
-| **`Scanner.js`** | Filtre de fitxers per **Data de Modificació** i **Prefix de Programa**. |
-| **`Project_Logic.js`** | Selecció de la **Seqüència correcta** d'una línia mitjançant Regex en el JSON rebut del JSX. |
-| **`Clips_Logic.js`** | Cerca de quin clip hi ha sota el cabezal via bucle sobre `jsx_getClipDataByIndex`. |
-| **`Parser.js`** | Extracció de metadades dels noms de fitxer (Títol, Línia, TC). |
-| **`Render_Logic.js`** | Control del **Polling del sistema d'arxius** (window.cep.fs) durant l'exportació de Snapshots. |
+1.  **Orquestració en JS**: Totes les decisions de "Si passa X fem Y" es prenen a la capa JS. El JSX mai pren decisions.
+2.  **Índexs Corregits**: El JS parla en **1-based (V1, V2)**. El Bridge (`main.jsx`) resta 1 per parlar amb Premiere **(0-based)**.
+3.  **JSON com a Lenguatge**: Les dades complexes viatgen sempre com a strings JSON per evitar pèrdues de tipus.
+4.  **Async Bridge**: Totes les crides `callJSX` són asíncrones (Promises), evitant bloquejar la UI durant càlculs pesats.
 
 ---
-
-## 🚦 FILOSOFIA DE TRADUCCIÓ DE DADES
-
-*   **Índexs**: El JS treballa sempre amb índexs **humans/VUI (1-based)**. El Bridge (`main.jsx`) resta 1 per parlar amb l'atomisme de Premiere **(0-based)**.
-*   **Decisions**: Mai posem un `if` de negoci al JSX. El JSX executa el que se li diu sense preguntar ("Posa A en B").
-*   **Estats**: El JS manté el `FASTPASS_UI.State` (què estem fent). El JSX no recorda res ("Stateless").
-
----
-*Generat automàticament per Antigravity seguint el Pla LIPO.*
+*Document tancat i segellat post-Pla LIPO per Antigravity.*

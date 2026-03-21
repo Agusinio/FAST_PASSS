@@ -121,6 +121,20 @@ FASTPASS.Project = (function() {
             return false;
         },
 
+        listSequences: function(projectPath) {
+            try {
+                var proj = getTargetProject(projectPath);
+                var results = [];
+                for (var i = 0; i < proj.sequences.numSequences; i++) {
+                    results.push({
+                        name: proj.sequences[i].name,
+                        id: proj.sequences[i].sequenceID
+                    });
+                }
+                return JSON.stringify(results);
+            } catch(e) { return "[]"; }
+        },
+
         createBin: function(name, projectPath) {
             var proj = getTargetProject(projectPath);
             var existing = findInCollection(proj.rootItem.children, name);

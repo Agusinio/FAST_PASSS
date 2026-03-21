@@ -1,148 +1,127 @@
-/*
- * =================================================================================
- * PROJECTE: FAST >>> PASS
- * ARXIU: flow_srt.js (WORKFLOW: SUBTÍTOLS)
- * =================================================================================
+/**
+ * ============================================================================
+ * WORKFLOW: SRT (SUBTÍTOLS) (v11 - VERSIÓ ULTRA-LIPO)
+ * ============================================================================
  */
 
 (function () {
-    window.FASTPASS_UI = window.FASTPASS_UI || {};
-    const FASTPASS_UI = window.FASTPASS_UI || {};
+    var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
-    const utils = FASTPASS_UI.Utils;
+
+    const utils = window.FASTPASS_UI.Utils;
+    const srtLogic = window.FASTPASS_UI.Logic.Srt;
+    const tracksLogic = window.FASTPASS_UI.Logic.Tracks;
+    const log = (m) => utils.log(m, "DEBUG");
+    const callJSX = (s) => utils.callJSX(s);
 
     FASTPASS_UI.Workflows.Srt = {
 
         /**
-         * Activa/Desactiva el mode de treball de subtítols (bloqueja pistes).
+         * Activa/Desactiva el mode de treball de subtítols (bloqueja pistes de vídeo).
          */
         toggleSrtWork: async function (force) {
-            utils.log("📝 SRT: Toggle Work Mode.", "DEBUG");
+            log("📝 SRT: Canviant mode de treball.");
+            
+            const state = FASTPASS_UI.State;
+            state.srtWorkMode = !state.srtWorkMode;
 
-            FASTPASS_UI.State.srtWorkMode = !FASTPASS_UI.State.srtWorkMode;
+            const btn = document.getElementById('btnSrtWork'); // Corregit ID segons index.html
+            const btnIn = document.getElementById('btnSrtIn');
+            const btnOut = document.getElementById('btnSrtOut');
 
-            const btn = document.getElementById('btn-srt-work');
-            const btnIn = document.getElementById('btn-srt-in');
-            const btnOut = document.getElementById('btn-srt-out');
-
-            const tracksLogic = FASTPASS_UI.Logic.Tracks;
-
-            if (FASTPASS_UI.State.srtWorkMode) {
+            if (state.srtWorkMode) {
                 if (btn) { btn.textContent = "TANCAR"; btn.classList.add('btn-active'); }
                 if (btnIn) btnIn.disabled = false;
                 if (btnOut) btnOut.disabled = false;
-                // Bloqueamos todas las de VÍDEO para trabajar tranquilos en subtítulos
+                // Bloqueig de seguretat de totes les pistes de vídeo (V1-V7)
                 await tracksLogic.setGlobalState("video", "lock", true);
             } else {
                 if (btn) { btn.textContent = "PREPARAR"; btn.classList.remove('btn-active'); }
                 if (btnIn) btnIn.disabled = true;
                 if (btnOut) btnOut.disabled = true;
+                // Desbloqueig de vídeo per tornar a l'edició normal
                 await tracksLogic.setGlobalState("video", "lock", false);
             }
-            utils.setBusy(false);
         },
 
         runSrtIn: async function () {
-            utils.log("📝 SRT: Marcar IN", "DEBUG");
+            log("📝 SRT: Marcar IN");
             try {
-                const cti = await utils.callJSX('jsx_getCTI()');
+                const ctiRaw = await callJSX('jsx_getCTI()');
+                const cti = parseFloat(ctiRaw || "0");
 
-                const srtLogic = FASTPASS_UI.Logic.Srt;
-                const clipCount = await utils.callJSX('jsx_getClipCount(1, "subtitle")'); 
+                // Regla de negoci: El primer subtítol mai pot començar abans dels 0.4s (Frame 10)
+                const clipCountRaw = await callJSX('jsx_getClipCount(1, "subtitle")'); 
                 let finalCti = cti;
-                if (parseInt(clipCount) === 0 && cti < 0.4) {
+                if (parseInt(clipCountRaw || "0") === 0 && cti < 0.4) {
                     finalCti = 0.4;
-                    utils.log("📍 Primer subtítol: Forçant inici a Frame 10 (0.4s)", "INFO");
+                    log("📍 Inici de seqüència: Ajustant primer subtítol a 0.4s per protocol.");
                 }
 
+                // Deleguem la neteja i trimm a la lògica especialitzada
                 await srtLogic.cleanIn(finalCti);
-            } catch (e) {
-                utils.handleError(e, "SrtIn");
-            } finally {
-                utils.setBusy(false);
-            }
+            } catch (e) { utils.handleError(e, "SrtIn"); }
         },
 
         runSrtOut: async function () {
-            utils.log("📝 SRT: Marcar OUT", "DEBUG");
+            log("📝 SRT: Marcar OUT");
             try {
-                const cti = await utils.callJSX('jsx_getCTI()');
-                await FASTPASS_UI.Logic.Srt.cleanOut(cti);
-            } catch (e) {
-                utils.handleError(e, "SrtOut");
-            } finally {
-                utils.setBusy(false);
-            }
+                const ctiRaw = await callJSX('jsx_getCTI()');
+                await srtLogic.cleanOut(parseFloat(ctiRaw || "0"));
+            } catch (e) { utils.handleError(e, "SrtOut"); }
         },
 
         /**
-         * Ajusta la durada del bloc de subtítols de forma proporcional (Acordió).
+         * Re-ajust temporal de tot el bloc de subtítols seleccionat (Acordió).
          */
         runTimeAdjust: async function () {
-            utils.log("📝 SRT: Ajustant temps proporcional...", "INFO");
-
+            log("⏳ Iniciant ajust proporcional de subtítols...");
             try {
-                // 1. Obtenir Clips Seleccionats
-                const jsonClips = await utils.callJSX('jsx_getSelectedSubtitleClips()');
-                let clips = [];
-                try { clips = JSON.parse(jsonClips); } catch (e) { clips = []; }
+                // Obtenim les dades dels subtítols seleccionats des de JS via bridge atòmic
+                const jsonClips = await callJSX('jsx_getSelectedSubtitleClips()');
+                const clips = JSON.parse(jsonClips || "[]");
 
-                if (!clips || clips.length === 0) throw new Error("Selecciona els rètols que vols ajustar.");
+                if (!clips || clips.length === 0) {
+                    throw new Error("Selecciona els subtítols (clips) que vols ajustar al timeline.");
+                }
 
+                // Ordenem per temps d'inici per garantir la linealitat
                 clips.sort((a, b) => a.start - b.start);
 
-                const firstClipIn = clips[0].start;
-                const lastClipOut = clips[clips.length - 1].end;
-                const currentTrack = clips[0].trackIndex;
-                const currentDur = lastClipOut - firstClipIn;
+                const firstIn = clips[0].start;
+                const lastOut = clips[clips.length - 1].end;
+                const currentDur = lastOut - firstIn;
 
-                // 2. Calcular Límite (Duración Ideal)
-                const cti = parseFloat(await utils.callJSX('jsx_getCTI()'));
-                const oppositeTrack = (currentTrack === 1) ? 2 : 1;
-                const nextClipIn = parseFloat(await utils.callJSX(`jsx_findNextClipOnTrack(${oppositeTrack}, ${firstClipIn}, "subtitle")`));
+                // Determinació del límit (CTI o següent clip)
+                const ctiRaw = await callJSX('jsx_getCTI()');
+                const cti = parseFloat(ctiRaw || "0");
+                
+                if (cti <= firstIn) throw new Error("Col·loca el cabezal on vulguis que acabi el bloc.");
 
-                let limitTime = 0;
-                // Fix v9.5.0: Acordió intel·ligent
-                // Detecta el clip més proper a l'altra pista o el cabezal.
-                if (nextClipIn > 0 && nextClipIn < cti) {
-                    limitTime = nextClipIn;
-                    utils.log(`🔗 Ajustant contra clip proper a pista S${oppositeTrack}: ${limitTime}s`, "DEBUG");
-                } else if (cti > firstClipIn) {
-                    limitTime = cti;
-                    utils.log(`🔗 Ajustant contra cabezal (CTI): ${limitTime}s`, "DEBUG");
-                } else if (nextClipIn > 0) {
-                    limitTime = nextClipIn;
-                } else {
-                    throw new Error("Posa el cabezal on vols que acabi el bloc.");
-                }
-
-                const durIdeal = limitTime - firstClipIn;
+                const durIdeal = cti - firstIn;
                 const ratio = durIdeal / currentDur;
-                const padding = 0.12; // 3 frames aprox
+                const padding = 0.04; // 1 frame de separació entre rètols
+                
+                let cursor = firstIn;
 
-                // 3. Re-calcular i aplicar de forma atòmica
-                log("⏳ Aplicant re-ajust atòmic clip a clip...");
+                log(`📏 Aplicant ratio de compressió: ${ratio.toFixed(3)}`);
+                
+                // Orquestració de moviments atòmics des de JS
                 for (let i = 0; i < clips.length; i++) {
-                    const clip = clips[i];
-                    const newClipDur = clip.duration * ratio;
-                    const newStart = currentTimeCursor;
-                    const newEnd = newStart + newClipDur;
+                    const c = clips[i];
+                    const newDur = (c.end - c.start) * ratio;
+                    const newStart = cursor;
+                    const newEnd = newStart + newDur;
 
-                    // Apliquem directament des del JS orquestrant
-                    await utils.callJSX(`jsx_setClipStart(${clip.trackIndex}, ${clip.clipIndex}, ${newStart}, 'subtitle')`);
-                    await utils.callJSX(`jsx_setClipEnd(${clip.trackIndex}, ${clip.clipIndex}, ${newEnd}, 'subtitle')`);
+                    await callJSX(`jsx_setClipStart(${c.trackIndex}, ${c.clipIndex}, ${newStart}, 'subtitle')`);
+                    await callJSX(`jsx_setClipEnd(${c.trackIndex}, ${c.clipIndex}, ${newEnd}, 'subtitle')`);
                     
-                    currentTimeCursor = newEnd + padding;
+                    cursor = newEnd + padding;
                 }
 
-                utils.log(`✅ ${clips.length} subtítols ajustats.`, "INFO");
-                utils.status("Ajust Proporcional OK", "exito");
+                utils.status(`Ajustat ${clips.length} rètols.`, "exito");
 
-            } catch (e) {
-                utils.handleError(e, "SrtTimeAdjust");
-            } finally {
-                utils.setBusy(false);
-            }
+            } catch (e) { utils.handleError(e, "SrtTimeAdjust"); }
         }
     };
 

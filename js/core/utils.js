@@ -39,7 +39,7 @@
             
             const payload = JSON.stringify(pathList);
             try {
-                const res = await this.callJSX(`jsx_importFile('${payload}', '${binName}')`);
+                const res = await this.callJSX(`jsx_importFiles('${payload}', '${binName}')`);
                 if (res && res.indexOf("ERR") === 0) throw new Error(res);
                 await this.delay(300);
             } catch (e) {

@@ -83,6 +83,32 @@ FASTPASS.KF = (function() {
                 if (!p) return 0.5;
                 return p.getValueAtTime(cti)[0];
             } catch(e) { return 0.5; }
+        },
+
+        setXPosition: function(val, isFinal) {
+            try {
+                var valNorm = parseFloat(val) / 608; 
+                var seq = app.project.activeSequence;
+                var cti = seq.getPlayerPosition();
+                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
+                if (!info.found) return "ERR_NO_CLIP";
+
+                var p = FASTPASS.Clips.getProperty(0, info.index, "ADBE Motion", "ADBE Video Position", "video");
+                if (!p) return "ERR_NO_PROP";
+
+                p.setTimeVarying(isFinal);
+                var currentVal = p.getValueAtTime(cti);
+                currentVal[0] = valNorm;
+                
+                if (isFinal) {
+                   p.addKey(cti.seconds);
+                   var idx = getKeyIndexByTime(p, cti.seconds);
+                   p.setValueAtKey(idx, currentVal, true);
+                } else {
+                   p.setValue(currentVal, true);
+                }
+                return "OK";
+            } catch(e) { return "ERR: " + e.message; }
         }
     };
 })();
