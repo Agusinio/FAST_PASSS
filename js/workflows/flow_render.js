@@ -70,7 +70,7 @@
             log("📸 Generant Portada...");
             try {
                 const config = FASTPASS_UI.Config.get();
-                const targetDir = config.rutas.portadas || "C:\\Temp";
+                const targetDir = config.rutas.portadas || config.rutas.destinoBase || "C:\\Temp";
 
                 let nameBase = FASTPASS_UI.State.lastRenderName;
                 if (!nameBase) {

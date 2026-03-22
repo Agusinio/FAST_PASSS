@@ -95,11 +95,55 @@
         },
 
         /**
-         * Inicialització del workflow (si cal binding local).
+         * Navegació ràpida al clip ANTERIOR de la pista Mp4.
          */
+        runPrevClip: async function () {
+            const cfg = FASTPASS_UI.Config.get();
+            const T_MP4 = cfg.tracks.video.mp4;
+            log("⏮ Nav: Clip anterior a V" + T_MP4);
+            try {
+                const ctiRaw = await callJSX('jsx_getCTI()');
+                const cti = parseFloat(ctiRaw || "0");
+                const count = parseInt(await callJSX(`jsx_getClipCount(${T_MP4}, 'video')`));
+                for (let i = count - 1; i >= 0; i--) {
+                    const raw = await callJSX(`jsx_getClipDataByIndex(${T_MP4}, ${i}, 'video')`);
+                    const clip = JSON.parse(raw || "{}");
+                    if (clip.end <= cti - 0.04) {
+                        const mid = (clip.start + clip.end) / 2;
+                        await callJSX(`jsx_setCTI_Safe(${mid})`);
+                        return;
+                    }
+                }
+            } catch (e) { utils.handleError(e, "NavPrev"); }
+        },
+
+        /**
+         * Navegació ràpida al clip SEGÜENT de la pista Mp4.
+         */
+        runNextClip: async function () {
+            const cfg = FASTPASS_UI.Config.get();
+            const T_MP4 = cfg.tracks.video.mp4;
+            log("⏭ Nav: Clip següent a V" + T_MP4);
+            try {
+                const ctiRaw = await callJSX('jsx_getCTI()');
+                const cti = parseFloat(ctiRaw || "0");
+                const count = parseInt(await callJSX(`jsx_getClipCount(${T_MP4}, 'video')`));
+                for (let i = 0; i < count; i++) {
+                    const raw = await callJSX(`jsx_getClipDataByIndex(${T_MP4}, ${i}, 'video')`);
+                    const clip = JSON.parse(raw || "{}");
+                    if (clip.start >= cti + 0.04) {
+                        const mid = (clip.start + clip.end) / 2;
+                        await callJSX(`jsx_setCTI_Safe(${mid})`);
+                        return;
+                    }
+                }
+            } catch (e) { utils.handleError(e, "NavNext"); }
+        },
+
         init: function () {
             log("🔧 Workflow Cut lligat a tracks dinàmics.");
         }
+
     };
 
     window.FASTPASS_UI = FASTPASS_UI;

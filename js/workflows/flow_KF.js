@@ -1,58 +1,53 @@
-/* flow_KF.js - El Negociador de Animación */
-(function() {
+/* flow_KF.js - El Negociador de Animació */
+(function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
+    // FIX CRASH: callJSX i log no estaven definits en el scope. 
+    // Ara s'obtenen correctament de Utils.
+    const utils = window.FASTPASS_UI.Utils;
+    const callJSX = (s) => utils.callJSX(s);
+    const log = (m) => utils.log(m, "DEBUG");
+
     FASTPASS_UI.Workflows.KF = {
-        
-        // Negociación para el botón KEY
-        runAddKF: function() {
+
+        runAddKF: function () {
             var self = this;
-            FASTPASS_UI.Utils.log("💎 Solicitando nuevo KF...");
-            
-            // 1. Orden atómica al JSX
-            callJSX('jsx_addKeyframe()').then(function(res) {
-                if (res.indexOf("OK") !== -1) {
-                    // 2. Si el KF se creó, negociamos el acabado pro
+            log("💎 Sol·licitant nou KF...");
+
+            callJSX('jsx_addKeyframe()').then(function (res) {
+                if (res && res.indexOf("OK") !== -1) {
                     return self.runSmoothKF();
                 }
-            })['catch'](function(err) {
-                console.error("Error en flujo AddKF: " + err);
+            })['catch'](function (err) {
+                console.error("Error en flux AddKF: " + err);
             });
         },
 
-        runSmoothKF: async function() {
+        runSmoothKF: async function () {
             try {
-                // 1. ESPERA DE SEGURIDAD (50ms)
-                // Esto da tiempo a Premiere a registrar el KF que puso el slider o el botón KEY
-                await FASTPASS_UI.Utils.delay(50); 
+                await utils.delay(50);
+                log("🧠 Negociant corbes...");
 
-                log("🧠 Negociando curvas...");
                 var raw = await callJSX("jsx_getKFData()");
-                
+
                 if (!raw || raw === "[]") {
-                    console.warn("⚠️ No se han obtenido datos. ¿Has puesto el KF primero?");
+                    console.warn("⚠️ No s'han obtingut dades. Has posat el KF primer?");
                     return;
                 }
 
                 var data = JSON.parse(raw);
                 if (!data || data.length < 2) return;
 
-                // 2. Bucle de decisión (Negociación)
                 for (var i = 0; i < data.length; i++) {
                     var t = data[i].time;
-                    
                     if (i === 0 || i === data.length - 1) {
-                        // Es un extremo (Inicio o Final)
                         await callJSX("jsx_applyExtremeKF(" + t + ")");
                     } else {
-                        // Analizamos si es un pico o un punto de paso
-                        var vP = data[i-1].val;
+                        var vP = data[i - 1].val;
                         var vC = data[i].val;
-                        var vN = data[i+1].val;
-
+                        var vN = data[i + 1].val;
                         var esPuntoDePaso = (vC > vP && vC < vN) || (vC < vP && vC > vN);
-                        
                         if (esPuntoDePaso) {
                             await callJSX("jsx_applyIntermediateKF(" + t + ")");
                         } else {
@@ -61,14 +56,14 @@
                     }
                 }
 
-                // 3. Órdenes finales de limpieza visual
                 await callJSX("FASTPASS.Sequences.nuclearRefresh()");
                 if (FASTPASS_UI.Sync) FASTPASS_UI.Sync.updateSliderFromPremiere();
-                
-                log("✅ Curvas procesadas.");
+                log("✅ Corbes processades.");
             } catch (e) {
-                console.error("💥 Error en Negociación KF: ", e);
+                console.error("💥 Error en Negociació KF: ", e);
             }
         }
     };
+
+    window.FASTPASS_UI = FASTPASS_UI;
 })();
