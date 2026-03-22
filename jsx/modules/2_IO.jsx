@@ -63,18 +63,47 @@ FASTPASS.IO = (function () {
                 if (f.exists) return f.remove();
             } catch(e) { $.writeln("Error borrando: " + e.message); }
             return false;
+        },
+
+        readTextFile: function(path) {
+            try {
+                var f = new File(path);
+                if (!f.exists) return "";
+                f.open('r');
+                var content = f.read();
+                f.close();
+                return content;
+            } catch(e) { return ""; }
+        },
+
+        writeTextFile: function(path, content) {
+            try {
+                var f = new File(path);
+                f.open('w');
+                f.write(content);
+                f.close();
+                return "OK";
+            } catch(e) { return "ERR: " + e.message; }
+        },
+
+        fileExists: function(path) {
+            var f = new File(path);
+            return f.exists;
+        },
+
+        getUserName: function() {
+            // Retorna el nom de l'usuari actual de l'OS
+            return $.global.userName || $.getenv("USERNAME") || $.getenv("USER") || "UnknownUser";
         }
     };
 })();
 
 // --- PUENTES (BRIDGES) GLOBALES ---
 
-// Corregido: Ahora llama a getRawFiles
 $.global.jsx_scanDirectory = function(path) {
     return FASTPASS.IO.getRawFiles(path);
 };
 
-// Corregido: Ahora llama a importFilesAtómico y usa la lógica de anclaje
 $.global.jsx_importFiles = function(jsonPaths, binName) {
     var proj = FASTPASS_WorkProject || app.project;
     return FASTPASS.IO.importFiles(jsonPaths, binName, proj);
@@ -82,4 +111,20 @@ $.global.jsx_importFiles = function(jsonPaths, binName) {
 
 $.global.jsx_deleteFile = function(path) {
     return FASTPASS.IO.deleteFile(path);
+};
+
+$.global.jsx_readTextFile = function(path) {
+    return FASTPASS.IO.readTextFile(path);
+};
+
+$.global.jsx_writeTextFile = function(path, content) {
+    return FASTPASS.IO.writeTextFile(path, content);
+};
+
+$.global.jsx_fileExists = function(path) {
+    return FASTPASS.IO.fileExists(path) ? "true" : "false";
+};
+
+$.global.jsx_getUserName = function() {
+    return FASTPASS.IO.getUserName();
 };

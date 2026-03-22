@@ -61,6 +61,9 @@
 
             // 3. Creació física (Project_Logic)
             await projectLogic.createFromTemplate(template, destPath, seqName);
+            
+            // 📍 BLOQUEIG: Creem el fitxer .lock
+            await this._createLock(destPath);
 
             // 4. Ingesta i Sincronització
             await this._performSync(ctx, wottData, media);
@@ -79,6 +82,38 @@
             await callJSX(`jsx_setTrackTarget(${T_TEMP}, true, 'video')`);
             
             log("✅ Projecte creat i llest a V" + T_MP4);
+        },
+
+        /**
+         * FLOW: OBRIR PROJECTE EXISTENT
+         */
+        _runLoad: async function () {
+            log("🚀 [FLOW-LOAD]");
+            const ctx = await this._setupContext();
+            const cfg = ctx.config;
+            
+            const wottData = await scanner.findTemaData(ctx);
+            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" +
+                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${utils.sanitizeName(wottData.tema)}.prproj`;
+
+            // 📍 BLOQUEIG: Creem el fitxer .lock
+            await this._createLock(destPath);
+            
+            await callJSX(`app.openDocument('${destPath.replace(/\\/g, "\\\\")}')`);
+            log("✅ Projecte obert.");
+        },
+
+        /**
+         * @private
+         * Crea el fitxer de bloqueig amb el nom de l'usuari.
+         */
+        _createLock: async function (projPath) {
+            try {
+                const lockPath = projPath + ".lock";
+                const user = await callJSX("jsx_getUserName()");
+                log(`🔒 Escrivint bloqueig per a ${user}...`);
+                await callJSX(`jsx_writeTextFile('${lockPath.replace(/\\/g, "\\\\")}', '${user}')`);
+            } catch(e) { console.error("Error creant .lock", e); }
         },
 
         /**

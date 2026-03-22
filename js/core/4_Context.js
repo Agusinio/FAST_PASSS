@@ -51,9 +51,25 @@
                 FASTPASS_UI.State.activeSequenceName = await session().getActiveSequenceName();
 
                 // --- 3. SÍNTESI I CONCLUSIÓ ---
-                const expectedProjName = `Pruebas_${progData.archivo}_${dateDir}_${elBloc.value}_${utils.sanitizeName(theme)}.prproj`;
-                const isProjectAlreadyOpen = openProjs.includes(expectedProjName);
-                const isCurrentlyActive = (activeProj === expectedProjName);
+                // --- 4. DETECCIÓ DE BLOQUEIG (.lock) ---
+                const lockExists = await utils.callJSX(`jsx_fileExists('${lockPath.replace(/\\/g, "\\\\")}')`);
+                const myUser = await utils.callJSX(`jsx_getUserName()`);
+
+                if (lockExists === "true") {
+                    const lockUser = await utils.callJSX(`jsx_readTextFile('${lockPath.replace(/\\/g, "\\\\")}')`);
+                    
+                    if (!isCurrentlyActive && lockUser && lockUser.trim() !== myUser.trim()) {
+                        this.updateLights(progKey, elBloc.value, theme, false);
+                        this.updateButton('LOCKED', { user: lockUser });
+                        return;
+                    }
+                } else if (isCurrentlyActive) {
+                    // Auto-healing: Si estem dins i no hi ha lock, el creem
+                    await utils.callJSX(`jsx_writeTextFile('${lockPath.replace(/\\/g, "\\\\")}', '${myUser.trim()}')`);
+                }
+
+                // --- 5. CONCLUSIÓ D'ESTAT ---
+                const fileExists = await utils.callJSX(`jsx_fileExists('${destPath.replace(/\\/g, "\\\\")}')`);
                 
                 let conclusion = 'NEW';
                 if (isCurrentlyActive) {
@@ -61,8 +77,6 @@
                 } else if (isProjectAlreadyOpen) {
                     conclusion = 'GO';
                 } else {
-                    const destPath = config.rutas.destinoBase + progData.directorio + "\\" + expectedProjName;
-                    const fileExists = await utils.callJSX(`jsx_fileExists('${destPath.replace(/\\/g, "\\\\")}')`);
                     conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
                 }
 
@@ -112,6 +126,12 @@
                     break;
                 case 'WAITING':
                     btn.innerText = data.msg || "ESPERANT...";
+                    break;
+                case 'LOCKED':
+                    btn.innerText = "BLOQUEJAT: " + (data.user || "ALTRE");
+                    btn.disabled = true;
+                    btn.style.border = "1px solid #dc3545";
+                    btn.style.color = "#dc3545";
                     break;
                 default:
                     btn.innerText = "---";
