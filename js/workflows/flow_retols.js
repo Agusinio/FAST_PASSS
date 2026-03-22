@@ -1,7 +1,8 @@
 /**
  * ============================================================================
- * WORKFLOW: RETOLS I GRÀFICS (v11 - VERSIÓ ULTRA-LIPO)
+ * WORKFLOW: RETOLS I GRÀFICS (v12 - VERSIÓ VARIABLES GLOBALS)
  * ============================================================================
+ * Ara utilitza el mapa de pistes definit a Config.js per a l'orquestració.
  */
 
 (function () {
@@ -9,7 +10,6 @@
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
     const utils = window.FASTPASS_UI.Utils;
-    const tracksLogic = window.FASTPASS_UI.Logic.Tracks;
     const clipsLogic = window.FASTPASS_UI.Logic.Clips;
     const log = (m) => utils.log(m, "DEBUG");
     const callJSX = (s) => utils.callJSX(s);
@@ -20,49 +20,53 @@
          * Genera un Freeze Frame d'un clip de tema i el col·loca al timeline.
          */
         processThemeFreeze: async function (themeClipName, cti, folderPath, programPrefix) {
-            log("📸 Generant Freeze Frame: " + themeClipName);
-            try {
-                // 1. Col·locació inicial del clip de tema a V4 (pista 4)
-                await callJSX(`jsx_overwriteClip('${utils.escape(themeClipName)}', 4, 0.0, 'video')`);
+            log("📸 Generant Freeze Frame...");
+            const cfg = FASTPASS_UI.Config.get();
+            const T_THEME = cfg.tracks.video.tematitol;
 
-                // 2. Posicionament per a captura (Frame 07:00)
+            try {
+                // Col·locació inicial a la pista de temes (V4)
+                await callJSX(`jsx_overwriteClip('${utils.escape(themeClipName)}', ${T_THEME}, 0.0, 'video')`);
+
                 await callJSX(`jsx_setCTI_Safe(7.0)`);
                 await callJSX("jsx_ClearCache()");
                 await utils.delay(800);
 
-                // 3. Preparació de ruta de destí
                 let cleanName = themeClipName.split("Tema-Titol_")[1] || themeClipName;
                 cleanName = cleanName.replace(/\.\d+\.mov$/i, "").substring(0, 30);
                 const fileName = `${programPrefix}_${cleanName}_Freeze.png`;
                 const fullPath = `${folderPath}\\${fileName}`;
 
-                // 4. Captura del Frame (Snapshot)
-                // Usem el pont genèric d'exportació
                 await callJSX(`jsx_exportFrameQE('${fullPath.replace(/\\/g, "\\\\")}', 7.0)`);
 
-                // 5. Ingesta i col·locació del Freeze Frame resultat
                 const payload = JSON.stringify([fullPath.replace(/\\/g, "\\\\")]);
                 await callJSX(`jsx_importFiles('${payload}', 'root')`);
                 
-                // Col·loquem el PNG a V4 a sobre del anterior (overwrite)
-                await callJSX(`jsx_overwriteClip('${utils.escape(fileName)}', 4, 7.0, 'video')`);
+                // Sobreescriure el tema original amb el PNG generat
+                await callJSX(`jsx_overwriteClip('${utils.escape(fileName)}', ${T_THEME}, 7.0, 'video')`);
                 
-                log("✅ Freeze Frame col·locat correctament.", "INFO");
+                log("✅ Freeze Frame col·locat a V" + T_THEME, "INFO");
 
             } catch (e) { utils.handleError(e, "ThemeFreeze"); }
         },
 
         /**
-         * Workflow principal de col·locació de rètols (Chyrons).
+         * Workflow principal de col·locació automàtica de rètols de peça.
          */
         runPlaceChyrons: async function () {
-            log("🎬 Aplicant rètols de peça...");
+            log("🎬 Aplicant rètols segons el nou mapa de pistes...");
+            const cfg = FASTPASS_UI.Config.get();
             const state = FASTPASS_UI.State;
             const idx = state.pieceIndex;
             const struct = state.structure;
 
+            // Variables de pistes des del Config
+            const T_THEME = cfg.tracks.video.tematitol;
+            const T_CHYRONS = cfg.tracks.video.chyrons; // V5: NomCarrec, Firma, Mapes
+            const T_LLOC = cfg.tracks.video.llocdata;   // V6: Lloc-Data
+
             if (!struct || !struct[idx]) {
-                log("⚠️ No hi ha estructura de peça definida al State.", "WARN");
+                log("⚠️ No es troba l'estructura del lloc al State.", "WARN");
                 return;
             }
 
@@ -71,27 +75,31 @@
                 const ctiRaw = await callJSX('jsx_getCTI()');
                 const cti = parseFloat(ctiRaw || "0");
 
-                // --- 1. TEMA-TITOL (V4) ---
+                // 1. TEMA-TITOL (V4)
                 if (piece.themeTitle) {
-                    await callJSX(`jsx_overwriteClip('${utils.escape(piece.themeTitle.name)}', 4, ${cti}, 'video')`);
+                    await callJSX(`jsx_overwriteClip('${utils.escape(piece.themeTitle.name)}', ${T_THEME}, ${cti}, 'video')`);
                 }
 
-                // --- 2. GRAFISMES (V7 o V2) ---
+                // 2. GRAFISMES I MAPES (V5 ara, ja no V7)
                 if (piece.graphics) {
                     for (const g of piece.graphics) {
-                        const track = (g.type === "GRAFISME") ? 7 : 2;
-                        await callJSX(`jsx_overwriteClip('${utils.escape(g.cleanName)}', ${track}, ${cti}, 'video')`);
+                        await callJSX(`jsx_overwriteClip('${utils.escape(g.cleanName)}', ${T_CHYRONS}, ${cti}, 'video')`);
                     }
                 }
 
-                // --- 3. CHYRONS INDIVIDUALS ---
+                // 3. CHYRONS INDIVIDUALS
                 if (piece.chyrons && piece.chyrons.length > 0) {
                     let firstTs = piece.chyrons[0].timestamp || 0;
                     for (let i = 0; i < piece.chyrons.length; i++) {
                         const c = piece.chyrons[i];
                         const diff = (c.timestamp > 0) ? (c.timestamp - firstTs) / 1000 : i * 4.0;
-                        // Regla de negoci: Els clips amb "Lloc" van a V6, la resta a V4
-                        const track = (c.name.indexOf("Lloc") !== -1) ? 6 : 4;
+                        
+                        // Determinació de pista segons contingut
+                        let track = T_CHYRONS; // Per defecte V5
+                        if (c.name.indexOf("Lloc") !== -1 || c.name.indexOf("Data") !== -1) {
+                            track = T_LLOC; // V6
+                        }
+                        
                         await callJSX(`jsx_overwriteClip('${utils.escape(c.name)}', ${track}, ${cti + diff}, 'video')`);
                     }
                 }
@@ -102,21 +110,24 @@
         },
 
         /**
-         * Aplica el preset de Fons 16:9 i posiciona el clip estructural.
+         * Aplica fons i preset sobre el clip seleccionat.
          */
         runPlaceGraph169: async function () {
-            log("🎬 Aplicant format 16:9...");
+            log("🎬 Aplicant format 16:9 amb fondos...");
+            const cfg = FASTPASS_UI.Config.get();
+            const T_MP4 = cfg.tracks.video.mp4;     // V1
+            const T_FONS = cfg.tracks.video.fondos;  // V3
+
             try {
-                // Busquem el clip base a V2 (pista 2)
-                const info = await clipsLogic.findAtTime(2, -1, "video");
-                if (!info) throw new Error("No s'ha trobat clip a V2 per aplicar el 16:9");
+                const info = await clipsLogic.findAtTime(T_MP4, -1, "video");
+                if (!info) throw new Error("No s'ha trobat clip a la pista mp4 (V" + T_MP4 + ")");
 
-                // Apliquem transformació KF des de Lògica
-                await clipsLogic.apply169Preset(2, info.index);
+                // Transformació del clip original a V1
+                await clipsLogic.apply169Preset(T_MP4, info.index);
 
-                // Col·loquem el Fons estàndard a V1 (pista 1)
+                // Col·locació del fons a la pista dedicada (V3)
                 const bgName = "Fons_16_9_GENERIC.png";
-                await callJSX(`jsx_overwriteClip('${utils.escape(bgName)}', 1, ${info.start}, 'video')`);
+                await callJSX(`jsx_overwriteClip('${utils.escape(bgName)}', ${T_FONS}, ${info.start}, 'video')`);
                 
             } catch (e) { utils.handleError(e, "Graph169"); }
         }

@@ -1,9 +1,9 @@
 /**
  * ============================================================================
- * WORKFLOW: MAIN BUTTON (v15 - SESSIÓ I CICLE DE VIDA)
+ * WORKFLOW: MAIN BUTTON (v16 - VARIABLES GLOBALS I TARGETING)
  * ============================================================================
- * Aquest workflow orquestra la creació, actualització i obertura de temes.
- * Totes les decisions de cerca i importació s'han delegat a LOGIC (Scanner i Project_Logic).
+ * Gestiona el cicle de vida del projecte (NOU, OBRIR, ANAR-HI, ACTUALITZAR)
+ * Usant el mapa de pistes definit a Config.js.
  */
 
 (function () {
@@ -15,142 +15,109 @@
     const scanner = window.FASTPASS_UI.Logic.Scanner;
 
     const log = (m) => utils.log(m, "DEBUG");
+    const callJSX = (s) => utils.callJSX(s);
 
     FASTPASS_UI.Workflows.MainButton = {
 
         /**
-         * runMainAction: Acció principal que orquestra la sesión segons l'estat del Context.
+         * runMainAction: Acció principal orquestrada pel Context.
          */
         runMainAction: async function (action, data) {
             log("⏯️ Iniciant workflow: [" + action + "]");
-            utils.updateUIState('BUSY'); // Bloqueig de UI per evitar clics duplicats
+            utils.updateUIState('BUSY');
 
             try {
                 switch (action) {
-                    case 'NEW': await this._runNew(); break;    // FLOW per a temes inexistents
-                    case 'UPDATE': await this._runUpdate(); break; // FLOW per a temes ja oberts o en disc
-                    case 'LOAD': await this._runLoad(); break;   // FLOW per a carregar projecte extern
-                    case 'GO': await this._runGo(data.name); break; // FLOW per canviar de projecte actiu
-                    default: console.warn("⚠️ Acció desconeguda:", action);
+                    case 'NEW': await this._runNew(); break;
+                    case 'UPDATE': await this._runUpdate(); break;
+                    case 'LOAD': await this._runLoad(); break;
+                    case 'GO': await this._runGo(data.name); break;
                 }
                 utils.status('Procés completat!', 'exito');
             } catch (e) {
                 utils.handleError(e, "MainAction");
             } finally {
-                utils.updateUIState('READY'); // Alliberament de la UI
+                utils.updateUIState('READY');
             }
         },
 
         /**
-         * FLOW: CREAR NOU TEMA (A partir de plantilla)
+         * FLOW: CREAR NOU TEMA
          */
         _runNew: async function () {
             log("🚀 [FLOW-NEW]");
-            // 1. Identificació del context (Programa, Bloc, Data)
             const ctx = await this._setupContext();
+            const cfg = ctx.config;
 
-            // 2. Descobriment automàtic de materials en disc (Logic: Scanner)
+            // 1. Descobriment automàtic
             const wottData = await scanner.findTemaData(ctx);
             const media = await scanner.findMediaAssets(ctx);
 
-            // 3. Generació de rutes de destí basades en el tema detectat
-            const template = ctx.config.rutas.plantilla_net;
-            const destPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" +
+            // 2. Definició de rutes i noms
+            const template = cfg.rutas.plantilla_net;
+            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" +
                 `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${utils.sanitizeName(wottData.tema)}.prproj`;
             const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
 
-            // 4. Creació física del projecte (Logic: Project_Logic)
-            // Inclou obertura de plantilla, clonació de seqüència, canvi de nom i SaveAs.
+            // 3. Creació física (Project_Logic)
             await projectLogic.createFromTemplate(template, destPath, seqName);
 
-            // 5. Ingesta i Sincronització de materials als Bins de Premiere
+            // 4. Ingesta i Sincronització
             await this._performSync(ctx, wottData, media);
 
-            // 6. Muntatger base (Overwrite) del clip principal (MP4) a V1
+            // 5. Muntatge base i configuració de l'espai de treball
+            const T_MP4 = cfg.tracks.video.mp4; // V1
+            const T_TEMP = cfg.tracks.video.template_1; // V2
+
             if (media.mp4) {
-                await utils.callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', 1, 0.0, 'video')`);
+                await callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', ${T_MP4}, 0.0, 'video')`);
             }
+
+            // Configuració de finalització: Cabezal a 0 i targeting de pistes principals
+            await callJSX('jsx_setCTI_Safe(0)');
+            await callJSX(`jsx_setTrackTarget(${T_MP4}, true, 'video')`);
+            await callJSX(`jsx_setTrackTarget(${T_TEMP}, true, 'video')`);
+            
+            log("✅ Projecte creat i llest a V" + T_MP4);
         },
 
         /**
-         * FLOW: ACTUALITZAR TEMA (Sincronia sense canvi de projecte)
+         * FLOW: ACTUALITZAR TEMA
          */
         _runUpdate: async function () {
             log("🚀 [FLOW-UPDATE]");
             const ctx = await this._setupContext();
+            const cfg = ctx.config;
 
-            // 1. Re-escaneig de materials per trobar nous rètols o versions de video
             const wottData = await scanner.findTemaData(ctx);
             const media = await scanner.findMediaAssets(ctx);
             const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
 
-            // 2. Importació de nous materials trobats al projecte actual
             await this._performSync(ctx, wottData, media);
 
-            // 3. Actualització del Timeline (Overwrite a V1 al temps 0.0)
             if (media.mp4) {
-                await utils.callJSX(`jsx_openSequence('${seqName}')`);
-                await utils.callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', 1, 0.0, 'video')`);
+                const T_MP4 = cfg.tracks.video.mp4;
+                await callJSX(`jsx_openSequence('${seqName}')`);
+                await callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', ${T_MP4}, 0.0, 'video')`);
             }
 
-            // 4. Salvetat forçada de seguretat
-            await utils.callJSX("app.project.save()");
-        },
-
-        /**
-         * FLOW: OBRIR TEMA (LOAD - Projecte en disc no actiu)
-         */
-        _runLoad: async function () {
-            log("🚀 [FLOW-LOAD]");
-            const ctx = await this._setupContext();
-            const wottData = await scanner.findTemaData(ctx);
-            const media = await scanner.findMediaAssets(ctx);
-
-            const projName = `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${utils.sanitizeName(wottData.tema)}.prproj`;
-            const fullPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + projName;
-            const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
-
-            // 1. Activació de la sessió de treball (Logic: Project_Logic)
-            // Obre el document i garanteix que la seqüència correcte estigui en focus.
-            await projectLogic.activateProject(fullPath, seqName);
-
-            // 2. Sincronia de nous materials des de l'obertura anterior
-            await this._performSync(ctx, wottData, media);
-
-            // 3. Muntatge del clip principal
-            if (media.mp4) {
-                await utils.callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', 1, 0.0, 'video')`);
-            }
-        },
-
-        /**
-         * FLOW: ANAR-HI (Canvi de focus en projectes ja oberts en Premiere)
-         */
-        _runGo: async function (projectName) {
-            log(`🚀 [FLOW-GO] Canviant focus a: ${projectName}`);
-            const ctx = await this._setupContext();
-            const wottData = await scanner.findTemaData(ctx);
-            const seqPrefix = `${ctx.progData.archivo}_${wottData.tema}`;
-
-            // Determinem la ruta actual si cal, i activem la seqüència orquestradament
-            const currentProjPath = await utils.callJSX("app.project.path");
-            await projectLogic.activateProject(currentProjPath, seqPrefix);
+            await callJSX("app.project.save()");
         },
 
         /**
          * @private
-         * Mètode unificat de sincronització de materials (Ingesta als Bins).
+         * Mètode de sincronització de materials als Bins.
          */
         _performSync: async function (ctx, wottData, media) {
-            log("🎞️ Sincronitzant materials als Bins...");
+            log("🎞️ Sincronitzant materials...");
 
-            // 1. Ingesta de Rètols (Wotts) a la carpeta "CHYRONS" definida al Project.jsx
+            // Ingesta de Rètols a la carpeta CHYRONS (VUI 5/6)
             if (wottData.list.length > 0) {
                 const list = wottData.list.map(w => w.file.path);
                 await utils.importList(list, "CHYRONS");
             }
 
-            // 2. Ingesta de vídeo (MP4) i subtítols (SRT) a l'arrel (root) del projecte
+            // Ingesta a l'arrel (Root) per a MP4 i SRT
             const baseMedia = [];
             if (media.mp4) baseMedia.push(media.mp4.path);
             if (media.srt) baseMedia.push(media.srt.path);
@@ -162,7 +129,7 @@
 
         /**
          * @private
-         * Generació de l'objecte Context basat en l'estat actual de la UI i la Config.
+         * Generació de l'objecte Context basat en la Config i la UI.
          */
         _setupContext: async function () {
             const config = FASTPASS_UI.Config.get();
@@ -170,7 +137,6 @@
             const bloque = document.getElementById('bloc').value;
             const progData = config.mapeoProgramas[idProg];
             const dateStr = utils.getFormattedDate();
-            // Neteja de caràcters per a noms de projecte compatibles
             const dateDir = dateStr.replace(/"/g, "").trim();
             return { config, progData, bloque, dateDir };
         }

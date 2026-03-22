@@ -1,8 +1,8 @@
 /**
  * ============================================================================
- * LOGIC: SRT (Subtítulos orquestados)
+ * LOGIC: SRT (Subtítols orquestrats) (v12 - VARIABLES GLOBALS)
  * ============================================================================
- * Centraliza la lógica de manipulación de pistas de subtítulos usando puentes atómicos.
+ * Centralitza la lògica de manipulació de pistes de subtítols.
  */
 
 (function() {
@@ -14,15 +14,20 @@
     FASTPASS_UI.Logic.Srt = {
         
         /**
-         * Obtiene todos los clips seleccionados en las pistas de subtítulos.
+         * Obté tots els clips seleccionats a les pistes de subtítols de forma dinàmica.
          */
         getSelectedClips: async function() {
             const utils = window.FASTPASS_UI.Utils;
             const res = [];
-            const trackCount = parseInt(await utils.callJSX(`jsx_getTrackCount('${TYPE}')`));
+            
+            // Obtenim quantes pistes de subtítols hi ha realment al timeline
+            const trackCountRaw = await utils.callJSX(`jsx_getTrackCount('${TYPE}')`);
+            const trackCount = parseInt(trackCountRaw || "0");
 
             for (let t = 1; t <= trackCount; t++) {
-                const clipCount = parseInt(await utils.callJSX(`jsx_getClipCount(${t}, '${TYPE}')`));
+                const clipCountRaw = await utils.callJSX(`jsx_getClipCount(${t}, '${TYPE}')`);
+                const clipCount = parseInt(clipCountRaw || "0");
+                
                 for (let c = 0; c < clipCount; c++) {
                     const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${t}, ${c}, '${TYPE}')`);
                     if (dataRaw) {
@@ -43,31 +48,29 @@
         },
 
         /**
-         * Limpieza SRT IN: Elimina clips previos y ajusta el offset del primero.
+         * Neteja SRT IN: Elimina clips previs i aplica offset per alineeació.
          */
         cleanIn: async function(ctiSec) {
-            const clipsLogic = FASTPASS_UI.Logic.Clips;
+            const cfg = window.FASTPASS_UI.Config.get();
             const utils = window.FASTPASS_UI.Utils;
+            const T_S1 = cfg.tracks.subtitle.s1; // Pista 1 de SRT segons mapa
             
-            // 1. Limpiamos clips que terminan antes del CTI (Orquestado)
-            await clipsLogic.clearTrackAfter(1, ctiSec, TYPE); // En este caso sería "clearBefore" si existiera
-            // Re-utilizamos clearTrackAfter pero con lógica inversa si fuera necesario. 
-            // PERO vamos a hacerlo manual aquí para seguir el flow específico:
-            
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(1, '${TYPE}')`));
+            const countRaw = await utils.callJSX(`jsx_getClipCount(${T_S1}, '${TYPE}')`);
+            const count = parseInt(countRaw || "0");
             const toMove = [];
             
             for (let i = count - 1; i >= 0; i--) {
-                const raw = await utils.callJSX(`jsx_getClipDataByIndex(1, i, '${TYPE}')`);
-                const clip = JSON.parse(raw);
+                const raw = await utils.callJSX(`jsx_getClipDataByIndex(${T_S1}, ${i}, '${TYPE}')`);
+                const clip = JSON.parse(raw || "{}");
+                
                 if (clip.end <= ctiSec) {
-                    await utils.callJSX(`jsx_removeClip(1, i, '${TYPE}')`);
+                    await utils.callJSX(`jsx_removeClip(${T_S1}, ${i}, '${TYPE}')`);
                 } else {
                     toMove.push({ index: i, start: clip.start });
                 }
             }
 
-            // 2. Aplicamos Offset al resto
+            // Aplicació d'offset proporcional si n'han quedat
             if (toMove.length > 0) {
                 toMove.sort((a, b) => a.start - b.start);
                 const firstStart = toMove[0].start;
@@ -75,17 +78,19 @@
 
                 for (let item of toMove) {
                     const newStart = Math.max(0, item.start + offset);
-                    await utils.callJSX(`jsx_setClipStart(1, ${item.index}, ${newStart}, '${TYPE}')`);
+                    await utils.callJSX(`jsx_setClipStart(${T_S1}, ${item.index}, ${newStart}, '${TYPE}')`);
                 }
             }
             return "OK_SRT_CLEAN_IN";
         },
 
         /**
-         * Limpieza SRT OUT: Elimina clips a partir del CTI.
+         * Neteja SRT OUT: Elimina clips a partir del CTI a la pista principal.
          */
         cleanOut: async function(ctiSec) {
-            return await FASTPASS_UI.Logic.Clips.clearTrackAfter(1, ctiSec, TYPE);
+            const cfg = window.FASTPASS_UI.Config.get();
+            const T_S1 = cfg.tracks.subtitle.s1;
+            return await FASTPASS_UI.Logic.Clips.clearTrackAfter(T_S1, ctiSec, TYPE);
         }
     };
 
