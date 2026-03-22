@@ -130,6 +130,29 @@
                 await callJSX(`jsx_overwriteClip('${utils.escape(bgName)}', ${T_FONS}, ${info.start}, 'video')`);
                 
             } catch (e) { utils.handleError(e, "Graph169"); }
+        },
+
+        /**
+         * Col·locació directa del fons vertical a la pista V3.
+         */
+        runPlaceBackground: async function () {
+            log("🎬 Col·locant fons a V3 a partir del cabezal...");
+            const cfg = FASTPASS_UI.Config.get();
+            const T_FONS = cfg.tracks.video.fondos;  // V3 (Fons)
+
+            try {
+                // Obtenim la posició actual del cabezal
+                const ctiRaw = await callJSX('jsx_getCTI()');
+                const cti = parseFloat(ctiRaw || "0");
+
+                const bgName = "Fons_Vertical_Generic.png";
+                
+                log(`📌 Inserint ${bgName} a V${T_FONS} (Time: ${cti})`);
+                await callJSX(`jsx_overwriteClip('${utils.escape(bgName)}', ${T_FONS}, ${cti}, 'video')`);
+                
+                utils.status("Fons col·locat al cabezal", "exito");
+
+            } catch (e) { utils.handleError(e, "PlaceBackground"); }
         }
     };
 

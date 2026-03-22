@@ -96,10 +96,12 @@ var isUserDraggingSlider = false;
         // --- WORKFLOW: GRÀFICS ---
         const btnChyrons = document.getElementById('btnPlaceChyrons');
         const btnGraph169 = document.getElementById('btnPlaceGraph169');
+        const btnBg = document.getElementById('btnBg');
         const btnDiag = document.getElementById('btnDiagnostic');
 
         if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Retols', 'runPlaceChyrons'));
         if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
+        if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
         if (btnDiag) {
             btnDiag.addEventListener('click', function() {
                 FASTPASS_UI.Utils.log("🛠️ Ejecutando Diagnóstico...");
