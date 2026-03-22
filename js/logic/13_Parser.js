@@ -22,6 +22,45 @@ FASTPASS_UI.Logic.BlockParser = function() {
 };
 
 FASTPASS_UI.Logic.BlockParser.prototype = {
+
+    /**
+     * MÈTODE MODERN: Crea l'estructura a partir d'una llista de fitxers WOTT.
+     */
+    parseFromFiles: function(fileList, program, block) {
+        this.structure = [];
+        var lookup = {};
+
+        for (var i = 0; i < fileList.length; i++) {
+            var f = fileList[i];
+            var meta = this.parseWottMetadata(f.name);
+            if (!meta) continue;
+
+            if (!lookup[meta.linea]) {
+                lookup[meta.linea] = { id: meta.linea, theme: "PENDENT", chyrons: [] };
+            }
+
+            // Si detectem un Tema-Titol en Majúscules, l'assignem com a títol de la línia
+            var possibleTheme = this.extractThemeFromWott(f.name);
+            if (possibleTheme) lookup[meta.linea].theme = possibleTheme;
+
+            // Afegim a la llista de chyrons
+            lookup[meta.linea].chyrons.push({
+                name: f.name,
+                path: f.path,
+                tc: meta.tc,
+                rol: meta.rol
+            });
+        }
+
+        // Convertim a array i ordenem
+        for (var key in lookup) {
+            lookup[key].chyrons.sort(function(a,b){ return a.tc.localeCompare(b.tc); });
+            this.structure.push(lookup[key]);
+        }
+        this.structure.sort(function(a,b){ return parseInt(a.id) - parseInt(b.id); });
+        
+        return this.structure;
+    },
     
     // --- 1. LÒGICA ORIGINAL (MANTINGUDA PER A VÍDEO MP4) ---
     parse: function(filename, programCode, blockCode) {

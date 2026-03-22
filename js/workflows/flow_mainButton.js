@@ -146,6 +146,12 @@
         _performSync: async function (ctx, wottData, media) {
             log("🎞️ Sincronitzant materials...");
 
+            // 📍 DEBUG: Mostrem l'estructura parsejada a la consola
+            if (FASTPASS_UI.State.structure && FASTPASS_UI.State.structure.length > 0) {
+                console.log("--- ESTRUCTURA DE GUION DETECTADA ---");
+                console.table(FASTPASS_UI.State.structure);
+            }
+
             // Ingesta de Rètols a la carpeta CHYRONS (VUI 5/6)
             if (wottData.list.length > 0) {
                 const list = wottData.list.map(w => w.file.path);

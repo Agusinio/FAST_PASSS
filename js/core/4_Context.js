@@ -38,12 +38,12 @@
                 const map = assets().getLatestDayMap(wottsRaw);
                 const theme = this._extractThemeFromFiles(map);
                 
-                if (!theme) {
-                    this.updateButton('WAITING', { msg: "Esperant Wotts..." });
-                    return;
-                }
+                // --- 2. PARSING I ESTRUCTURA ---
+                const parser = new FASTPASS_UI.Logic.BlockParser();
+                const pieces = parser.parseFromFiles(map, elProg.value, elBloc.value);
+                FASTPASS_UI.State.structure = pieces;
 
-                // --- 2. INSPECCIÓ INTERNA ---
+                // --- 3. INSPECCIÓ INTERNA ---
                 const openProjs = await appInfo().getOpenProjects();
                 const activeProj = await appInfo().getActiveProjectName();
                 
@@ -136,6 +136,28 @@
                 default:
                     btn.innerText = "---";
             }
+        },
+
+        renderStructure(pieces) {
+            const container = document.getElementById('structure-table');
+            if (!container) return;
+
+            if (!pieces || pieces.length === 0) {
+                container.innerHTML = '<div class="structure-msg">Esperant anàlisi de guion...</div>';
+                return;
+            }
+
+            let html = '';
+            for (let p of pieces) {
+                html += `
+                    <div class="piece-row">
+                        <div class="piece-id">${p.id}</div>
+                        <div class="piece-title">${p.theme}</div>
+                        <div class="piece-status"><span></span></div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
         },
 
         init() {
