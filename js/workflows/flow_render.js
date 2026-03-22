@@ -68,11 +68,23 @@
          * Exporta un PNG del frame actual (Portada).
          */
         runPortada: async function () {
-            log("📸 Generant Portada...");
+            log("📸 Generant Portada (Mode Aïllat)...");
+            const tracksLogic = window.FASTPASS_UI.Logic.Tracks;
+            
             try {
                 const config = FASTPASS_UI.Config.get();
                 const targetDir = config.rutas.portadas || config.rutas.destinoBase || "C:\\Temp";
+                const T_MP4 = config.tracks.video.mp4;
+                const T_THEME = config.tracks.video.tematitol;
 
+                // 🛡️ AÏLLAMENT DE PISTES (Per a que no surtin chyrons bruts o fons)
+                // 1. Muteja-ho TOT (Video)
+                await tracksLogic.setGlobalState("video", "mute", true);
+                // 2. Unmute només el que volem (MP4 i Tema)
+                await callJSX(`jsx_setTrackMute(${T_MP4}, false, 'video')`);
+                await callJSX(`jsx_setTrackMute(${T_THEME}, false, 'video')`);
+
+                // 📸 SNAPSHOT
                 let nameBase = FASTPASS_UI.State.lastRenderName;
                 if (!nameBase) {
                     const seqName = await callJSX('jsx_getActiveSequenceName()');
@@ -84,13 +96,20 @@
 
                 const res = await renderLogic.exportSnapshot(fullPath);
 
+                // 🔄 RESTAURACIÓ (Unmute All)
+                await tracksLogic.unmuteAll("video");
+
                 if (res.success) {
                     log("✅ Portada exportada amb èxit.", "INFO");
                     utils.status("Portada OK", "exito");
                 } else {
                     throw new Error(res.log || "Error capturant snapshot.");
                 }
-            } catch (e) { utils.handleError(e, "RenderPortada"); }
+            } catch (e) { 
+                // Fail-safe: Assegurar-nos que les pistes tornen a estar visibles
+                if (window.FASTPASS_UI.Logic.Tracks) window.FASTPASS_UI.Logic.Tracks.unmuteAll("video");
+                utils.handleError(e, "RenderPortada"); 
+            }
         }
     };
 
