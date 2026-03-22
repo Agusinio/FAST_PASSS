@@ -80,6 +80,46 @@
         updateUIState: function(state) {
             const main = document.getElementById('main-content');
             if (main) main.classList.toggle('busy', state === 'BUSY');
+        },
+
+        /**
+         * 🛡️ SEGURETAT: Verifica si la seqüència activa en Premiere coincideix 
+         * amb el context triat al panell.
+         */
+        validateActiveSequence: async function() {
+            const state = window.FASTPASS_UI.State;
+            const config = window.FASTPASS_UI.Config.get();
+            const elProg = document.getElementById('programa');
+            const elBloc = document.getElementById('bloc');
+            
+            if (!elProg || !elBloc) return true; // Fail-safe si no hi ha UI
+            
+            const progKey = elProg.value;
+            const blocVal = elBloc.value;
+            const activeSeq = state.activeSequenceName || "";
+            
+            // Si estem en una seqüència buida o NO n'hi ha cap de activa
+            if (!activeSeq) {
+                this.status("⚠️ Cap seqüència activa!", "error");
+                return false;
+            }
+
+            // Validació per paraules clau (Tokens)
+            // Busquem si el nom de la seqüència inclou el codi del programa i el bloc
+            const progData = config.mapeoProgramas[progKey];
+            const progFileName = progData ? progData.archivo : "";
+            
+            const hasProg = activeSeq.indexOf(progFileName) !== -1;
+            const hasBloc = activeSeq.indexOf(blocVal) !== -1;
+
+            if (!hasProg || !hasBloc) {
+                const msg = `⚠️ Sincronia Perduda! Estàs a '${activeSeq.substring(0,15)}...' però el panell diu ${progKey}/${blocVal}`;
+                this.status(msg, "error");
+                this.log(msg, "WARN");
+                return false;
+            }
+
+            return true;
         }
     };
 })();

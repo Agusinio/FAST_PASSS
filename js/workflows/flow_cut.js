@@ -21,6 +21,7 @@
          * Realitza un Ripple Trim In al clip principal de Mp4.
          */
         runCutIn: async function () {
+            if (!(await utils.validateActiveSequence())) return;
             log("🎬 Realitzant CUT IN...");
             const cfg = FASTPASS_UI.Config.get();
             const T_MP4 = cfg.tracks.video.mp4; // V1
@@ -46,6 +47,7 @@
          * Workflow de tancament (CUT OUT).
          */
         runCutOut: async function () {
+            if (!(await utils.validateActiveSequence())) return;
             log("🎬 Executant fase de tancament (CUT OUT)...");
             const cfg = FASTPASS_UI.Config.get();
             const T_MP4 = cfg.tracks.video.mp4;     // V1 (Brut)

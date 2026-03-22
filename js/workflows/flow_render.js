@@ -19,6 +19,7 @@
          * Envia la seqüència activa a AME.
          */
         runVideo: async function () {
+            if (!(await utils.validateActiveSequence())) return;
             log("🚀 Preparant enviament a AME...");
             const config = FASTPASS_UI.Config.get();
 
