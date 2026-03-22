@@ -109,6 +109,46 @@ FASTPASS.KF = (function() {
                 }
                 return "OK";
             } catch(e) { return "ERR: " + e.message; }
+        },
+
+        addKeyframeAtCurrentTime: function() {
+            try {
+                var seq = app.project.activeSequence;
+                var cti = seq.getPlayerPosition();
+                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
+                if (!info.found) return "ERR_NO_CLIP";
+                
+                var p = FASTPASS.Clips.getProperty(0, info.index, "ADBE Motion", "ADBE Video Position", "video");
+                if (!p) return "ERR_NO_PROP";
+                
+                p.setTimeVarying(true);
+                p.addKey(cti.seconds);
+                return "OK_ADD";
+            } catch(e) { return "ERR: " + e.message; }
+        },
+
+        applyAutoReframe: function() {
+            try {
+                var seq = app.project.activeSequence;
+                var cti = seq.getPlayerPosition();
+                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
+                if (!info.found) return "ERR_NO_CLIP";
+                
+                var clip = seq.videoTracks[0].clips[info.index];
+                
+                // A Premiere Pro 25, podem aplicar l'efecte "Auto Reframe"
+                // Busquem l'efecte a la base de dades de Premiere
+                var effect = app.project.getVideoEffectByName("Auto Reframe");
+                if (effect) {
+                    clip.addVideoEffect(effect);
+                    return "OK_REFRAME";
+                }
+                
+                // Alternativa: Command ID de Premiere (depèn de la versió)
+                // app.executeCommand( ... );
+                
+                return "ERR_EFFECT_NOT_FOUND";
+            } catch(e) { return "ERR: " + e.message; }
         }
     };
 })();

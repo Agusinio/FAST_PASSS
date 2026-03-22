@@ -58,6 +58,7 @@ var isUserDraggingSlider = false;
         const btnScene = document.getElementById('btnScene');
         const btnPrevClip = document.getElementById('btnPrevClip');
         const btnNextClip = document.getElementById('btnNextClip');
+        const btnCenter = document.getElementById('btnCenter');
         const btnKey = document.getElementById('btnKey');
 
         if (btnIn) btnIn.addEventListener('click', function() { callWorkflow('Cut', 'runCutIn'); });
@@ -65,6 +66,12 @@ var isUserDraggingSlider = false;
         if (btnScene) btnScene.addEventListener('click', function() { callWorkflow('Cut', 'runScene'); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function() { callWorkflow('Cut', 'runPrevClip'); });
         if (btnNextClip) btnNextClip.addEventListener('click', function() { callWorkflow('Cut', 'runNextClip'); });
+        
+        if (btnCenter) {
+            btnCenter.addEventListener('click', function() {
+                if(FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAutoReframe();
+            });
+        }
         if (btnKey) {
             btnKey.addEventListener('click', function() { 
                 if(FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAddKF(); 

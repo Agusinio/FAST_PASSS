@@ -505,7 +505,7 @@ button.wide-small { height: var(--boto-petit); }
 /* 2. VIDEO */
 .video-edit-grid-wrapper { display: grid; grid-template-columns: 1fr var(--boto-petit); gap: 6px; }
 .video-edit-grid { display: grid; grid-template-columns: var(--boto-petit) 1fr var(--boto-petit); gap: 6px; }
-.video-slider-grid { display: grid; grid-template-columns: var(--boto-petit) 1fr var(--boto-petit) var(--boto-petit); align-items: center; gap: 6px; margin-top: 8px; }
+.video-slider-grid { display: grid; grid-template-columns: var(--boto-petit) 1fr var(--boto-petit) var(--boto-petit) var(--boto-petit); align-items: center; gap: 6px; margin-top: 8px; }
 
 /* SLIDER */
 input[type="range"] { 

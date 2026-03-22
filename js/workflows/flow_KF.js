@@ -62,6 +62,21 @@
             } catch (e) {
                 console.error("💥 Error en Negociació KF: ", e);
             }
+        },
+
+        runAutoReframe: async function() {
+            log("🤖 Executant Auto Reframe Intel·ligent...");
+            try {
+                const res = await callJSX("FASTPASS.KF.applyAutoReframe()");
+                if (res === "OK_REFRAME") {
+                    utils.status("Reframe OK", "exito");
+                    log("✅ Auto Reframe aplicat al clip de V1.");
+                } else {
+                    log("⚠️ Error Reframe: " + res, "WARN");
+                }
+            } catch (e) {
+                console.error("Error en AutoReframe: " + e);
+            }
         }
     };
 

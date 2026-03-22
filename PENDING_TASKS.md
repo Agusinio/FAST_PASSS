@@ -23,7 +23,7 @@ Ordenades de menor a major dificultat. Actualitzat: 22/03/2026.
 | 7 | CutOut Pro (col·loca Tema + Conductor) | `flow_cut.js` → `runCutOut()` |
 | 8 | Indicador de Context (4 llums) | `index.html` + `4_Context.js` |
 | 9 | Botó Fons (col·locar clip a V3) | `flow_retols.js` + `main.js` + `index.html` |
-| 10 | Autocentrat automàtic (KF centrat) | `7_KF.jsx` (àtom) + `7_KF_Logic.js` |
+| 10 | Auto Reframe Intel·ligent (Centrat de persones) | `flow_KF.js` + `7_KF.jsx` |
 
 ---
 
