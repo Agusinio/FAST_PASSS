@@ -628,3 +628,10 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: var
 }
 .modal-footer button { height: 30px; font-weight: bold; }
 .modal-footer button.primary { background: var(--color-principal); }
+
+/* --- INDICADORS DE CONTEXT (LLUMS) --- */
+.context-lights { display: flex; gap: 4px; align-items: center; margin-right: 10px; }
+.light { width: 8px; height: 8px; border-radius: 50%; background-color: #444; border: 1px solid rgba(0,0,0,0.3); transition: background-color 0.3s; }
+.light.on { background-color: #28a745; box-shadow: 0 0 6px #28a745; }
+.light.error { background-color: #dc3545; box-shadow: 0 0 6px #dc3545; }
+.light.warn { background-color: #ffc107; box-shadow: 0 0 6px #ffc107; }

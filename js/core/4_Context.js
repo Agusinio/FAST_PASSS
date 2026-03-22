@@ -66,12 +66,25 @@
                     conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
                 }
 
+                this.updateLights(progKey, elBloc.value, theme, isCurrentlyActive);
                 this.updateButton(conclusion, { theme, expectedProjName, path: mediaSource });
 
             } catch(e) {
                 console.error("💥 Error en el Core de Context:", e);
+                this.updateLights(false, false, false, false);
                 this.updateButton('DISABLED');
             }
+        },
+
+        updateLights(prog, bloc, theme, active) {
+            const set = (id, state) => {
+                const el = document.getElementById(id);
+                if (el) el.className = "light " + (state ? "on" : "off");
+            };
+            set('light-prog', !!prog);
+            set('light-bloc', !!bloc && bloc !== "---");
+            set('light-tema', !!theme && theme !== "PENDENT");
+            set('light-seq', !!active);
         },
 
         updateButton(state, data) {
