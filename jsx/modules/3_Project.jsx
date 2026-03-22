@@ -139,6 +139,10 @@ FASTPASS.Project = (function() {
             var proj = getTargetProject(projectPath);
             var existing = findInCollection(proj.rootItem.children, name);
             return existing || proj.rootItem.createBin(name);
+        },
+
+        getActiveSequenceName: function() {
+            return app.project.activeSequence ? app.project.activeSequence.name : "";
         }
     };
 })();

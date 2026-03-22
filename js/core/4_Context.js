@@ -46,6 +46,9 @@
                 // --- 2. INSPECCIÓ INTERNA ---
                 const openProjs = await appInfo().getOpenProjects();
                 const activeProj = await appInfo().getActiveProjectName();
+                
+                // 📍 DINAMISME: Guardem la seqüència activa al State per a futurs validacions
+                FASTPASS_UI.State.activeSequenceName = await session().getActiveSequenceName();
 
                 // --- 3. SÍNTESI I CONCLUSIÓ ---
                 const expectedProjName = `Pruebas_${progData.archivo}_${dateDir}_${elBloc.value}_${utils.sanitizeName(theme)}.prproj`;
@@ -75,27 +78,23 @@
             const btn = document.getElementById('btnMainAction');
             if (!btn) return;
             btn.disabled = (state === 'DISABLED' || state === 'WAITING');
-            btn.classList.remove('btn-update', 'btn-go', 'btn-load', 'btn-new');
+            btn.className = "square-large"; // Classe neutre única
 
             switch(state) {
                 case 'UPDATE':
                     btn.innerText = "ACTUALITZAR";
-                    btn.className = "square-large btn-update";
                     btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('UPDATE', data);
                     break;
                 case 'GO':
                     btn.innerText = "ANAR-HI";
-                    btn.className = "square-large btn-go";
                     btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('GO', data);
                     break;
                 case 'LOAD':
                     btn.innerText = "OBRIR";
-                    btn.className = "square-large btn-load";
                     btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('LOAD', data);
                     break;
                 case 'NEW':
                     btn.innerText = "NOU";
-                    btn.className = "square-large btn-new";
                     btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('NEW', data);
                     break;
                 case 'WAITING':

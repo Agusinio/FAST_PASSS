@@ -7,6 +7,7 @@ FASTPASS_UI.State = {
     pieceIndex: 0,
     srtWorkMode: false,
     isKeyframeMode: false,
+    activeSequenceName: "", 
     
     // Almacenamiento de clips activos (MasterTheme / SRT)
     masterTheme: null, 

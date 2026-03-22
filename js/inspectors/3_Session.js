@@ -27,6 +27,10 @@
         async getClipAtCTI(trackIdx, type) {
             const raw = await utils.callJSX(`jsx_getClipDataByTime(${trackIdx}, -1, '${type || "video"}')`);
             return JSON.parse(raw || "null");
+        },
+
+        async getActiveSequenceName() {
+            return await utils.callJSX("jsx_getActiveSequenceName()");
         }
     };
 
