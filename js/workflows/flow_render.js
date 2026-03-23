@@ -8,10 +8,11 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const utils = window.FASTPASS_UI.Utils;
-    const renderLogic = window.FASTPASS_UI.Logic.Render;
-    const log = (m) => utils.log(m, "DEBUG");
-    const callJSX = (s) => utils.callJSX(s);
+    const getUtils = () => window.FASTPASS_UI.Utils;
+    const getRenderLogic = () => window.FASTPASS_UI.Logic.Render;
+
+    const log = (m) => getUtils().log(m, "DEBUG");
+    const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.Render = {
 
@@ -19,7 +20,7 @@
          * Envia la seqüència activa a AME.
          */
         runVideo: async function () {
-            if (!(await utils.validateActiveSequence())) return;
+            if (!(await getUtils().validateActiveSequence())) return;
             log("🚀 Preparant enviament a AME...");
             const config = FASTPASS_UI.Config.get();
 
@@ -28,7 +29,7 @@
                 let outputDir = await callJSX("jsx_getProjectFolder()");
                 if (!outputDir) outputDir = config.rutas.destinoBase || "C:\\Temp";
                 
-                utils.status("Processant nom...", "procesando");
+                getUtils().status("Processant nom...", "procesando");
 
                 // 2. Càlcul del nom de sortida basat en la seqüència
                 const seqName = await callJSX('jsx_getActiveSequenceName()');
@@ -50,10 +51,10 @@
                 log(`📤 Destí: ${outputDir}\\${fileName}`);
 
                 // 4. Execució delegada a la Lògica
-                const res = await renderLogic.queueRender(presetPath, outputDir, fileName);
+                const res = await getRenderLogic().queueRender(presetPath, outputDir, fileName);
 
                 if (res && res.indexOf("OK") === 0) {
-                    utils.status(`Render OK: ${fileName}`, "exito");
+                    getUtils().status(`Render OK: ${fileName}`, "exito");
                     log("✅ Enviat a Media Encoder correctament.", "INFO");
                     // Guardem la referència per a la portada
                     FASTPASS_UI.State.lastRenderName = fileName.replace(".mp4", "");
@@ -61,13 +62,14 @@
                     throw new Error("Error en el pont AME: " + res);
                 }
 
-            } catch (e) { utils.handleError(e, "RenderVideo"); }
+            } catch (e) { getUtils().handleError(e, "RenderVideo"); }
         },
 
         /**
          * Exporta un PNG del frame actual (Portada).
          */
         runPortada: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
             log("📸 Generant Portada (Mode Aïllat)...");
             const tracksLogic = window.FASTPASS_UI.Logic.Tracks;
             
@@ -94,21 +96,21 @@
                 const fullPath = `${targetDir}\\${nameBase}.png`;
                 log(`📍 Destí Portada: ${fullPath}`);
 
-                const res = await renderLogic.exportSnapshot(fullPath);
+                const res = await getRenderLogic().exportSnapshot(fullPath);
 
                 // 🔄 RESTAURACIÓ (Unmute All)
                 await tracksLogic.unmuteAll("video");
 
                 if (res.success) {
                     log("✅ Portada exportada amb èxit.", "INFO");
-                    utils.status("Portada OK", "exito");
+                    getUtils().status("Portada OK", "exito");
                 } else {
                     throw new Error(res.log || "Error capturant snapshot.");
                 }
             } catch (e) { 
                 // Fail-safe: Assegurar-nos que les pistes tornen a estar visibles
                 if (window.FASTPASS_UI.Logic.Tracks) window.FASTPASS_UI.Logic.Tracks.unmuteAll("video");
-                utils.handleError(e, "RenderPortada"); 
+                getUtils().handleError(e, "RenderPortada"); 
             }
         }
     };

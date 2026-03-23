@@ -1,11 +1,12 @@
 /* * =================================================================================
- * 11_Context.jsx
+ * 11_Context.jsx (v2.4.1)
  * Módulo especializado en la obtención de datos del entorno de Premiere.
  * (v12 - VERSIÓN ULTRA-ATÓMICA: SIN BÚSQUEDA EN DISCO)
  * =================================================================================
  */
 
 var FASTPASS = FASTPASS || {};
+
 FASTPASS.Context = {
 
     /**
@@ -13,9 +14,15 @@ FASTPASS.Context = {
      */
     getActiveName: function() {
         try {
-            if (!app.project || !app.project.name) return "";
-            return File.decode(app.project.name);
-        } catch(e) { return ""; }
+            // La clave es verificar app.project ANTES de tocar nada
+            if (app && app.project && app.project.name) {
+                var n = app.project.name;
+                return File.decode(n);
+            }
+            return ""; // Si no hay proyecto, devolvemos string vacío, no error
+        } catch(e) { 
+            return ""; 
+        }
     },
 
     /**
@@ -24,12 +31,18 @@ FASTPASS.Context = {
     getOpenNames: function() {
         try {
             var res = [];
-            if (app.projects && app.projects.numProjects > 0) {
-                for (var i = 0; i < app.projects.numProjects; i++) {
-                    res.push(File.decode(app.projects[i].name));
+            // CORRECCIÓN: Usamos .length en lugar de .numProjects
+            if (typeof app !== "undefined" && app.projects && app.projects.length > 0) {
+                for (var i = 0; i < app.projects.length; i++) {
+                    if (app.projects[i] && app.projects[i].name) {
+                        res.push(File.decode(app.projects[i].name));
+                    }
                 }
             }
             return JSON.stringify(res);
-        } catch(e) { return "[]"; }
+        } catch(e) { 
+            // Si algo falla, devolvemos un JSON de array vacío para no romper el JSON.parse del JS
+            return "[]"; 
+        }
     }
 };

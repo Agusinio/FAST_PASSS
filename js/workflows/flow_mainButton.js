@@ -10,12 +10,12 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const utils = window.FASTPASS_UI.Utils;
-    const projectLogic = window.FASTPASS_UI.Logic.Project;
-    const scanner = window.FASTPASS_UI.Logic.Scanner;
+    const getUtils = () => window.FASTPASS_UI.Utils;
+    const projectLogic = () => window.FASTPASS_UI.Logic.Project;
+    const scanner = () => window.FASTPASS_UI.Logic.Scanner;
 
-    const log = (m) => utils.log(m, "DEBUG");
-    const callJSX = (s) => utils.callJSX(s);
+    const log = (m) => getUtils().log(m, "DEBUG");
+    const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.MainButton = {
 
@@ -24,7 +24,7 @@
          */
         runMainAction: async function (action, data) {
             log("⏯️ Iniciant workflow: [" + action + "]");
-            utils.updateUIState('BUSY');
+            getUtils().updateUIState('BUSY');
 
             try {
                 switch (action) {
@@ -33,11 +33,11 @@
                     case 'LOAD': await this._runLoad(); break;
                     case 'GO': await this._runGo(data.name); break;
                 }
-                utils.status('Procés completat!', 'exito');
+                getUtils().status('Procés completat!', 'exito');
             } catch (e) {
-                utils.handleError(e, "MainAction");
+                getUtils().handleError(e, "MainAction");
             } finally {
-                utils.updateUIState('READY');
+                getUtils().updateUIState('READY');
             }
         },
 
@@ -48,19 +48,22 @@
             log("🚀 [FLOW-NEW]");
             const ctx = await this._setupContext();
             const cfg = ctx.config;
-
-            // 1. Descobriment automàtic
-            const wottData = await scanner.findTemaData(ctx);
-            const media = await scanner.findMediaAssets(ctx);
+        
+            // 1. Descobriment automàtic (AÑADIMOS PARÉNTESIS AQUÍ)
+            const wottData = await scanner().findTemaData(ctx);
+            const media = await scanner().findMediaAssets(ctx);
+        
+            if (!scanner()) throw new Error("Logic.Scanner no encontrado. Revisa el orden de carga en index.html");
+            if (!projectLogic()) throw new Error("Logic.Project no encontrado.");
 
             // 2. Definició de rutes i noms
             const template = cfg.rutas.plantilla_net;
             const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" +
-                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${utils.sanitizeName(wottData.tema)}.prproj`;
+                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${getUtils().sanitizeName(wottData.tema)}.prproj`;
             const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
 
             // 3. Creació física (Project_Logic)
-            await projectLogic.createFromTemplate(template, destPath, seqName);
+            await projectLogic().createFromTemplate(template, destPath, seqName);
             
             // 📍 BLOQUEIG: Creem el fitxer .lock
             await this._createLock(destPath);
@@ -73,7 +76,8 @@
             const T_TEMP = cfg.tracks.video.template_1; // V2
 
             if (media.mp4) {
-                await callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', ${T_MP4}, 0.0, 'video')`);
+                const mp4Escaped = getUtils().escape(media.mp4.name);
+                await callJSX(`jsx_overwriteClip('${mp4Escaped}', ${T_MP4}, 0.0, 'video')`);
             }
 
             // Configuració de finalització: Cabezal a 0 i targeting de pistes principals
@@ -91,10 +95,10 @@
             log("🚀 [FLOW-LOAD]");
             const ctx = await this._setupContext();
             const cfg = ctx.config;
-            
-            const wottData = await scanner.findTemaData(ctx);
+        
+            const wottData = await scanner().findTemaData(ctx);
             const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" +
-                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${utils.sanitizeName(wottData.tema)}.prproj`;
+                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${getUtils().sanitizeName(wottData.tema)}.prproj`;
 
             // 📍 BLOQUEIG: Creem el fitxer .lock
             await this._createLock(destPath);
@@ -123,9 +127,9 @@
             log("🚀 [FLOW-UPDATE]");
             const ctx = await this._setupContext();
             const cfg = ctx.config;
-
-            const wottData = await scanner.findTemaData(ctx);
-            const media = await scanner.findMediaAssets(ctx);
+        
+            const wottData = await scanner().findTemaData(ctx);
+            const media = await scanner().findMediaAssets(ctx);
             const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
 
             await this._performSync(ctx, wottData, media);
@@ -133,7 +137,7 @@
             if (media.mp4) {
                 const T_MP4 = cfg.tracks.video.mp4;
                 await callJSX(`jsx_openSequence('${seqName}')`);
-                await callJSX(`jsx_overwriteClip('${utils.escape(media.mp4.name)}', ${T_MP4}, 0.0, 'video')`);
+                await callJSX(`jsx_overwriteClip('${getUtils().escape(media.mp4.name)}', ${T_MP4}, 0.0, 'video')`);
             }
 
             await callJSX("app.project.save()");
@@ -155,7 +159,7 @@
             // Ingesta de Rètols a la carpeta CHYRONS (VUI 5/6)
             if (wottData.list.length > 0) {
                 const list = wottData.list.map(w => w.file.path);
-                await utils.importList(list, "CHYRONS");
+                await getUtils().importList(list, "CHYRONS");
             }
 
             // Ingesta a l'arrel (Root) per a MP4 i SRT
@@ -164,7 +168,7 @@
             if (media.srt) baseMedia.push(media.srt.path);
 
             if (baseMedia.length > 0) {
-                await utils.importList(baseMedia, "root");
+                await getUtils().importList(baseMedia, "root");
             }
         },
 
@@ -177,7 +181,7 @@
             const idProg = document.getElementById('programa').value;
             const bloque = document.getElementById('bloc').value;
             const progData = config.mapeoProgramas[idProg];
-            const dateStr = utils.getFormattedDate();
+            const dateStr = getUtils().getFormattedDate();
             const dateDir = dateStr.replace(/"/g, "").trim();
             return { config, progData, bloque, dateDir };
         }

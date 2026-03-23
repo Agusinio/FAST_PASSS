@@ -13,7 +13,9 @@ var isUserDraggingSlider = false;
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function() {
-    var utils = FASTPASS_UI.Utils;
+    // Verificamos si utils existe antes de usarlo
+    var getUtils = () => window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
+    var utils = getUtils();
     if (utils && utils.log) utils.log("🚀 Iniciando Panel...");
 
     try {
@@ -32,8 +34,9 @@ var isUserDraggingSlider = false;
 
             // 📍 PASO C: Inicialización de la lógica
             if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.init) {
-                utils.log("🧠 Vinculando lógica de estado (Inspectores)...");
-                FASTPASS_UI.Core.Context.init(); 
+                utils.log("🧠 Vinculando lógica de estado...");
+                await FASTPASS_UI.Core.Context.init(); 
+                FASTPASS_UI.Core.Context.checkContext(); 
             }
         } else {
             console.error("❌ El motor JSX no ha respondido correctamente: " + result);
@@ -160,9 +163,16 @@ var isUserDraggingSlider = false;
     }
 
     // HELPERS INTERNOS
-    function callWorkflow(module, method) {
+    async function callWorkflow(module, method) {
         if (FASTPASS_UI.Workflows[module] && FASTPASS_UI.Workflows[module][method]) {
-            FASTPASS_UI.Workflows[module][method]();
+            try {
+                await FASTPASS_UI.Workflows[module][method]();
+            } catch (e) {
+                console.error("💥 Error en Workflow " + module + "." + method + ":", e);
+                if (FASTPASS_UI.Utils && FASTPASS_UI.Utils.handleError) {
+                    FASTPASS_UI.Utils.handleError(e, module + "." + method);
+                }
+            }
         } else {
             console.error("⚠️ Error: " + module + "." + method + " no existe.");
         }
@@ -177,12 +187,23 @@ var isUserDraggingSlider = false;
     }
 
     function callContextAudit() {
+        // Si el motor JSX no ha dicho OK, no pedimos nada
+        if (!window.FASTPASS_UI.Utils.isJsxReady) {
+            console.warn("⏳ Postergando auditoría: El motor JSX aún se está cargando...");
+            return; 
+        }
+    
         if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.checkContext) {
             FASTPASS_UI.Core.Context.checkContext();
         }
     }
 
-    window.addEventListener('DOMContentLoaded', initPanel);
+    // Lanzamos la inicialización según el estado del documento
+    if (document.readyState === 'loading') {
+        window.addEventListener('DOMContentLoaded', initPanel);
+    } else {
+        initPanel();
+    }
 })();
 
 // 4. SINCRONIZACIÓN (POLLING)

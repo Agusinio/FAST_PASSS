@@ -91,6 +91,7 @@ FASTPASS.System = {
     // Solo utilidades de entorno que NO pueden hacerse en JS
     getAppVersion: function() { return app.version; },
     isMac: function() { return File.fs === "Macintosh"; }
+    
 };
 
 // --- BRIDGE COMPAT ---

@@ -38,64 +38,75 @@ function jsx_fileExists(path) { return (new File(path)).exists; }
 var FASTPASS_WorkProject = null;
 
 // --- 1. IO & SYSTEM ---
-function jsx_scanDirectory(path) { return FASTPASS.IO.getRawFiles(path); }
-function jsx_importFiles(jsonPaths, binName) { return FASTPASS.IO.importFiles(jsonPaths, binName); }
+function jsx_scanDirectory(path) { try { return FASTPASS.IO.getRawFiles(path); } catch(e) { return "[]"; } }
+function jsx_importFiles(jsonPaths, binName) { try { return FASTPASS.IO.importFiles(jsonPaths, binName); } catch(e) { return "ERR: " + e.message; } }
 
 // --- 2. PROJECT ---
-function jsx_listItems(binName, projectPath) { return FASTPASS.Project.listItems(binName, projectPath); }
-function jsx_renameItem(oldName, newName, projectPath) { return FASTPASS.Project.renameItem(oldName, newName, projectPath) ? "true" : "false"; }
-function jsx_moveItem(itemName, binName, projectPath) { return FASTPASS.Project.moveItem(itemName, binName, projectPath) ? "true" : "false"; }
-function jsx_saveProjectAs(path, projectPath) { return FASTPASS.Project.saveAs(path, projectPath) ? "true" : "false"; }
-function jsx_openProject(path) { return FASTPASS.Project.openProject(path) ? "true" : "false"; }
-function jsx_cloneSequence(source, target, projectPath) { return FASTPASS.Project.cloneSequence(source, target, projectPath); }
-function jsx_openSequence(name, projectPath) { return FASTPASS.Project.openSequence(name, projectPath) ? "true" : "false"; }
-function jsx_getSequences(projectPath) { return FASTPASS.Project.listSequences(projectPath); }
-function jsx_createBin(name, projectPath) { var bin = FASTPASS.Project.createBin(name, projectPath); return bin ? bin.name : "root"; }
+function jsx_listItems(binName, projectPath) { try { return FASTPASS.Project.listItems(binName, projectPath); } catch(e) { return "[]"; } }
+function jsx_renameItem(oldName, newName, projectPath) { try { return FASTPASS.Project.renameItem(oldName, newName, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
+function jsx_moveItem(itemName, binName, projectPath) { try { return FASTPASS.Project.moveItem(itemName, binName, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
+function jsx_saveProjectAs(path, projectPath) { try { return FASTPASS.Project.saveAs(path, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
+function jsx_openProject(path) { try { return FASTPASS.Project.openProject(path) ? "true" : "false"; } catch(e) { return "false"; } }
+function jsx_cloneSequence(source, target, projectPath) { try { return FASTPASS.Project.cloneSequence(source, target, projectPath); } catch(e) { return "ERR: " + e.message; } }
+function jsx_openSequence(name, projectPath) { try { return FASTPASS.Project.openSequence(name, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
+function jsx_getSequences(projectPath) { try { return FASTPASS.Project.listSequences(projectPath); } catch(e) { return "[]"; } }
+function jsx_createBin(name, projectPath) { try { var bin = FASTPASS.Project.createBin(name, projectPath); return bin ? bin.name : "root"; } catch(e) { return "root"; } }
 
 // --- 3. TIMELINE & TRACKS ---
-function jsx_getCTI() { return FASTPASS.Sequences.getCTI(); }
-function jsx_setCTI_Safe(val) { return FASTPASS.Sequences.setCTI(val); }
-function jsx_setSequenceInOut(i, o) { return FASTPASS.Sequences.setInOut(i, o); }
-function jsx_getTrackCount(type) { return FASTPASS.Tracks.getTrackCount(type); }
-function jsx_setTrackMute(idx, m, type) { return FASTPASS.Tracks.setMute(idx - 1, m, type); }
-function jsx_setTrackLock(idx, l, type) { return FASTPASS.Tracks.setLock(idx - 1, l, type); }
-function jsx_setTrackTarget(idx, t, type) { return FASTPASS.Tracks.setTarget(idx - 1, t, type); }
-function jsx_getProjectFolder() { return app.project.path ? (new File(app.project.path)).parent.fsName : ""; }
-function jsx_getActiveSequenceName() { return app.project.activeSequence ? app.project.activeSequence.name : ""; }
+function jsx_getCTI() { try { return FASTPASS.Sequences.getCTI(); } catch(e) { return "0"; } }
+function jsx_setCTI_Safe(val) { try { return FASTPASS.Sequences.setCTI(val); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setSequenceInOut(i, o) { try { return FASTPASS.Sequences.setInOut(i, o); } catch(e) { return "ERR: " + e.message; } }
+function jsx_getTrackCount(type) { try { return FASTPASS.Tracks.getTrackCount(type); } catch(e) { return "0"; } }
+function jsx_setTrackMute(idx, m, type) { try { return FASTPASS.Tracks.setMute(idx - 1, m, type); } catch(e) { return "false"; } }
+function jsx_setTrackLock(idx, l, type) { try { return FASTPASS.Tracks.setLock(idx - 1, l, type); } catch(e) { return "false"; } }
+function jsx_setTrackTarget(idx, t, type) { try { return FASTPASS.Tracks.setTarget(idx - 1, t, type); } catch(e) { return "false"; } }
+function jsx_getProjectFolder() { try { return app.project.path ? (new File(app.project.path)).parent.fsName : ""; } catch(e) { return ""; } }
+function jsx_getActiveSequenceName() { try { return app.project.activeSequence ? app.project.activeSequence.name : ""; } catch(e) { return ""; } }
 
 // --- 4. CLIPS (SOPORTE TOTAL V/A/S) ---
-function jsx_getClipCount(trackIdx, type) { return FASTPASS.Clips.getCount(trackIdx - 1, type || "video"); }
-function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { return FASTPASS.Clips.getDataByIndex(trackIdx - 1, clipIdx, type || "video"); }
-function jsx_removeClip(trackIdx, clipIdx, type) { return FASTPASS.Clips.remove(trackIdx - 1, clipIdx, type || "video"); }
-function jsx_overwriteClip(name, trackIdx, time, type) { return FASTPASS.Clips.overwrite(name, trackIdx - 1, time, type); }
-function jsx_getClipDataByTime(ti, t, type) { return FASTPASS.Clips.getDataByTime(ti, t, type); }
-function jsx_getSelectedSubtitleClips() { return FASTPASS.Clips.getSelectedSubtitleClips(); }
-function jsx_detectScenes(trackIdx) { return FASTPASS.Clips.detectScenes(trackIdx - 1); }
-function jsx_setClipStart(ti, ci, t, type) { return FASTPASS.Clips.setStart(ti - 1, ci, t, type); }
-function jsx_setClipEnd(ti, ci, t, type) { return FASTPASS.Clips.setEnd(ti - 1, ci, t, type); }
-function jsx_setClipInPoint(ti, ci, t, type) { return FASTPASS.Clips.setInPoint(ti - 1, ci, t, type); }
+function jsx_getClipCount(trackIdx, type) { try { return FASTPASS.Clips.getCount(trackIdx - 1, type || "video"); } catch(e) { return "0"; } }
+function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { try { return FASTPASS.Clips.getDataByIndex(trackIdx - 1, clipIdx, type || "video"); } catch(e) { return "null"; } }
+function jsx_removeClip(trackIdx, clipIdx, type) { try { return FASTPASS.Clips.remove(trackIdx - 1, clipIdx, type || "video"); } catch(e) { return "ERR: " + e.message; } }
+function jsx_overwriteClip(name, trackIdx, time, type) { try { return FASTPASS.Clips.overwrite(name, trackIdx - 1, time, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_getClipDataByTime(ti, t, type) { try { return FASTPASS.Clips.getDataByTime(ti, t, type); } catch(e) { return "null"; } }
+function jsx_getSelectedSubtitleClips() { try { return FASTPASS.Clips.getSelectedSubtitleClips(); } catch(e) { return "[]"; } }
+function jsx_detectScenes(trackIdx) { try { return FASTPASS.Clips.detectScenes(trackIdx - 1); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setClipStart(ti, ci, t, type) { try { return FASTPASS.Clips.setStart(ti - 1, ci, t, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setClipEnd(ti, ci, t, type) { try { return FASTPASS.Clips.setEnd(ti - 1, ci, t, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setClipInPoint(ti, ci, t, type) { try { return FASTPASS.Clips.setInPoint(ti - 1, ci, t, type); } catch(e) { return "ERR: " + e.message; } }
 function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Clips.setProperty(ti - 1, ci, comp, prop, val, type); }
 
 // --- 5. MOTION & KF ---
-function jsx_getXPosition() { return FASTPASS.KF.getXPosition(); }
-function jsx_setClipXPosition(val, isFinal) { return FASTPASS.KF.setXPosition(val, isFinal); }
-function jsx_addKey(ti, ci, comp, prop, time) { return FASTPASS.KF.addKey(ti - 1, ci, comp, prop, time); }
-function jsx_removeKey(ti, ci, comp, prop, time) { return FASTPASS.KF.removeKey(ti - 1, ci, comp, prop, time); }
-function jsx_setKeyValue(ti, ci, comp, prop, time, val) { return FASTPASS.KF.setKeyValue(ti - 1, ci, comp, prop, time, val); }
-function jsx_setInterpolation(ti, ci, comp, prop, time, type) { return FASTPASS.KF.setInterpolation(ti - 1, ci, comp, prop, time, type); }
-function jsx_addKeyframe() { return FASTPASS.KF.addKeyframeAtCurrentTime(); }
+function jsx_getXPosition() { try { return FASTPASS.KF.getXPosition(); } catch(e) { return "0"; } }
+function jsx_setClipXPosition(val, isFinal) { try { return FASTPASS.KF.setXPosition(val, isFinal); } catch(e) { return "ERR: " + e.message; } }
+function jsx_addKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.addKey(ti - 1, ci, comp, prop, time); } catch(e) { return "ERR: " + e.message; } }
+function jsx_removeKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.removeKey(ti - 1, ci, comp, prop, time); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setKeyValue(ti, ci, comp, prop, time, val) { try { return FASTPASS.KF.setKeyValue(ti - 1, ci, comp, prop, time, val); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setInterpolation(ti, ci, comp, prop, time, type) { try { return FASTPASS.KF.setInterpolation(ti - 1, ci, comp, prop, time, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_addKeyframe() { try { return FASTPASS.KF.addKeyframeAtCurrentTime(); } catch(e) { return "ERR: " + e.message; } }
 
 // --- 6. RENDER & EXPORT ---
-function jsx_exportFrameQE(tempPath, time) { return FASTPASS.Render.exportFrameQE(tempPath, time); }
-function jsx_renderActiveSequence(preset, output, name) { return FASTPASS.Render.addToAME(preset, output, name); }
+function jsx_exportFrameQE(tempPath, time) { try { return FASTPASS.Render.exportFrameQE(tempPath, time); } catch(e) { return "ERR: " + e.message; } }
+function jsx_renderActiveSequence(preset, output, name) { try { return FASTPASS.Render.addToAME(preset, output, name); } catch(e) { return "ERR: " + e.message; } }
 
-// --- 7. CONTEXT (ATÓMICO) ---
-function jsx_getActiveProjectName() { return FASTPASS.Context.getActiveName(); }
-function jsx_getOpenProjectsNames() { return FASTPASS.Context.getOpenNames(); }
+// --- 7. CONTEXT (ATÓMICO Y SEGURO) ---
+function jsx_getActiveProjectName() { 
+    if ($.global.FASTPASS && FASTPASS.Context) {
+        return FASTPASS.Context.getActiveName(); 
+    }
+    return "ERR_NOT_LOADED"; // Avisamos al JS que aún no estamos listos
+}
+
+function jsx_getOpenProjectsNames() { 
+    if ($.global.FASTPASS && FASTPASS.Context) {
+        return FASTPASS.Context.getOpenNames(); 
+    }
+    return "[]"; 
+}
 
 // --- 9. GRAPHICS ---
-function jsx_findLargeChyronVerbose() { return FASTPASS.Graphics.findLargeChyronVerbose(); }
-function jsx_findAndPlaceChyron_Stored(trackIdx, inS, outS) { return FASTPASS.Graphics.placeStoredChyron(trackIdx - 1, inS, outS); }
+function jsx_findLargeChyronVerbose() { try { return FASTPASS.Graphics.findLargeChyronVerbose(); } catch(e) { return "ERR: " + e.message; } }
+function jsx_findAndPlaceChyron_Stored(trackIdx, inS, outS) { try { return FASTPASS.Graphics.placeStoredChyron(trackIdx - 1, inS, outS); } catch(e) { return "ERR: " + e.message; } }
 
 // --- 10. DIAGNOSTIC ---
-function jsx_getKFDiagnostic() { return FASTPASS.Diagnostic.runFullReport(); }
+function jsx_getKFDiagnostic() { try { return FASTPASS.Diagnostic.runFullReport(); } catch(e) { return "null"; } }

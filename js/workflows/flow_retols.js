@@ -9,10 +9,11 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const utils = window.FASTPASS_UI.Utils;
-    const clipsLogic = window.FASTPASS_UI.Logic.Clips;
-    const log = (m) => utils.log(m, "DEBUG");
-    const callJSX = (s) => utils.callJSX(s);
+    const getUtils = () => window.FASTPASS_UI.Utils;
+    const getClipsLogic = () => window.FASTPASS_UI.Logic.Clips;
+
+    const log = (m) => getUtils().log(m, "DEBUG");
+    const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.Retols = {
 
@@ -26,11 +27,11 @@
 
             try {
                 // Col·locació inicial a la pista de temes (V4)
-                await callJSX(`jsx_overwriteClip('${utils.escape(themeClipName)}', ${T_THEME}, 0.0, 'video')`);
+                await callJSX(`jsx_overwriteClip('${getUtils().escape(themeClipName)}', ${T_THEME}, 0.0, 'video')`);
 
                 await callJSX(`jsx_setCTI_Safe(7.0)`);
                 await callJSX("jsx_ClearCache()");
-                await utils.delay(800);
+                await getUtils().delay(800);
 
                 let cleanName = themeClipName.split("Tema-Titol_")[1] || themeClipName;
                 cleanName = cleanName.replace(/\.\d+\.mov$/i, "").substring(0, 30);
@@ -43,17 +44,18 @@
                 await callJSX(`jsx_importFiles('${payload}', 'root')`);
                 
                 // Sobreescriure el tema original amb el PNG generat
-                await callJSX(`jsx_overwriteClip('${utils.escape(fileName)}', ${T_THEME}, 7.0, 'video')`);
+                await callJSX(`jsx_overwriteClip('${getUtils().escape(fileName)}', ${T_THEME}, 7.0, 'video')`);
                 
                 log("✅ Freeze Frame col·locat a V" + T_THEME, "INFO");
 
-            } catch (e) { utils.handleError(e, "ThemeFreeze"); }
+            } catch (e) { getUtils().handleError(e, "ThemeFreeze"); }
         },
 
         /**
          * Workflow principal de col·locació automàtica de rètols de peça.
          */
         runPlaceChyrons: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
             log("🎬 Aplicant rètols segons el nou mapa de pistes...");
             const cfg = FASTPASS_UI.Config.get();
             const state = FASTPASS_UI.State;
@@ -77,13 +79,13 @@
 
                 // 1. TEMA-TITOL (V4)
                 if (piece.themeTitle) {
-                    await callJSX(`jsx_overwriteClip('${utils.escape(piece.themeTitle.name)}', ${T_THEME}, ${cti}, 'video')`);
+                    await callJSX(`jsx_overwriteClip('${getUtils().escape(piece.themeTitle.name)}', ${T_THEME}, ${cti}, 'video')`);
                 }
 
                 // 2. GRAFISMES I MAPES (V5 ara, ja no V7)
                 if (piece.graphics) {
                     for (const g of piece.graphics) {
-                        await callJSX(`jsx_overwriteClip('${utils.escape(g.cleanName)}', ${T_CHYRONS}, ${cti}, 'video')`);
+                        await callJSX(`jsx_overwriteClip('${getUtils().escape(g.cleanName)}', ${T_CHYRONS}, ${cti}, 'video')`);
                     }
                 }
 
@@ -100,13 +102,13 @@
                             track = T_LLOC; // V6
                         }
                         
-                        await callJSX(`jsx_overwriteClip('${utils.escape(c.name)}', ${track}, ${cti + diff}, 'video')`);
+                        await callJSX(`jsx_overwriteClip('${getUtils().escape(c.name)}', ${track}, ${cti + diff}, 'video')`);
                     }
                 }
 
                 state.pieceIndex++;
-                utils.status(`Peça ${piece.id} processada.`, "exito");
-            } catch (e) { utils.handleError(e, "PlaceChyrons"); }
+                getUtils().status(`Peça ${piece.id} processada.`, "exito");
+            } catch (e) { getUtils().handleError(e, "PlaceChyrons"); }
         },
 
         /**
@@ -119,23 +121,24 @@
             const T_FONS = cfg.tracks.video.fondos;  // V3
 
             try {
-                const info = await clipsLogic.findAtTime(T_MP4, -1, "video");
+                const info = await getClipsLogic().findAtTime(T_MP4, -1, "video");
                 if (!info) throw new Error("No s'ha trobat clip a la pista mp4 (V" + T_MP4 + ")");
 
                 // Transformació del clip original a V1
-                await clipsLogic.apply169Preset(T_MP4, info.index);
+                await getClipsLogic().apply169Preset(T_MP4, info.index);
 
                 // Col·locació del fons a la pista dedicada (V3)
                 const bgName = "Fons_16_9_GENERIC.png";
-                await callJSX(`jsx_overwriteClip('${utils.escape(bgName)}', ${T_FONS}, ${info.start}, 'video')`);
+                await callJSX(`jsx_overwriteClip('${getUtils().escape(bgName)}', ${T_FONS}, ${info.start}, 'video')`);
                 
-            } catch (e) { utils.handleError(e, "Graph169"); }
+            } catch (e) { getUtils().handleError(e, "Graph169"); }
         },
 
         /**
          * Col·locació directa del fons vertical a la pista V3.
          */
         runPlaceBackground: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
             log("🎬 Col·locant fons a V3 a partir del cabezal...");
             const cfg = FASTPASS_UI.Config.get();
             const T_FONS = cfg.tracks.video.fondos;  // V3 (Fons)
@@ -148,11 +151,11 @@
                 const bgName = "Fons_Vertical_Generic.png";
                 
                 log(`📌 Inserint ${bgName} a V${T_FONS} (Time: ${cti})`);
-                await callJSX(`jsx_overwriteClip('${utils.escape(bgName)}', ${T_FONS}, ${cti}, 'video')`);
+                await callJSX(`jsx_overwriteClip('${getUtils().escape(bgName)}', ${T_FONS}, ${cti}, 'video')`);
                 
-                utils.status("Fons col·locat al cabezal", "exito");
+                getUtils().status("Fons col·locat al cabezal", "exito");
 
-            } catch (e) { utils.handleError(e, "PlaceBackground"); }
+            } catch (e) { getUtils().handleError(e, "PlaceBackground"); }
         }
     };
 

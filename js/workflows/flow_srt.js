@@ -8,11 +8,12 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const utils = window.FASTPASS_UI.Utils;
-    const srtLogic = window.FASTPASS_UI.Logic.Srt;
-    const tracksLogic = window.FASTPASS_UI.Logic.Tracks;
-    const log = (m) => utils.log(m, "DEBUG");
-    const callJSX = (s) => utils.callJSX(s);
+    const getUtils = () => window.FASTPASS_UI.Utils;
+    const getSrtLogic = () => window.FASTPASS_UI.Logic.Srt;
+    const getTracksLogic = () => window.FASTPASS_UI.Logic.Tracks;
+
+    const log = (m) => getUtils().log(m, "DEBUG");
+    const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.Srt = {
 
@@ -33,12 +34,12 @@
                 if (btnIn) btnIn.disabled = false;
                 if (btnOut) btnOut.disabled = false;
                 // Bloqueig de seguretat de totes les pistes de vídeo (V1-V7)
-                await tracksLogic.setGlobalState("video", "lock", true);
+                await getTracksLogic().setGlobalState("video", "lock", true);
             } else {
                 if (btn) { btn.textContent = "PREPARAR"; btn.classList.remove('btn-active'); }
                 if (btnIn) btnIn.disabled = true;
                 if (btnOut) btnOut.disabled = true;
-                await tracksLogic.setGlobalState("video", "lock", false);
+                await getTracksLogic().setGlobalState("video", "lock", false);
             }
         },
 
@@ -59,16 +60,16 @@
                     log("📍 Inici de seqüència: Ajustant primer subtítol a 0.4s.");
                 }
 
-                await srtLogic.cleanIn(finalCti);
-            } catch (e) { utils.handleError(e, "SrtIn"); }
+                await getSrtLogic().cleanIn(finalCti);
+            } catch (e) { getUtils().handleError(e, "SrtIn"); }
         },
 
         runSrtOut: async function () {
             log("📝 SRT: Marcar OUT");
             try {
                 const ctiRaw = await callJSX('jsx_getCTI()');
-                await srtLogic.cleanOut(parseFloat(ctiRaw || "0"));
-            } catch (e) { utils.handleError(e, "SrtOut"); }
+                await getSrtLogic().cleanOut(parseFloat(ctiRaw || "0"));
+            } catch (e) { getUtils().handleError(e, "SrtOut"); }
         },
 
         /**
@@ -112,8 +113,8 @@
                     cursor = newEnd + padding;
                 }
 
-                utils.status(`Ajustat ${clips.length} rètols.`, "exito");
-            } catch (e) { utils.handleError(e, "SrtTimeAdjust"); }
+                getUtils().status(`Ajustat ${clips.length} rètols.`, "exito");
+            } catch (e) { getUtils().handleError(e, "SrtTimeAdjust"); }
         }
     };
 

@@ -5,13 +5,14 @@
 
     // FIX CRASH: callJSX i log no estaven definits en el scope. 
     // Ara s'obtenen correctament de Utils.
-    const utils = window.FASTPASS_UI.Utils;
-    const callJSX = (s) => utils.callJSX(s);
-    const log = (m) => utils.log(m, "DEBUG");
+    const getUtils = () => window.FASTPASS_UI.Utils;
+    const log = (m) => getUtils().log(m, "DEBUG");
+    const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.KF = {
 
-        runAddKF: function () {
+        runAddKF: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
             var self = this;
             log("💎 Sol·licitant nou KF...");
 
@@ -26,7 +27,7 @@
 
         runSmoothKF: async function () {
             try {
-                await utils.delay(50);
+                await getUtils().delay(50);
                 log("🧠 Negociant corbes...");
 
                 var raw = await callJSX("jsx_getKFData()");
@@ -69,7 +70,7 @@
             try {
                 const res = await callJSX("FASTPASS.KF.applyAutoReframe()");
                 if (res === "OK_REFRAME") {
-                    utils.status("Reframe OK", "exito");
+                    getUtils().status("Reframe OK", "exito");
                     log("✅ Auto Reframe aplicat al clip de V1.");
                 } else {
                     log("⚠️ Error Reframe: " + res, "WARN");

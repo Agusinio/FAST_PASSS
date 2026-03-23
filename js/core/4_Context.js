@@ -1,88 +1,100 @@
 /**
  * ============================================================================
- * CORE: 4_Context (Sintetitzador de Context)
+ * CORE: 4_Context (Sintetitzador de Context) - REVISAT v2.4.2
  * ============================================================================
- * Aquest mòdul analitza els informes dels Inspectors per definir l'estat global.
  */
 
 (function() {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Core = FASTPASS_UI.Core || {};
 
-    const utils = window.FASTPASS_UI.Utils;
-    // Referències als inspectors puros (discovery)
-    const assets = () => FASTPASS_UI.Inspectors.SourceAssets;
-    const appInfo = () => FASTPASS_UI.Inspectors.App;
-    const session = () => FASTPASS_UI.Inspectors.Session;
+    const getUtils = () => window.FASTPASS_UI.Utils;
 
     FASTPASS_UI.Core.Context = {
         
         async checkContext() {
-            if (!utils.isJsxReady) return;
+            if (!getUtils().isJsxReady) return;
+
+            // 📍 DINAMISMO: Pillamos los inspectors aquí dentro, no fuera.
+            // Así nos aseguramos de que ya están cargados en el window.
+            const assets = FASTPASS_UI.Inspectors.SourceAssets;
+            const appInfo = FASTPASS_UI.Inspectors.App;
+            const session = FASTPASS_UI.Inspectors.Session;
 
             const elProg = document.getElementById('programa');
             const elBloc = document.getElementById('bloc');
-            if (!elProg || !elBloc || !elProg.value || !elBloc.value) {
+            
+            if (!elProg || !elBloc || !elProg.value || elBloc.value === "---") {
                 this.updateButton('DISABLED');
                 return;
             }
 
             try {
                 const config = FASTPASS_UI.Config.get();
-                const progData = config.mapeoProgramas[elProg.value];
-                const dateDir = utils.getFormattedDate().replace(/"/g, "").trim();
+                const progKey = elProg.value;
+                const progData = config.mapeoProgramas[progKey];
+                const dateDir = getUtils().getFormattedDate().replace(/"/g, "").trim();
                 
                 // --- 1. INSPECCIÓ EXTERNA ---
                 const mediaSource = config.rutas.destinoBase + progData.directorio + "\\" + dateDir;
-                const wottsRaw = await assets().scan(mediaSource, "*.wott");
-                const map = assets().getLatestDayMap(wottsRaw);
+                // CORREGIT: Ja no fem servir assets() amb parèntesis
+                const wottsRaw = await assets.scan(mediaSource, "*.wott");
+                const map = assets.getLatestDayMap(wottsRaw);
                 const theme = this._extractThemeFromFiles(map);
                 
                 // --- 2. PARSING I ESTRUCTURA ---
                 const parser = new FASTPASS_UI.Logic.BlockParser();
-                const pieces = parser.parseFromFiles(map, elProg.value, elBloc.value);
+                const pieces = parser.parseFromFiles(map, progKey, elBloc.value);
                 FASTPASS_UI.State.structure = pieces;
 
-                // --- 3. INSPECCIÓ INTERNA ---
-                const openProjs = await appInfo().getOpenProjects();
-                const activeProj = await appInfo().getActiveProjectName();
-                
-                // 📍 DINAMISME: Guardem la seqüència activa al State per a futurs validacions
-                FASTPASS_UI.State.activeSequenceName = await session().getActiveSequenceName();
+                // --- 3. INSPECCIÓ INTERNA (ADUANA) ---
+                const openProjs = await appInfo.getOpenProjects();
+                const activeProj = await appInfo.getActiveProjectName();
 
-                // --- 3. SÍNTESI I CONCLUSIÓ ---
-                // --- 4. DETECCIÓ DE BLOQUEIG (.lock) ---
-                const lockExists = await utils.callJSX(`jsx_fileExists('${lockPath.replace(/\\/g, "\\\\")}')`);
-                const myUser = await utils.callJSX(`jsx_getUserName()`);
+                // 1. Definim els "Pasaports" vàlids
+                const templateName = "3CatInfo_NET.prproj";
+                const expectedProjName = `${progKey}_${elBloc.value}_${dateDir}_${theme || 'PENDENT'}.prproj`;
+                const destPath = mediaSource + "\\" + expectedProjName;
 
-                if (lockExists === "true") {
-                    const lockUser = await utils.callJSX(`jsx_readTextFile('${lockPath.replace(/\\/g, "\\\\")}')`);
-                    
-                    if (!isCurrentlyActive && lockUser && lockUser.trim() !== myUser.trim()) {
-                        this.updateLights(progKey, elBloc.value, theme, false);
-                        this.updateButton('LOCKED', { user: lockUser });
-                        return;
-                    }
-                } else if (isCurrentlyActive) {
-                    // Auto-healing: Si estem dins i no hi ha lock, el creem
-                    await utils.callJSX(`jsx_writeTextFile('${lockPath.replace(/\\/g, "\\\\")}', '${myUser.trim()}')`);
-                }
+                // 2. Comprovacions de pertinença (Punt 5 Revisat: Obertura de Filtre)
+                const isTemplate = (activeProj === templateName);
+                const isTarget = activeProj.indexOf(progKey) !== -1 && activeProj.indexOf(elBloc.value) !== -1;
+                const isProjectAlreadyOpen = openProjs.some(p => p.indexOf(progKey) !== -1 && p.indexOf(elBloc.value) !== -1);
 
-                // --- 5. CONCLUSIÓ D'ESTAT ---
-                const fileExists = await utils.callJSX(`jsx_fileExists('${destPath.replace(/\\/g, "\\\\")}')`);
-                
-                let conclusion = 'NEW';
-                if (isCurrentlyActive) {
-                    conclusion = 'UPDATE'; 
-                } else if (isProjectAlreadyOpen) {
-                    conclusion = 'GO';
+                // 🚨 EL FILTRE CRÍTIC: Si no és el nostre negociat, "no existeix"
+                let isOurs = isTemplate || isTarget;
+
+                if (!isOurs) {
+                    // Si estem a TEST.prproj o qualsevol altre, ignorem el contingut del bin
+                    FASTPASS_UI.State.structure = []; 
+                    FASTPASS_UI.State.activeSequenceName = "";
+                    getUtils().log("⚠️ Projecte ajè o sense guardar (" + activeProj + "). Ignorant contingut.");
                 } else {
-                    conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
+                    // NOMÉS si és un projecte oficial o la plantilla, analitzem el bin
+                    const piecesLocal = parser.parseFromFiles(map, progKey, elBloc.value);
+                    FASTPASS_UI.State.structure = piecesLocal;
+                    FASTPASS_UI.State.activeSequenceName = await session.getActiveSequenceName();
                 }
 
-                this.updateLights(progKey, elBloc.value, theme, isCurrentlyActive);
-                this.updateButton(conclusion, { theme, expectedProjName, path: mediaSource });
+                // --- 5. CONCLUSIÓ D'ESTAT (Basada en Identitat, no en clips) ---
+                const fileExists = await getUtils().callJSX(`jsx_fileExists('${destPath.replace(/\\/g, "\\\\")}')`);
 
+                let conclusion = 'NEW';
+
+                if (isTarget) {
+                    conclusion = 'UPDATE'; // Estem dins del projecte correcte i guardat
+                } else if (isProjectAlreadyOpen) {
+                    conclusion = 'GO';     // El projecte correcte està obert però no és l'actiu
+                } else if (isTemplate) {
+                    conclusion = 'NEW';    // Estem a la plantilla, llestos per fer el "Save As"
+                } else {
+                    // Si estem a TEST.prproj (o qualsevol altre), mirem si el projecte real existeix a disc
+                    conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
+                } 
+                // --- 6. APLICACIÓ A LA UI ---
+                this.updateLights(progKey, elBloc.value, theme, FASTPASS_UI.State.activeSequenceName);
+                this.updateButton(conclusion, { progKey, bloc: elBloc.value, theme });
+                
             } catch(e) {
                 console.error("💥 Error en el Core de Context:", e);
                 this.updateLights(false, false, false, false);
