@@ -44,5 +44,27 @@ FASTPASS.Context = {
             // Si algo falla, devolvemos un JSON de array vacío para no romper el JSON.parse del JS
             return "[]"; 
         }
+    },
+
+
+    jsx_getProjectItems: function() {
+        var items = [];
+        for (var i = 0; i < app.project.rootItem.children.numItems; i++) {
+            var item = app.project.rootItem.children[i];
+            var obj = {
+                name: item.name,
+                type: item.type, // 1 = CLIP, 2 = BIN
+                children: []
+            };
+            
+            // Si es un BIN, sacamos los nombres de sus hijos (sin filtrar)
+            if (item.type === 2) {
+                for (var j = 0; j < item.children.numItems; j++) {
+                    obj.children.push(item.children[j].name);
+                }
+            }
+            items.push(obj);
+        }
+        return JSON.stringify(items);
     }
 };

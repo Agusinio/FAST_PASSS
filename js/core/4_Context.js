@@ -8,6 +8,7 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Core = FASTPASS_UI.Core || {};
 
+    const log = (...args) => FASTPASS_UI.Utils.log(...args);
     const getUtils = () => window.FASTPASS_UI.Utils;
 
     FASTPASS_UI.Core.Context = {
@@ -175,37 +176,83 @@
         init() {
             const p = document.getElementById('programa');
             const b = document.getElementById('bloc');
+            
             if (p && b) {
                 const trigger = () => {
                     FASTPASS_UI.Config.saveSelection(p);
                     FASTPASS_UI.Config.saveSelection(b);
                     this.checkContext();
+                    
+                    // 📍 CRÍTIC: Ara fem servir la funció unificada que mira el NAS
+                    this.syncConductorUI(); 
                 };
+        
                 p.addEventListener('change', trigger);
                 b.addEventListener('change', trigger);
-                setInterval(() => this.checkContext(), 5000);
-                setTimeout(() => this.checkContext(), 800);
+        
+                // Arrencada inicial
+                setTimeout(() => {
+                    this.checkContext();
+                    // Poblem el desplegable només obrir el panell
+                    this.syncConductorUI();
+                }, 800);
             }
         },
 
-        updateConductorSelector(programKey) {
-            const selectCond = document.getElementById('conductor');
-            if (!selectCond) return;
-            selectCond.innerHTML = '<option value="">Tria conductor</option>';
+        async syncConductorUI() {
+            const utils = FASTPASS_UI.Utils;
             const config = FASTPASS_UI.Config.get();
+            const select = document.getElementById('conductor');
+            const programKey = document.getElementById('programa').value;
+            
+            if (!select || !programKey) return;
+
+            // 1. Obtenim els "Titulars" i "Substituts" del programa actual segons Config.js
             const progData = config.mapeoProgramas[programKey];
-            if (!progData || !progData.conductors) return;
-            const cond = progData.conductors;
-            const titulares = Array.isArray(cond.titular) ? cond.titular : [cond.titular];
-            const lista = titulares.concat(cond.substituts || []).concat(cond.capsDesetmana || []);
-            for (let file of lista) {
-                if (!file) continue;
-                const opt = document.createElement('option');
-                opt.value = file;
-                opt.textContent = file.replace('Conduct_', '').replace('.mov', '');
-                selectCond.appendChild(opt);
+            let defaults = [];
+            if (progData && progData.conductors) {
+                // Ajuntem titular i substituts en una sola llista plana
+                defaults = [].concat(progData.conductors.titular, progData.conductors.substituts).filter(Boolean);
             }
-            if (selectCond.options.length > 1) selectCond.selectedIndex = 1;
+
+            // 2. Llegim TOT el que hi ha al NAS
+            const nasFiles = utils.readFolder(config.rutas.conductors);
+            const validNasFiles = nasFiles.filter(f => f.includes("Conduct_") && f.includes(".mov"));
+
+            // 3. POBLAR SELECTOR
+            select.innerHTML = ""; // Netegem
+
+            // A. Afegim primer els DEFAULTS (Prioritat)
+            if (defaults.length > 0) {
+                const groupDefault = document.createElement('optgroup');
+                groupDefault.label = "⭐ CONDUCTORS PROGRAMA";
+                
+                defaults.forEach(fileName => {
+                    const opt = document.createElement('option');
+                    opt.value = fileName;
+                    opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
+                    groupDefault.appendChild(opt);
+                });
+                select.appendChild(groupDefault);
+            }
+
+            // B. Afegim la resta del NAS (Altres)
+            const others = validNasFiles.filter(f => !defaults.includes(f));
+            if (others.length > 0) {
+                const groupOthers = document.createElement('optgroup');
+                groupOthers.label = "🌐 ALTRES (NAS)";
+                
+                others.forEach(fileName => {
+                    const opt = document.createElement('option');
+                    opt.value = fileName;
+                    opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
+                    groupOthers.appendChild(opt);
+                });
+                select.appendChild(groupOthers);
+            }
+
+            // Seleccionem el primer per defecte (que serà el titular)
+            if (select.options.length > 0) select.selectedIndex = 0;
         },
 
         _extractThemeFromFiles(fileList) {

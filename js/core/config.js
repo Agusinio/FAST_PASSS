@@ -91,6 +91,25 @@
                     video1: localStorage.getItem('fp_cfg_path_render_1') || "",
                     video2: localStorage.getItem('fp_cfg_path_render_2') || "",
                     portada: localStorage.getItem('fp_cfg_path_portada') || ""
+                }, 
+
+                naming: {
+                    // [Prog]_[Bloq]_[Autor]_[MMDD]_[Tema]
+                    getProjectName: function(ctx, sanitizedTema) {
+                        const prog = ctx.progData.archivo;
+                        const bloq = ctx.bloque;
+                        const autor = ctx.userName || "USER";
+                        
+                        // Extraer MMDD de 24_03_2026 -> 0324
+                        const d = ctx.dateDir.split('_');
+                        const mmdd = d[1] + d[0];
+                
+                        return `${prog}_${bloq}_${autor}_${mmdd}_${sanitizedTema}`;
+                    },
+                    getSequenceName: function(ctx, sanitizedTema) {
+                        const prog = ctx.progData.archivo;
+                        return `${prog}_${sanitizedTema}`;
+                    }
                 }
             };
         },

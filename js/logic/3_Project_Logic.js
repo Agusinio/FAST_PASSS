@@ -50,20 +50,29 @@
          * Crea un nou tema a partir d'una plantilla.
          */
         createFromTemplate: async function(templatePath, destPath, sequenceName) {
-            const log = (msg) => window.FASTPASS_UI.Utils.log(msg, "INFO");
-            const safeTpl = templatePath.replace(/\\/g, '\\\\');
-            const safeDest = destPath.replace(/\\/g, '\\\\');
-
+            const utils = window.FASTPASS_UI.Utils;
+            const log = (msg) => utils.log(msg, "INFO");
+        
+            const safeTpl = utils.escape(templatePath);
+            const safeDest = utils.escape(destPath);
+        
             log("📂 Generant a partir de plantilla...");
+            
+            // 1. Obrir
             await utils.callJSX(`jsx_openProject('${safeTpl}')`);
             await utils.delay(1000);
-
-            // Clonar seqüència base (suposem 'OTT VERTICAL' com a estàndard)
-            const clonePattern = await utils.callJSX(`jsx_cloneSequence('OTT VERTICAL', '${sequenceName}', '${safeTpl}')`);
-            await utils.callJSX(`jsx_renameItem('${clonePattern}', '${sequenceName}', '${safeTpl}')`);
-
-            // Guardar com a nou projecte
-            await utils.callJSX(`jsx_saveProjectAs('${safeDest}', '${safeTpl}')`);
+        
+            // 2. Clonar
+            const cloneRes = await utils.callJSX(`jsx_cloneSequence('OTT VERTICAL', '${sequenceName}')`);
+            if (cloneRes.indexOf("ERR") === 0) return cloneRes;
+        
+            // 3. EL GUARDAT (Aquest és el que mana)
+            const saveRes = await utils.callJSX(`jsx_saveProjectAs('${safeDest}')`);
+        
+            // 📍 SI EL GUARDAT NO ÉS "OK", RETORNEM L'ERROR REAL
+            if (saveRes !== "OK") {
+                return saveRes; // Enviem el "ERR: saveAs ha fallat" cap amunt
+            }
             
             return { success: true, path: destPath, sequence: sequenceName };
         }

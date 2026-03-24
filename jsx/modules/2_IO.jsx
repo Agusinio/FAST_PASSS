@@ -32,16 +32,26 @@ FASTPASS.IO = (function () {
         importFiles: function (jsonPaths, binName, targetProj) {
             try {
                 var paths = JSON.parse(jsonPaths);
-                var proj = targetProj || FASTPASS_WorkProject || app.project;
+                
+                // 🛡️ Blindatge total: busquem el projecte en aquest ordre
+                var proj = (targetProj instanceof Project) ? targetProj : 
+                           ($.global.FASTPASS_WorkProject instanceof Project) ? $.global.FASTPASS_WorkProject : 
+                           app.project;
                 
                 if (paths.length === 0) return "OK_EMPTY";
-    
+                if (!proj) throw new Error("No s'ha trobat cap projecte actiu.");
+        
+                // Passem el 'proj' que hem validat a createBin
                 var targetBin = (binName && binName !== "root") ? 
                                 FASTPASS.Project.createBin(binName, proj) : 
                                 proj.rootItem;
-    
+        
                 proj.importFiles(paths, true, targetBin, false);
-                return "OK";
+                
+                if (targetBin.children.numItems < paths.length && binName !== "root") {
+                    $.writeln("⚠️ [JSX] Alguns fitxers no s'han importat. Possible extensió no suportada.");
+                }
+
             } catch (e) {
                 return "ERR: " + e.message;
             }
@@ -105,8 +115,46 @@ $.global.jsx_scanDirectory = function(path) {
 };
 
 $.global.jsx_importFiles = function(jsonPaths, binName) {
-    var proj = FASTPASS_WorkProject || app.project;
-    return FASTPASS.IO.importFiles(jsonPaths, binName, proj);
+    var proj = $.global.FASTPASS_WorkProject || app.project;
+    
+    // Si es root, forzamos que no busque Bins
+    var targetBin = proj.rootItem; 
+    
+    if (binName && binName !== "root") {
+        // Solo si no es root intentamos buscar el bin
+        targetBin = FASTPASS.Project.createBin(binName, proj);
+    }
+
+    try {
+        var paths = JSON.parse(jsonPaths);
+        proj.importFiles(paths, true, targetBin, false);
+        return "OK";
+    } catch(e) { return "ERR: " + e.message; }
+};
+
+$.global.jsx_getBinContent = function(binName) {
+    try {
+        var proj = $.global.FASTPASS_WorkProject || app.project;
+        // Busquem el Bin
+        var bin = null;
+        for (var i = 0; i < proj.rootItem.children.numItems; i++) {
+            var item = proj.rootItem.children[i];
+            if (item.name === binName && item.type === 2) { // 2 = Bin
+                bin = item;
+                break;
+            }
+        }
+        if (!bin) return "[]";
+
+        // Llistem els noms dels fitxers que ja hi ha
+        var names = [];
+        for (var j = 0; j < bin.children.numItems; j++) {
+            names.push(bin.children[j].name);
+        }
+        return JSON.stringify(names);
+    } catch(e) {
+        return "ERR: " + e.message;
+    }
 };
 
 $.global.jsx_deleteFile = function(path) {

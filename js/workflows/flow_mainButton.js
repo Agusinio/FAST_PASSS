@@ -14,7 +14,7 @@
     const projectLogic = () => window.FASTPASS_UI.Logic.Project;
     const scanner = () => window.FASTPASS_UI.Logic.Scanner;
 
-    const log = (m) => getUtils().log(m, "DEBUG");
+    const log = (...args) => FASTPASS_UI.Utils.log(...args);
     const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.MainButton = {
@@ -46,46 +46,74 @@
          */
         _runNew: async function () {
             log("🚀 [FLOW-NEW]");
-            const ctx = await this._setupContext();
+        
+            // 1. SEGURETAT: Verificació (Això està perfecte)
+            const logicScanner = scanner();
+            const logicProject = projectLogic();
+            if (!logicScanner || !logicProject) throw new Error("Mòduls de lògica no carregats");
+        
+            // 2. Setup Context (OJO: Forcem que llegeixi la UI actual)
+            // Ens assegurem que el Context sap que hem triat "TN COMARQUES" ara mateix
+            const ctx = await this._setupContext(); 
             const cfg = ctx.config;
         
-            // 1. Descobriment automàtic (AÑADIMOS PARÉNTESIS AQUÍ)
-            const wottData = await scanner().findTemaData(ctx);
-            const media = await scanner().findMediaAssets(ctx);
+            // 3. Descobriment (Amb el ctx ja refrescat)
+            log(`🔍 Escanejant servidor per a ${ctx.programa}...`);
+            const wottData = await logicScanner.findTemaData(ctx);
+            const media = await logicScanner.findMediaAssets(ctx);
         
-            if (!scanner()) throw new Error("Logic.Scanner no encontrado. Revisa el orden de carga en index.html");
-            if (!projectLogic()) throw new Error("Logic.Project no encontrado.");
-
-            // 2. Definició de rutes i noms
-            const template = cfg.rutas.plantilla_net;
-            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" +
-                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${getUtils().sanitizeName(wottData.tema)}.prproj`;
-            const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
-
-            // 3. Creació física (Project_Logic)
-            await projectLogic().createFromTemplate(template, destPath, seqName);
+            if (!wottData || !wottData.list || wottData.list.length === 0) {
+                throw new Error("No s'han trobat rètols (.wott) recents per a aquest programa.");
+            }
+        
+            // 4. Definició de rutes
+            const sanitizedTema = getUtils().sanitizeName(ctx.progData.tema || "TEMA_PENDENT");
             
-            // 📍 BLOQUEIG: Creem el fitxer .lock
-            await this._createLock(destPath);
+            // 📞 DEMANAR NOMS DIFERENCIATS
+            const projectName = cfg.naming.getProjectName(ctx, sanitizedTema);
+            const seqName     = cfg.naming.getSequenceName(ctx, sanitizedTema);
 
-            // 4. Ingesta i Sincronització
-            await this._performSync(ctx, wottData, media);
 
-            // 5. Muntatge base i configuració de l'espai de treball
-            const T_MP4 = cfg.tracks.video.mp4; // V1
-            const T_TEMP = cfg.tracks.video.template_1; // V2
+            // Definició de ruta final (Projecte)
+            const fileName = `Pruebas_${projectName}.prproj`;
+            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" + fileName;
 
-            if (media.mp4) {
-                const mp4Escaped = getUtils().escape(media.mp4.name);
-                await callJSX(`jsx_overwriteClip('${mp4Escaped}', ${T_MP4}, 0.0, 'video')`);
+            // Pavimentar el camí al NAS (JS)
+            const parentFolder = destPath.substring(0, destPath.lastIndexOf("\\"));
+            log(`🛠️ Verificant ruta al NAS: ${parentFolder}`);
+            getUtils().ensureFolders(parentFolder)
+
+            // 5. Creació física
+            log("🏗️ Creant projecte a partir de plantilla...");
+            const projectResult = await logicProject.createFromTemplate(cfg.rutas.plantilla_net, destPath, seqName);
+
+            if (projectResult !== "OK" && projectResult.success !== true) {
+                // Si projectResult es un string de error, lo mostramos. Si no, ponemos un genérico.
+                const msg = (typeof projectResult === "string") ? projectResult : "Fallo en saveAs (Check NAS Permissions)";
+                getUtils().log("🔴 Workflow ATURAT: " + projectResult, "ERROR");
+                getUtils().status("Error: " + msg, "error");
+                return;
             }
 
-            // Configuració de finalització: Cabezal a 0 i targeting de pistes principals
+            // Només arribem aquí si el projecte s'ha guardat bé al NAS
+            await getUtils().delay(1000);
+            await this._createLock(destPath);
+            await this._performSync(ctx, wottData, media);
+        
+            // 8. Muntatge base (📍 AQUÍ CORREGIM L'ERROR DE RUTA)
+            if (media.mp4 && media.mp4.name) {
+                const T_MP4 = cfg.tracks.video.mp4; 
+                // Usem el NOM de l'arxiu per buscar-lo al Bin, no el path de xarxa
+                const mp4Name = media.mp4.name; 
+                const mp4Escaped = getUtils().escape(mp4Name);
+                
+                log(`🎬 Col·locant clip a línia de temps: ${mp4Name}`);
+                await callJSX(`jsx_overwriteClip('${mp4Escaped}', ${T_MP4}, 0.0, 'video')`);
+            }
+        
+            // Finalització (Això està perfecte)
             await callJSX('jsx_setCTI_Safe(0)');
-            await callJSX(`jsx_setTrackTarget(${T_MP4}, true, 'video')`);
-            await callJSX(`jsx_setTrackTarget(${T_TEMP}, true, 'video')`);
-            
-            log("✅ Projecte creat i llest a V" + T_MP4);
+            log("✅ Projecte creat i llest.");
         },
 
         /**
@@ -145,30 +173,83 @@
 
         /**
          * @private
-         * Mètode de sincronització de materials als Bins.
+         * Ingesta específica de la noticia (MP4, SRT i Rètols).
          */
         _performSync: async function (ctx, wottData, media) {
-            log("🎞️ Sincronitzant materials...");
-
-            // 📍 DEBUG: Mostrem l'estructura parsejada a la consola
-            if (FASTPASS_UI.State.structure && FASTPASS_UI.State.structure.length > 0) {
-                console.log("--- ESTRUCTURA DE GUION DETECTADA ---");
-                console.table(FASTPASS_UI.State.structure);
+            const utils = getUtils();
+            log("🎞️ [SYNC] Iniciant ingesta a ROOT...");
+        
+            // 1. Recopilamos TODAS las rutas en una sola lista para una sola llamada (más rápido)
+            let allPaths = [];
+            
+            // Añadimos Chyrons
+            if (wottData.list && wottData.list.length > 0) {
+                wottData.list.forEach(w => allPaths.push(utils.escape(w.path)));
             }
-
-            // Ingesta de Rètols a la carpeta CHYRONS (VUI 5/6)
-            if (wottData.list.length > 0) {
-                const list = wottData.list.map(w => w.file.path);
-                await getUtils().importList(list, "CHYRONS");
+            
+            // Añadimos Media
+            if (media?.mp4?.path) allPaths.push(utils.escape(media.mp4.path));
+            if (media?.srt?.path) allPaths.push(utils.escape(media.srt.path));
+        
+            if (allPaths.length > 0) {
+                // IMPORTANTE: Importamos todo a "root"
+                log(`📥 Ingestant ${allPaths.length} fitxers directament a root...`);
+                await utils.importList(allPaths, "root");
+                
+                // 2. PAUSA DE SEGURIDAD (Para que Premiere registre los clips)
+                await utils.delay(1000);
+        
+                // 3. ORGANIZACIÓN: Movemos los Chyrons a su Bin
+                if (wottData.list && wottData.list.length > 0) {
+                    log("📁 Organitzant Chyrons al seu Bin...");
+                    // Aseguramos que el Bin existe primero
+                    await utils.callJSX(`jsx_createBin('CHYRONS')`);
+                    
+                    // Movemos cada clip por su nombre
+                    for (let w of wottData.list) {
+                        // El nombre en Premiere suele ser el nombre del archivo sin ruta
+                        await utils.callJSX(`FASTPASS.Project.moveItem('${w.name}', 'CHYRONS')`);
+                    }
+                    log("✅ Organització completada.");
+                }
             }
+        },
 
-            // Ingesta a l'arrel (Root) per a MP4 i SRT
-            const baseMedia = [];
-            if (media.mp4) baseMedia.push(media.mp4.path);
-            if (media.srt) baseMedia.push(media.srt.path);
-
-            if (baseMedia.length > 0) {
-                await getUtils().importList(baseMedia, "root");
+        /**
+         * @private
+         * Sincronització de la llibreria de conductors (Incremental).
+         */
+        _syncConductors: async function(cfg) {
+            const utils = getUtils();
+            // 📍 Usa el nom EXACTE del Bin que ja tens a la plantilla
+            // Si a la plantilla es diu "CHYRONS CONDUCTORS", posa-ho aquí:
+            const NOM_BIN_PLANTILLA = "Conductors"; 
+            
+            log(`🎙️ Verificant llibreria a '${NOM_BIN_PLANTILLA}'...`);
+            
+            // 1. Llegim el que ja hi ha al projecte (Ara sí que funcionarà el bridge)
+            const rawBin = await utils.callJSX(`jsx_getBinContent("${NOM_BIN_PLANTILLA}")`);
+            let binFiles = [];
+            try { binFiles = JSON.parse(rawBin); } catch(e) { binFiles = []; }
+        
+            // 2. Llegim el NAS
+            const nasFiles = utils.readFolder(cfg.rutas.conductors);
+            const validNasFiles = nasFiles.filter(name => 
+                name.indexOf("Conduct_") === 0 && name.indexOf(".mov") !== -1
+            );
+        
+            // 3. Comparem: Només importem el que NO estigui al Bin
+            const missing = validNasFiles.filter(f => {
+                // Mirem si el nom del fitxer del NAS ja existeix a la llista del Bin
+                return !binFiles.includes(f);
+            });
+        
+            if (missing.length > 0) {
+                log(`📥 Important ${missing.length} conductors nous.`);
+                const paths = missing.map(name => cfg.rutas.conductors + name);
+                await utils.importList(paths, NOM_BIN_PLANTILLA);
+            } else {
+                log("✅ Llibreria de conductors al dia. No cal importar res.");
             }
         },
 
@@ -178,12 +259,26 @@
          */
         _setupContext: async function () {
             const config = FASTPASS_UI.Config.get();
+            
+            // 1. Demanem al Context que llegeixi la UI (programa, bloc, etc.)
+            const currentStatus = FASTPASS_UI.Core.Context.checkContext();
+            
+            // 2. Extraiem les dades del programa triat
             const idProg = document.getElementById('programa').value;
-            const bloque = document.getElementById('bloc').value;
             const progData = config.mapeoProgramas[idProg];
+            
+            // 3. Preparem la data (Neta de caràcters estranys)
             const dateStr = getUtils().getFormattedDate();
-            const dateDir = dateStr.replace(/"/g, "").trim();
-            return { config, progData, bloque, dateDir };
+            const dateDir = dateStr.replace(/["\s]/g, "").trim();
+        
+            // 📍 CRÍTIC: Retornem 'programa' per a que el Scanner sàpiga on buscar
+            return { 
+                config, 
+                progData, 
+                programa: idProg, // Clau per al Scanner (ex: "TNCOMARQUES")
+                bloque: document.getElementById('bloc').value, 
+                dateDir 
+            };
         }
     };
 

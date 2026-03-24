@@ -11,11 +11,11 @@ FASTPASS.Project = (function() {
     // --- GENERIC HELPERS (PRIVATE) ---
 
     function getTargetProject(path) {
-        if (!path) return FASTPASS_WorkProject || app.project;
-        var f = new File(path);
-        for (var i = 0; i < app.projects.numProjects; i++) {
-            if (app.projects[i].path === f.fsName) return app.projects[i];
+        // Si tenemos una ancla global y es un proyecto, mandamos nosotros
+        if ($.global.FASTPASS_WorkProject instanceof Project) {
+            return $.global.FASTPASS_WorkProject;
         }
+        // Si no, lo que diga Premiere
         return app.project;
     }
 
@@ -50,12 +50,33 @@ FASTPASS.Project = (function() {
         
         // --- 1. GESTIÓN DE PROYECTO ---
 
-        saveAs: function(pathString, projectPath) {
+        saveAs: function(pathString) {
             try {
-                var f = new File(pathString);
-                if (!f.parent.exists) f.parent.create();
-                return getTargetProject(projectPath).saveAs(f.fsName);
-            } catch(e) { return false; }
+                // 1. Limpiamos la ruta de posibles dobles barras accidentales (excepto al inicio)
+                var cleanPath = pathString.replace(/\\/g, "/");
+                if (pathString.indexOf("\\\\") === 0) cleanPath = "//" + cleanPath.substring(2).replace(/\/+/g, "/");
+        
+                // 2. Creamos un objeto File. Esto es vital para que Premiere acepte la ruta.
+                var myFile = new File(cleanPath);
+        
+                // 3. Verificamos una última vez desde JSX si la carpeta existe
+                if (!myFile.parent.exists) {
+                    myFile.parent.create();
+                }
+        
+                // 4. Intentamos el guardado usando .fsName (Ruta nativa del OS)
+                $.writeln("🧪 [JSX] Intentant saveAs a: " + myFile.fsName);
+                var success = app.project.saveAs(myFile.fsName);
+                
+                if (success) {
+                    $.global.FASTPASS_WorkProject = app.project;
+                    return "OK";
+                }
+                
+                return "ERR: Premiere ha rebutjat el saveAs a " + myFile.fsName;
+            } catch(e) { 
+                return "ERR: " + e.message; 
+            }
         },
 
         openProject: function(path) {
@@ -109,9 +130,24 @@ FASTPASS.Project = (function() {
         cloneSequence: function(sourceName, newName, projectPath) {
             var proj = getTargetProject(projectPath);
             var seq = findInCollection(proj.sequences, sourceName);
+            
             if (!seq) return "ERR_SOURCE_NOT_FOUND";
+        
+            // 1. Clonamos (esto crea "OTT VERTICAL Copy")
             seq.clone();
-            return sourceName + " Copy";
+        
+            // 2. Buscamos el ítem que Premiere acaba de crear
+            var expectedCloneName = sourceName + " Copy";
+            var clonedItem = this.findItem(expectedCloneName, projectPath);
+        
+            if (clonedItem) {
+                // 3. 📍 AQUÍ es donde usamos por fin el newName
+                clonedItem.name = newName; 
+                return newName; 
+            }
+        
+            // Si por lo que sea no lo encuentra, devolvemos el nombre de la copia
+            return expectedCloneName;
         },
 
         openSequence: function(name, projectPath) {
@@ -146,3 +182,22 @@ FASTPASS.Project = (function() {
         }
     };
 })();
+
+$.global.jsx_openProject = function(path) {
+    var proj = FASTPASS.Project.openProject(path); 
+    if (proj) {
+        $.global.FASTPASS_WorkProject = proj; // Anclem l'objecte REAL
+        return "OK";
+    }
+    return "ERR";
+};
+
+$.global.jsx_saveProjectAs = function(pathString) {
+    $.writeln("📂 [JSX-BRIDGE] Intentant guardar com a: " + pathString);
+    return FASTPASS.Project.saveAs(pathString);
+};
+
+$.global.jsx_createBin = function(name) {
+    // Usem el teu àtom de creació de Bins
+    return FASTPASS.Project.createBin(name);
+};

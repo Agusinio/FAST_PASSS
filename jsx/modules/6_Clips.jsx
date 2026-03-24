@@ -76,9 +76,17 @@ FASTPASS.Clips = {
         try {
             var item = FASTPASS.Project.findItem(decodeURIComponent(itemName));
             if (!item) return "ERR_ITEM_NOT_FOUND";
+            
             var track = this._getTrack(trackIdx, type || "video"); 
+            
+            // 📍 VALIDACIÓ CRÍTICA: Si no hi ha seqüència activa o la pista no existeix
+            if (!track) {
+                return "ERR_TRACK_OR_SEQUENCE_NOT_FOUND";
+            }
+    
             var tStart = new Time();
             tStart.seconds = parseFloat(timeSec);
+            
             track.overwriteClip(item, tStart);
             return "OK";
         } catch (e) { return "ERR: " + e.message; }
