@@ -1,25 +1,27 @@
-// 4_Sequences.jsx
-
 var FASTPASS = FASTPASS || {};
 FASTPASS.Sequences = {
     getCTI: function () {
-        return app.project.activeSequence ? app.project.activeSequence.getPlayerPosition().seconds : 0;
+        var seq = FASTPASS.Context.getWorkSequence();
+        return seq ? seq.getPlayerPosition().seconds : 0;
     },
 
     setCTI: function (s) {
+        var seq = FASTPASS.Context.getWorkSequence();
+        if (!seq) return "ERR:NO_SEQ";
         var t = new Time(); t.seconds = parseFloat(s);
-        app.project.activeSequence.setPlayerPosition(t.ticks);
+        seq.setPlayerPosition(t.ticks);
+        return "OK";
     },
 
     nuclearRefresh: function () {
-        var s = app.project.activeSequence; if (!s) return;
-        var p = s.getPlayerPosition();
+        var seq = FASTPASS.Context.getWorkSequence();
+        if (!seq) return "ERR:NO_SEQ";
+        var p = seq.getPlayerPosition();
         var n = new Time(); n.seconds = p.seconds + 0.001;
-        s.setPlayerPosition(n.ticks); s.setPlayerPosition(p.ticks);
+        seq.setPlayerPosition(n.ticks); seq.setPlayerPosition(p.ticks);
         return "REFRESH_OK";
     },
 
-    // El "Atajo de Ingeniería" (QE) recuperado
     setCTI_QE: function (tc) {
         app.enableQE();
         qe.project.getActiveSequence().CTI.setSeconds(parseFloat(tc));
@@ -27,9 +29,11 @@ FASTPASS.Sequences = {
     },
 
     setInOut: function (i, o) {
-        var s = app.project.activeSequence;
+        var seq = FASTPASS.Context.getWorkSequence();
+        if (!seq) return "ERR:NO_SEQ";
         var tIn = new Time(); tIn.seconds = parseFloat(i);
         var tOut = new Time(); tOut.seconds = parseFloat(o);
-        s.setInPoint(tIn.ticks); s.setOutPoint(tOut.ticks);
+        seq.setInPoint(tIn.ticks); seq.setOutPoint(tOut.ticks);
+        return "OK";
     }
-};
+};

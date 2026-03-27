@@ -16,8 +16,7 @@ FASTPASS.Clips = {
      */
     _getTrack: function(idx, type) {
         try {
-            var seq = app.project.activeSequence;
-            if (!seq && app.project.sequences.numSequences > 0) seq = app.project.sequences[0];
+            var seq = FASTPASS.Context.getWorkSequence();
             if (!seq) return null;
 
             // ÚNICA RESTA: Aquí convertimos el 1 de la UI al 0 de Premiere

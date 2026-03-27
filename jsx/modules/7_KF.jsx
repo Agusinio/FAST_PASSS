@@ -73,7 +73,8 @@ FASTPASS.KF = (function() {
 
         getXPosition: function() {
             try {
-                var seq = app.project.activeSequence;
+                var seq = FASTPASS.Context.getWorkSequence();
+                if (!seq) return 0.5;
                 var cti = seq.getPlayerPosition();
                 var info = FASTPASS.Timeline.getClipInfoUnderCTI(1, "video", cti.seconds);
                 if (!info.found) return 0.5;
@@ -87,7 +88,8 @@ FASTPASS.KF = (function() {
         setXPosition: function(valNorm, isFinal) {
             try {
                 var val = parseFloat(valNorm);
-                var seq = app.project.activeSequence;
+                var seq = FASTPASS.Context.getWorkSequence();
+                if (!seq) return "ERR_NO_SEQ";
                 var seqW = seq.frameRect[2] - seq.frameRect[0];
                 
                 var cti = seq.getPlayerPosition();
@@ -149,7 +151,8 @@ FASTPASS.KF = (function() {
 
         applyAutoReframe: function(trackIdx, clipIdx) {
             try {
-                var seq = app.project.activeSequence;
+                var seq = FASTPASS.Context.getWorkSequence();
+                if (!seq) return "ERR_NO_SEQ";
                 var track = seq.videoTracks[trackIdx - 1]; // Base 1 a Base 0
                 if (!track) return "ERR_TRACK_NOT_FOUND";
                 

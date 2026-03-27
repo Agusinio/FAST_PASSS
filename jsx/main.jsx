@@ -40,6 +40,18 @@ function jsx_BOOTSTRAP(extensionRootPath) {
 function jsx_isReady() { return "READY"; }
 function jsx_ClearCache() { return "OK"; }
 function jsx_fileExists(path) { return (new File(path)).exists; }
+function jsx_scanOpenProjects() { try { return FASTPASS.Context.scanOpenProjects(); } catch(e) { return "[]"; } }
+function jsx_setWorkProject(projectName) {
+    try {
+        for (var i = 0; i < app.projects.length; i++) {
+            if (app.projects[i].name === projectName) {
+                $.global.FASTPASS_WorkProject = app.projects[i];
+                return "OK";
+            }
+        }
+        return "ERR:NOT_FOUND";
+    } catch(e) { return "ERR:" + e.message; }
+}
 
 var FASTPASS_WorkProject = null;
 

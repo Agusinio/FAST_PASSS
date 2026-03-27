@@ -106,3 +106,40 @@ FASTPASS.Context.getSequenceName_FINAL = function() {
         return "ERROR_JSX:" + e.message; 
     }
 };
+
+/**
+ * Retorna tots els projectes oberts amb la seqüència activa de cadascun.
+ * Usada per el Registry de JS per detectar canvis de projecte.
+ * Returns: JSON string: [{name, sequenceName}]
+ */
+FASTPASS.Context.scanOpenProjects = function() {
+    try {
+        var result = [];
+        if (typeof app === "undefined" || !app.projects) return "[]";
+        for (var i = 0; i < app.projects.length; i++) {
+            var proj = app.projects[i];
+            if (!proj) continue;
+            var seqName = "";
+            try {
+                if (proj.activeSequence) seqName = proj.activeSequence.name;
+                else if (proj.sequences && proj.sequences.numSequences > 0) seqName = proj.sequences[0].name;
+            } catch(se) { /* no seq */ }
+            result.push({ name: String(proj.name), sequenceName: seqName });
+        }
+        return JSON.stringify(result);
+    } catch(e) { return "[]"; }
+};
+
+/**
+ * Retorna la seqüència activa del projecte ancorat (FASTPASS_WorkProject).
+ * Si no hi ha ancla, usa app.project (comportament legacy segur).
+ */
+FASTPASS.Context.getWorkSequence = function() {
+    try {
+        var proj = ($.global.FASTPASS_WorkProject instanceof Project)
+            ? $.global.FASTPASS_WorkProject
+            : app.project;
+        if (!proj) return null;
+        return proj.activeSequence || (proj.sequences.numSequences > 0 ? proj.sequences[0] : null);
+    } catch(e) { return null; }
+};

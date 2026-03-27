@@ -224,6 +224,10 @@ setInterval(function() {
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
         FASTPASS_UI.Sync.updateSliderFromPremiere();
     }
+    // Detecció reactiva de canvi de projecte
+    if (FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
+        FASTPASS_UI.Registry.poll();
+    }
 }, 500);
 
 // Diagnóstico post-arranque (matamos el viejo EvalScript error)
