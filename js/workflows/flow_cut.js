@@ -21,64 +21,44 @@
          * Realitza un Ripple Trim In al clip principal de Mp4.
          */
         runCutIn: async function () {
-            log("1. Comprobando existencia de función...");
-            const check = await callJSX("typeof FASTPASS.Context.findSequenceByTokens");
-            log("   Resultado: " + check);
-
-            if (check !== "function") {
-                log("❌ CRÍTICO: La función no existe en Premiere. ¿Colisión de nombres?", "ERROR");
-                return;
-            }
-
-            // Si llegamos aquí, la función existe.
-            const prog = document.getElementById('programa').value;
-            const bloc = document.getElementById('bloc').value;
-  
             try {
                 const config = FASTPASS_UI.Config.get();
                 const elProg = document.getElementById('programa').value;
                 const elBloc = document.getElementById('bloc').value;
                 
-                // Obtenemos el token del programa (ej: "TNV" o "TN_VESPRE")
+                // 1. Cercar token del programa
                 const progData = config.mapeoProgramas[elProg];
                 const progToken = progData ? progData.archivo : elProg;
         
-                log(`🔍 Buscant seqüència per tokens: [${progToken}] + [${elBloc}]`);
+                log(`🔍 Sincronitzant per tokens: [${progToken}] + [${elBloc}]`);
         
-                // 1. Llamada al JSX
-                const foundNameRaw = await callJSX(`FASTPASS.Context.findSequenceByTokens('${progToken}', '${elBloc}')`);
-
-                // 2. BLINDAJE: Forzamos que sea un String y limpiamos basura
-                // Si llega un objeto o array, String() lo convertirá en algo legible.
+                // 2. Sincronitzem la seqüència
                 const foundName = await callJSX(`jsx_findSequenceByTokens('${progToken}', '${elBloc}')`);
-
-                if (!foundName || foundName.indexOf("ERR") !== -1 || foundName === "null") {
+                if (!foundName || foundName.indexOf("ERR:") !== -1 || foundName === "null") {
                     getUtils().status("⚠️ No trobo la seqüència!", "error");
-                    log("❌ Error o buit: " + foundName, "ERROR");
                     return;
                 }
 
-                // 3. Sincronizamos
                 window.FASTPASS_UI.State.activeSequenceName = foundName;
-                log("✅ Seqüència sintonitzada: " + foundName);
-        
-                // 3. Ahora la validación de sincronía PASARÁ siempre
                 if (!(await getUtils().validateActiveSequence())) return;
         
-                // --- SEGUIMOS CON EL CORTE ---
+                // 3. Tallar el clip Mp4 (V1, A1)
                 const T_MP4 = config.tracks.video.mp4;
                 const ctiRaw = await callJSX('jsx_getCTI()'); 
                 const val = parseFloat(ctiRaw || "0");
         
-                // 4. Buscar el clip (Pasamos el nombre por si findAtTime lo necesita)
                 const clip = await getClipsLogic().findAtTime(T_MP4, val, "video");
                 
                 if (clip) {
+                    log(`✂️ Aplicant Ripple Trim In a V${T_MP4} (Time: ${val}s)`);
                     await getClipsLogic().rippleTrimStart(T_MP4, clip.index, val, clip);
+                    
+                    // Ens tornem a posar al 0 per seguretat
                     await callJSX('jsx_setCTI_Safe(0)');
                     getUtils().status("IN: Tall OK", "exito");
                 } else {
-                    log("⚠️ No s'ha trobat clip a V" + T_MP4 + " al segon " + val, "WARN");
+                    log("⚠️ No s'ha trobat clip mp4 al cabezal.", "WARN");
+                    getUtils().status("No hi ha clip al cabezal", "error");
                 }
         
             } catch (e) { getUtils().handleError(e, "CutIn"); }
@@ -89,7 +69,7 @@
          */
         runCutOut: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            log("🎬 Executant tancament PRO (CUT OUT)...");
+            log("🎬 Tancament (CUT OUT) - Neteja de cues i tancament...");
             
             const cfg = FASTPASS_UI.Config.get();
             const state = FASTPASS_UI.State;
@@ -102,46 +82,50 @@
                 const ctiRaw = await callJSX('jsx_getCTI()');
                 const val = parseFloat(ctiRaw || "0");
                 
-                // 1. NETEJA DE CUES: Esborrem tot el que sobresurti
-                // Netegem pistes 1 a 6 (Video)
-                await getClipsLogic().clearMultipleTracksAfter(val, [1, 2, 3, 4, 5, 6], [T_MP4]);
+                // 1. TALLAR I NETEJAR CUES (V1-V6 i A1) - Amb extensió si són curts
+                await getClipsLogic().clearMultipleTracksAfter(val, [1, 2, 3, 4, 5, 6], [T_MP4], true);
 
-                // 2. COL·LOCACIÓ TEMA MESTRE (V4)
+                // 2. TANCAMENT DE SEQÜÈNCIA (Out point en val - 1 frame)
+                const outPoint = (val - 0.04).toFixed(2);
+                await callJSX(`jsx_setSequenceInOut(0.0, ${outPoint})`);
+
+                // 3. COL·LOCACIÓ ELEMENTOS FIXOS (Tema i Conductor)
                 if (state.masterTheme) {
-                    log(`📌 Col·locant Tema: ${state.masterTheme.name}`);
                     await callJSX(`jsx_overwriteClip('${getUtils().escape(state.masterTheme.name)}', ${T_THEME}, 0.0, 'video')`);
                 }
-
-                // 3. COL·LOCACIÓ CONDUCTOR (V5)
                 const elCond = document.getElementById('conductor');
                 if (elCond && elCond.value) {
-                    log(`📌 Col·locant Conductor: ${elCond.value}`);
-                    // El conductor sol anar al frame 0 o amb un petit offset si calgués
                     await callJSX(`jsx_overwriteClip('${getUtils().escape(elCond.value)}', ${T_CHYRONS}, 0.0, 'video')`);
                 }
 
-                // 4. TANCAMENT DE SEQÜÈNCIA
-                const outPoint = (val - 0.04).toFixed(2);
-                await callJSX(`jsx_setSequenceInOut(0.0, ${outPoint})`);
-                
-                // 📍 Posicionament final del cabezal per a revisió (1 frame abans del final)
-                await callJSX(`jsx_setCTI_Safe(${outPoint})`);
+                // 4. POSICIONAMENT INICIAL
+                await callJSX('jsx_setCTI_Safe(0)');
                 
                 await callJSX('app.project.save()');
                 getUtils().status("Peça Tancada OK", "exito");
-                log("🏁 Tancament de seqüència completat amb èxit.", "INFO");
+                log("🏁 Tancament completat i tornada a l'inici.", "INFO");
 
             } catch (e) { getUtils().handleError(e, "CutOut"); }
         },
 
-        /**
-         * Detectar talls automàticament en el clip principal.
-         */
         runScene: async function() { 
             const cfg = FASTPASS_UI.Config.get();
             const T_MP4 = cfg.tracks.video.mp4;
-            log("🎬 Detectant escenes a V" + T_MP4 + "...");
-            await callJSX(`jsx_detectScenes(${T_MP4})`); 
+            log("🎬 Trossejant clip a V" + T_MP4 + "...");
+            
+            try {
+                // Assegurem que la pista estigui activa/targeted (Base 1)
+                await callJSX(`jsx_setTrackTarget(${T_MP4}, true, 'video')`);
+                
+                // Executem la detecció d'escenes
+                await callJSX(`jsx_detectScenes(${T_MP4})`); 
+                
+                // 🚀 NOVA FASE: Análisis de estructura i col·locació de rètols automàtica
+                log("🧠 Analitzant estructura i col·locant rètols...");
+                await FASTPASS_UI.Workflows.Assembly.runAutoPlacement(T_MP4);
+
+                getUtils().status("Trossejat i Muntatge OK", "exito");
+            } catch (e) { getUtils().handleError(e, "Troseja"); }
         },
 
         /**
@@ -158,9 +142,14 @@
                 for (let i = count - 1; i >= 0; i--) {
                     const raw = await callJSX(`jsx_getClipDataByIndex(${T_MP4}, ${i}, 'video')`);
                     const clip = JSON.parse(raw || "{}");
-                    if (clip.end <= cti - 0.04) {
+                    if (clip.end <= cti - 0.05) {
                         const mid = (clip.start + clip.end) / 2;
+                        log(`   🎯 Saltant al clip anterior ${i}: ${mid.toFixed(2)}s`);
                         await callJSX(`jsx_setCTI_Safe(${mid})`);
+                        
+                        if (window.FASTPASS_UI.Sync && window.FASTPASS_UI.Sync.updateSliderFromPremiere) {
+                            setTimeout(() => window.FASTPASS_UI.Sync.updateSliderFromPremiere(), 100);
+                        }
                         return;
                     }
                 }
@@ -181,9 +170,15 @@
                 for (let i = 0; i < count; i++) {
                     const raw = await callJSX(`jsx_getClipDataByIndex(${T_MP4}, ${i}, 'video')`);
                     const clip = JSON.parse(raw || "{}");
-                    if (clip.start >= cti + 0.04) {
+                    if (clip.start >= cti + 0.05) {
                         const mid = (clip.start + clip.end) / 2;
+                        log(`   🎯 Saltant al clip ${i}: ${mid.toFixed(2)}s`);
                         await callJSX(`jsx_setCTI_Safe(${mid})`);
+                        
+                        // Forcem l'actualització del slider perquè l'usuari pugui ajustar al moment
+                        if (window.FASTPASS_UI.Sync && window.FASTPASS_UI.Sync.updateSliderFromPremiere) {
+                            setTimeout(() => window.FASTPASS_UI.Sync.updateSliderFromPremiere(), 100);
+                        }
                         return;
                     }
                 }

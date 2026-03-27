@@ -63,9 +63,10 @@
             const struct = state.structure;
 
             // Variables de pistes des del Config
-            const T_THEME = cfg.tracks.video.tematitol;
-            const T_CHYRONS = cfg.tracks.video.chyrons; // V5: NomCarrec, Firma, Mapes
-            const T_LLOC = cfg.tracks.video.llocdata;   // V6: Lloc-Data
+            const T_THEME = cfg.tracks.video.tematitol; // V5
+            const T_GRAFICOS = cfg.tracks.video.graficos; // V3 (Mapes / Gràfiques)
+            const T_CHYRONS = cfg.tracks.video.chyrons; // V6 (NomCarrec / Firma)
+            const T_LLOC = cfg.tracks.video.llocdata;   // V7 (Lloc-Data)
 
             if (!struct || !struct[idx]) {
                 log("⚠️ No es troba l'estructura del lloc al State.", "WARN");
@@ -82,10 +83,10 @@
                     await callJSX(`jsx_overwriteClip('${getUtils().escape(piece.themeTitle.name)}', ${T_THEME}, ${cti}, 'video')`);
                 }
 
-                // 2. GRAFISMES I MAPES (V5 ara, ja no V7)
+                // 2. GRAFISMES I MAPES (V3)
                 if (piece.graphics) {
                     for (const g of piece.graphics) {
-                        await callJSX(`jsx_overwriteClip('${getUtils().escape(g.cleanName)}', ${T_CHYRONS}, ${cti}, 'video')`);
+                        await callJSX(`jsx_overwriteClip('${getUtils().escape(g.cleanName)}', ${T_GRAFICOS}, ${cti}, 'video')`);
                     }
                 }
 
@@ -117,8 +118,8 @@
         runPlaceGraph169: async function () {
             log("🎬 Aplicant format 16:9 amb fondos...");
             const cfg = FASTPASS_UI.Config.get();
-            const T_MP4 = cfg.tracks.video.mp4;     // V1
-            const T_FONS = cfg.tracks.video.fondos;  // V3
+            const T_MP4 = cfg.tracks.video.mp4;     // V1 (Vídeo principal)
+            const T_FONS = cfg.tracks.video.fondos;  // V2 (Fons)
 
             try {
                 const info = await getClipsLogic().findAtTime(T_MP4, -1, "video");
@@ -141,7 +142,7 @@
             if (!(await getUtils().validateActiveSequence())) return;
             log("🎬 Col·locant fons a V3 a partir del cabezal...");
             const cfg = FASTPASS_UI.Config.get();
-            const T_FONS = cfg.tracks.video.fondos;  // V3 (Fons)
+            const T_FONS = cfg.tracks.video.fondos;  // V2 (Fons)
 
             try {
                 // Obtenim la posició actual del cabezal

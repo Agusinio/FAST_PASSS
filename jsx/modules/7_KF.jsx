@@ -74,38 +74,58 @@ FASTPASS.KF = (function() {
         getXPosition: function() {
             try {
                 var seq = app.project.activeSequence;
-                var trackV1 = seq.videoTracks[0];
                 var cti = seq.getPlayerPosition();
-                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
+                var info = FASTPASS.Timeline.getClipInfoUnderCTI(1, "video", cti.seconds);
                 if (!info.found) return 0.5;
                 
-                var p = FASTPASS.Clips.getProperty(0, info.index, "ADBE Motion", "ADBE Video Position", "video");
+                var p = FASTPASS.Clips.getProperty(1, info.index, "ADBE Motion", "ADBE Video Position", "video");
                 if (!p) return 0.5;
                 return p.getValueAtTime(cti)[0];
             } catch(e) { return 0.5; }
         },
-
-        setXPosition: function(val, isFinal) {
+    
+        setXPosition: function(valNorm, isFinal) {
             try {
-                var valNorm = parseFloat(val) / 608; 
+                var val = parseFloat(valNorm);
                 var seq = app.project.activeSequence;
+                var seqW = seq.frameRect[2] - seq.frameRect[0];
+                
                 var cti = seq.getPlayerPosition();
-                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
+                var info = FASTPASS.Timeline.getClipInfoUnderCTI(1, "video", cti.seconds);
                 if (!info.found) return "ERR_NO_CLIP";
+    
+                var idx = info.index;
+                var pPos = FASTPASS.Clips.getProperty(1, idx, "ADBE Motion", "ADBE Video Position", "video");
+                var pScale = FASTPASS.Clips.getProperty(1, idx, "ADBE Motion", "ADBE Video Scale", "video");
+                
+                if (!pPos || !pScale) return "ERR_NO_PROP";
+    
+                // --- CALCULA LÍMITS FÍSICS REALS (Anti-Negre) ---
+                var scale = pScale.getValueAtTime(cti) / 100; // Premiere usa %
+                var clipW = 1920 * scale; // Suposem que el clip base és 1920 (16:9)
+                
+                // Si el clip és més estret que la seqüència, no hi ha marge de moviment
+                if (clipW <= seqW) {
+                    val = 0.5; 
+                } else {
+                    var marginNorm = ((clipW - seqW) / 2) / seqW;
+                    var minL = 0.5 - marginNorm;
+                    var maxL = 0.5 + marginNorm;
+                    
+                    if (val < minL) val = minL;
+                    if (val > maxL) val = maxL;
+                }
 
-                var p = FASTPASS.Clips.getProperty(0, info.index, "ADBE Motion", "ADBE Video Position", "video");
-                if (!p) return "ERR_NO_PROP";
-
-                p.setTimeVarying(isFinal);
-                var currentVal = p.getValueAtTime(cti);
-                currentVal[0] = valNorm;
+                pPos.setTimeVarying(isFinal);
+                var currentVal = pPos.getValueAtTime(cti);
+                currentVal[0] = val; // Directament el valor normalitzat clamat
                 
                 if (isFinal) {
-                   p.addKey(cti.seconds);
-                   var idx = getKeyIndexByTime(p, cti.seconds);
-                   p.setValueAtKey(idx, currentVal, true);
+                   pPos.addKey(cti.seconds);
+                   var kIdx = getKeyIndexByTime(pPos, cti.seconds);
+                   pPos.setValueAtKey(kIdx, currentVal, true);
                 } else {
-                   p.setValue(currentVal, true);
+                   pPos.setValue(currentVal, true);
                 }
                 return "OK";
             } catch(e) { return "ERR: " + e.message; }
@@ -115,10 +135,10 @@ FASTPASS.KF = (function() {
             try {
                 var seq = app.project.activeSequence;
                 var cti = seq.getPlayerPosition();
-                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
+                var info = FASTPASS.Timeline.getClipInfoUnderCTI(1, "video", cti.seconds);
                 if (!info.found) return "ERR_NO_CLIP";
                 
-                var p = FASTPASS.Clips.getProperty(0, info.index, "ADBE Motion", "ADBE Video Position", "video");
+                var p = FASTPASS.Clips.getProperty(1, info.index, "ADBE Motion", "ADBE Video Position", "video");
                 if (!p) return "ERR_NO_PROP";
                 
                 p.setTimeVarying(true);
@@ -127,25 +147,20 @@ FASTPASS.KF = (function() {
             } catch(e) { return "ERR: " + e.message; }
         },
 
-        applyAutoReframe: function() {
+        applyAutoReframe: function(trackIdx, clipIdx) {
             try {
                 var seq = app.project.activeSequence;
-                var cti = seq.getPlayerPosition();
-                var info = FASTPASS.Timeline.getClipInfoUnderCTI(0, cti.seconds);
-                if (!info.found) return "ERR_NO_CLIP";
+                var track = seq.videoTracks[trackIdx - 1]; // Base 1 a Base 0
+                if (!track) return "ERR_TRACK_NOT_FOUND";
                 
-                var clip = seq.videoTracks[0].clips[info.index];
+                var clip = track.clips[clipIdx];
+                if (!clip) return "ERR_CLIP_NOT_FOUND";
                 
-                // A Premiere Pro 25, podem aplicar l'efecte "Auto Reframe"
-                // Busquem l'efecte a la base de dades de Premiere
                 var effect = app.project.getVideoEffectByName("Auto Reframe");
                 if (effect) {
                     clip.addVideoEffect(effect);
                     return "OK_REFRAME";
                 }
-                
-                // Alternativa: Command ID de Premiere (depèn de la versió)
-                // app.executeCommand( ... );
                 
                 return "ERR_EFFECT_NOT_FOUND";
             } catch(e) { return "ERR: " + e.message; }

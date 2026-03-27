@@ -27,37 +27,41 @@ Mentre l'usuari tria un programa o bloc:
 ## FASE 2: Acció Principal (flow_mainButton.js)
 L'usuari executa l'acció (ex: NOU):
 1.  [LOGICA A REVISAR] Bins: Els fitxers Media i Srt van directament a ROOT (arrel). No es creen carpetes extra.
-2.  Mapeig de Tracks (Definitiu):
-    *   V1: Mp4 original.
-    *   V2: NO ES TOCA (Plantilla).
-    *   V3: FONDOS (Per a grafisme).
-    *   V4: TEMATITOL.
-    *   V5: CHYRONS (Nom-Carrec, Firma, Mapes i Gràfiques).
-    *   V6: CHYRONS LLOC-DATA.
-    *   V7: NO ES TOCA (Plantilla).
-    *   SRTs: Pistes de subtítols S1 i S2.
-3.  [PENDENT CRÍTIC] Taula d'Estructura: Generació automàtica llegint els noms dels Chyrons (Ordre, TC, Tipus).
+2.  Mapeig Jeràrquic i Estructura:
+    *   **Identificació de Blocs (LINEA)**: Basat en el prefix del Wott (p.ex: `04lead` -> `04i` -> `04`).
+    *   **Heurística de Classificació**:
+        *   **Intro/Lead**: Clips > 10s + Chyron de Conductor + TemaTitol.
+        *   **Video**: Clips < 10s (sèrie de talls curts).
+        *   **Prioritat d'Ordre**: El sistema ordena automàticament: Lead (0) -> Intro (1) -> Base (2).
+3.  [IMPLEMENTAT] Taula d'Estructura: Generació intel·ligent llegint els sufixos i TCs dels Wotts.
 4.  Finalització: Tracks V1 i V2 actius per a edició. Cabezal posicionat a 0.0.
 
 ---
 
 ## FASE 3: Edició i Tall (flow_cut.js)
-1.  [PENDENT] CutIn: Ripple trim in des de cabezal fins a l'inici i desplaça a zero.
-2.  [REFACTORITZACIÓ] CutOut: 
+1.  [IMPLEMENTAT] **CutIn**: Ripple trim in des de cabezal fins a l'inici.
+2.  [IMPLEMENTAT] **CutOut**: 
     *   Elimina cues de material a partir del CTI.
-    *   **Col·loca TemaTitol i Conductor** (Pistes V4 i V5).
-    *   Posiciona cabezal a -1 frame del punt de tall i fa setSequenceOut.
-3.  [PENDENT] Troseja: Executa detectScene sobre el clip de V1.
-4.  [PENDENT] Navegació (< / >): Salt al frame central del clip anterior o posterior.
+    *   **Tancament de Seqüència**: Posiciona cabezal a -1 frame i fa setSequenceOut per evitar frames negres.
+3.  [IMPLEMENTAT] **Trosseja (The Magic)**: 
+    *   **Scene Detection**: Troseja el clip de V1.
+    *   **Assemblatge Màgic**: Alinea automàticament els rètols dels Wotts amb els talls reals del timeline usant inferència de "Footprint" (deriva temporal).
+    *   **Snap Magnètic**: Els rètols s'imanen al tall de càmera més proper per a una sincronia perfecta.
+4.  [IMPLEMENTAT] **Navegació (< / >)**: Salt entre clips del timeline.
 
 ---
 
 ## FASE 4: Grafismes i Rètols (flow_retols.js)
-1.  [INVESTIGACIÓ] **Col·locació Intel·ligent**: 
-    *   Si es detecta un grafisme que interfereix amb la introducció (Intro), el sistema ha de moure i re-calcular automàticament la posició del TemaTitol i del Conductor per evitar que es trepitgin visualment.
-2.  [PENDENT] Autocentrat: Efecte automàtic per a clips amb insert.
-3.  [PENDENT] Botó Fons: Col·loca fons sota el clip a V3 sense tocar el clip original.
-4.  [PENDENT] UI: Reubicació de botons <, >, Slider i Key sota la secció de Grafisme en una caixa apart.
+1.  [IMPLEMENTAT] **Col·locació d'Intro**: 
+    *   Regla de 10 frames de seguretat al començament.
+    *   Decalatge de 6.3s per al conductor en intros llargues (>10s).
+2.  [IMPLEMENTAT] **Auto Reframe Intel·ligent**: 
+    *   Aplicació automàtica de l'efecte "Auto Reframe" en clips de **Intro** i **Inserts** (clips amb NomCarrec o Firma).
+    *   Filtre de seguretat de **2,5 segons** de durada mínima per evitar errors de processament.
+3.  [IMPLEMENTAT] **Control de Posició (Slider)**: 
+    *   Slider horizontal amb **Límits Físics Dinàmics**: El moviment es bloqueja automàticament abans de mostrar fons negre, calculant el marge segons l'escala del clip.
+4.  [PENDENT] **Botó Fons**: Col·loca fons sota el clip a V3 sense tocar el clip original.
+5.  [PENDENT] UI: Reubicació de botons <, >, Slider i Key sota la secció de Grafisme en una caixa apart.
 
 ---
 

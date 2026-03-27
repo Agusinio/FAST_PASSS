@@ -29,16 +29,27 @@ FASTPASS.Timeline = (function() {
         /**
          * getClipInfoUnderCTI: Utility compartida para Clips y Tracks
          */
-        getClipInfoUnderCTI: function(trackIdx, optionalTime) {
+        getClipInfoUnderCTI: function(trackIdx, type, optionalTime) {
             var seq = app.project.activeSequence;
             if (!seq) return { found: false };
-            var track = seq.videoTracks[trackIdx];
-            var timeToCheck = (optionalTime !== undefined) ? optionalTime : seq.getPlayerPosition().seconds;
             
-            for (var i = 0; i < track.clips.numItems; i++) {
-                var c = track.clips[i];
+            // Base 1 to Base 0 conversion
+            var i = parseInt(trackIdx) - 1;
+            if (i < 0) i = 0;
+            
+            var track;
+            if (type === "audio") track = seq.audioTracks[i];
+            else if (type === "subtitle") track = seq.subtitleTracks[i];
+            else track = seq.videoTracks[i];
+            
+            if (!track || !track.clips) return { found: false };
+            
+            var timeToCheck = (optionalTime !== undefined) ? parseFloat(optionalTime) : seq.getPlayerPosition().seconds;
+            
+            for (var j = 0; j < track.clips.numItems; j++) {
+                var c = track.clips[j];
                 if (c.start.seconds <= timeToCheck && c.end.seconds > timeToCheck) {
-                    return { found: true, index: i, start: c.start.seconds, end: c.end.seconds, name: c.name, obj: c };
+                    return { found: true, index: j, start: c.start.seconds, end: c.end.seconds, name: c.name, obj: c };
                 }
             }
             return { found: false };

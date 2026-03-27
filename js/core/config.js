@@ -21,11 +21,13 @@
                     video: {
                         mp4: 1,
                         //template_1: 2, // NO TOCAR
-                        fondos: 3,
-                        tematitol: 4,
-                        chyrons: 5,    // NomCarrec, Firma, Mapes, Gràfiques
-                        llocdata: 6,
-                        //template_2: 7  // NO TOCAR
+                        fondos: 2,
+                        graficos: 3, //Mapes, Gràfiques
+                        //mascara subtitulos: 4 // NO TOCAR
+                        tematitol: 5,
+                        chyrons: 6,    // NomCarrec, Firma, 
+                        llocdata: 7,
+                        //mosca: 8  // NO TOCAR
                     },
                     subtitle: {
                         s1: 1,
@@ -91,22 +93,22 @@
                     video1: localStorage.getItem('fp_cfg_path_render_1') || "",
                     video2: localStorage.getItem('fp_cfg_path_render_2') || "",
                     portada: localStorage.getItem('fp_cfg_path_portada') || ""
-                }, 
+                },
 
                 naming: {
                     // [Prog]_[Bloq]_[Autor]_[MMDD]_[Tema]
-                    getProjectName: function(ctx, sanitizedTema) {
+                    getProjectName: function (ctx, sanitizedTema) {
                         const prog = ctx.progData.archivo;
                         const bloq = ctx.bloque;
                         const autor = ctx.userName || "USER";
-                        
+
                         // Extraer MMDD de 24_03_2026 -> 0324
                         const d = ctx.dateDir.split('_');
                         const mmdd = d[1] + d[0];
-                
+
                         return `${prog}_${bloq}_${autor}_${mmdd}_${sanitizedTema}`;
                     },
-                    getSequenceName: function(ctx, sanitizedTema) {
+                    getSequenceName: function (ctx, sanitizedTema) {
                         const prog = ctx.progData.archivo;
                         return `${prog}_${sanitizedTema}`;
                     }

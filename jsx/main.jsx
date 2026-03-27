@@ -67,9 +67,9 @@ function jsx_setSequenceInOut(i, o) { try { return FASTPASS.Sequences.setInOut(i
 function jsx_getTrackCount(type) { 
     return FASTPASS.Tracks.getTrackCount(type); // Quita el -1 si lo tenías
 }
-function jsx_setTrackMute(idx, m, type) { try { return FASTPASS.Tracks.setMute(idx - 1, m, type); } catch(e) { return "false"; } }
-function jsx_setTrackLock(idx, l, type) { try { return FASTPASS.Tracks.setLock(idx - 1, l, type); } catch(e) { return "false"; } }
-function jsx_setTrackTarget(idx, t, type) { try { return FASTPASS.Tracks.setTarget(idx - 1, t, type); } catch(e) { return "false"; } }
+function jsx_setTrackMute(idx, m, type) { try { return FASTPASS.Tracks.setMute(idx, m, type); } catch(e) { return "false"; } }
+function jsx_setTrackLock(idx, l, type) { try { return FASTPASS.Tracks.setLock(idx, l, type); } catch(e) { return "false"; } }
+function jsx_setTrackTarget(idx, t, type) { try { return FASTPASS.Tracks.setTarget(idx, t, type); } catch(e) { return "false"; } }
 function jsx_getProjectFolder() { try { return app.project.path ? (new File(app.project.path)).parent.fsName : ""; } catch(e) { return ""; } }
 function jsx_getActiveSequenceName() { try { return app.project.activeSequence ? app.project.activeSequence.name : ""; } catch(e) { return ""; } }
 
@@ -81,11 +81,11 @@ function jsx_getClipCount(trackIdx, type) {
 function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { 
     return FASTPASS.Clips.getDataByIndex(trackIdx, clipIdx, type || "video"); 
 }
-function jsx_removeClip(trackIdx, clipIdx, type) { try { return FASTPASS.Clips.remove(trackIdx - 1, clipIdx, type || "video"); } catch(e) { return "ERR: " + e.message; } }
-function jsx_overwriteClip(name, trackIdx, time, type) { try { return FASTPASS.Clips.overwrite(name, trackIdx - 1, time, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_removeClip(trackIdx, clipIdx, type) { try { return FASTPASS.Clips.remove(trackIdx, clipIdx, type || "video"); } catch(e) { return "ERR: " + e.message; } }
+function jsx_overwriteClip(name, trackIdx, time, type) { try { return FASTPASS.Clips.overwrite(name, trackIdx, time, type); } catch(e) { return "ERR: " + e.message; } }
 function jsx_getClipDataByTime(ti, t, type) { try { return FASTPASS.Clips.getDataByTime(ti, t, type); } catch(e) { return "null"; } }
 function jsx_getSelectedSubtitleClips() { try { return FASTPASS.Clips.getSelectedSubtitleClips(); } catch(e) { return "[]"; } }
-function jsx_detectScenes(trackIdx) { try { return FASTPASS.Clips.detectScenes(trackIdx - 1); } catch(e) { return "ERR: " + e.message; } }
+function jsx_detectScenes(trackIdx) { try { return FASTPASS.Clips.detectScenes(trackIdx); } catch(e) { return "ERR: " + e.message; } }
 function jsx_setClipStart(ti, ci, t, type) { 
     return FASTPASS.Clips.setStart(ti, ci, t, type); 
 }
@@ -93,17 +93,18 @@ function jsx_setClipStart(ti, ci, t, type) {
 function jsx_setClipInPoint(trackIdx, clipIdx, seconds, type) {
     try { return FASTPASS.Clips.setInPoint(trackIdx, clipIdx, seconds, type); } catch(e) { return "ERR:" + e.message; }
 }
-    function jsx_setClipEnd(ti, ci, t, type) { try { return FASTPASS.Clips.setEnd(ti - 1, ci, t, type); } catch(e) { return "ERR: " + e.message; } }
-function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Clips.setProperty(ti - 1, ci, comp, prop, val, type); }
+function jsx_setClipEnd(ti, ci, t, type) { try { return FASTPASS.Clips.setEnd(ti, ci, t, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Clips.setProperty(ti, ci, comp, prop, val, type); }
 
 // --- 5. MOTION & KF ---
 function jsx_getXPosition() { try { return FASTPASS.KF.getXPosition(); } catch(e) { return "0"; } }
 function jsx_setClipXPosition(val, isFinal) { try { return FASTPASS.KF.setXPosition(val, isFinal); } catch(e) { return "ERR: " + e.message; } }
-function jsx_addKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.addKey(ti - 1, ci, comp, prop, time); } catch(e) { return "ERR: " + e.message; } }
-function jsx_removeKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.removeKey(ti - 1, ci, comp, prop, time); } catch(e) { return "ERR: " + e.message; } }
-function jsx_setKeyValue(ti, ci, comp, prop, time, val) { try { return FASTPASS.KF.setKeyValue(ti - 1, ci, comp, prop, time, val); } catch(e) { return "ERR: " + e.message; } }
-function jsx_setInterpolation(ti, ci, comp, prop, time, type) { try { return FASTPASS.KF.setInterpolation(ti - 1, ci, comp, prop, time, type); } catch(e) { return "ERR: " + e.message; } }
+function jsx_addKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.addKey(ti, ci, comp, prop, time); } catch(e) { return "ERR: " + e.message; } }
+function jsx_removeKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.removeKey(ti, ci, comp, prop, time); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setKeyValue(ti, ci, comp, prop, time, val) { try { return FASTPASS.KF.setKeyValue(ti, ci, comp, prop, time, val); } catch(e) { return "ERR: " + e.message; } }
+function jsx_setInterpolation(ti, ci, comp, prop, time, type) { try { return FASTPASS.KF.setInterpolation(ti, ci, comp, prop, time, type); } catch(e) { return "ERR: " + e.message; } }
 function jsx_addKeyframe() { try { return FASTPASS.KF.addKeyframeAtCurrentTime(); } catch(e) { return "ERR: " + e.message; } }
+function jsx_applyAutoReframe(ti, ci) { try { return FASTPASS.KF.applyAutoReframe(ti, ci); } catch(e) { return "ERR: " + e.message; } }
 
 // --- 6. RENDER & EXPORT ---
 function jsx_exportFrameQE(tempPath, time) { try { return FASTPASS.Render.exportFrameQE(tempPath, time); } catch(e) { return "ERR: " + e.message; } }
@@ -132,7 +133,7 @@ function jsx_getOpenProjectsNames() {
 
 // --- 9. GRAPHICS ---
 function jsx_findLargeChyronVerbose() { try { return FASTPASS.Graphics.findLargeChyronVerbose(); } catch(e) { return "ERR: " + e.message; } }
-function jsx_findAndPlaceChyron_Stored(trackIdx, inS, outS) { try { return FASTPASS.Graphics.placeStoredChyron(trackIdx - 1, inS, outS); } catch(e) { return "ERR: " + e.message; } }
+function jsx_findAndPlaceChyron_Stored(trackIdx, inS, outS) { try { return FASTPASS.Graphics.placeStoredChyron(trackIdx, inS, outS); } catch(e) { return "ERR: " + e.message; } }
 
 // --- 10. DIAGNOSTIC ---
 function jsx_getKFDiagnostic() { try { return FASTPASS.Diagnostic.runFullReport(); } catch(e) { return "null"; } }

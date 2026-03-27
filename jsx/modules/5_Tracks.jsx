@@ -14,9 +14,11 @@ FASTPASS.Tracks = {
     _getTrackObj: function(idx, type) {
         var seq = app.project.activeSequence;
         if (!seq) return null;
-        if (type === "audio") return seq.audioTracks[idx];
-        if (type === "subtitle") return seq.subtitleTracks[idx];
-        return seq.videoTracks[idx];
+        var i = parseInt(idx) - 1; // Convert Base 1 to Base 0
+        if (i < 0) i = 0;
+        if (type === "audio") return seq.audioTracks[i];
+        if (type === "subtitle") return seq.subtitleTracks[i];
+        return seq.videoTracks[i];
     },
 
     setMute: function(idx, m, type) {

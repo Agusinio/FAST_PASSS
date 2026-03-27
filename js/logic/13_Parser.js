@@ -23,9 +23,6 @@ FASTPASS_UI.Logic.BlockParser = function() {
 
 FASTPASS_UI.Logic.BlockParser.prototype = {
 
-    /**
-     * MÈTODE MODERN: Crea l'estructura a partir d'una llista de fitxers WOTT.
-     */
     parseFromFiles: function(fileList, program, block) {
         this.structure = [];
         var lookup = {};
@@ -35,16 +32,23 @@ FASTPASS_UI.Logic.BlockParser.prototype = {
             var meta = this.parseWottMetadata(f.name);
             if (!meta) continue;
 
-            if (!lookup[meta.linea]) {
-                lookup[meta.linea] = { id: meta.linea, theme: "PENDENT", chyrons: [] };
+            const blockId = meta.rawLinea; 
+
+            if (!lookup[blockId]) {
+                lookup[blockId] = { 
+                    id: blockId, 
+                    numBase: meta.linea, 
+                    suffix: meta.descriptor,
+                    theme: "PENDENT", 
+                    chyrons: [],
+                    type: "UNKNOWN" // Se clasificará luego por duración
+                };
             }
 
-            // Si detectem un Tema-Titol en Majúscules, l'assignem com a títol de la línia
             var possibleTheme = this.extractThemeFromWott(f.name);
-            if (possibleTheme) lookup[meta.linea].theme = possibleTheme;
+            if (possibleTheme) lookup[blockId].theme = possibleTheme;
 
-            // Afegim a la llista de chyrons
-            lookup[meta.linea].chyrons.push({
+            lookup[blockId].chyrons.push({
                 name: f.name,
                 path: f.path,
                 tc: meta.tc,
@@ -52,12 +56,31 @@ FASTPASS_UI.Logic.BlockParser.prototype = {
             });
         }
 
-        // Convertim a array i ordenem
         for (var key in lookup) {
             lookup[key].chyrons.sort(function(a,b){ return a.tc.localeCompare(b.tc); });
             this.structure.push(lookup[key]);
         }
-        this.structure.sort(function(a,b){ return parseInt(a.id) - parseInt(b.id); });
+
+        // --- ORDENACIÓ AVANÇADA (Lead -> i -> Base) ---
+        this.structure.sort(function(a, b) {
+            var n1 = parseInt(a.numBase);
+            var n2 = parseInt(b.numBase);
+            if (n1 !== n2) return n1 - n2;
+
+            var getWeight = function(s) {
+                s = s.toLowerCase();
+                if (s === "lead") return 0;
+                if (s === "i") return 1;
+                if (s === "") return 2;
+                return 3; 
+            };
+            
+            var w1 = getWeight(a.suffix);
+            var w2 = getWeight(b.suffix);
+            if (w1 !== w2) return w1 - w2;
+
+            return a.id.localeCompare(b.id);
+        });
         
         return this.structure;
     },
@@ -133,8 +156,8 @@ FASTPASS_UI.Logic.BlockParser.prototype = {
         var parts = wottName.split("_");
         if (parts.length < 5) return null;
     
-        var rawLinea = parts[3];
-        var matchLine = rawLinea.match(/(\d+)([a-z]*)/);
+        var rawLinea = parts[3]; // '04i', '04lead', etc.
+        var matchLine = rawLinea.match(/(\d+)(.*)/); // Fem el match de dígits + qualsevol cosa
         var numLinea = matchLine ? matchLine[1] : rawLinea;
         var descriptor = matchLine ? matchLine[2] : "";
     
@@ -143,11 +166,12 @@ FASTPASS_UI.Logic.BlockParser.prototype = {
         try { nombreRaw = decodeURIComponent(nombreRaw).replace(/_/g, " "); } catch(e) {}
     
         var res = {
+            rawLinea: rawLinea,
             linea: numLinea,
             descriptor: descriptor,
             tc: parts[4],
-            nombre: nombreRaw, // Nom ja net i descodificat
-            rol: (parts[7] || "ROTUL").split(".")[0], // Netegem extensions si n'hi ha
+            nombre: nombreRaw, 
+            rol: (parts[7] || "ROTUL").split(".")[0], 
             isTraduccion: false
         };
     
@@ -234,6 +258,33 @@ FASTPASS_UI.Logic.BlockParser.prototype = {
 
             // 4. NETEJA: Eliminem possibles duplicats si s'ha escanejat la carpeta vàries vegades
             this.uniqueChyrons(linea);
+        }
+    },
+
+    /**
+     * Lògica d'Heurística per classificar blocs segons durada.
+     * Intro (>10s + Conductor), Video (<10s), Lead (Amb TemaTitol).
+     */
+    classifyBlock: function(block, duration) {
+        var hasConductor = false;
+        var isGraphicIntro = false;
+
+        for(var i=0; i<block.chyrons.length; i++) {
+            var c = block.chyrons[i];
+            if(c.rol === "CONDUCTOR") hasConductor = true;
+            // Si el nom de l'arxiu/títol comença amb 3 espais -> Gràfic d'Intro
+            if(c.name && c.name.indexOf("   ") === 0) isGraphicIntro = true;
+        }
+
+        if (isGraphicIntro) return "GRAPHIC_INTRO";
+
+        if (duration > 10) {
+            if (block.suffix === "lead") return "LEAD";
+            if (hasConductor || block.suffix === "i") return "INTRO";
+            return "VIDEO_LONG";
+        } else {
+            if (block.suffix === "lead") return "LEAD"; // Ara unificat
+            return "VIDEO";
         }
     },
 

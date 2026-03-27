@@ -172,6 +172,18 @@
             return day + "_" + month + "_" + year;
         },
 
+        /**
+         * Converteix format "00.46" o "01.00" a segons (float).
+         */
+        timeToSeconds: function(tcStr) {
+            if (!tcStr) return 0;
+            const parts = tcStr.split('.');
+            if (parts.length === 1) return parseFloat(parts[0]);
+            const m = parseFloat(parts[0]) || 0;
+            const s = parseFloat(parts[1]) || 0;
+            return (m * 60) + s;
+        },
+
         handleError: function(e, context) {
             this.log(`💥 [${context}] Error: ${e.message}`, "ERROR");
             this.status(`Error en ${context}`, "error");
