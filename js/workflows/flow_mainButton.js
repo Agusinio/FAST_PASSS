@@ -45,75 +45,113 @@
          * FLOW: CREAR NOU TEMA
          */
         _runNew: async function () {
+            const utils = getUtils(); // Aseguramos tener utils a mano
             log("🚀 [FLOW-NEW]");
+            const ctx = await this._setupContext();
         
-            // 1. SEGURETAT: Verificació (Això està perfecte)
-            const logicScanner = scanner();
-            const logicProject = projectLogic();
-            if (!logicScanner || !logicProject) throw new Error("Mòduls de lògica no carregats");
+            // 1. Scanner de Tema
+            const wottData = await scanner().findTemaData(ctx);
+            const temaReal = (wottData && wottData.tema) ? wottData.tema : "PENDENT";
         
-            // 2. Setup Context (OJO: Forcem que llegeixi la UI actual)
-            // Ens assegurem que el Context sap que hem triat "TN COMARQUES" ara mateix
-            const ctx = await this._setupContext(); 
-            const cfg = ctx.config;
-        
-            // 3. Descobriment (Amb el ctx ja refrescat)
-            log(`🔍 Escanejant servidor per a ${ctx.programa}...`);
-            const wottData = await logicScanner.findTemaData(ctx);
-            const media = await logicScanner.findMediaAssets(ctx);
-        
-            if (!wottData || !wottData.list || wottData.list.length === 0) {
-                throw new Error("No s'han trobat rètols (.wott) recents per a aquest programa.");
-            }
-        
-            // 4. Definició de rutes
-            const sanitizedTema = getUtils().sanitizeName(ctx.progData.tema || "TEMA_PENDENT");
+            const sanitizedTema = utils.sanitizeName(temaReal);
             
-            // 📞 DEMANAR NOMS DIFERENCIATS
-            const projectName = cfg.naming.getProjectName(ctx, sanitizedTema);
-            const seqName     = cfg.naming.getSequenceName(ctx, sanitizedTema);
-
-
-            // Definició de ruta final (Projecte)
-            const fileName = `Pruebas_${projectName}.prproj`;
-            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" + fileName;
-
-            // Pavimentar el camí al NAS (JS)
-            const parentFolder = destPath.substring(0, destPath.lastIndexOf("\\"));
-            log(`🛠️ Verificant ruta al NAS: ${parentFolder}`);
-            getUtils().ensureFolders(parentFolder)
-
-            // 5. Creació física
-            log("🏗️ Creant projecte a partir de plantilla...");
-            const projectResult = await logicProject.createFromTemplate(cfg.rutas.plantilla_net, destPath, seqName);
-
-            if (projectResult !== "OK" && projectResult.success !== true) {
-                // Si projectResult es un string de error, lo mostramos. Si no, ponemos un genérico.
-                const msg = (typeof projectResult === "string") ? projectResult : "Fallo en saveAs (Check NAS Permissions)";
-                getUtils().log("🔴 Workflow ATURAT: " + projectResult, "ERROR");
-                getUtils().status("Error: " + msg, "error");
-                return;
-            }
-
-            // Només arribem aquí si el projecte s'ha guardat bé al NAS
-            await getUtils().delay(1000);
-            await this._createLock(destPath);
-            await this._performSync(ctx, wottData, media);
+            // 3. Generar nombres
+            const projectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
+            const seqName     = ctx.config.naming.getSequenceName(ctx, sanitizedTema);
+            
+            const fileName    = `Pruebas_${projectName}.prproj`;
+            const destPath    = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + fileName;
         
-            // 8. Muntatge base (📍 AQUÍ CORREGIM L'ERROR DE RUTA)
-            if (media.mp4 && media.mp4.name) {
-                const T_MP4 = cfg.tracks.video.mp4; 
-                // Usem el NOM de l'arxiu per buscar-lo al Bin, no el path de xarxa
-                const mp4Name = media.mp4.name; 
-                const mp4Escaped = getUtils().escape(mp4Name);
+            utils.ensureFolders(destPath.substring(0, destPath.lastIndexOf("\\")));
+        
+            log(`🏗️ Creant projecte [${temaReal}]...`);
+            const projectResult = await projectLogic().createFromTemplate(ctx.config.rutas.plantilla_net, destPath, seqName);
+            
+            if (projectResult === "OK" || projectResult.success) {
+                await this._createLock(destPath);
+        
+                log("📁 Creant estructura de Bins obligatòria...");
+                await utils.callJSX("FASTPASS.Project.createBin('CHYRON')");
+        
+                // 📍 MICRO-CIRURGIA: Guardem el resultat directament al CTX
+                ctx.mediaAssets = await scanner().findMediaAssets(ctx);
                 
-                log(`🎬 Col·locant clip a línia de temps: ${mp4Name}`);
-                await callJSX(`jsx_overwriteClip('${mp4Escaped}', ${T_MP4}, 0.0, 'video')`);
+                // Usem ctx.mediaAssets en la condició
+                if ((wottData.list && wottData.list.length > 0) || (ctx.mediaAssets && ctx.mediaAssets.mp4)) {
+                    log("🎞️ Iniciant sincronització de fitxers...");
+                    // Passem ctx.mediaAssets a la sync
+                    await this._performSync(ctx, wottData, ctx.mediaAssets);
+                } else {
+                    log("⚠️ No s'han trobat fitxers per importar.", "DEBUG");
+                }
+        
+                // 📍 ARA SÍ: La condició es complirà
+                if (ctx.mediaAssets && ctx.mediaAssets.mp4) {
+                    const mp4Name = ctx.mediaAssets.mp4.name;
+                    
+                    // 📍 MICRO-CIRURGIA: Esperem 1 segon perquè Premiere "paeixi" la importació
+                    await utils.delay(1000); 
+                    
+                    log(`🎬 Col·locant clip [${mp4Name}] al Timeline...`);
+                
+                    // Usem el nom del fitxer directament (Premiere identifica per nom al Bin)
+                    const resTimeline = await utils.callJSX(`jsx_overwriteClip('${utils.escape(mp4Name)}', 1, 0, 'video')`);
+                    
+                    utils.log(`🧪 [JSX TIMELINE]: ${resTimeline}`, "DEBUG");
+                    
+                    if (resTimeline === "OK") {
+                        log("✅ Clip inserit i visible al V1.");
+                    }
+                }
+        
+                log("✅ Procés de creació finalitzat.");
+            }
+        },
+        
+        _runUpdate: async function () {
+            log("🚀 [FLOW-UPDATE]");
+            const ctx = await this._setupContext();
+            const wottData = await scanner().findTemaData(ctx);
+            
+            // Si sigue sin haber datos en el NAS, solo guardamos lo que el editor lleve hecho
+            if (!wottData || !wottData.tema) {
+                log("⚠️ Encara no hi ha rètols al NAS. Guardant progrés...");
+                return await callJSX("app.project.save()");
             }
         
-            // Finalització (Això està perfecte)
-            await callJSX('jsx_setCTI_Safe(0)');
-            log("✅ Projecte creat i llest.");
+            // 📍 DETECCIÓN DE ZOMBI: ¿El proyecto actual se llama PENDENT?
+            const currentPath = await callJSX("app.project.path");
+            
+            if (currentPath.indexOf("PENDENT") !== -1) {
+                log("🧬 Projecte PENDENT detectat. Promocionant a Real...");
+                
+                const sanitizedTema = getUtils().sanitizeName(wottData.tema);
+                const newProjectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
+                const newPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\Pruebas_" + newProjectName + ".prproj";
+        
+                // 1. Importar archivos (Ahora que ya existen)
+                const media = await scanner().findMediaAssets(ctx);
+                await this._performSync(ctx, wottData, media);
+        
+                // 2. PROMOCIÓN: SaveAs con el nombre definitivo
+                log(`💾 Guardant com a: ${newPath}`);
+                const saveRes = await callJSX(`jsx_saveProjectAs('${getUtils().escape(newPath)}')`);
+        
+                if (saveRes === "OK") {
+                    // 3. LIMPIEZA: Borramos el cadáver del proyecto PENDENT
+                    log(`🗑️ Eliminant rastre del projecte PENDENT...`);
+                    getUtils().deleteFile(currentPath);
+                    getUtils().deleteFile(currentPath + ".lock");
+                    await this._createLock(newPath);
+                    log("🟢 Projecte promocionat amb èxit!");
+                }
+            } else {
+                // Update normal para proyectos que ya tenían nombre
+                const media = await scanner().findMediaAssets(ctx);
+                await this._performSync(ctx, wottData, media);
+                await callJSX("app.project.save()");
+                log("✅ Actualització completada.");
+            }
         },
 
         /**
@@ -149,69 +187,31 @@
         },
 
         /**
-         * FLOW: ACTUALITZAR TEMA
-         */
-        _runUpdate: async function () {
-            log("🚀 [FLOW-UPDATE]");
-            const ctx = await this._setupContext();
-            const cfg = ctx.config;
-        
-            const wottData = await scanner().findTemaData(ctx);
-            const media = await scanner().findMediaAssets(ctx);
-            const seqName = `${ctx.progData.archivo}_${wottData.tema}`;
-
-            await this._performSync(ctx, wottData, media);
-
-            if (media.mp4) {
-                const T_MP4 = cfg.tracks.video.mp4;
-                await callJSX(`jsx_openSequence('${seqName}')`);
-                await callJSX(`jsx_overwriteClip('${getUtils().escape(media.mp4.name)}', ${T_MP4}, 0.0, 'video')`);
-            }
-
-            await callJSX("app.project.save()");
-        },
-
-        /**
          * @private
          * Ingesta específica de la noticia (MP4, SRT i Rètols).
          */
         _performSync: async function (ctx, wottData, media) {
             const utils = getUtils();
-            log("🎞️ [SYNC] Iniciant ingesta a ROOT...");
+
+            log("🎞️ [SYNC] Iniciant ingesta segmentada...");
         
-            // 1. Recopilamos TODAS las rutas en una sola lista para una sola llamada (más rápido)
-            let allPaths = [];
-            
-            // Añadimos Chyrons
-            if (wottData.list && wottData.list.length > 0) {
-                wottData.list.forEach(w => allPaths.push(utils.escape(w.path)));
+            // 📍 A. INGESTA DE MEDIA (Vídeo + SRT) -> a 'root'
+            let mediaPaths = [];
+            if (media?.mp4?.path) mediaPaths.push(media.mp4.path);
+            if (media?.srt?.path) mediaPaths.push(media.srt.path);
+        
+            if (mediaPaths.length > 0) {
+                log(`📥 Ingestant media a root...`);
+                await utils.importList(mediaPaths, "root");
             }
-            
-            // Añadimos Media
-            if (media?.mp4?.path) allPaths.push(utils.escape(media.mp4.path));
-            if (media?.srt?.path) allPaths.push(utils.escape(media.srt.path));
         
-            if (allPaths.length > 0) {
-                // IMPORTANTE: Importamos todo a "root"
-                log(`📥 Ingestant ${allPaths.length} fitxers directament a root...`);
-                await utils.importList(allPaths, "root");
+            // 📍 B. INGESTA DE RÈTOLS (Wotts) -> al Bin 'CHYRON'
+            if (wottData.list && wottData.list.length > 0) {
+                const wottPaths = wottData.list.map(w => w.path);
+                log(`📥 Ingestant ${wottPaths.length} rètols al Bin CHYRON...`);
                 
-                // 2. PAUSA DE SEGURIDAD (Para que Premiere registre los clips)
-                await utils.delay(1000);
-        
-                // 3. ORGANIZACIÓN: Movemos los Chyrons a su Bin
-                if (wottData.list && wottData.list.length > 0) {
-                    log("📁 Organitzant Chyrons al seu Bin...");
-                    // Aseguramos que el Bin existe primero
-                    await utils.callJSX(`jsx_createBin('CHYRONS')`);
-                    
-                    // Movemos cada clip por su nombre
-                    for (let w of wottData.list) {
-                        // El nombre en Premiere suele ser el nombre del archivo sin ruta
-                        await utils.callJSX(`FASTPASS.Project.moveItem('${w.name}', 'CHYRONS')`);
-                    }
-                    log("✅ Organització completada.");
-                }
+                // Cridem a importList passant "CHYRON" com a destí
+                await utils.importList(wottPaths, "CHYRON");
             }
         },
 

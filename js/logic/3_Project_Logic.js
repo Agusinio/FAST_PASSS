@@ -47,33 +47,43 @@
         },
 
         /**
-         * Crea un nou tema a partir d'una plantilla.
-         */
+        * Crea un nou tema a partir d'una plantilla.
+        */
         createFromTemplate: async function(templatePath, destPath, sequenceName) {
             const utils = window.FASTPASS_UI.Utils;
-            const log = (msg) => utils.log(msg, "INFO");
-        
-            const safeTpl = utils.escape(templatePath);
-            const safeDest = utils.escape(destPath);
-        
-            log("📂 Generant a partir de plantilla...");
             
-            // 1. Obrir
-            await utils.callJSX(`jsx_openProject('${safeTpl}')`);
-            await utils.delay(1000);
+            // 1. OBRIR PLANTILLA
+            await utils.callJSX(`jsx_openProject('${utils.escape(templatePath)}')`);
+            await utils.delay(1500); // Un pelín más de tiempo para que Premiere respire
         
-            // 2. Clonar
-            const cloneRes = await utils.callJSX(`jsx_cloneSequence('OTT VERTICAL', '${sequenceName}')`);
-            if (cloneRes.indexOf("ERR") === 0) return cloneRes;
+            // 2. GUARDAR COM
+            utils.log("💾 Creant fitxer al destí...");
+            const saveRes = await utils.callJSX(`jsx_saveProjectAs('${utils.escape(destPath)}')`);
+            if (saveRes !== "OK") return saveRes;
         
-            // 3. EL GUARDAT (Aquest és el que mana)
-            const saveRes = await utils.callJSX(`jsx_saveProjectAs('${safeDest}')`);
-        
-            // 📍 SI EL GUARDAT NO ÉS "OK", RETORNEM L'ERROR REAL
-            if (saveRes !== "OK") {
-                return saveRes; // Enviem el "ERR: saveAs ha fallat" cap amunt
+            // 📍 AJUSTE: El nombre base de la secuencia en tu plantilla
+            // ¡IMPORTANTE! Asegúrate de que en la plantilla se llama EXACTAMENTE así:
+            const baseName = 'OTT VERTICAL';
+
+            // 1. CLONAR (JSX nos devuelve el nombre temporal, ej: "OTT VERTICAL Copy 01")
+            const tempCloneName = await utils.callJSX(`FASTPASS.Project.cloneSequence('${baseName}')`);
+            
+            if (tempCloneName.indexOf("ERR") === -1) {
+                utils.log(`🧬 Clon creat: [${tempCloneName}]. Procedint a moure i renombrar...`, "DEBUG");
+            
+                // 2. MOURE AL ROOT (Usando tu función moveItem ya existente)
+                // El segundo parámetro vacío o "root" hará que vaya a la raíz
+                await utils.callJSX(`FASTPASS.Project.moveItem('${tempCloneName}', 'root')`);
+            
+                // 3. RENOMBRAR (Usando tu función renameItem ya existente)
+                await utils.callJSX(`FASTPASS.Project.renameItem('${tempCloneName}', '${sequenceName}')`);
+            
+                utils.log(`✅ Seqüència [${sequenceName}] llista al root.`, "INFO");
+            } else {
+                utils.log(`🔴 Error en clonar base: ${tempCloneName}`, "ERROR");
             }
-            
+        
+            await utils.callJSX(`app.project.save()`); 
             return { success: true, path: destPath, sequence: sequenceName };
         }
     };

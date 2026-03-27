@@ -127,27 +127,23 @@ FASTPASS.Project = (function() {
 
         // --- 3. SECUENCIAS ---
 
-        cloneSequence: function(sourceName, newName, projectPath) {
-            var proj = getTargetProject(projectPath);
-            var seq = findInCollection(proj.sequences, sourceName);
-            
-            if (!seq) return "ERR_SOURCE_NOT_FOUND";
-        
-            // 1. Clonamos (esto crea "OTT VERTICAL Copy")
-            seq.clone();
-        
-            // 2. Buscamos el ítem que Premiere acaba de crear
-            var expectedCloneName = sourceName + " Copy";
-            var clonedItem = this.findItem(expectedCloneName, projectPath);
-        
-            if (clonedItem) {
-                // 3. 📍 AQUÍ es donde usamos por fin el newName
-                clonedItem.name = newName; 
-                return newName; 
+        cloneSequence: function(sourceName) {
+            try {
+                var proj = app.project;
+                // Buscamos la secuencia usando tu helper existente
+                var seq = findInCollection(proj.sequences, sourceName);
+                
+                if (seq) {
+                    // 1. Clonamos
+                    seq.clone();
+                    // 2. Premiere siempre hace que el clon sea la secuencia ACTIVA.
+                    // Devolvemos el nombre exacto que Premiere le ha puesto (sea "Copy", "Copy 01", etc.)
+                    return proj.activeSequence.name; 
+                }
+                return "ERR: Source not found";
+            } catch (e) {
+                return "ERR: " + e.message;
             }
-        
-            // Si por lo que sea no lo encuentra, devolvemos el nombre de la copia
-            return expectedCloneName;
         },
 
         openSequence: function(name, projectPath) {
@@ -175,18 +171,80 @@ FASTPASS.Project = (function() {
             var proj = getTargetProject(projectPath);
             var existing = findInCollection(proj.rootItem.children, name);
             return existing || proj.rootItem.createBin(name);
-        },
+        }, 
 
-        getActiveSequenceName: function() {
-            return app.project.activeSequence ? app.project.activeSequence.name : "";
+        /**
+         * Busca una secuencia por su nombre en todo el proyecto.
+         */
+        findSequenceByName: function(name) {
+            var proj = app.project;
+            if (!proj) return null;
+            for (var i = 0; i < proj.sequences.numSequences; i++) {
+                if (proj.sequences[i].name === name) {
+                    return proj.sequences[i];
+                }
+            }
+            // Si no la encuentra por nombre, devolvemos la activa como último recurso
+            return proj.activeSequence;
+        }, 
+
+        findSequenceByTokens: function(tokenProg, tokenBloc) {
+            $.writeln("🚀 [JSX]: Iniciant findSequenceByTokens...");
+            $.writeln("🔍 [JSX]: Buscant Prog: [" + tokenProg + "] Bloc: [" + tokenBloc + "]");
+        
+            try {
+                var proj = app.project;
+                if (!proj) {
+                    $.writeln("❌ [JSX]: Error - app.project és undefined");
+                    return "ERR:NO_PROJECT";
+                }
+        
+                var totalSeqs = proj.sequences.numSequences;
+                $.writeln("📊 [JSX]: Total seqüències al projecte: " + totalSeqs);
+        
+                for (var i = 0; i < totalSeqs; i++) {
+                    var s = proj.sequences[i];
+                    if (!s) {
+                        $.writeln("⚠️ [JSX]: Seqüència en índex " + i + " és null!");
+                        continue;
+                    }
+        
+                    var name = s.name;
+                    $.writeln("👀 [JSX]: Comprovant: " + name);
+        
+                    // Verificació de tokens
+                    var hasProg = (name.indexOf(tokenProg) !== -1);
+                    var hasBloc = (name.indexOf(tokenBloc) !== -1);
+        
+                    if (hasProg && hasBloc) {
+                        $.writeln("🎯 [JSX]: MATCH TROBAT! -> " + name);
+                        return String(name);
+                    }
+                }
+        
+                $.writeln("empty [JSX]: No s'ha trobat cap match.");
+                return "ERR:NOT_FOUND";
+        
+            } catch(e) {
+                $.writeln("💥 [JSX CRITICAL ERROR]: " + e.message);
+                return "ERR_JSX_EXCEPTION:" + e.message;
+            }
         }
     };
 })();
 
-$.global.jsx_openProject = function(path) {
-    var proj = FASTPASS.Project.openProject(path); 
-    if (proj) {
-        $.global.FASTPASS_WorkProject = proj; // Anclem l'objecte REAL
+$.global.jsx_openProject = function(path, newSequenceName) {
+    // 1. Intentem obrir el projecte
+    var success = FASTPASS.Project.openProject(path); 
+    
+    if (success) {
+        // 📍 MICRO-CIRURGIA: Renombrar la seqüència activa
+        // Un cop obert, app.project ja és el projecte nou.
+        if (app.project.activeSequence && newSequenceName) {
+            app.project.activeSequence.name = newSequenceName;
+        }
+        
+        $.global.FASTPASS_WorkProject = app.project; 
         return "OK";
     }
     return "ERR";

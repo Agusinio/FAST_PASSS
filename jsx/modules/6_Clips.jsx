@@ -1,36 +1,53 @@
 /* * =================================================================================
  * 6_Clips.jsx
  * Módulo especializado en la manipulación física de objetos Clip en el Timeline.
- * (v13 - SOPORTE PARA VÍDEO, AUDIO Y SUBTÍTULOS + ESCENA)
+ * (v17 - RECONSTRUCCIÓN LÍNEA A LÍNEA - SIN REGEX)
  * =================================================================================
  */
 
-var FASTPASS = FASTPASS || {};
+if (typeof $.global.FASTPASS === "undefined") { $.global.FASTPASS = {}; }
+var FASTPASS = $.global.FASTPASS;
+
 FASTPASS.Clips = {
 
     /**
-     * Helper privat: Obté l'objecte track segons el tipus.
+     * Helper: Obtiene la pista de forma segura.
+     * REGLA: Recibe índice base 1 (V1 = 1) y entrega objeto Premiere (base 0).
      */
     _getTrack: function(idx, type) {
-        var seq = app.project.activeSequence;
-        if (!seq) return null;
-        if (type === "audio") return seq.audioTracks[idx];
-        if (type === "subtitle") return seq.subtitleTracks[idx];
-        return seq.videoTracks[idx];
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq && app.project.sequences.numSequences > 0) seq = app.project.sequences[0];
+            if (!seq) return null;
+
+            // ÚNICA RESTA: Aquí convertimos el 1 de la UI al 0 de Premiere
+            var i = parseInt(idx) - 1; 
+            if (i < 0) i = 0;
+
+            var tracks;
+            if (type === "audio") tracks = seq.audioTracks;
+            else if (type === "subtitle") tracks = seq.subtitleTracks;
+            else tracks = seq.videoTracks;
+
+            if (!tracks || i >= tracks.numTracks) return null;
+            return tracks[i];
+        } catch(e) { return null; }
     },
 
     getCount: function(trackIdx, type) {
         try {
             var track = this._getTrack(trackIdx, type);
-            return track ? track.clips.numItems : 0;
+            return (track && track.clips) ? track.clips.numItems : 0;
         } catch(e) { return 0; }
     },
 
     getDataByIndex: function(trackIdx, clipIdx, type) {
         try {
             var track = this._getTrack(trackIdx, type);
+            if (!track || !track.clips) return "null";
+            
             var clip = track.clips[clipIdx];
-            if (!clip) return null;
+            if (!clip) return "null";
 
             return JSON.stringify({
                 index: clipIdx,
@@ -42,12 +59,14 @@ FASTPASS.Clips = {
                 duration: clip.duration.seconds,
                 selected: clip.isSelected()
             });
-        } catch(e) { return null; }
+        } catch(e) { return "null"; }
     },
 
     getDataByTime: function(trackIdx, timeSec, type) {
         try {
             var track = this._getTrack(trackIdx, type || "video");
+            if (!track || !track.clips) return "null";
+
             var targetTime = (timeSec === -1) ? app.project.activeSequence.getPlayerPosition().seconds : parseFloat(timeSec);
             
             for (var i = 0; i < track.clips.numItems; i++) {
@@ -74,34 +93,51 @@ FASTPASS.Clips = {
 
     overwrite: function(itemName, trackIdx, timeSec, type) {
         try {
-            var item = FASTPASS.Project.findItem(decodeURIComponent(itemName));
-            if (!item) return "ERR_ITEM_NOT_FOUND";
+            if (!app.project) return "ERR_NO_PROJECT";
+            var nameToFind = decodeURIComponent(itemName);
+            var item = FASTPASS.Project.findItem(nameToFind);
             
-            var track = this._getTrack(trackIdx, type || "video"); 
-            
-            // 📍 VALIDACIÓ CRÍTICA: Si no hi ha seqüència activa o la pista no existeix
-            if (!track) {
-                return "ERR_TRACK_OR_SEQUENCE_NOT_FOUND";
+            // Si no lo encuentra, buscamos quitando la extensión manualmente (Sin Regex)
+            if (!item) {
+                var lastDot = nameToFind.lastIndexOf(".");
+                if (lastDot > 0) {
+                    var nameOnly = nameToFind.substring(0, lastDot);
+                    item = FASTPASS.Project.findItem(nameOnly);
+                }
             }
-    
+
+            if (!item) return "ERR_ITEM_NOT_FOUND";
+
+            var track = this._getTrack(trackIdx, type || "video"); 
+            if (!track) return "ERR_TRACK_NOT_FOUND";
+
             var tStart = new Time();
             tStart.seconds = parseFloat(timeSec);
-            
             track.overwriteClip(item, tStart);
             return "OK";
         } catch (e) { return "ERR: " + e.message; }
     },
 
-    // --- PROPIEDADES (ATÓMICAS) ---
-
+    /**
+     * Mueve la posición (In-point en el timeline) de un clip.
+     * @param {number} trackIdx - Índice de la pista.
+     * @param {number} clipIdx - Índice del clip en la pista.
+     * @param {number} seconds - Tiempo en segundos donde se quiere colocar.
+     * @param {string} type - "video", "audio" o "subtitle".
+     */
     setStart: function(trackIdx, clipIdx, seconds, type) {
         try {
             var track = this._getTrack(trackIdx, type || "video");
+            if (!track || !track.clips) return "ERR:TRACK_NOT_FOUND";
+
             var clip = track.clips[clipIdx];
-            var t = new Time(); t.seconds = parseFloat(seconds);
+            if (!clip) return "ERR:CLIP_NOT_FOUND";
+
+            var t = new Time(); 
+            t.seconds = parseFloat(seconds);
             clip.start = t;
             return "OK";
-        } catch (e) { return "ERR: " + e.message; }
+        } catch (e) { return "ERR:" + e.message; }
     },
 
     setEnd: function(trackIdx, clipIdx, seconds, type) {
@@ -117,11 +153,16 @@ FASTPASS.Clips = {
     setInPoint: function(trackIdx, clipIdx, seconds, type) {
         try {
             var track = this._getTrack(trackIdx, type || "video");
+            if (!track || !track.clips) return "ERR:TRACK_NOT_FOUND";
+            
             var clip = track.clips[clipIdx];
-            var t = new Time(); t.seconds = parseFloat(seconds);
+            if (!clip) return "ERR:CLIP_NOT_FOUND";
+            
+            var t = new Time(); 
+            t.seconds = parseFloat(seconds);
             clip.inPoint = t;
             return "OK";
-        } catch (e) { return "ERR: " + e.message; }
+        } catch (e) { return "ERR:" + e.message; }
     },
 
     getProperty: function(trackIdx, clipIdx, compMatch, propMatch, type) {
@@ -137,8 +178,7 @@ FASTPASS.Clips = {
         try {
             var prop = this.getProperty(trackIdx, clipIdx, compMatch, propMatch, type || "video");
             if (!prop) return "ERR_PROP";
-            
-            if (propMatch === "ADBE Video Position") {
+            if (propMatch == "ADBE Video Position") {
                 prop.setValue(val, true);
             } else {
                 prop.setValue(parseFloat(val), true);
@@ -150,12 +190,12 @@ FASTPASS.Clips = {
     detectScenes: function(trackIdx) {
         try {
             var track = this._getTrack(trackIdx, "video");
-            if (!track || track.clips.numItems === 0) return "ERR_EMPTY_TRACK";
+            if (!track || track.clips.numItems == 0) return "ERR_EMPTY_TRACK";
             for (var i = 0; i < track.clips.numItems; i++) {
                 track.clips[i].setSelected(true, true);
             }
             app.project.activeSequence.performSceneEditDetectionOnSelection();
-            return "OK_DETECT_REQUESTED";
+            return "OK";
         } catch (e) { return "ERR: " + e.message; }
     },
 

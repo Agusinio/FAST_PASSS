@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: CLIPS (Orquestación de acciones atómicas y Búsqueda)
+ * LOGIC: CLIPS (Orquestación de acciones atómicas y Búsqueda) - Clips_Logic.js
  * ============================================================================
  */
 
@@ -44,10 +44,13 @@
             if (diff <= 0) return "NO_DIFF";
 
             const newInPoint = clipData.inPoint + diff;
+            const type = "video";
 
-            // Ajustar el In Point y mover al inicio (0)
-            await utils.callJSX(`jsx_setClipInPoint(${trackIdx}, ${clipIdx}, ${newInPoint})`);
-            await utils.callJSX(`jsx_setClipStart(${trackIdx}, ${clipIdx}, 0)`);
+            // 1. Ajustar el offset interno del clip
+            await utils.callJSX(`FASTPASS.Clips.setInPoint(${trackIdx}, ${clipIdx}, ${newInPoint}, '${type}')`);
+            
+            // 2. Mover el clip al inicio de la línea de tiempo (segundo 0)
+            await utils.callJSX(`FASTPASS.Clips.setStart(${trackIdx}, ${clipIdx}, 0, '${type}')`);
 
             return "OK_RIPPLE_TRIM_START";
         },

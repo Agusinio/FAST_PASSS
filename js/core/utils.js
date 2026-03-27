@@ -37,13 +37,37 @@
         },
 
         readFolder: function(path) {
-            // Usamos el FileSystem nativo de la extensión (CEP)
+            // 1. Leemos los nombres de la carpeta
             var result = window.cep.fs.readdir(path);
             
-            if (result.err === 0) { // 0 significa "sin errores"
-                return result.data; // Devuelve un array de strings con los nombres
+            if (result.err === 0) {
+                var filenames = result.data; // Array de strings ["file1.mp4", "file2.mov"]
+                var filesWithStats = [];
+        
+                // Aseguramos que el path termine en barra para concatenar bien
+                var folderPath = path.replace(/[\\/]*$/, "\\");
+        
+                for (var i = 0; i < filenames.length; i++) {
+                    var name = filenames[i];
+                    var fullPath = folderPath + name;
+        
+                    // 📍 MICRO-CIRURGIA: Demanem la data de cada fitxer (stat)
+                    var stat = window.cep.fs.stat(fullPath);
+                    
+                    if (stat.err === 0) {
+                        filesWithStats.push({
+                            name: name,
+                            mtime: stat.data.mtime // Aquí está la fecha real!
+                        });
+                    } else {
+                        // Si falla el stat (como el Error 3), guardamos el nombre con fecha 0
+                        // para que el filtro de la guarda no lo mate si decidimos ser permisivos
+                        filesWithStats.push({ name: name, mtime: 0 });
+                    }
+                }
+                return filesWithStats; // Ahora devolvemos un Array de OBJETOS
             } else {
-                console.error("Error leyendo carpeta desde JS:", result.err);
+                console.error("Error leyendo carpeta:", result.err);
                 return [];
             }
         },
@@ -93,41 +117,30 @@
 
 
         /**
-         * Ingesta massiva de fitxers. Atòmic: Rep rutes i les envia.
-         * La preparació de rutes es fa a la capa de Lògica/Inspectors.
+         * Ingesta de fitxers a Premiere Pro.
+         * @param {Array} pathList - Llista de rutes (UNC o locals).
+         * @param {string} binName - Nom del Bin de destí (o "root").
          */
         importList: async function(pathList, binName) {
             if (!pathList || !pathList.length) return;
-            
-            this.log(`📦 Preparant importació de ${pathList.length} ítems a '${binName}'...`, "DEBUG");
         
-            // 📍 DEBUG: Esto imprimirá la lista real en la consola del inspector
-            console.log("🚀 [DEBUG] Rutes que s'enviaran a Premiere:", pathList);
-            
+            // Convertimos la lista de objetos a lista de strings (Rutas)
+            // El Scanner ahora nos da {name, path}. Solo queremos el path.
+            const rawPaths = pathList.map(item => item.path || item);
+        
+            // 📍 LOG DE INSPECCIÓN
+            console.log(`🚀 [IMPORT] Enviant ${rawPaths.length} rutes al JSX:`);
+            console.table(rawPaths); 
+        
             try {
-                // 1. EL JS DECIDE: Si no és root, primer ens assegurem que el Bin existeix
-                if (binName && binName !== "root") {
-                    this.log(`📁 Assegurant existència del Bin: ${binName}`, "DEBUG");
-                    // Cridem al teu àtom de Project.jsx
-                    await this.callJSX(`jsx_createBin('${binName}')`);
-                    await this.delay(200); // Pausa tàctica per a Premiere
-                }
-        
-                // 2. PREPARACIÓ DE DADES: Escapem les rutes per a ExtendScript
-                // (Això evita l'error de [object Object])
-                const escapedPaths = pathList.map(p => this.escape(p));
-                const payload = JSON.stringify(escapedPaths);
-        
-                // 3. ENVIAMENT AL OBRER: Cridem al teu àtom de IO.jsx
-                this.log(`📥 Executant importFiles a Premiere...`, "DEBUG");
-                const res = await this.callJSX(`jsx_importFiles('${payload}', '${binName}')`);
+                const payload = JSON.stringify(rawPaths);
+                // Enviamos sin comillas envolventes
+                const res = await this.callJSX(`jsx_importFiles(${payload}, '${binName}')`);
                 
-                if (res && res.indexOf("ERR") === 0) throw new Error(res);
-                
-                this.log(`✅ Importació a '${binName}' completada amb èxit.`, "INFO");
-        
+                if (res !== "OK") throw new Error(res);
+                this.log(`✅ Ingesta OK a ${binName}`, "INFO");
             } catch (e) {
-                this.log(`❌ Error importList: ${e.message}`, "ERROR");
+                this.log(`🔴 Error Ingesta: ${e.message}`, "ERROR");
             }
         },
 
@@ -141,8 +154,10 @@
         },
 
         escape: function(str) {
-            if (typeof str !== 'string') return str;
-            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            if (!str) return "";
+            // 📍 Eliminem l'escapat de comilles simples (\') 
+            // Només escapem barres invertides per a que el string de JS no trenqui
+            return str.replace(/\\/g, "\\\\"); 
         },
 
         delay: function(ms) { 
@@ -212,6 +227,26 @@
             }
 
             return true;
+        },
+
+        deleteFile: function(path) {
+            try {
+                const fs = window.cep.fs;
+                // Normalizamos barras para Node/CEP
+                const normalizedPath = path.replace(/\//g, '\\');
+                const result = fs.unlink(normalizedPath);
+                
+                if (result.err === 0) {
+                    this.log(`✅ Arxiu eliminat del NAS: ${normalizedPath}`, "DEBUG");
+                    return true;
+                } else {
+                    this.log(`⚠️ No s'ha pogut esborrar (Error ${result.err}): ${normalizedPath}`, "DEBUG");
+                    return false;
+                }
+            } catch(e) { 
+                return false; 
+            }
         }
+
     };
 })();

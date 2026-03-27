@@ -206,23 +206,26 @@
             const programKey = document.getElementById('programa').value;
             
             if (!select || !programKey) return;
-
-            // 1. Obtenim els "Titulars" i "Substituts" del programa actual segons Config.js
+        
+            // 1. Obtenim titulars i substituts (Strings)
             const progData = config.mapeoProgramas[programKey];
             let defaults = [];
             if (progData && progData.conductors) {
-                // Ajuntem titular i substituts en una sola llista plana
                 defaults = [].concat(progData.conductors.titular, progData.conductors.substituts).filter(Boolean);
             }
-
-            // 2. Llegim TOT el que hi ha al NAS
+        
+            // 2. Llegim el NAS (Ara torna [{name: "...", mtime: ...}])
             const nasFiles = utils.readFolder(config.rutas.conductors);
-            const validNasFiles = nasFiles.filter(f => f.includes("Conduct_") && f.includes(".mov"));
-
-            // 3. POBLAR SELECTOR
-            select.innerHTML = ""; // Netegem
-
-            // A. Afegim primer els DEFAULTS (Prioritat)
+            
+            // 📍 CANVI 1: Filtrem usant f.name
+            const validNasFiles = nasFiles.filter(f => {
+                const n = (f.name || f).toString(); 
+                return n.includes("Conduct_") && n.includes(".mov");
+            });
+        
+            select.innerHTML = ""; 
+        
+            // A. Afegim DEFAULTS
             if (defaults.length > 0) {
                 const groupDefault = document.createElement('optgroup');
                 groupDefault.label = "⭐ CONDUCTORS PROGRAMA";
@@ -235,14 +238,18 @@
                 });
                 select.appendChild(groupDefault);
             }
-
-            // B. Afegim la resta del NAS (Altres)
-            const others = validNasFiles.filter(f => !defaults.includes(f));
+        
+            // B. Afegim la resta del NAS
+            // 📍 CANVI 2: Comparem contra f.name
+            const others = validNasFiles.filter(f => !defaults.includes(f.name || f));
+            
             if (others.length > 0) {
                 const groupOthers = document.createElement('optgroup');
                 groupOthers.label = "🌐 ALTRES (NAS)";
                 
-                others.forEach(fileName => {
+                others.forEach(fileObj => {
+                    // 📍 CANVI 3: Extraiem el nom de l'objecte
+                    const fileName = fileObj.name || fileObj;
                     const opt = document.createElement('option');
                     opt.value = fileName;
                     opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
@@ -250,8 +257,7 @@
                 });
                 select.appendChild(groupOthers);
             }
-
-            // Seleccionem el primer per defecte (que serà el titular)
+        
             if (select.options.length > 0) select.selectedIndex = 0;
         },
 

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: CUT (v15 - VERSIÓ VARIABLES GLOBALS)
+ * WORKFLOW: CUT (v15 - VERSIÓ VARIABLES GLOBALS) - flow_cut.js
  * ============================================================================
  * Totes les operacions d'edició (In/Out) ara usen el mapa de pistes global.
  */
@@ -21,25 +21,66 @@
          * Realitza un Ripple Trim In al clip principal de Mp4.
          */
         runCutIn: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
-            log("🎬 Realitzant CUT IN...");
-            const cfg = FASTPASS_UI.Config.get();
-            const T_MP4 = cfg.tracks.video.mp4; // V1
+            log("1. Comprobando existencia de función...");
+            const check = await callJSX("typeof FASTPASS.Context.findSequenceByTokens");
+            log("   Resultado: " + check);
 
+            if (check !== "function") {
+                log("❌ CRÍTICO: La función no existe en Premiere. ¿Colisión de nombres?", "ERROR");
+                return;
+            }
+
+            // Si llegamos aquí, la función existe.
+            const prog = document.getElementById('programa').value;
+            const bloc = document.getElementById('bloc').value;
+  
             try {
-                const ctiRaw = await callJSX('jsx_getCTI()');
-                const val = parseFloat(ctiRaw || "0");
+                const config = FASTPASS_UI.Config.get();
+                const elProg = document.getElementById('programa').value;
+                const elBloc = document.getElementById('bloc').value;
+                
+                // Obtenemos el token del programa (ej: "TNV" o "TN_VESPRE")
+                const progData = config.mapeoProgramas[elProg];
+                const progToken = progData ? progData.archivo : elProg;
+        
+                log(`🔍 Buscant seqüència per tokens: [${progToken}] + [${elBloc}]`);
+        
+                // 1. Llamada al JSX
+                const foundNameRaw = await callJSX(`FASTPASS.Context.findSequenceByTokens('${progToken}', '${elBloc}')`);
 
-                // Troba el clip a la pista mp4 (V1)
-                const clip = await getClipsLogic().findAtTime(T_MP4, val, "video");
-                if (clip) {
-                    // Ajusta entrada i desplaça tot (Ripple Trim)
-                    await getClipsLogic().rippleTrimStart(T_MP4, clip.index, val, clip);
-                    // Retorn del cabezal a l'inici per poliment
-                    await callJSX('jsx_setCTI_Safe(0)');
-                } else {
-                    log("⚠️ No es troba clip a V" + T_MP4 + " per fer el tall.", "WARN");
+                // 2. BLINDAJE: Forzamos que sea un String y limpiamos basura
+                // Si llega un objeto o array, String() lo convertirá en algo legible.
+                const foundName = await callJSX(`jsx_findSequenceByTokens('${progToken}', '${elBloc}')`);
+
+                if (!foundName || foundName.indexOf("ERR") !== -1 || foundName === "null") {
+                    getUtils().status("⚠️ No trobo la seqüència!", "error");
+                    log("❌ Error o buit: " + foundName, "ERROR");
+                    return;
                 }
+
+                // 3. Sincronizamos
+                window.FASTPASS_UI.State.activeSequenceName = foundName;
+                log("✅ Seqüència sintonitzada: " + foundName);
+        
+                // 3. Ahora la validación de sincronía PASARÁ siempre
+                if (!(await getUtils().validateActiveSequence())) return;
+        
+                // --- SEGUIMOS CON EL CORTE ---
+                const T_MP4 = config.tracks.video.mp4;
+                const ctiRaw = await callJSX('jsx_getCTI()'); 
+                const val = parseFloat(ctiRaw || "0");
+        
+                // 4. Buscar el clip (Pasamos el nombre por si findAtTime lo necesita)
+                const clip = await getClipsLogic().findAtTime(T_MP4, val, "video");
+                
+                if (clip) {
+                    await getClipsLogic().rippleTrimStart(T_MP4, clip.index, val, clip);
+                    await callJSX('jsx_setCTI_Safe(0)');
+                    getUtils().status("IN: Tall OK", "exito");
+                } else {
+                    log("⚠️ No s'ha trobat clip a V" + T_MP4 + " al segon " + val, "WARN");
+                }
+        
             } catch (e) { getUtils().handleError(e, "CutIn"); }
         },
 
