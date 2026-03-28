@@ -4,7 +4,7 @@
  * ============================================================================
  */
 
-(function() {
+(function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Core = FASTPASS_UI.Core || {};
 
@@ -14,7 +14,7 @@
     let _lastCheckAt = 0; // Guard de debounce
 
     FASTPASS_UI.Core.Context = {
-        
+
         async checkContext() {
             if (!getUtils().isJsxReady) return;
 
@@ -31,7 +31,7 @@
 
             const elProg = document.getElementById('programa');
             const elBloc = document.getElementById('bloc');
-            
+
             if (!elProg || !elBloc || !elProg.value || elBloc.value === "---") {
                 this.updateButton('DISABLED');
                 return;
@@ -42,17 +42,16 @@
                 const progKey = elProg.value;
                 const progData = config.mapeoProgramas[progKey];
                 const dateDir = getUtils().getFormattedDate().replace(/"/g, "").trim();
-                
+
                 // --- 1. INSPECCIÓ EXTERNA ---
                 const mediaSource = config.rutas.destinoBase + progData.directorio + "\\" + dateDir;
                 // CORREGIT: Ja no fem servir assets() amb parèntesis
                 const wottsRaw = await assets.scan(mediaSource, "*.wott");
                 const map = assets.getLatestDayMap(wottsRaw);
                 const theme = this._extractThemeFromFiles(map);
-                
+
                 // --- 2. PARSING I ESTRUCTURA ---
-                const parser = new FASTPASS_UI.Logic.BlockParser();
-                const pieces = parser.parseFromFiles(map, progKey, elBloc.value);
+                const pieces = window.Parse.files(map, progKey, elBloc.value);
                 FASTPASS_UI.State.structure = pieces;
 
                 // --- 3. INSPECCIÓ INTERNA (ADUANA) ---
@@ -63,12 +62,12 @@
                 const templateName = "3CatInfo_NET.prproj";
                 const sanitizedTheme = getUtils().sanitizeName(theme || 'PENDENT');
                 const projSlug = config.naming.getProjectName({
-                    progData, 
-                    bloque: elBloc.value, 
+                    progData,
+                    bloque: elBloc.value,
                     userName: await getUtils().callJSX("jsx_getUserName()"),
-                    dateDir 
+                    dateDir
                 }, sanitizedTheme);
-                
+
                 const expectedProjName = `Pruebas_${projSlug}.prproj`;
                 const destPath = mediaSource + "\\" + expectedProjName;
 
@@ -82,7 +81,7 @@
 
                 if (!isOurs) {
                     // Si estem a TEST.prproj o qualsevol altre, ignorem el contingut del bin
-                    FASTPASS_UI.State.structure = []; 
+                    FASTPASS_UI.State.structure = [];
                     FASTPASS_UI.State.activeSequenceName = "";
                     getUtils().log("⚠️ Projecte ajè o sense guardar (" + activeProj + "). Ignorant contingut.");
                 } else {
@@ -106,13 +105,13 @@
                 } else {
                     // Si estem a TEST.prproj (o qualsevol altre), mirem si el projecte real existeix a disc
                     conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
-                } 
+                }
                 // --- 6. APLICACIÓ A LA UI ---
                 FASTPASS_UI.State.projectName = expectedProjName;
                 this.updateLights(progKey, elBloc.value, theme, FASTPASS_UI.State.activeSequenceName);
                 this.updateButton(conclusion, { progKey, bloc: elBloc.value, theme, name: expectedProjName });
-                
-            } catch(e) {
+
+            } catch (e) {
                 console.error("💥 Error en el Core de Context:", e);
                 this.updateLights(false, false, false, false);
                 this.updateButton('DISABLED');
@@ -136,7 +135,7 @@
             btn.disabled = (state === 'DISABLED' || state === 'WAITING');
             btn.className = "square-large"; // Classe neutre única
 
-            switch(state) {
+            switch (state) {
                 case 'UPDATE':
                     btn.innerText = "ACTUALITZAR";
                     btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('UPDATE', data);
@@ -192,20 +191,20 @@
         init() {
             const p = document.getElementById('programa');
             const b = document.getElementById('bloc');
-            
+
             if (p && b) {
                 const trigger = () => {
                     FASTPASS_UI.Config.saveSelection(p);
                     FASTPASS_UI.Config.saveSelection(b);
                     this.checkContext();
-                    
+
                     // 📍 CRÍTIC: Ara fem servir la funció unificada que mira el NAS
-                    this.syncConductorUI(); 
+                    this.syncConductorUI();
                 };
-        
+
                 p.addEventListener('change', trigger);
                 b.addEventListener('change', trigger);
-        
+
                 // Arrencada inicial
                 setTimeout(() => {
                     this.checkContext();
@@ -220,32 +219,32 @@
             const config = FASTPASS_UI.Config.get();
             const select = document.getElementById('conductor');
             const programKey = document.getElementById('programa').value;
-            
+
             if (!select || !programKey) return;
-        
+
             // 1. Obtenim titulars i substituts (Strings)
             const progData = config.mapeoProgramas[programKey];
             let defaults = [];
             if (progData && progData.conductors) {
                 defaults = [].concat(progData.conductors.titular, progData.conductors.substituts).filter(Boolean);
             }
-        
+
             // 2. Llegim el NAS (Ara torna [{name: "...", mtime: ...}])
             const nasFiles = utils.readFolder(config.rutas.conductors);
-            
+
             // 📍 CANVI 1: Filtrem usant f.name
             const validNasFiles = nasFiles.filter(f => {
-                const n = (f.name || f).toString(); 
+                const n = (f.name || f).toString();
                 return n.includes("Conduct_") && n.includes(".mov");
             });
-        
-            select.innerHTML = ""; 
-        
+
+            select.innerHTML = "";
+
             // A. Afegim DEFAULTS
             if (defaults.length > 0) {
                 const groupDefault = document.createElement('optgroup');
                 groupDefault.label = "⭐ CONDUCTORS PROGRAMA";
-                
+
                 defaults.forEach(fileName => {
                     const opt = document.createElement('option');
                     opt.value = fileName;
@@ -254,15 +253,15 @@
                 });
                 select.appendChild(groupDefault);
             }
-        
+
             // B. Afegim la resta del NAS
             // 📍 CANVI 2: Comparem contra f.name
             const others = validNasFiles.filter(f => !defaults.includes(f.name || f));
-            
+
             if (others.length > 0) {
                 const groupOthers = document.createElement('optgroup');
                 groupOthers.label = "🌐 ALTRES (NAS)";
-                
+
                 others.forEach(fileObj => {
                     // 📍 CANVI 3: Extraiem el nom de l'objecte
                     const fileName = fileObj.name || fileObj;
@@ -273,7 +272,7 @@
                 });
                 select.appendChild(groupOthers);
             }
-        
+
             if (select.options.length > 0) select.selectedIndex = 0;
         },
 

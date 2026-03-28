@@ -10,7 +10,7 @@
 
     const getUtils = () => window.FASTPASS_UI.Utils;
     const getClipsLogic = () => window.FASTPASS_UI.Logic.Clips;
-    const getParser = () => new FASTPASS_UI.Logic.BlockParser();
+    const getParse = () => window.Parse;
 
     const log = (m) => getUtils().log(m, "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
@@ -24,7 +24,7 @@
             log("🎬 Iniciant Assemblatge Automàtic (THE MAGIC)...");
             const state = FASTPASS_UI.State;
             const cfg = FASTPASS_UI.Config.get();
-            
+
             if (!state.structure || state.structure.length === 0) {
                 log("⚠️ No hi ha estructura carregada. Avortant muntatge.");
                 return;
@@ -40,16 +40,15 @@
 
                 for (let bIndex = 0; bIndex < struct.length; bIndex++) {
                     const block = struct[bIndex];
-                    
+
                     // Cercar el primer clip d'aquest bloc
                     let headClip = clips[clipIndex];
                     if (!headClip) break;
 
                     const blockStartTime = headClip.start;
                     const blockDuration = headClip.end - headClip.start;
-                    const parser = getParser();
-                    const type = parser.classifyBlock(block, blockDuration);
-                    
+                    const type = getParse().classify(block, blockDuration);
+
                     log(`📦 Bloc ${block.id} (${type}) -> Clips iniciant a ${blockStartTime.toFixed(2)}s`);
 
                     if (type === "INTRO") {
@@ -57,7 +56,7 @@
                         // Aplicar REFRAME a la Intro
                         log(`   ✨ Aplicant Auto Reframe a la INTRO (V${mainTrack}:${headClip.index})`);
                         await callJSX(`jsx_applyAutoReframe(${mainTrack}, ${headClip.index})`);
-                        clipIndex++; 
+                        clipIndex++;
                     } else {
                         // Agrupem tots els clips que pertanyen a aquest bloc
                         let blockClips = [headClip];
@@ -66,7 +65,7 @@
                             blockClips.push(clips[nextI]);
                             nextI++;
                         }
-                        
+
                         // ALQUÍMIA: Inferència màgica
                         const result = await this._placeMagicChyrons(block, blockClips, cfg.tracks.video);
 
@@ -114,13 +113,13 @@
          */
         _placeMagicChyrons: async function (block, clips, tracks) {
             log(`   🔮 Aplicant Footprint Matching a ${block.id}...`);
-            
+
             // 1. Buscar ANCLA (NomCarrec coincidents amb clips llargs)
             let anchors = [];
             for (const c of block.chyrons) {
                 if (c.rol !== "NOMCARREC") continue;
                 const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
-                
+
                 // Busquem un clip que envolti aquesta posició ideal i duri > 2.5s
                 const candidate = clips.find(clip => clip.start <= (idealPos + 2) && clip.start >= (idealPos - 2) && (clip.end - clip.start) > 2.5);
                 if (candidate) {
@@ -139,7 +138,7 @@
             for (const c of block.chyrons) {
                 const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
                 const adjustedTime = idealPos + avgDelta;
-                
+
                 // Marcadors per a REFRAME
                 if (c.rol === "NOMCARREC") hasNom = true;
                 if (c.name.includes("Firma")) hasFirma = true;

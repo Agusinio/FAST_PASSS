@@ -44,20 +44,20 @@ El mòdul **`4_Context.js`** recull els informes dels 3 Inspectors i decideix l'
 ### A. FLUX: MAIN ACTION (`flow_mainButton.js`)
 1. **Workflow**: `runMainAction(action, data)`
 2. **Logic**: `Project_Logic.createFromTemplate(...)` o `Project_Logic.openProject(...)`
-3. **Bridge**: `jsx_openProject(path)` ↔ `jsx_overwriteClip(name, track, time)`
+3. **Bridge**: `jsx_openProject(path)` ↔ `Clips.insert(name, track, time)`
 | **`2_IO.jsx`** | `jsx_importFiles` | Ingesta massiva amb anclatge a Bin. |
-| **`3_Project.jsx`** | `jsx_listSequences` | Recuperació d'indices de seqüència. |
-| **`6_Clips.jsx`** | `jsx_getClipDataByTime`| Dades del clip sota el cabezal (CTI). |
+| **`13_Timeline.jsx`**| `Timeline.get()` | Mòdul unificat de navegació (CTI, Range). |
+| **`6_Clips.jsx`** | `Clips.at(time)` | Dades del clip sota el cabezal (CTI). |
 | **`7_KF.jsx`** | `jsx_setClipXPosition`| Manipulació de la propietat Posi (Motion). |
 
 ---
 
-## 🚦 FILOSOFIA DE COMUNICACIÓ (JS ↔ JSX)
+## 🚦 FILOSOFIA DE COMUNICACIÓ (LITERAL & DRY)
 
 1.  **Orquestració en JS**: Totes les decisions de "Si passa X fem Y" es prenen a la capa JS. El JSX mai pren decisions.
-2.  **Índexs Corregits**: El JS parla en **1-based (V1, V2)**. El Bridge (`main.jsx`) resta 1 per parlar amb Premiere **(0-based)**.
+2.  **Namespaces Literals**: S'adopten objectes globals (`Clips`, `Timeline`, `Tracks`) que eliminen la redundància en els noms de mètodes.
 3.  **JSON com a Lenguatge**: Les dades complexes viatgen sempre com a strings JSON per evitar pèrdues de tipus.
 4.  **Async Bridge**: Totes les crides `callJSX` són asíncrones (Promises), evitant bloquejar la UI durant càlculs pesats.
 
 ---
-*Document tancat i segellat post-Pla LIPO per Antigravity.*
+*Document tancat i segellat post-Refactor Literal per Antigravity.*

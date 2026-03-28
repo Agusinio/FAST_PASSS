@@ -7,12 +7,12 @@
 
 // 1. GLOBALES Y NAMESPACES
 var csInterface = new CSInterface();
-var FASTPASS_UI = window.FASTPASS_UI || {}; 
+var FASTPASS_UI = window.FASTPASS_UI || {};
 FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; // Aseguramos que Sync exista para no dar error
 var isUserDraggingSlider = false;
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
-(async function() {
+(async function () {
     // Verificamos si utils existe antes de usarlo
     var getUtils = () => window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
     var utils = getUtils();
@@ -28,15 +28,15 @@ var isUserDraggingSlider = false;
         // 📍 PASO B: Verificación de respuesta (1_System.jsx devuelve "OK_BOOT")
         if (result && result.indexOf("OK") !== -1) {
             utils.log("✅ Premiere Listo (Bootstrap OK).");
-            
+
             // Levantamos el semáforo
-            utils.isJsxReady = true; 
+            utils.isJsxReady = true;
 
             // 📍 PASO C: Inicialización de la lógica
             if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.init) {
                 utils.log("🧠 Vinculando lógica de estado...");
-                await FASTPASS_UI.Core.Context.init(); 
-                FASTPASS_UI.Core.Context.checkContext(); 
+                await FASTPASS_UI.Core.Context.init();
+                FASTPASS_UI.Core.Context.checkContext();
             }
         } else {
             console.error("❌ El motor JSX no ha respondido correctamente: " + result);
@@ -49,7 +49,7 @@ var isUserDraggingSlider = false;
 })();
 
 // 3. CONTROLADOR DE LA INTERFAZ (BOTONES)
-(function() {
+(function () {
     'use strict';
 
     function initPanel() {
@@ -64,38 +64,38 @@ var isUserDraggingSlider = false;
         const btnCenter = document.getElementById('btnCenter');
         const btnKey = document.getElementById('btnKey');
 
-        if (btnIn) btnIn.addEventListener('click', function() { callWorkflow('Cut', 'runCutIn'); });
-        if (btnOut) btnOut.addEventListener('click', function() { callWorkflow('Cut', 'runCutOut'); });
-        if (btnScene) btnScene.addEventListener('click', function() { callWorkflow('Cut', 'runScene'); });
-        if (btnPrevClip) btnPrevClip.addEventListener('click', function() { callWorkflow('Cut', 'runPrevClip'); });
-        if (btnNextClip) btnNextClip.addEventListener('click', function() { callWorkflow('Cut', 'runNextClip'); });
-        
+        if (btnIn) btnIn.addEventListener('click', function () { callWorkflow('Cut', 'runCutIn'); });
+        if (btnOut) btnOut.addEventListener('click', function () { callWorkflow('Cut', 'runCutOut'); });
+        if (btnScene) btnScene.addEventListener('click', function () { callWorkflow('Cut', 'runScene'); });
+        if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
+        if (btnNextClip) btnNextClip.addEventListener('click', function () { callWorkflow('Cut', 'runNextClip'); });
+
         if (btnCenter) {
-            btnCenter.addEventListener('click', function() {
-                if(FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAutoReframe();
+            btnCenter.addEventListener('click', function () {
+                if (FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAutoReframe();
             });
         }
         if (btnKey) {
-            btnKey.addEventListener('click', function() { 
-                if(FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAddKF(); 
+            btnKey.addEventListener('click', function () {
+                if (FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAddKF();
             });
         }
 
         // --- SLIDER: MOVIMIENTO Y ANIMACIÓN ---
         const slider = document.getElementById('slider-move');
         if (slider) {
-            slider.oninput = function() {
+            slider.oninput = function () {
                 isUserDraggingSlider = true;
                 var val = parseInt(slider.value, 10);
                 // Movimiento visual (ligero)
                 csInterface.evalScript('jsx_setClipXPosition(' + val + ', false)');
             };
-            
-            slider.onchange = function() {
+
+            slider.onchange = function () {
                 isUserDraggingSlider = false;
                 var val = parseInt(slider.value, 10);
                 // Clavado de KF (pesado) y suavizado
-                csInterface.evalScript('jsx_setClipXPosition(' + val + ', true)', function() {
+                csInterface.evalScript('jsx_setClipXPosition(' + val + ', true)', function () {
                     if (FASTPASS_UI.Workflows.KF && FASTPASS_UI.Workflows.KF.runSmoothKF) {
                         FASTPASS_UI.Workflows.KF.runSmoothKF();
                     }
@@ -113,9 +113,9 @@ var isUserDraggingSlider = false;
         if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
         if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
         if (btnDiag) {
-            btnDiag.addEventListener('click', function() {
+            btnDiag.addEventListener('click', function () {
                 FASTPASS_UI.Utils.log("🛠️ Ejecutando Diagnóstico...");
-                csInterface.evalScript('jsx_getKFDiagnostic()', function(report) {
+                csInterface.evalScript('jsx_getKFDiagnostic()', function (report) {
                     console.log("📊 --- RESULTADO DEL DIAGNÓSTICO ---\n" + report);
                 });
             });
@@ -128,7 +128,7 @@ var isUserDraggingSlider = false;
         const btnTimeAdjust = document.getElementById('btnTimeAdjust');
 
         if (btnSrtWork) btnSrtWork.addEventListener('click', (e) => {
-            if(FASTPASS_UI.Workflows.Srt) FASTPASS_UI.Workflows.Srt.toggleSrtWork(e.ctrlKey);
+            if (FASTPASS_UI.Workflows.Srt) FASTPASS_UI.Workflows.Srt.toggleSrtWork(e.ctrlKey);
         });
         if (btnSrtIn) btnSrtIn.addEventListener('click', () => callWorkflow('Srt', 'runSrtIn'));
         if (btnSrtOut) btnSrtOut.addEventListener('click', () => callWorkflow('Srt', 'runSrtOut'));
@@ -151,7 +151,7 @@ var isUserDraggingSlider = false;
         if (selectBloc) selectBloc.addEventListener('change', handleSelectionChange);
 
         // --- INICIALIZACIÓN DE VALORES ---
-        if(FASTPASS_UI.Config && FASTPASS_UI.Config.loadSelection) FASTPASS_UI.Config.loadSelection();
+        if (FASTPASS_UI.Config && FASTPASS_UI.Config.loadSelection) FASTPASS_UI.Config.loadSelection();
 
         const progInicial = document.getElementById('programa').value;
         if (progInicial && FASTPASS_UI.Core.Context.updateConductorSelector) {
@@ -182,7 +182,7 @@ var isUserDraggingSlider = false;
         if (e.target.id === 'programa' && FASTPASS_UI.Core.Context.updateConductorSelector) {
             FASTPASS_UI.Core.Context.updateConductorSelector(e.target.value);
         }
-        if(FASTPASS_UI.Config) FASTPASS_UI.Config.saveSelection(e.target); 
+        if (FASTPASS_UI.Config) FASTPASS_UI.Config.saveSelection(e.target);
         callContextAudit();
     }
 
@@ -190,9 +190,9 @@ var isUserDraggingSlider = false;
         // Si el motor JSX no ha dicho OK, no pedimos nada
         if (!window.FASTPASS_UI.Utils.isJsxReady) {
             console.warn("⏳ Postergando auditoría: El motor JSX aún se está cargando...");
-            return; 
+            return;
         }
-    
+
         if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.checkContext) {
             FASTPASS_UI.Core.Context.checkContext();
         }
@@ -208,10 +208,10 @@ var isUserDraggingSlider = false;
 
 // 4. SINCRONIZACIÓN (POLLING)
 // Corregido para usar la nueva ruta y evitar el error del debugger
-FASTPASS_UI.Sync.updateSliderFromPremiere = function() {
+FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
     if (isUserDraggingSlider) return;
-    
-    csInterface.evalScript('jsx_getXPosition()', function(val) {
+
+    csInterface.evalScript('jsx_getXPosition()', function (val) {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
             const pxValue = Math.round(parseFloat(val) * 608);
@@ -220,7 +220,7 @@ FASTPASS_UI.Sync.updateSliderFromPremiere = function() {
     });
 };
 
-setInterval(function() {
+setInterval(function () {
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
         FASTPASS_UI.Sync.updateSliderFromPremiere();
     }
@@ -235,12 +235,12 @@ setTimeout(() => {
     if (window.FASTPASS_UI && FASTPASS_UI.Utils) {
         FASTPASS_UI.Utils.callJSX("jsx_getKFDiagnostic()").then(report => {
             console.log("📊 REPORTE INICIAL:\n" + report);
-        }).catch(() => {});
+        }).catch(() => { });
     }
 }, 3000);
 
 // Cache cleaner al entrar con el ratón
-window.onmouseenter = function() {
+window.onmouseenter = function () {
     csInterface.evalScript('jsx_ClearCache()');
 };
 

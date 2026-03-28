@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: TRACKS (Orquestación de pistas)
+ * LOGIC: TRACKS (Orquestació de pistes)
  * ============================================================================
  */
 
@@ -8,42 +8,48 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
+    const utils = {
+        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
+    };
+
     FASTPASS_UI.Logic.Tracks = {
         
         /**
-         * Silencia o desbloquea todas las pistas de un tipo.
+         * all: Aplica un estat (mute, lock) a totes les pistes d'un tipus.
          */
-        setGlobalState: async function(type, action, state) {
-            const utils = window.FASTPASS_UI.Utils;
-            const count = parseInt(await utils.callJSX(`jsx_getTrackCount('${type}')`));
+        all: async function(type, action, state) {
+            const count = parseInt(await utils.callJSX(`Tracks.count('${type}')`));
             
             for (let i = 1; i <= count; i++) {
                 if (action === "mute") {
-                    await utils.callJSX(`jsx_setTrackMute(${i}, ${state}, '${type}')`);
+                    await utils.callJSX(`Tracks.mute(${i}, ${state}, '${type}')`);
                 } else if (action === "lock") {
-                    await utils.callJSX(`jsx_setTrackLock(${i}, ${state}, '${type}')`);
+                    await utils.callJSX(`Tracks.lock(${i}, ${state}, '${type}')`);
                 }
             }
             return "OK_GLOBAL_" + action.toUpperCase();
         },
 
-        unmuteAll: function(type) { return this.setGlobalState(type || "video", "mute", false); },
-        unlockAll: function(type) { return this.setGlobalState(type || "video", "lock", false); },
+        unmuteAll: function(type) { return this.all(type || "video", "mute", false); },
+        unlockAll: function(type) { return this.all(type || "video", "lock", false); },
 
         /**
-         * AISLAMIENTO: Muta todo excepto la pista indicada.
+         * isolate: Muta tota la resta excepte la pista indicada.
          */
-        isolateTrack: async function(trackIdx, type) {
-            const utils = window.FASTPASS_UI.Utils;
-            const count = parseInt(await utils.callJSX(`jsx_getTrackCount('${type}')`));
+        isolate: async function(trackIdx, type) {
+            const count = parseInt(await utils.callJSX(`Tracks.count('${type}')`));
 
             for (let i = 1; i <= count; i++) {
                 const shouldMute = (i !== trackIdx);
-                await utils.callJSX(`jsx_setTrackMute(${i}, ${shouldMute}, '${type}')`);
+                await utils.callJSX(`Tracks.mute(${i}, ${shouldMute}, '${type}')`);
             }
             return "OK_ISOLATE";
         }
     };
+
+    // Alias global literal
+    window.Tracks = FASTPASS_UI.Logic.Tracks;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();

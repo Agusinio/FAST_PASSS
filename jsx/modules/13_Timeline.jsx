@@ -1,58 +1,72 @@
-/* 4_Timeline.jsx - SÓLO UTILIDADES COMPARTIDAS */
+/**
+ * =================================================================================
+ * 13_Timeline.jsx
+ * Módulo unificado para navegación del cabezal (CTI) y estado de la Secuencia.
+ * (Fusión de Sequences + Timeline Utilities - v18 DRY)
+ * =================================================================================
+ */
 
-var FASTPASS = FASTPASS || {};
-FASTPASS.Timeline = (function() {
+if (typeof $.global.FASTPASS === "undefined") { $.global.FASTPASS = {}; }
+var FASTPASS = $.global.FASTPASS;
 
-    // --- HELPERS INTERNOS DE BAJO NIVEL ---
-    // (Utilizados por los módulos especializados para no repetir código)
+FASTPASS.Timeline = {
 
-    function _getClipAtTime(track, time) {
-        if (!track || !time) return null;
-        for (var i = 0; i < track.clips.numItems; i++) {
-            var clip = track.clips[i];
-            if (clip.start.seconds <= time.seconds && clip.end.seconds > time.seconds) return clip;
-        }
-        return null;
-    }
+    /**
+     * get: Obtiene la posición actual del CTI en segundos.
+     */
+    get: function() {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        return seq ? seq.getPlayerPosition().seconds : 0;
+    },
 
-    function _sec(s) { 
+    /**
+     * set: Posiciona el CTI en un tiempo determinado.
+     */
+    set: function(seconds) {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        if (!seq) return "ERR:NO_SEQ";
+        
         var t = new Time(); 
-        t.seconds = parseFloat(s); 
-        return t; 
+        t.seconds = parseFloat(seconds);
+        seq.setPlayerPosition(t.ticks);
+        return "OK";
+    },
+
+    /**
+     * range: Establece puntos de Entrada (In) y Salida (Out).
+     */
+    range: function(inSec, outSec) {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        if (!seq) return "ERR:NO_SEQ";
+        
+        var tIn = new Time(); tIn.seconds = parseFloat(inSec);
+        var tOut = new Time(); tOut.seconds = parseFloat(outSec);
+        
+        seq.setInPoint(tIn.ticks);
+        seq.setOutPoint(tOut.ticks);
+        return "OK";
+    },
+
+    /**
+     * refresh: Realiza un 'nuclear refresh' para forzar actualizaciones de UI en Premiere.
+     */
+    refresh: function() {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        if (!seq) return "ERR:NO_SEQ";
+        
+        var pos = seq.getPlayerPosition();
+        var next = new Time(); 
+        next.seconds = pos.seconds + 0.001; 
+        
+        seq.setPlayerPosition(next.ticks);
+        seq.setPlayerPosition(pos.ticks);
+        return "REFRESH_OK";
+    },
+
+    // --- HELPER INTERNO (BAJO NIVEL) ---
+    _sec: function(s) {
+        var t = new Time(); 
+        t.seconds = parseFloat(s);
+        return t;
     }
-
-    return {
-        // Hacemos públicos los helpers para que Sequences, Clips y KF puedan usarlos
-        _getClipAtTime: _getClipAtTime,
-        _sec: _sec,
-
-        /**
-         * getClipInfoUnderCTI: Utility compartida para Clips y Tracks
-         */
-        getClipInfoUnderCTI: function(trackIdx, type, optionalTime) {
-            var seq = FASTPASS.Context.getWorkSequence();
-            if (!seq) return { found: false };
-            
-            // Base 1 to Base 0 conversion
-            var i = parseInt(trackIdx) - 1;
-            if (i < 0) i = 0;
-            
-            var track;
-            if (type === "audio") track = seq.audioTracks[i];
-            else if (type === "subtitle") track = seq.subtitleTracks[i];
-            else track = seq.videoTracks[i];
-            
-            if (!track || !track.clips) return { found: false };
-            
-            var timeToCheck = (optionalTime !== undefined) ? parseFloat(optionalTime) : seq.getPlayerPosition().seconds;
-            
-            for (var j = 0; j < track.clips.numItems; j++) {
-                var c = track.clips[j];
-                if (c.start.seconds <= timeToCheck && c.end.seconds > timeToCheck) {
-                    return { found: true, index: j, start: c.start.seconds, end: c.end.seconds, name: c.name, obj: c };
-                }
-            }
-            return { found: false };
-        }
-    };
-})();
+};

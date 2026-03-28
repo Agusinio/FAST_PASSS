@@ -1,66 +1,83 @@
-/* * =================================================================================
+/**
+ * =================================================================================
  * 5_Tracks.jsx
  * Módulo especializado en la gestión física de Tracks (Pistas).
- * (v14 - VERSIÓN ULTRA-ATÓMICA SIN BUCLES)
+ * (v15 - REFACCIÓ LITERAL DRY)
  * =================================================================================
  */
 
-var FASTPASS = FASTPASS || {};
+if (typeof $.global.FASTPASS === "undefined") { $.global.FASTPASS = {}; }
+var FASTPASS = $.global.FASTPASS;
+
 FASTPASS.Tracks = {
 
     /**
-     * Helper privat: Obté l'objecte track segons el tipus.
+     * _get: Helper privat per obtenir l'objecte track.
      */
-    _getTrackObj: function(idx, type) {
-        var seq = FASTPASS.Context.getWorkSequence();
+    _get: function(idx, type) {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
         if (!seq) return null;
-        var i = parseInt(idx) - 1; // Convert Base 1 to Base 0
+        
+        var i = parseInt(idx) - 1; // Base 1 (JS) a Base 0 (Premiere)
         if (i < 0) i = 0;
+        
         if (type === "audio") return seq.audioTracks[i];
         if (type === "subtitle") return seq.subtitleTracks[i];
         return seq.videoTracks[i];
     },
 
-    setMute: function(idx, m, type) {
+    /**
+     * count: Retorna el nombre total de pistes d'un tipus.
+     */
+    count: function(type) {
         try {
-            var track = this._getTrackObj(idx, type);
-            if (track) {
-                track.setMute(m);
-                return "OK";
-            }
-            return "ERR_NO_TRACK_INDEX_" + idx;
-        } catch(e) { return "EXC: " + e.message; }
-    },
-
-    setLock: function(idx, l, type) {
-        try {
-            var track = this._getTrackObj(idx, type);
-            if (track) {
-                track.setLocked(l);
-                return "OK";
-            }
-            return "ERR_NO_TRACK";
-        } catch(e) { return "EXC: " + e.message; }
-    },
-
-    setTarget: function(idx, t, type) {
-        try {
-            var track = this._getTrackObj(idx, type);
-            if (track) {
-                track.setTargeted(t);
-                return "OK";
-            }
-            return "ERR_NO_TRACK";
-        } catch(e) { return "EXC: " + e.message; }
-    },
-
-    getTrackCount: function(type) {
-        try {
-            var seq = FASTPASS.Context.getWorkSequence();
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             if (!seq) return 0;
             if (type === "audio") return seq.audioTracks.numTracks;
             if (type === "subtitle") return seq.subtitleTracks.numTracks;
             return seq.videoTracks.numTracks;
         } catch(e) { return 0; }
+    },
+
+    /**
+     * mute: Silencia o activa una pista.
+     */
+    mute: function(idx, state, type) {
+        try {
+            var track = this._get(idx, type);
+            if (track) {
+                track.setMute(state);
+                return "OK";
+            }
+            return "ERR_NO_TRACK";
+        } catch(e) { return "EXC: " + e.message; }
+    },
+
+    /**
+     * lock: Bloqueja o desbloqueja una pista.
+     */
+    lock: function(idx, state, type) {
+        try {
+            var track = this._get(idx, type);
+            if (track) {
+                track.setLocked(state);
+                return "OK";
+            }
+            return "ERR_NO_TRACK";
+        } catch(e) { return "EXC: " + e.message; }
+    },
+
+    /**
+     * target: Activa o desactiva el targeting de la pista.
+     */
+    target: function(idx, state, type) {
+        try {
+            var track = this._get(idx, type);
+            if (track) {
+                track.setTargeted(state);
+                return "OK";
+            }
+            return "ERR_NO_TRACK";
+        } catch(e) { return "EXC: " + e.message; }
     }
 };
