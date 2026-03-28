@@ -1,7 +1,7 @@
 /* * =================================================================================
  * 6_Clips.jsx
  * Módulo especializado en la manipulación física de objetos Clip en el Timeline.
- * (v17 - RECONSTRUCCIÓN LÍNEA A LÍNEA - SIN REGEX)
+ * (v18 - RECONSTRUCCIÓN LITERAL - DRY)
  * =================================================================================
  */
 
@@ -11,40 +11,37 @@ var FASTPASS = $.global.FASTPASS;
 FASTPASS.Clips = {
 
     /**
-     * Helper: Obtiene la pista de forma segura.
-     * REGLA: Recibe índice base 1 (V1 = 1) y entrega objeto Premiere (base 0).
+     * _get: Helper privat: Obté un objecte Track segons context ancorat.
      */
-    _getTrack: function(idx, type) {
+    _get: function(idx, type) {
         try {
-            var seq = FASTPASS.Context.getWorkSequence();
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             if (!seq) return null;
-
-            // ÚNICA RESTA: Aquí convertimos el 1 de la UI al 0 de Premiere
             var i = parseInt(idx) - 1; 
             if (i < 0) i = 0;
-
-            var tracks;
-            if (type === "audio") tracks = seq.audioTracks;
-            else if (type === "subtitle") tracks = seq.subtitleTracks;
-            else tracks = seq.videoTracks;
-
+            var tracks = (type === "audio") ? seq.audioTracks : (type === "subtitle" ? seq.subtitleTracks : seq.videoTracks);
             if (!tracks || i >= tracks.numTracks) return null;
             return tracks[i];
         } catch(e) { return null; }
     },
 
-    getCount: function(trackIdx, type) {
+    /**
+     * count: Compta clips en una pista.
+     */
+    count: function(trackIdx, type) {
         try {
-            var track = this._getTrack(trackIdx, type);
+            var track = this._get(trackIdx, type);
             return (track && track.clips) ? track.clips.numItems : 0;
         } catch(e) { return 0; }
     },
 
-    getDataByIndex: function(trackIdx, clipIdx, type) {
+    /**
+     * get: Obté data bàsica d'un clip per índex.
+     */
+    get: function(trackIdx, clipIdx, type) {
         try {
-            var track = this._getTrack(trackIdx, type);
+            var track = this._get(trackIdx, type);
             if (!track || !track.clips) return "null";
-            
             var clip = track.clips[clipIdx];
             if (!clip) return "null";
 
@@ -61,26 +58,31 @@ FASTPASS.Clips = {
         } catch(e) { return "null"; }
     },
 
-    getDataByTime: function(trackIdx, timeSec, type) {
+    /**
+     * at: Troba i retorna dades d'un clip en un temps determinat.
+     */
+    at: function(trackIdx, timeSec, type) {
         try {
-            var track = this._getTrack(trackIdx, type || "video");
+            var track = this._get(trackIdx, type || "video");
             if (!track || !track.clips) return "null";
-
-            var targetTime = (timeSec === -1) ? app.project.activeSequence.getPlayerPosition().seconds : parseFloat(timeSec);
+            var targetTime = (timeSec === -1) ? (app.project.activeSequence.getPlayerPosition().seconds) : parseFloat(timeSec);
             
             for (var i = 0; i < track.clips.numItems; i++) {
                 var clip = track.clips[i];
                 if (clip.start.seconds <= targetTime && clip.end.seconds > targetTime) {
-                    return this.getDataByIndex(trackIdx, i, type);
+                    return this.get(trackIdx, i, type);
                 }
             }
             return "null";
         } catch(e) { return "null"; }
     },
 
+    /**
+     * remove: Elimina un clip.
+     */
     remove: function(trackIdx, clipIdx, type) {
         try {
-            var track = this._getTrack(trackIdx, type);
+            var track = this._get(trackIdx, type);
             var clip = track.clips[clipIdx];
             if (clip) {
                 clip.remove(true, true);
@@ -90,13 +92,13 @@ FASTPASS.Clips = {
         } catch(e) { return "EXC: " + e.message; }
     },
 
-    overwrite: function(itemName, trackIdx, timeSec, type) {
+    /**
+     * insert: Insereix un element del Bin (Overwrite).
+     */
+    insert: function(itemName, trackIdx, timeSec, type) {
         try {
-            if (!app.project) return "ERR_NO_PROJECT";
             var nameToFind = decodeURIComponent(itemName);
             var item = FASTPASS.Project.findItem(nameToFind);
-            
-            // Si no lo encuentra, buscamos quitando la extensión manualmente (Sin Regex)
             if (!item) {
                 var lastDot = nameToFind.lastIndexOf(".");
                 if (lastDot > 0) {
@@ -104,10 +106,9 @@ FASTPASS.Clips = {
                     item = FASTPASS.Project.findItem(nameOnly);
                 }
             }
-
             if (!item) return "ERR_ITEM_NOT_FOUND";
 
-            var track = this._getTrack(trackIdx, type || "video"); 
+            var track = this._get(trackIdx, type || "video"); 
             if (!track) return "ERR_TRACK_NOT_FOUND";
 
             var tStart = new Time();
@@ -118,65 +119,74 @@ FASTPASS.Clips = {
     },
 
     /**
-     * Mueve la posición (In-point en el timeline) de un clip.
-     * @param {number} trackIdx - Índice de la pista.
-     * @param {number} clipIdx - Índice del clip en la pista.
-     * @param {number} seconds - Tiempo en segundos donde se quiere colocar.
-     * @param {string} type - "video", "audio" o "subtitle".
+     * start: Canvia el temps d'inici (posició) d'un clip.
      */
-    setStart: function(trackIdx, clipIdx, seconds, type) {
+    start: function(trackIdx, clipIdx, seconds, type) {
         try {
-            var track = this._getTrack(trackIdx, type || "video");
-            if (!track || !track.clips) return "ERR:TRACK_NOT_FOUND";
-
+            var track = this._get(trackIdx, type || "video");
             var clip = track.clips[clipIdx];
-            if (!clip) return "ERR:CLIP_NOT_FOUND";
-
             var t = new Time(); 
             t.seconds = parseFloat(seconds);
             clip.start = t;
             return "OK";
-        } catch (e) { return "ERR:" + e.message; }
+        } catch ( e ) { return "ERR:" + e.message; }
     },
 
-    setEnd: function(trackIdx, clipIdx, seconds, type) {
+    /**
+     * end: Canvia el temps final d'un clip.
+     */
+    end: function(trackIdx, clipIdx, seconds, type) {
         try {
-            var track = this._getTrack(trackIdx, type || "video");
+            var track = this._get(trackIdx, type || "video");
             var clip = track.clips[clipIdx];
             var t = new Time(); t.seconds = parseFloat(seconds);
             clip.end = t;
             return "OK";
-        } catch (e) { return "ERR: " + e.message; }
+        } catch ( e ) { return "ERR: " + e.message; }
     },
 
-    setInPoint: function(trackIdx, clipIdx, seconds, type) {
+    /**
+     * inPoint: Canvia el punt d'entrada (inPoint) d'un clip.
+     */
+    inPoint: function(trackIdx, clipIdx, seconds, type) {
         try {
-            var track = this._getTrack(trackIdx, type || "video");
-            if (!track || !track.clips) return "ERR:TRACK_NOT_FOUND";
-            
+            var track = this._get(trackIdx, type || "video");
             var clip = track.clips[clipIdx];
-            if (!clip) return "ERR:CLIP_NOT_FOUND";
-            
             var t = new Time(); 
             t.seconds = parseFloat(seconds);
             clip.inPoint = t;
             return "OK";
-        } catch (e) { return "ERR:" + e.message; }
+        } catch ( e ) { return "ERR:" + e.message; }
     },
 
-    getProperty: function(trackIdx, clipIdx, compMatch, propMatch, type) {
+    /**
+     * getProp: Obté el valor d'una propietat d'un clip.
+     */
+    getProp: function(trackIdx, clipIdx, compMatch, propMatch, type) {
         try {
-            var track = this._getTrack(trackIdx, type || "video");
+            var track = this._get(trackIdx, type || "video");
             var clip = track.clips[clipIdx];
             if (!clip) return null;
-            return clip.components.getComponentByMatchName(compMatch).properties.getPropertyByMatchName(propMatch);
+            
+            var comp = clip.components.getComponentByMatchName(compMatch);
+            if (!comp) return null;
+            var prop = comp.properties.getPropertyByMatchName(propMatch);
+            return prop;
         } catch(e) { return null; }
     },
 
-    setProperty: function(trackIdx, clipIdx, compMatch, propMatch, val, type) {
+    /**
+     * setProp: Estableix el valor d'una propietat d'un clip.
+     */
+    setProp: function(trackIdx, clipIdx, compMatch, propMatch, val, type) {
         try {
-            var prop = this.getProperty(trackIdx, clipIdx, compMatch, propMatch, type || "video");
+            var track = this._get(trackIdx, type || "video");
+            var clip = track.clips[clipIdx];
+            if (!clip) return "ERR_CLIP";
+            var comp = clip.components.getComponentByMatchName(compMatch);
+            var prop = comp.properties.getPropertyByMatchName(propMatch);
             if (!prop) return "ERR_PROP";
+            
             if (propMatch == "ADBE Video Position") {
                 prop.setValue(val, true);
             } else {
@@ -186,9 +196,12 @@ FASTPASS.Clips = {
         } catch (e) { return "ERR: " + e.message; }
     },
 
-    detectScenes: function(trackIdx) {
+    /**
+     * scenes: Executa el Scene Edit Detection.
+     */
+    scenes: function(trackIdx) {
         try {
-            var track = this._getTrack(trackIdx, "video");
+            var track = this._get(trackIdx, "video");
             if (!track || track.clips.numItems == 0) return "ERR_EMPTY_TRACK";
             for (var i = 0; i < track.clips.numItems; i++) {
                 track.clips[i].setSelected(true, true);
@@ -198,9 +211,12 @@ FASTPASS.Clips = {
         } catch (e) { return "ERR: " + e.message; }
     },
 
-    getSelectedSubtitleClips: function() {
+    /**
+     * getSubtitles: Busca clips de subtítols seleccionats.
+     */
+    getSubtitles: function() {
         try {
-            var seq = app.project.activeSequence;
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             if (!seq) return "[]";
             var results = [];
             for (var t = 0; t < seq.subtitleTracks.numItems; t++) {

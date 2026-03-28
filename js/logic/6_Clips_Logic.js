@@ -1,9 +1,8 @@
 /**
  * ============================================================================
- * LOGIC: CLIPS (Orquestación de acciones atómicas y Búsqueda) - Clips_Logic.js
+ * LOGIC: Clips (Orquestació d'accions atòmiques i Cerca) - v2.5.0
  * ============================================================================
  */
-
 (function() {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
@@ -13,18 +12,18 @@
         log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
     };
 
+    // Alias per a crides literals
     FASTPASS_UI.Logic.Clips = {
         
         /**
-         * Troba el clip en una pista a un temps determinat.
-         * Orquestra la cerca via bridges atòmics (count + indexData).
+         * at: Troba el clip en una pista a un temps determinat.
          */
-        findAtTime: async function(trackIdx, timeSec, type) {
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(${trackIdx}, '${type}')`));
+        at: async function(trackIdx, timeSec, type) {
+            const count = parseInt(await utils.callJSX(`Clips.count(${trackIdx}, '${type}')`));
             if (count === 0) return null;
 
             for (let i = 0; i < count; i++) {
-                const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${trackIdx}, ${i}, '${type}')`);
+                const dataRaw = await utils.callJSX(`Clips.get(${trackIdx}, ${i}, '${type}')`);
                 if (!dataRaw || dataRaw === "null") continue;
                 
                 const clip = JSON.parse(dataRaw);
@@ -37,49 +36,51 @@
         },
 
         /**
-         * Realiza un Ripple Trim del inicio de un clip.
+         * trimStart: Realitza un Ripple Trim de l'inici d'un clip.
          */
-        rippleTrimStart: async function(trackIdx, clipIdx, cutSec, clipData) {
+        trimStart: async function(trackIdx, clipIdx, cutSec, clipData) {
             const diff = parseFloat(cutSec) - clipData.start;
             if (diff <= 0.01) return "NO_DIFF";
 
             const newInPoint = clipData.inPoint + diff;
             
-            // 1. Ajustar V1
-            await utils.callJSX(`jsx_setClipInPoint(${trackIdx}, ${clipIdx}, ${newInPoint}, 'video')`);
-            await utils.callJSX(`jsx_setClipStart(${trackIdx}, ${clipIdx}, 0, 'video')`);
+            // 1. Ajustar V1 literalment
+            await utils.callJSX(`Clips.inPoint(${trackIdx}, ${clipIdx}, ${newInPoint}, 'video')`);
+            await utils.callJSX(`Clips.start(${trackIdx}, ${clipIdx}, 0, 'video')`);
 
-            // 2. Intentar ajustar A1 (Audio)
-            // Normalment la música/audio va lligat al mateix temps
-            const audioClip = await this.findAtTime(trackIdx, cutSec, "audio");
+            // 2. Intentar ajustar A1 (Audio) literalment
+            const audioClip = await this.at(trackIdx, cutSec, "audio");
             if (audioClip) {
                 const audioDiff = parseFloat(cutSec) - audioClip.start;
                 const newAudioIn = audioClip.inPoint + audioDiff;
-                await utils.callJSX(`jsx_setClipInPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
-                await utils.callJSX(`jsx_setClipStart(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
+                await utils.callJSX(`Clips.inPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
+                await utils.callJSX(`Clips.start(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
             }
 
-            return "OK_RIPPLE_TRIM_START";
+            return "OK_TRIM_START";
         },
 
         /**
-         * Neteja clips posteriors a un temps en múltiples pistes.
+         * clearAfterMultiple: Neteja clips posteriors a un temps en múltiples pistes.
          */
-        clearMultipleTracksAfter: async function(timeSec, videoTracks = [1], audioTracks = [], extendToTarget = false) {
+        clearAfterMultiple: async function(timeSec, videoTracks = [1], audioTracks = [], extendToTarget = false) {
             let total = 0;
             for (let vt of videoTracks) {
-                const res = await this.clearTrackAfter(vt, timeSec, "video", extendToTarget);
+                const res = await this.clearAfter(vt, timeSec, "video", extendToTarget);
                 total += parseInt(res.replace("OK_CLEAN_", "") || 0);
             }
             for (let at of audioTracks) {
-                const res = await this.clearTrackAfter(at, timeSec, "audio", extendToTarget);
+                const res = await this.clearAfter(at, timeSec, "audio", extendToTarget);
                 total += parseInt(res.replace("OK_CLEAN_", "") || 0);
             }
             return total;
         },
 
-        clearTrackAfter: async function(trackIdx, timeSec, type, extendToTarget = false) {
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(${trackIdx}, '${type}')`));
+        /**
+         * clearAfter: Neteja clips posteriors en una pista.
+         */
+        clearAfter: async function(trackIdx, timeSec, type, extendToTarget = false) {
+            const count = parseInt(await utils.callJSX(`Clips.count(${trackIdx}, '${type}')`));
             if (count === 0) return "EMPTY_TRACK";
 
             let removedCount = 0;
@@ -87,21 +88,18 @@
             let lastClipValid = null;
 
             for (let i = count - 1; i >= 0; i--) {
-                const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${trackIdx}, ${i}, '${type}')`);
+                const dataRaw = await utils.callJSX(`Clips.get(${trackIdx}, ${i}, '${type}')`);
                 if (!dataRaw || dataRaw === "null") continue;
                 
                 const clip = JSON.parse(dataRaw);
                 
-                // 1. Clips que comencen després del tall -> Esborrar
                 if (clip.start >= target - 0.01) {
-                    await utils.callJSX(`jsx_removeClip(${trackIdx}, ${i}, '${type}')`);
+                    await utils.callJSX(`Clips.remove(${trackIdx}, ${i}, '${type}')`);
                     removedCount++;
                 } 
-                // 2. Clips que creuen el tall -> Retallar el final
                 else if (clip.start < target && clip.end > target + 0.01) {
-                    await utils.callJSX(`jsx_setClipEnd(${trackIdx}, ${i}, ${target}, '${type}')`);
+                    await utils.callJSX(`Clips.end(${trackIdx}, i, ${target}, '${type}')`);
                 }
-                // 3. Guardem la referència a l'últim clip que queda per estendre'l si cal
                 else if (extendToTarget && clip.end < target - 0.01) {
                     if (!lastClipValid || clip.end > lastClipValid.end) {
                         lastClipValid = { index: i, end: clip.end };
@@ -109,21 +107,21 @@
                 }
             }
 
-            // Si cal estendre l'últim clip trobat abans del tall
             if (extendToTarget && lastClipValid) {
-                await utils.callJSX(`jsx_setClipEnd(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
+                await utils.callJSX(`Clips.end(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
             }
 
             return "OK_CLEAN_" + removedCount;
         },
+
         /**
-         * Obté tots els clips d'una pista en un format manejable.
+         * list: Obté tots els clips d'una pista.
          */
-        getTrackClips: async function(trackIdx, type = "video") {
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(${trackIdx}, '${type}')`));
+        list: async function(trackIdx, type = "video") {
+            const count = parseInt(await utils.callJSX(`Clips.count(${trackIdx}, '${type}')`));
             const clips = [];
             for (let i = 0; i < count; i++) {
-                const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${trackIdx}, ${i}, '${type}')`);
+                const dataRaw = await utils.callJSX(`Clips.get(${trackIdx}, ${i}, '${type}')`);
                 if (dataRaw && dataRaw !== "null") {
                     const c = JSON.parse(dataRaw);
                     c.index = i;
@@ -133,6 +131,9 @@
             return clips;
         }
     };
+
+    // Alias global per a sintaxi literal Clips.list()
+    window.Clips = FASTPASS_UI.Logic.Clips;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();

@@ -76,6 +76,7 @@ function jsx_getCTI() {
 }
 function jsx_setCTI_Safe(val) { try { return FASTPASS.Sequences.setCTI(val); } catch(e) { return "ERR: " + e.message; } }
 function jsx_setSequenceInOut(i, o) { try { return FASTPASS.Sequences.setInOut(i, o); } catch(e) { return "ERR: " + e.message; } }
+// --- 3. TRACKS (PUNT TOT-O-RES) ---
 function jsx_getTrackCount(type) { 
     return FASTPASS.Tracks.getTrackCount(type); // Quita el -1 si lo tenías
 }
@@ -90,27 +91,36 @@ function jsx_getProjectFolder() {
 }
 
 // --- 4. CLIPS (SOPORTE TOTAL V/A/S) ---
-function jsx_getClipCount(trackIdx, type) { 
-    // ENVIAMOS EL trackIdx TAL CUAL (1, 2, 3...)
-    return FASTPASS.Clips.getCount(trackIdx, type || "video"); 
-}
-function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { 
-    return FASTPASS.Clips.getDataByIndex(trackIdx, clipIdx, type || "video"); 
-}
-function jsx_removeClip(trackIdx, clipIdx, type) { try { return FASTPASS.Clips.remove(trackIdx, clipIdx, type || "video"); } catch(e) { return "ERR: " + e.message; } }
-function jsx_overwriteClip(name, trackIdx, time, type) { try { return FASTPASS.Clips.overwrite(name, trackIdx, time, type); } catch(e) { return "ERR: " + e.message; } }
-function jsx_getClipDataByTime(ti, t, type) { try { return FASTPASS.Clips.getDataByTime(ti, t, type); } catch(e) { return "null"; } }
-function jsx_getSelectedSubtitleClips() { try { return FASTPASS.Clips.getSelectedSubtitleClips(); } catch(e) { return "[]"; } }
-function jsx_detectScenes(trackIdx) { try { return FASTPASS.Clips.detectScenes(trackIdx); } catch(e) { return "ERR: " + e.message; } }
-function jsx_setClipStart(ti, ci, t, type) { 
-    return FASTPASS.Clips.setStart(ti, ci, t, type); 
-}
 
-function jsx_setClipInPoint(trackIdx, clipIdx, seconds, type) {
-    try { return FASTPASS.Clips.setInPoint(trackIdx, clipIdx, seconds, type); } catch(e) { return "ERR:" + e.message; }
-}
-function jsx_setClipEnd(ti, ci, t, type) { try { return FASTPASS.Clips.setEnd(ti, ci, t, type); } catch(e) { return "ERR: " + e.message; } }
-function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Clips.setProperty(ti, ci, comp, prop, val, type); }
+// 📍 NUEVA NOMENCLATURA LITERAL
+$.global.Clips = {
+    count: function(idx, type) { return FASTPASS.Clips.count(idx, type); },
+    get: function(idx, cIdx, type) { return FASTPASS.Clips.get(idx, cIdx, type); },
+    at: function(idx, t, type) { return FASTPASS.Clips.at(idx, t, type); },
+    remove: function(idx, cIdx, type) { return FASTPASS.Clips.remove(idx, cIdx, type); },
+    insert: function(name, idx, t, type) { return FASTPASS.Clips.insert(name, idx, t, type); },
+    start: function(idx, cIdx, t, type) { return FASTPASS.Clips.start(idx, cIdx, t, type); },
+    end: function(idx, cIdx, t, type) { return FASTPASS.Clips.end(idx, cIdx, t, type); },
+    inPoint: function(idx, cIdx, t, type) { return FASTPASS.Clips.inPoint(idx, cIdx, t, type); },
+    getProp: function(idx, cIdx, cam, prop, type) { return FASTPASS.Clips.getProp(idx, cIdx, cam, prop, type); },
+    set: function(idx, cIdx, cam, prop, val, type) { return FASTPASS.Clips.setProp(idx, cIdx, cam, prop, val, type); },
+    scenes: function(idx) { return FASTPASS.Clips.scenes(idx); },
+    subtitles: function() { return FASTPASS.Clips.getSubtitles(); }
+};
+
+// 📍 Manteniment Retroactiu (Bridges antics)
+function jsx_getClipCount(trackIdx, type) { return Clips.count(trackIdx, type); }
+function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { return Clips.get(trackIdx, clipIdx, type); }
+function jsx_getClipDataByTime(trackIdx, timeSec, type) { return Clips.at(trackIdx, timeSec, type); }
+function jsx_removeClip(trackIdx, clipIdx, type) { return Clips.remove(trackIdx, clipIdx, type); }
+function jsx_overwriteClip(itemName, trackIdx, timeSec, type) { return Clips.insert(itemName, trackIdx, timeSec, type); }
+function jsx_setClipStart(idx, cIdx, t, type) { return Clips.start(idx, cIdx, t, type); }
+function jsx_setClipInPoint(idx, cIdx, t, type) { return Clips.inPoint(idx, cIdx, t, type); }
+function jsx_setClipEnd(idx, cIdx, t, type) { return Clips.end(idx, cIdx, t, type); }
+function jsx_setClipProperty(idx, cIdx, cam, prop, val, type) { return Clips.set(idx, cIdx, cam, prop, val, type); }
+function jsx_getClipProperty(idx, cIdx, cam, prop, type) { return Clips.getProp(idx, cIdx, cam, prop, type); }
+function jsx_detectScenes(idx) { return Clips.scenes(idx); }
+function jsx_getSelectedSubtitleClips() { return Clips.subtitles(); }
 
 // --- 5. MOTION & KF ---
 function jsx_getXPosition() { try { return FASTPASS.KF.getXPosition(); } catch(e) { return "0"; } }
