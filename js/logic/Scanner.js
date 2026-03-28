@@ -11,57 +11,6 @@
 
     FASTPASS_UI.Logic.Scanner = {
         
-        /**
-         * Escaneja el NAS buscant els rètols (.wott / .mov) del programa i bloc seleccionats.
-         * @param {Object} ctx - Context de l'aplicació (programa, bloc, dateDir, etc.)
-         * @returns {Object} { tema: string, list: Array }
-         */
-        findTemaData: async function(ctx) {
-            const utils = window.FASTPASS_UI.Utils;
-            const readFn = this.readNASFolder || utils.readFolder;
-        
-            try {
-                const pathNAS = ctx.config.rutas.chyrons;
-                const allFiles = await readFn(pathNAS);
-                
-                if (!allFiles || allFiles.length === 0) return { tema: "PENDENT", list: [] };
-        
-                // 📍 MICRO-CIRUGÍA 1: Llegir la propietat correcta del Config.js
-                const fProg = (ctx.progData && ctx.progData.archivo_wott) ? ctx.progData.archivo_wott.toUpperCase() : "TNC";
-                const fBloc = ctx.bloque ? `_${ctx.bloque}_`.toUpperCase() : "_V1_";
-
-                utils.log(`🎯 Scanner: Filtrant per [${fProg}] i [${fBloc}]`, "DEBUG");
-        
-                // 📍 FILTRADO SIMPLE (El que te funcionaba)
-                let filtered = allFiles.filter(f => {
-                    const name = (f.name || f).toUpperCase();
-                    return name.indexOf(fProg) !== -1 && name.indexOf(fBloc) !== -1 && name.indexOf(".MOV") !== -1;
-                });
-        
-                if (filtered.length === 0) return { tema: "PENDENT", list: [] };
-        
-                // 📍 MICRO-CIRUGÍA 2: Ordenar antes de sacar el tema
-                filtered.sort((a, b) => (a.name || a).localeCompare(b.name || b));
-        
-                const finalList = filtered.map(f => {
-                    const name = f.name || f;
-                    // Limpieza básica de barras para evitar las "3 barras"
-                    let p = (pathNAS + name).replace(/\\+/g, '\\').replace(/\\/g, '/');
-                    if (p.indexOf("//") !== 0) p = "//" + p.replace(/^\/+/, "");
-                    return { name: name, path: p };
-                });
-        
-                let tema = "TEMA";
-                const first = filtered[0].name || filtered[0];
-                const parts = first.split('_');
-                if (parts.length >= 6) tema = parts[5].replace(/\..+$/, "");
-        
-                return { tema: tema, list: finalList };
-        
-            } catch (e) {
-                return { tema: "ERROR", list: [] };
-            }
-        },
 
         /**
          * Lògica de filtratge per finestra de temps (Guarda)

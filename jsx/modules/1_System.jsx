@@ -93,6 +93,3 @@ FASTPASS.System = {
     isMac: function() { return File.fs === "Macintosh"; }
     
 };
-
-// --- BRIDGE COMPAT ---
-$.global.jsx_isReady = function() { return "READY"; };

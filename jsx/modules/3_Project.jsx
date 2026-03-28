@@ -49,6 +49,17 @@ FASTPASS.Project = (function() {
     return {
         
         // --- 1. GESTIÓN DE PROYECTO ---
+        
+        save: function() {
+            try {
+                var proj = getTargetProject();
+                if (proj) {
+                    proj.save();
+                    return true;
+                }
+                return false;
+            } catch(e) { return false; }
+        },
 
         saveAs: function(pathString) {
             try {
@@ -65,11 +76,12 @@ FASTPASS.Project = (function() {
                 }
         
                 // 4. Intentamos el guardado usando .fsName (Ruta nativa del OS)
+                var currentProj = getTargetProject();
                 $.writeln("🧪 [JSX] Intentant saveAs a: " + myFile.fsName);
-                var success = app.project.saveAs(myFile.fsName);
+                var success = currentProj.saveAs(myFile.fsName);
                 
                 if (success) {
-                    $.global.FASTPASS_WorkProject = app.project;
+                    $.global.FASTPASS_WorkProject = currentProj;
                     return "OK";
                 }
                 
@@ -129,7 +141,7 @@ FASTPASS.Project = (function() {
 
         cloneSequence: function(sourceName) {
             try {
-                var proj = app.project;
+                var proj = getTargetProject();
                 // Buscamos la secuencia usando tu helper existente
                 var seq = findInCollection(proj.sequences, sourceName);
                 
@@ -177,7 +189,7 @@ FASTPASS.Project = (function() {
          * Busca una secuencia por su nombre en todo el proyecto.
          */
         findSequenceByName: function(name) {
-            var proj = app.project;
+            var proj = getTargetProject();
             if (!proj) return null;
             for (var i = 0; i < proj.sequences.numSequences; i++) {
                 if (proj.sequences[i].name === name) {

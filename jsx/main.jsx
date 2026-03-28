@@ -40,6 +40,7 @@ function jsx_BOOTSTRAP(extensionRootPath) {
 function jsx_isReady() { return "READY"; }
 function jsx_ClearCache() { return "OK"; }
 function jsx_fileExists(path) { return (new File(path)).exists; }
+function jsx_getActiveProjectName() { try { return app.project.name; } catch(e) { return ""; } }
 function jsx_scanOpenProjects() { try { return FASTPASS.Context.scanOpenProjects(); } catch(e) { return "[]"; } }
 function jsx_setWorkProject(projectName) {
     try {
@@ -53,8 +54,6 @@ function jsx_setWorkProject(projectName) {
     } catch(e) { return "ERR:" + e.message; }
 }
 
-var FASTPASS_WorkProject = null;
-
 // --- 1. IO & SYSTEM ---
 function jsx_scanDirectory(path) { try { return FASTPASS.IO.getRawFiles(path); } catch(e) { return "[]"; } }
 function jsx_importFiles(jsonPaths, binName) { try { return FASTPASS.IO.importFiles(jsonPaths, binName); } catch(e) { return "ERR: " + e.message; } }
@@ -63,6 +62,7 @@ function jsx_importFiles(jsonPaths, binName) { try { return FASTPASS.IO.importFi
 function jsx_listItems(binName, projectPath) { try { return FASTPASS.Project.listItems(binName, projectPath); } catch(e) { return "[]"; } }
 function jsx_renameItem(oldName, newName, projectPath) { try { return FASTPASS.Project.renameItem(oldName, newName, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
 function jsx_moveItem(itemName, binName, projectPath) { try { return FASTPASS.Project.moveItem(itemName, binName, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
+function jsx_saveProject(projectPath) { try { return FASTPASS.Project.save(projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
 function jsx_saveProjectAs(path, projectPath) { try { return FASTPASS.Project.saveAs(path, projectPath) ? "true" : "false"; } catch(e) { return "false"; } }
 function jsx_openProject(path) { try { return FASTPASS.Project.openProject(path) ? "true" : "false"; } catch(e) { return "false"; } }
 function jsx_cloneSequence(source, target, projectPath) { try { return FASTPASS.Project.cloneSequence(source, target, projectPath); } catch(e) { return "ERR: " + e.message; } }
@@ -82,8 +82,12 @@ function jsx_getTrackCount(type) {
 function jsx_setTrackMute(idx, m, type) { try { return FASTPASS.Tracks.setMute(idx, m, type); } catch(e) { return "false"; } }
 function jsx_setTrackLock(idx, l, type) { try { return FASTPASS.Tracks.setLock(idx, l, type); } catch(e) { return "false"; } }
 function jsx_setTrackTarget(idx, t, type) { try { return FASTPASS.Tracks.setTarget(idx, t, type); } catch(e) { return "false"; } }
-function jsx_getProjectFolder() { try { return app.project.path ? (new File(app.project.path)).parent.fsName : ""; } catch(e) { return ""; } }
-function jsx_getActiveSequenceName() { try { return app.project.activeSequence ? app.project.activeSequence.name : ""; } catch(e) { return ""; } }
+function jsx_getProjectFolder() { 
+    try { 
+        var proj = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkProject() : app.project;
+        return proj.path ? (new File(proj.path)).parent.fsName : ""; 
+    } catch(e) { return ""; } 
+}
 
 // --- 4. CLIPS (SOPORTE TOTAL V/A/S) ---
 function jsx_getClipCount(trackIdx, type) { 

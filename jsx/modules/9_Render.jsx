@@ -28,7 +28,7 @@ FASTPASS.Render = {
      */
     addToAME: function(presetPath, outputFolder, outputFileName) {
         try {
-            var seq = app.project.activeSequence;
+            var seq = FASTPASS.Context.getWorkSequence();
             var f = new File(presetPath);
             if (!f.exists) return "ERR_PRESET_NOT_FOUND";
             

@@ -101,7 +101,7 @@
                 // 4. POSICIONAMENT INICIAL
                 await callJSX('jsx_setCTI_Safe(0)');
                 
-                await callJSX('app.project.save()');
+                await callJSX('jsx_saveProject()');
                 getUtils().status("Peça Tancada OK", "exito");
                 log("🏁 Tancament completat i tornada a l'inici.", "INFO");
 

@@ -9,7 +9,8 @@
 
     const utils = {
         callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
-        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
+        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG"),
+        escape: (s) => window.FASTPASS_UI.Utils.escape(s)
     };
 
     FASTPASS_UI.Inspectors.Session = {

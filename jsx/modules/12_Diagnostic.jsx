@@ -9,7 +9,7 @@ FASTPASS.Diagnostic = (function() {
     return {
         runFullReport: function() {
             try {
-                var seq = app.project.activeSequence;
+                var seq = FASTPASS.Context.getWorkSequence();
                 if (!seq) return "DIAG: No hay secuencia activa.";
                 
                 // Buscamos clip en V1
