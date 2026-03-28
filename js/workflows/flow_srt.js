@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: SRT (SUBTÍTOLS) (v12 - VERSIÓ VARIABLES GLOBALS)
+ * WORKFLOW: SRT (SUBTÍTOLS) - v2.6.0 literal
  * ============================================================================
  */
 
@@ -33,7 +33,6 @@
                 if (btn) { btn.textContent = "TANCAR"; btn.classList.add('btn-active'); }
                 if (btnIn) btnIn.disabled = false;
                 if (btnOut) btnOut.disabled = false;
-                // Bloqueig de seguretat de totes les pistes de vídeo (V1-V7)
                 await getTracksLogic().setGlobalState("video", "lock", true);
             } else {
                 if (btn) { btn.textContent = "PREPARAR"; btn.classList.remove('btn-active'); }
@@ -49,11 +48,12 @@
             const T_S1 = cfg.tracks.subtitle.s1;
 
             try {
-                const ctiRaw = await callJSX('jsx_getCTI()');
+                // Literal: Timeline.get()
+                const ctiRaw = await callJSX('Timeline.get()');
                 const cti = parseFloat(ctiRaw || "0");
 
-                // Protocol: Inici mínim a 0.4s si és el primer clip
-                const clipCountRaw = await callJSX(`jsx_getClipCount(${T_S1}, "subtitle")`); 
+                // Literal: Clips.count()
+                const clipCountRaw = await callJSX(`Clips.count(${T_S1}, "subtitle")`); 
                 let finalCti = cti;
                 if (parseInt(clipCountRaw || "0") === 0 && cti < 0.4) {
                     finalCti = 0.4;
@@ -67,7 +67,7 @@
         runSrtOut: async function () {
             log("📝 SRT: Marcar OUT");
             try {
-                const ctiRaw = await callJSX('jsx_getCTI()');
+                const ctiRaw = await callJSX('Timeline.get()');
                 await getSrtLogic().cleanOut(parseFloat(ctiRaw || "0"));
             } catch (e) { getUtils().handleError(e, "SrtOut"); }
         },
@@ -78,7 +78,8 @@
         runTimeAdjust: async function () {
             log("⏳ Iniciant ajust proporcional de subtítols...");
             try {
-                const jsonClips = await callJSX('jsx_getSelectedSubtitleClips()');
+                // Literal: Clips.getSubtitles()
+                const jsonClips = await callJSX('Clips.getSubtitles()');
                 const clips = JSON.parse(jsonClips || "[]");
 
                 if (!clips || clips.length === 0) {
@@ -90,7 +91,7 @@
                 const firstIn = clips[0].start;
                 const lastOut = clips[clips.length - 1].end;
                 const currentDur = lastOut - firstIn;
-                const ctiRaw = await callJSX('jsx_getCTI()');
+                const ctiRaw = await callJSX('Timeline.get()');
                 const cti = parseFloat(ctiRaw || "0");
                 
                 if (cti <= firstIn) throw new Error("Col·loca el cabezal on vulguis que acabi el bloc.");
@@ -107,8 +108,9 @@
                     const newStart = cursor;
                     const newEnd = newStart + newDur;
 
-                    await callJSX(`jsx_setClipStart(${c.trackIndex + 1}, ${c.clipIndex}, ${newStart}, 'subtitle')`);
-                    await callJSX(`jsx_setClipEnd(${c.trackIndex + 1}, ${c.clipIndex}, ${newEnd}, 'subtitle')`);
+                    // Literals: Clips.start i Clips.end
+                    await callJSX(`Clips.start(${c.trackIndex + 1}, ${c.clipIndex}, ${newStart}, 'subtitle')`);
+                    await callJSX(`Clips.end(${c.trackIndex + 1}, ${c.clipIndex}, ${newEnd}, 'subtitle')`);
                     
                     cursor = newEnd + padding;
                 }
@@ -118,5 +120,5 @@
         }
     };
 
-    window.FASTPASS_UI = FASTPASS_UI;
+    window.FASTPASS_UI.Workflows.Srt = FASTPASS_UI.Workflows.Srt;
 })();

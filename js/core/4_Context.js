@@ -64,7 +64,7 @@
                 const projSlug = config.naming.getProjectName({
                     progData,
                     bloque: elBloc.value,
-                    userName: await getUtils().callJSX("jsx_getUserName()"),
+                    userName: await getUtils().callJSX("IO.getUser()"),
                     dateDir
                 }, sanitizedTheme);
 
@@ -92,7 +92,7 @@
                 }
 
                 // --- 5. CONCLUSIÓ D'ESTAT (Basada en Identitat, no en clips) ---
-                const fileExists = await getUtils().callJSX(`jsx_fileExists('${destPath.replace(/\\/g, "\\\\")}')`);
+                const fileExists = await getUtils().callJSX(`IO.exists('${destPath.replace(/\\/g, "\\\\")}')`);
 
                 let conclusion = 'NEW';
 

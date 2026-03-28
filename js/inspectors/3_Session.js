@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * INSPECTOR: 3_Session (Contingut Projecte Actiu)
+ * INSPECTOR: 3_Session (Contingut Projecte Actiu) - v2.6.0 literal
  * ============================================================================
  */
 (function() {
@@ -16,22 +16,24 @@
     FASTPASS_UI.Inspectors.Session = {
         
         async getBinContent(binName) {
-            const raw = await utils.callJSX(`jsx_listItems('${utils.escape(binName)}')`);
+            const raw = await utils.callJSX(`Project.items('${utils.escape(binName)}')`);
             return JSON.parse(raw || "[]");
         },
 
         async getSequences() {
-            const raw = await utils.callJSX("jsx_getSequences()");
+            const raw = await utils.callJSX("Project.list()");
             return JSON.parse(raw || "[]");
         },
 
         async getClipAtCTI(trackIdx, type) {
-            const raw = await utils.callJSX(`jsx_getClipDataByTime(${trackIdx}, -1, '${type || "video"}')`);
+            // Seguint la convenció literal: Clips.at(track, time)
+            // Posem -1 per a que el JSX use el playerPosition actual
+            const raw = await utils.callJSX(`Clips.at(${trackIdx}, -1, '${type || "video"}')`);
             return JSON.parse(raw || "null");
         },
 
         async getActiveSequenceName() {
-            return await utils.callJSX("jsx_getActiveSequenceName()");
+            return await utils.callJSX("Context.activeSeq()");
         }
     };
 

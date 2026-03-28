@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: RENDER (EXPORTACIÓ) (v11 - VERSIÓ ULTRA-LIPO)
+ * WORKFLOW: RENDER (EXPORTACIÓ) - v2.6.0 literal
  * ============================================================================
  */
 
@@ -25,14 +25,14 @@
             const config = FASTPASS_UI.Config.get();
 
             try {
-                // 1. Obtenir ruta del projecte o rutes per defecte
-                let outputDir = await callJSX("jsx_getProjectFolder()");
+                // Literal: Context.folder()
+                let outputDir = await callJSX("Context.folder()");
                 if (!outputDir) outputDir = config.rutas.destinoBase || "C:\\Temp";
                 
                 getUtils().status("Processant nom...", "procesando");
 
-                // 2. Càlcul del nom de sortida basat en la seqüència
-                const seqName = await callJSX('jsx_getActiveSequenceName()');
+                // Literal: Context.activeSeq()
+                const seqName = await callJSX('Context.activeSeq()');
                 let fileName = "Export_TBD.mp4";
                 
                 if (seqName) {
@@ -44,19 +44,17 @@
                     fileName = `${prog}_${tema}_${timeStr}.mp4`;
                 }
 
-                // 3. Ruta del Preset (.epr)
                 const extRoot = window.FASTPASS_UI.csInterface.getSystemPath(SystemPath.EXTENSION);
                 const presetPath = `${extRoot}/presets/H264_2Pass_Vertical.epr`.replace(/\\/g, '\\\\');
 
                 log(`📤 Destí: ${outputDir}\\${fileName}`);
 
-                // 4. Execució delegada a la Lògica
+                // Delegació a lògica
                 const res = await getRenderLogic().queueRender(presetPath, outputDir, fileName);
 
                 if (res && res.indexOf("OK") === 0) {
                     getUtils().status(`Render OK: ${fileName}`, "exito");
                     log("✅ Enviat a Media Encoder correctament.", "INFO");
-                    // Guardem la referència per a la portada
                     FASTPASS_UI.State.lastRenderName = fileName.replace(".mp4", "");
                 } else {
                     throw new Error("Error en el pont AME: " + res);
@@ -79,17 +77,17 @@
                 const T_MP4 = config.tracks.video.mp4;
                 const T_THEME = config.tracks.video.tematitol;
 
-                // 🛡️ AÏLLAMENT DE PISTES (Per a que no surtin chyrons bruts o fons)
-                // 1. Muteja-ho TOT (Video)
+                // 🛡️ AÏLLAMENT DE PISTES
                 await tracksLogic.setGlobalState("video", "mute", true);
-                // 2. Unmute només el que volem (MP4 i Tema)
-                await callJSX(`jsx_setTrackMute(${T_MP4}, false, 'video')`);
-                await callJSX(`jsx_setTrackMute(${T_THEME}, false, 'video')`);
+                
+                // Literals: Tracks.mute()
+                await callJSX(`Tracks.mute(${T_MP4}, false, 'video')`);
+                await callJSX(`Tracks.mute(${T_THEME}, false, 'video')`);
 
                 // 📸 SNAPSHOT
                 let nameBase = FASTPASS_UI.State.lastRenderName;
                 if (!nameBase) {
-                    const seqName = await callJSX('jsx_getActiveSequenceName()');
+                    const seqName = await callJSX('Context.activeSeq()');
                     nameBase = seqName ? seqName : "Portada_TBD";
                 }
 
@@ -108,12 +106,11 @@
                     throw new Error(res.log || "Error capturant snapshot.");
                 }
             } catch (e) { 
-                // Fail-safe: Assegurar-nos que les pistes tornen a estar visibles
                 if (window.FASTPASS_UI.Logic.Tracks) window.FASTPASS_UI.Logic.Tracks.unmuteAll("video");
                 getUtils().handleError(e, "RenderPortada"); 
             }
         }
     };
 
-    window.FASTPASS_UI = FASTPASS_UI;
+    window.FASTPASS_UI.Workflows.Render = FASTPASS_UI.Workflows.Render;
 })();

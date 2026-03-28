@@ -1,19 +1,18 @@
 /*
  * =================================================================================
  * PROJECTE: FAST >>> PASS
- * ARXIU: main.js (ENTRY POINT & UI CONTROLLER - FULL VERSION)
+ * ARXIU: main.js (ENTRY POINT & UI CONTROLLER - v2.6.0 literal)
  * =================================================================================
  */
 
 // 1. GLOBALES Y NAMESPACES
 var csInterface = new CSInterface();
 var FASTPASS_UI = window.FASTPASS_UI || {};
-FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; // Aseguramos que Sync exista para no dar error
+FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; 
 var isUserDraggingSlider = false;
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
-    // Verificamos si utils existe antes de usarlo
     var getUtils = () => window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
     var utils = getUtils();
     if (utils && utils.log) utils.log("🚀 Iniciando Panel...");
@@ -22,17 +21,13 @@ var isUserDraggingSlider = false;
         var extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
         var safeRoot = extensionRoot.replace(/\\/g, "/");
 
-        // 📍 PASO A: Llamada al Bootstrap
+        // 📍 PASO A: Llamada al Bootstrap (Manté el nom per ser el punt d'entrada)
         var result = await utils.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
 
-        // 📍 PASO B: Verificación de respuesta (1_System.jsx devuelve "OK_BOOT")
         if (result && result.indexOf("OK") !== -1) {
             utils.log("✅ Premiere Listo (Bootstrap OK).");
-
-            // Levantamos el semáforo
             utils.isJsxReady = true;
 
-            // 📍 PASO C: Inicialización de la lógica
             if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.init) {
                 utils.log("🧠 Vinculando lógica de estado...");
                 await FASTPASS_UI.Core.Context.init();
@@ -87,15 +82,15 @@ var isUserDraggingSlider = false;
             slider.oninput = function () {
                 isUserDraggingSlider = true;
                 var val = parseInt(slider.value, 10);
-                // Movimiento visual (ligero)
-                csInterface.evalScript('jsx_setClipXPosition(' + val + ', false)');
+                // Moviment visual literal
+                FASTPASS_UI.Utils.callJSX(`Anim.x(${val}, false)`);
             };
 
             slider.onchange = function () {
                 isUserDraggingSlider = false;
                 var val = parseInt(slider.value, 10);
-                // Clavado de KF (pesado) y suavizado
-                csInterface.evalScript('jsx_setClipXPosition(' + val + ', true)', function () {
+                // Clavat de KF i suavitzat literal
+                FASTPASS_UI.Utils.callJSX(`Anim.x(${val}, true)`).then(() => {
                     if (FASTPASS_UI.Workflows.KF && FASTPASS_UI.Workflows.KF.runSmoothKF) {
                         FASTPASS_UI.Workflows.KF.runSmoothKF();
                     }
@@ -115,7 +110,7 @@ var isUserDraggingSlider = false;
         if (btnDiag) {
             btnDiag.addEventListener('click', function () {
                 FASTPASS_UI.Utils.log("🛠️ Ejecutando Diagnóstico...");
-                csInterface.evalScript('jsx_getKFDiagnostic()', function (report) {
+                FASTPASS_UI.Utils.callJSX('Diagnostic.report()').then(report => {
                     console.log("📊 --- RESULTADO DEL DIAGNÓSTICO ---\n" + report);
                 });
             });
@@ -162,7 +157,6 @@ var isUserDraggingSlider = false;
         FASTPASS_UI.Utils.log("✅ TODOS LOS BOTONES VINCULADOS");
     }
 
-    // HELPERS INTERNOS
     async function callWorkflow(module, method) {
         if (FASTPASS_UI.Workflows[module] && FASTPASS_UI.Workflows[module][method]) {
             try {
@@ -187,18 +181,12 @@ var isUserDraggingSlider = false;
     }
 
     function callContextAudit() {
-        // Si el motor JSX no ha dicho OK, no pedimos nada
-        if (!window.FASTPASS_UI.Utils.isJsxReady) {
-            console.warn("⏳ Postergando auditoría: El motor JSX aún se está cargando...");
-            return;
-        }
-
+        if (!window.FASTPASS_UI.Utils.isJsxReady) return;
         if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.checkContext) {
             FASTPASS_UI.Core.Context.checkContext();
         }
     }
 
-    // Lanzamos la inicialización según el estado del documento
     if (document.readyState === 'loading') {
         window.addEventListener('DOMContentLoaded', initPanel);
     } else {
@@ -206,12 +194,10 @@ var isUserDraggingSlider = false;
     }
 })();
 
-// 4. SINCRONIZACIÓN (POLLING)
-// Corregido para usar la nueva ruta y evitar el error del debugger
+// 4. SINCRONIZACIÓN (POLLING DEL SLIDER)
 FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
     if (isUserDraggingSlider) return;
-
-    csInterface.evalScript('jsx_getXPosition()', function (val) {
+    FASTPASS_UI.Utils.callJSX('Anim.x()').then(val => {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
             const pxValue = Math.round(parseFloat(val) * 608);
@@ -224,33 +210,22 @@ setInterval(function () {
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
         FASTPASS_UI.Sync.updateSliderFromPremiere();
     }
-    // Detecció reactiva de canvi de projecte
     if (FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
         FASTPASS_UI.Registry.poll();
     }
 }, 500);
 
-// Diagnóstico post-arranque (matamos el viejo EvalScript error)
-setTimeout(() => {
-    if (window.FASTPASS_UI && FASTPASS_UI.Utils) {
-        FASTPASS_UI.Utils.callJSX("jsx_getKFDiagnostic()").then(report => {
-            console.log("📊 REPORTE INICIAL:\n" + report);
-        }).catch(() => { });
-    }
-}, 3000);
-
-// Cache cleaner al entrar con el ratón
+// Neteja de memòria al entrar amb el ratolí
 window.onmouseenter = function () {
-    csInterface.evalScript('jsx_ClearCache()');
+    FASTPASS_UI.Utils.callJSX('System.clear()');
 };
 
-// Afegeix això al final del teu fitxer d'arrancada del panell
+// Escalfament de rutes de xarxa
 async function warmUpNetwork() {
     var config = FASTPASS_UI.Config.get();
     if (config.rutas) {
         console.log("🔥 [SYSTEM] Escalfant rutes de xarxa...");
-        // Cridem a una funció lleugera que només verifiqui l'existència
-        utils.callJSX("jsx_fileExists('" + config.rutas.verticalitzacio.replace(/\\/g, '\\\\') + "')");
-        utils.callJSX("jsx_fileExists('" + config.rutas.chyrons.replace(/\\/g, '\\\\') + "')");
+        FASTPASS_UI.Utils.callJSX(`IO.exists('${config.rutas.verticalitzacio.replace(/\\/g, '\\\\')}')`);
+        FASTPASS_UI.Utils.callJSX(`IO.exists('${config.rutas.chyrons.replace(/\\/g, '\\\\')}')`);
     }
 };

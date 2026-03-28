@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: ASSEMBLY (Orquestació de muntatge i acabats) - v2.5.7 literal
+ * LOGIC: ASSEMBLY (Orquestació de muntatge i acabats) - v2.6.0 literal
  * ============================================================================
  */
 
@@ -35,7 +35,9 @@
             }
             
             // 3. CHYRON MASTER (V6)
-            const masterChyron = JSON.parse(await utils.callJSX("Project.biggestIn('CHYRONS')"));
+            const masterChyronRaw = await utils.callJSX("Project.biggestIn('CHYRONS')");
+            const masterChyron = JSON.parse(masterChyronRaw || "null");
+            
             if (masterChyron) {
                 utils.log(`🎯 Chyron principal detectat: ${masterChyron.name}`);
                 await window.Clips.insert(masterChyron.name, cfg.tracks.video.chyrons, 0.4, 6.6);
@@ -52,25 +54,27 @@
             const cfg = window.FASTPASS_UI.Config.get();
             const T_THEME = cfg.tracks.video.tematitol;
 
-            // 1. Aïllament visual de la pista de Temes per a la captura
+            // 1. Aïllament visual de la pista de Temes
             await window.Tracks.isolate(T_THEME, "video");
             await window.Timeline.set(targetTime);
             await utils.delay(1000);
 
-            // 2. Captura orquestrada
-            const folder = await utils.callJSX("jsx_getProjectFolder()");
+            // 2. Captura orquestrada (Literal: Context.folder)
+            const folder = await utils.callJSX("Context.folder()");
             const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`.replace(/\\/g, "\\\\");
             const res = await window.Render.capture(snapPath, targetTime);
             
             // 3. Restauració de visibilitat
             await window.Tracks.all("video", "mute", false);
 
-            // 4. Importació i "Smart Insert" (Fins al final de la seqüència)
+            // 4. Importació i "Smart Insert"
             if (res.success) {
                 const fileName = snapPath.split("\\\\").pop();
                 const payload = JSON.stringify([snapPath]);
-                await utils.callJSX(`IO.import('${payload}', 'root')`);
+                // Literal: IO.importFiles
+                await utils.callJSX(`IO.importFiles('${payload}', 'root')`);
                 
+                // Literal: Timeline.duration()
                 const dur = await utils.callJSX("Timeline.duration()");
                 await window.Clips.insert(fileName, T_THEME, targetTime, dur);
                 return "OK_FREEZE";
@@ -88,14 +92,15 @@
             
             utils.log(`👤 Assembly: Inserint conductor ${conductorFile}`);
             const payload = JSON.stringify([pathRaw.replace(/\\/g, "\\\\")]);
-            await utils.callJSX(`IO.import('${payload}', 'root')`);
+            // Literal: IO.importFiles
+            await utils.callJSX(`IO.importFiles('${payload}', 'root')`);
             await window.Clips.insert(conductorFile, cfg.tracks.video.chyrons, targetTime);
             
             return "OK_CONDUCTOR";
         }
     };
 
-    // Alias global literal window.Assembly
+    // Alias global literal
     window.Assembly = FASTPASS_UI.Logic.Assembly;
 
     window.FASTPASS_UI = FASTPASS_UI;

@@ -15,7 +15,7 @@
     FASTPASS_UI.Inspectors.SourceAssets = {
         
         async scan(path, pattern) {
-            const raw = await utils.callJSX(`jsx_scanDirectory(${JSON.stringify(path)})`);
+            const raw = await utils.callJSX(`IO.scanDirectory(${JSON.stringify(path)})`);
             let files = JSON.parse(raw || "[]");
             if (pattern && pattern !== "*.*") {
                 const targetExt = pattern.replace("*.", "").toLowerCase();

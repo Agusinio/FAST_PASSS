@@ -13,7 +13,7 @@
         
         async getOpenProjects() {
             try {
-                const raw = await window.FASTPASS_UI.Utils.callJSX("jsx_getOpenProjectsNames()");
+                const raw = await window.FASTPASS_UI.Utils.callJSX("Context.list()");
                 if (!raw || raw.startsWith("ERR") || raw.startsWith("Eval")) return [];
                 return JSON.parse(raw);
             } catch (e) { return []; }
@@ -21,7 +21,7 @@
 
         async getActiveProjectName() {
             try {
-                const name = await window.FASTPASS_UI.Utils.callJSX("jsx_getActiveProjectName()");
+                const name = await window.FASTPASS_UI.Utils.callJSX("Context.activeProj()");
                 if (!name || name.startsWith("ERR") || name.startsWith("Eval")) return "";
                 return name;
             } catch (e) { return ""; }

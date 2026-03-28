@@ -134,8 +134,7 @@
         
             try {
                 const payload = JSON.stringify(rawPaths);
-                // Enviamos sin comillas envolventes
-                const res = await this.callJSX(`jsx_importFiles(${payload}, '${binName}')`);
+                const res = await this.callJSX(`IO.importFiles(${payload}, '${binName}')`);
                 
                 if (res !== "OK") throw new Error(res);
                 this.log(`✅ Ingesta OK a ${binName}`, "INFO");

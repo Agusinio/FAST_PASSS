@@ -5,7 +5,11 @@
  * =================================================================================
  */
 
-// --- 1. POLYFILL DE JSON (Necesario para ExtendScript) ---
+// --- 1. NAMESPACE GLOBAL ---
+if (typeof $.global.FASTPASS === "undefined") { $.global.FASTPASS = {}; }
+var FASTPASS = $.global.FASTPASS;
+
+// --- 2. POLYFILL DE JSON (Necesario para ExtendScript) ---
 if (typeof JSON !== 'object') {
     JSON = {};
     (function () {
@@ -83,13 +87,17 @@ if (typeof JSON !== 'object') {
     }());
 }
 
-// --- 2. NAMESPACE GLOBAL ---
-var FASTPASS = FASTPASS || {};
-
-// --- 3. MÓDULO SYSTEM (Atómico) ---
+// --- 3. MÓDULO SYSTEM (Atómico y Seguro) ---
 FASTPASS.System = {
-    // Solo utilidades de entorno que NO pueden hacerse en JS
-    getAppVersion: function() { return app.version; },
-    isMac: function() { return File.fs === "Macintosh"; }
-    
+
+    /**
+     * version: Obté la versió nativa de Premiere (Ex: "24.1").
+     */
+    version: function() { return app.version; },
+
+    /**
+     * os: Retorna el sistema operatiu de forma literal.
+     * @returns {string} - "mac" o "win"
+     */
+    os: function() { return (File.fs === "Macintosh") ? "mac" : "win"; }
 };

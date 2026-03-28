@@ -37,7 +37,7 @@
          */
         poll: async function () {
             try {
-                const raw = await FASTPASS_UI.Utils.callJSX("jsx_scanOpenProjects()");
+                const raw = await FASTPASS_UI.Utils.callJSX("Context.list()");
                 if (!raw || raw === "[]") return;
 
                 const projects = JSON.parse(raw);
@@ -74,7 +74,7 @@
 
             if (isCompat) {
                 // Ancorar el projecte al motor JSX
-                await utils.callJSX(`jsx_setWorkProject('${utils.escape(projectName)}')`);
+                await utils.callJSX(`Context.set('${utils.escape(projectName)}')`);
 
                 // Actualitzar la barra d'estat
                 utils.status(`🟢 Actiu: ${projectName.substring(0, 25)}`, "exito");

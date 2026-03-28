@@ -1,13 +1,14 @@
-/* flow_KF.js - El Negociador de Animació */
+/* flow_KF.js - El Negociador de Animació - v2.6.0 literal */
 (function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    // FIX CRASH: callJSX i log no estaven definits en el scope. 
-    // Ara s'obtenen correctament de Utils.
     const getUtils = () => window.FASTPASS_UI.Utils;
     const log = (m) => getUtils().log(m, "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
+
+    const COMPANT = 'AE.ADBE Motion';
+    const PROPPOS = 'ADBE Video Position';
 
     FASTPASS_UI.Workflows.KF = {
 
@@ -16,7 +17,9 @@
             var self = this;
             log("💎 Sol·licitant nou KF...");
 
-            callJSX('jsx_addKeyframe()').then(function (res) {
+            // Literal: Anim.add(track, clip, component, property, time)
+            // Posem -1 per a que el motor busque la selecció actual
+            callJSX(`Anim.add(-1, -1, '${COMPANT}', '${PROPPOS}', -1)`).then(function (res) {
                 if (res && res.indexOf("OK") !== -1) {
                     return self.runSmoothKF();
                 }
@@ -30,7 +33,8 @@
                 await getUtils().delay(50);
                 log("🧠 Negociant corbes...");
 
-                var raw = await callJSX("jsx_getKFData()");
+                // Literal: Anim.get()
+                var raw = await callJSX("Anim.get()");
 
                 if (!raw || raw === "[]") {
                     console.warn("⚠️ No s'han obtingut dades. Has posat el KF primer?");
@@ -43,21 +47,21 @@
                 for (var i = 0; i < data.length; i++) {
                     var t = data[i].time;
                     if (i === 0 || i === data.length - 1) {
-                        await callJSX("jsx_applyExtremeKF(" + t + ")");
+                        // Extreme: Bezier (5)
+                        await callJSX(`Anim.interp(-1, -1, '${COMPANT}', '${PROPPOS}', ${t}, 5)`);
                     } else {
                         var vP = data[i - 1].val;
                         var vC = data[i].val;
                         var vN = data[i + 1].val;
                         var esPuntoDePaso = (vC > vP && vC < vN) || (vC < vP && vC > vN);
-                        if (esPuntoDePaso) {
-                            await callJSX("jsx_applyIntermediateKF(" + t + ")");
-                        } else {
-                            await callJSX("jsx_applyExtremeKF(" + t + ")");
-                        }
+                        
+                        // Intermediate: Linear (1) o Extreme (5) segons càlcul
+                        const mode = esPuntoDePaso ? 1 : 5;
+                        await callJSX(`Anim.interp(-1, -1, '${COMPANT}', '${PROPPOS}', ${t}, ${mode})`);
                     }
                 }
 
-                await callJSX("FASTPASS.Sequences.nuclearRefresh()");
+                await callJSX("Sequences.refresh()");
                 if (FASTPASS_UI.Sync) FASTPASS_UI.Sync.updateSliderFromPremiere();
                 log("✅ Corbes processades.");
             } catch (e) {
@@ -68,7 +72,8 @@
         runAutoReframe: async function() {
             log("🤖 Executant Auto Reframe Intel·ligent...");
             try {
-                const res = await callJSX("FASTPASS.KF.applyAutoReframe()");
+                // Literal: Anim.reframe()
+                const res = await callJSX("Anim.reframe()");
                 if (res === "OK_REFRAME") {
                     getUtils().status("Reframe OK", "exito");
                     log("✅ Auto Reframe aplicat al clip de V1.");
