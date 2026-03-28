@@ -143,3 +143,14 @@ FASTPASS.Context.getWorkSequence = function() {
         return proj.activeSequence || (proj.sequences.numSequences > 0 ? proj.sequences[0] : null);
     } catch(e) { return null; }
 };
+
+/**
+ * Retorna l'objecte projecte ancorat (o l'actiu per defecte).
+ */
+FASTPASS.Context.getWorkProject = function() {
+    try {
+        return ($.global.FASTPASS_WorkProject instanceof Project)
+            ? $.global.FASTPASS_WorkProject
+            : app.project;
+    } catch(e) { return app.project; }
+};

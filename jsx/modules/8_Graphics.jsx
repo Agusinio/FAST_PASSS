@@ -13,7 +13,7 @@ FASTPASS.Graphics = {
      */
     exportFrame: function(path) {
         try {
-            var seq = app.project.activeSequence;
+            var seq = FASTPASS.Context.getWorkSequence();
             if (!seq) return "ERR_NO_SEQ";
             var f = new File(path);
             if (!f.parent.exists) f.parent.create();
@@ -27,7 +27,7 @@ FASTPASS.Graphics = {
      */
     findLargeChyronVerbose: function() {
         try {
-            var proj = app.project;
+            var proj = FASTPASS.Context.getWorkProject();
             var bin = null;
             for (var i = 0; i < proj.rootItem.children.numItems; i++) {
                 if (proj.rootItem.children[i].name === "CHYRONS") { bin = proj.rootItem.children[i]; break; }
@@ -56,8 +56,7 @@ FASTPASS.Graphics = {
      */
     placeStoredChyron: function(trackIdx, tS, tE) {
         try {
-            // Re-escaneo rápido para encontrar el item (Atomismo: no guardamos estado en JSX si es posible)
-            var proj = app.project;
+            var proj = FASTPASS.Context.getWorkProject();
             var res = this.findLargeChyronVerbose();
             if (res.indexOf("✅") === -1) return "ERR_NOT_FOUND";
             
@@ -65,7 +64,8 @@ FASTPASS.Graphics = {
             var item = FASTPASS.Project.findItem(name);
             if (!item) return "ERR_ITEM_LOST";
 
-            var seq = proj.activeSequence;
+            var seq = proj.activeSequence || (proj.sequences.numSequences > 0 ? proj.sequences[0] : null);
+            if (!seq) return "ERR_NO_SEQ";
             var track = seq.videoTracks[trackIdx];
             var timeStart = new Time(); timeStart.seconds = parseFloat(tS);
             

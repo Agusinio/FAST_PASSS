@@ -30,7 +30,7 @@ FASTPASS.Timeline = (function() {
          * getClipInfoUnderCTI: Utility compartida para Clips y Tracks
          */
         getClipInfoUnderCTI: function(trackIdx, type, optionalTime) {
-            var seq = app.project.activeSequence;
+            var seq = FASTPASS.Context.getWorkSequence();
             if (!seq) return { found: false };
             
             // Base 1 to Base 0 conversion

@@ -13,8 +13,12 @@ Aquest document detalla el funcionament de l'extensió i les millores pendents.
 
 ## FASE 1: Descobriment i Estat (Discovery)
 Mentre l'usuari tria un programa o bloc:
-1.  [DINAMISME] **Project Awareness**: La extensió és capaç de saber en tot moment en quin projecte i seqüència està operant l'usuari (encara que n'hi hagin diverses d'obertes). 
-2.  [PENDENT] **Auto-verificació abans d'actuar**: Cada vegada que es prem un botó (ex: CUT), el sistema verifica internament si la seqüència activa en Premiere coincideix amb el Programa i Bloc seleccionats al panell. Si no hi ha match, es bloqueja l'acció per evitar errors.
+1.  [IMPLEMENTAT] **Multi-Project Awareness**: 
+    *   **Detecció Reactiva**: El panell detecta automàticament quan l'usuari canvia de pestanya de projecte a Premiere (via polling de 500ms).
+    *   **Filtrat de Compatibilitat**: Analitza si el projecte enfocat és un projecte de FAST>>>PASS basat en els tokens de configuració.
+    *   **UI Dinàmica**: Si el projecte no és compatible, el panell es desactiva ("Inactiu") per evitar errors.
+2.  [IMPLEMENTAT] **Contextual Safety (Anchoring)**: 
+    *   Totes les funcions JSX usen un helper central `getWorkSequence()` que garanteix que l'operació s'executa en el projecte ancorat pel panell, independentment de quin projecte tingui el focus visual en aquell moment.
 3.  Inspectors: SourceAssets, App i Session generen els informes.
 4.  [PENDENT] Bloqueig d'Usuari: Verificació de fitxer .lock en disc. Si existeix, mostra alerta amb el nom del propietari.
 5.  Botó Principal (Main Action):

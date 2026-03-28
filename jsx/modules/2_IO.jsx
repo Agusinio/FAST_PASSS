@@ -116,47 +116,8 @@ $.global.jsx_scanDirectory = function(path) {
 
 $.global.jsx_importFiles = function(pathsArray, binName) {
     try {
-        var proj = app.project;
-        var targetBin = proj.rootItem;
-        
-        // 1. BUSCAR O CREAR EL BIN
-        if (binName && binName !== "root") {
-            var found = false;
-            for (var i = 0; i < proj.rootItem.children.numItems; i++) {
-                if (proj.rootItem.children[i].name === binName) {
-                    targetBin = proj.rootItem.children[i];
-                    found = true;
-                    break;
-                }
-            }
-            // SI NO EXISTE EL BIN, LO CREAMOS
-            if (!found) targetBin = proj.rootItem.createBin(binName);
-        }
-
-        var validPaths = [];
-        for (var j = 0; j < pathsArray.length; j++) {
-            var rawPath = pathsArray[j];
-            var cleanPath = rawPath.replace(/\\/g, "/");
-            if (cleanPath.indexOf("//") !== 0) {
-                 cleanPath = cleanPath.replace(/^\/+/, "//"); 
-            }
-            cleanPath = decodeURI(cleanPath).replace(/\\'/g, "'");
-
-            var f = new File(cleanPath);
-            if (f.exists) {
-                validPaths.push(f.fsName);
-            } else {
-                var fFallback = new File(rawPath);
-                if (fFallback.exists) validPaths.push(fFallback.fsName);
-            }
-        }
-
-        if (validPaths.length > 0) {
-            // Importem directament al targetBin (que ja hem assegurat que existeix)
-            proj.importFiles(validPaths, true, targetBin, false);
-            return "OK";
-        }
-        return "ERR: Cap fitxer trobat";
+        var jsonPaths = JSON.parse(JSON.stringify(pathsArray));
+        return FASTPASS.IO.importFiles(JSON.stringify(jsonPaths), binName);
     } catch (e) {
         return "ERR: " + e.message;
     }

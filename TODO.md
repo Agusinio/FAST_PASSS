@@ -14,7 +14,9 @@
 - [x] **Slider Limits**: Límits físics per evitar negres.
 - [ ] **Boundary Detection**: Use the TC of the last chyron for better estimate of block end.
 
-## 📁 NAS & File System
-- [ ] **NC Files / Sync**: Review how "wotts" and "mp4" are synchronized when names have slight differences.
+## 🖥️ UI & Stability
+- [x] **Multi-Project Awareness**: El panell detecta canvis de projecte i s'adapta reactivament. [FET]
+- [x] **Context Safety**: Totes les crides JSX estan ancorades al projecte del panell. [FET]
+- [ ] **User Locking (.lock)**: Verificació de seguretat per evitar que dos usuaris editin la mateixa peça al NAS.
 
 © 2026 FAST >>> PASS

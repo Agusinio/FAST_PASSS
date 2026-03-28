@@ -12,7 +12,7 @@ FASTPASS.Tracks = {
      * Helper privat: Obté l'objecte track segons el tipus.
      */
     _getTrackObj: function(idx, type) {
-        var seq = app.project.activeSequence;
+        var seq = FASTPASS.Context.getWorkSequence();
         if (!seq) return null;
         var i = parseInt(idx) - 1; // Convert Base 1 to Base 0
         if (i < 0) i = 0;
@@ -56,7 +56,7 @@ FASTPASS.Tracks = {
 
     getTrackCount: function(type) {
         try {
-            var seq = app.project.activeSequence;
+            var seq = FASTPASS.Context.getWorkSequence();
             if (!seq) return 0;
             if (type === "audio") return seq.audioTracks.numTracks;
             if (type === "subtitle") return seq.subtitleTracks.numTracks;
