@@ -11,10 +11,17 @@
     const log = (...args) => FASTPASS_UI.Utils.log(...args);
     const getUtils = () => window.FASTPASS_UI.Utils;
 
+    let _lastCheckAt = 0; // Guard de debounce
+
     FASTPASS_UI.Core.Context = {
         
         async checkContext() {
             if (!getUtils().isJsxReady) return;
+
+            // 📍 DEBOUNCE: Evitem saturar el NAS si el polling és molt ràpid
+            const now = Date.now();
+            if (now - _lastCheckAt < 1000) return;
+            _lastCheckAt = now;
 
             // 📍 DINAMISMO: Pillamos los inspectors aquí dentro, no fuera.
             // Así nos aseguramos de que ya están cargados en el window.
@@ -52,9 +59,17 @@
                 const openProjs = await appInfo.getOpenProjects();
                 const activeProj = await appInfo.getActiveProjectName();
 
-                // 1. Definim els "Pasaports" vàlids
+                // 1. Definim els "Pasaports" vàlids d'Identitat
                 const templateName = "3CatInfo_NET.prproj";
-                const expectedProjName = `${progKey}_${elBloc.value}_${dateDir}_${theme || 'PENDENT'}.prproj`;
+                const sanitizedTheme = getUtils().sanitizeName(theme || 'PENDENT');
+                const projSlug = config.naming.getProjectName({
+                    progData, 
+                    bloque: elBloc.value, 
+                    userName: await getUtils().callJSX("jsx_getUserName()"),
+                    dateDir 
+                }, sanitizedTheme);
+                
+                const expectedProjName = `Pruebas_${projSlug}.prproj`;
                 const destPath = mediaSource + "\\" + expectedProjName;
 
                 // 2. Comprovacions de pertinença (Punt 5 Revisat: Obertura de Filtre)
@@ -93,8 +108,9 @@
                     conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
                 } 
                 // --- 6. APLICACIÓ A LA UI ---
+                FASTPASS_UI.State.projectName = expectedProjName;
                 this.updateLights(progKey, elBloc.value, theme, FASTPASS_UI.State.activeSequenceName);
-                this.updateButton(conclusion, { progKey, bloc: elBloc.value, theme });
+                this.updateButton(conclusion, { progKey, bloc: elBloc.value, theme, name: expectedProjName });
                 
             } catch(e) {
                 console.error("💥 Error en el Core de Context:", e);

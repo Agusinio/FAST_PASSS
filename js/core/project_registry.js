@@ -83,6 +83,11 @@
                 // Habilitar tots els botons de workflow
                 this._setWorkflowEnabled(true);
 
+                // 📍 REACTIVITAT: Forçar el recalculo del botó principal
+                if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
+                    FASTPASS_UI.Core.Context.checkContext();
+                }
+
             } else {
                 // Desancorar: en qualsevol operació el guard del JSX protegirà
                 utils.status("⚫ Projecte no compatible", "debug");

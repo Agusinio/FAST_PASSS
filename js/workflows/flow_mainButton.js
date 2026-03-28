@@ -60,7 +60,7 @@
             const seqName     = ctx.config.naming.getSequenceName(ctx, sanitizedTema);
             
             const fileName    = `Pruebas_${projectName}.prproj`;
-            const destPath    = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + fileName;
+            const destPath    = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + fileName;
         
             utils.ensureFolders(destPath.substring(0, destPath.lastIndexOf("\\")));
         
@@ -127,7 +127,7 @@
                 
                 const sanitizedTema = getUtils().sanitizeName(wottData.tema);
                 const newProjectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
-                const newPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\Pruebas_" + newProjectName + ".prproj";
+                const newPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + "Pruebas_" + newProjectName + ".prproj";
         
                 // 1. Importar archivos (Ahora que ya existen)
                 const media = await scanner().findMediaAssets(ctx);
@@ -153,6 +153,21 @@
                 log("✅ Actualització completada.");
             }
         },
+        
+        /**
+         * FLOW: ANAR AL PROJECTE (SI JA ESTÀ OBERT)
+         */
+        _runGo: async function (projName) {
+            log(`🚀 [FLOW-GO] Canviant focus a: ${projName}...`);
+            // El bridge reactivar el projecte a Premiere
+            const res = await callJSX(`jsx_setWorkProject('${getUtils().escape(projName)}')`);
+            if (res === "OK") {
+                // Forçem actualització del botó
+                if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
+                    await FASTPASS_UI.Core.Context.checkContext();
+                }
+            }
+        },
 
         /**
          * FLOW: OBRIR PROJECTE EXISTENT
@@ -163,8 +178,9 @@
             const cfg = ctx.config;
         
             const wottData = await scanner().findTemaData(ctx);
-            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" +
-                `Pruebas_${ctx.progData.archivo}_${ctx.dateDir}_${ctx.bloque}_${getUtils().sanitizeName(wottData.tema)}.prproj`;
+            const sanitizedTheme = getUtils().sanitizeName(wottData.tema || 'PENDENT');
+            const projSlug = ctx.config.naming.getProjectName(ctx, sanitizedTheme);
+            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + `Pruebas_${projSlug}.prproj`;
 
             // 📍 BLOQUEIG: Creem el fitxer .lock
             await this._createLock(destPath);
