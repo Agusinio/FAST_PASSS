@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: KEYFRAMES (Orquestación de animaciones)
+ * LOGIC: ANIM (Orquestació d'animacions i Keyframes) - v2.5.3 literal
  * ============================================================================
  */
 
@@ -8,50 +8,55 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    FASTPASS_UI.Logic.KF = {
+    const utils = {
+        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
+    };
+
+    FASTPASS_UI.Logic.Anim = {
         
         /**
-         * Orquesta la creación de una curva Bezier "Extrema".
-         * (Antiguamente una función compleja en el JSX).
+         * extreme: Crea una corba Bezier extrema (Usada en rètols).
          */
-        applyExtremeCurves: async function(ti, ci, t) {
-            const utils = window.FASTPASS_UI.Utils;
+        extreme: async function(ti, ci, t) {
             const comp = "AE.ADBE Motion";
             const prop = "ADBE Video Position";
             
-            // 1. Aseguramos el punto en el tiempo T
-            await utils.callJSX(`jsx_addKey(${ti}, ${ci}, '${comp}', '${prop}', ${t})`);
+            // 1. Add Key principal al temps T
+            await utils.callJSX(`Anim.add(${ti}, ${ci}, '${comp}', '${prop}', ${t})`);
             
-            // 2. Truco de Premiere para crear una curva (usamos un punto auxiliar)
+            // 2. Auxiliar per forçar corba (0.04s després)
             const auxT = t + 0.04;
-            await utils.callJSX(`jsx_addKey(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
+            await utils.callJSX(`Anim.add(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
             
-            // 3. Establecemos interpolación Bezier (5 = Bezier en Premiere)
-            await utils.callJSX(`jsx_setInterpolation(${ti}, ${ci}, '${comp}', '${prop}', ${t}, 5)`);
+            // 3. Interpolació Bezier (5)
+            await utils.callJSX(`Anim.interp(${ti}, ${ci}, '${comp}', '${prop}', ${t}, 5)`);
             
-            // 4. Limpiamos el punto auxiliar
-            await utils.callJSX(`jsx_removeKey(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
+            // 4. Neteja auxiliar
+            await utils.callJSX(`Anim.remove(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
 
-            return "OK_EXTREME_CURVE";
+            return "OK_EXTREME";
         },
 
         /**
-         * Gestiona el movimiento del slider del panel.
+         * slider: Gestiona el moviment del slider de la UI cap al clip.
          */
-        handleSliderEvent: async function(sliderVal, isFinal, ti, ci, t) {
-            const utils = window.FASTPASS_UI.Utils;
-            const valX = parseFloat(sliderVal) / 608.0; // Normalización a 0.0-1.0
-            
-            if (isFinal) {
-                // Al soltar el ratón: creamos el Keyframe físico
-                await utils.callJSX(`jsx_addKey(${ti}, ${ci}, 'AE.ADBE Motion', 'ADBE Video Position', ${t})`);
-                await utils.callJSX(`jsx_setKeyValue(${ti}, ${ci}, 'AE.ADBE Motion', 'ADBE Video Position', ${t}, [${valX}, 0.5])`);
-            } else {
-                // Durante el arrastre: solo actualizamos el valor visual (sin crear KF)
-                await utils.callJSX(`jsx_setClipProperty(${ti}, ${ci}, 'AE.ADBE Motion', 'ADBE Video Position', [${valX}, 0.5])`);
-            }
+        slider: async function(valPx, isFinal) {
+            // Conversió literal del canvas (608px) a Normalitzat (0-1)
+            const valNorm = parseFloat(valPx) / 608.0;
+            return await utils.callJSX(`Anim.x(${valNorm}, ${isFinal})`);
+        },
+
+        /**
+         * reframe: Aplica Auto Reframe.
+         */
+        reframe: async function(ti, ci) {
+            return await utils.callJSX(`Anim.reframe(${ti}, ${ci})`);
         }
     };
+
+    // Alias global literal window.Anim
+    window.Anim = FASTPASS_UI.Logic.Anim;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();

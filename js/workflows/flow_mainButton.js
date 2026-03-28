@@ -11,10 +11,7 @@
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
     const getUtils = () => window.FASTPASS_UI.Utils;
-    const projectLogic = () => window.FASTPASS_UI.Logic.Project;
-    const scanner = () => window.FASTPASS_UI.Logic.Scanner;
-
-    const log = (...args) => FASTPASS_UI.Utils.log(...args);
+    const log = (...args) => getUtils().log(...args);
     const callJSX = (s) => getUtils().callJSX(s);
 
     FASTPASS_UI.Workflows.MainButton = {
@@ -50,7 +47,7 @@
             const ctx = await this._setupContext();
 
             // 1. Scanner de Tema
-            const wottData = await scanner().findTemaData(ctx);
+            const wottData = await Scan.wotts(ctx);
             const temaReal = (wottData && wottData.tema) ? wottData.tema : "PENDENT";
 
             const sanitizedTema = utils.sanitizeName(temaReal);
@@ -65,7 +62,7 @@
             utils.ensureFolders(destPath.substring(0, destPath.lastIndexOf("\\")));
 
             log(`🏗️ Creant projecte [${temaReal}]...`);
-            const projectResult = await projectLogic().createFromTemplate(ctx.config.rutas.plantilla_net, destPath, seqName);
+            const projectResult = await window.Project.create(ctx.config.rutas.plantilla_net, destPath, seqName);
 
             if (projectResult === "OK" || projectResult.success) {
                 await this._createLock(destPath);
@@ -74,7 +71,7 @@
                 await utils.callJSX("FASTPASS.Project.createBin('CHYRON')");
 
                 // 📍 MICRO-CIRURGIA: Guardem el resultat directament al CTX
-                ctx.mediaAssets = await scanner().findMediaAssets(ctx);
+                ctx.mediaAssets = await window.Scan.mediaAssets(ctx);
 
                 // Usem ctx.mediaAssets en la condició
                 if ((wottData.list && wottData.list.length > 0) || (ctx.mediaAssets && ctx.mediaAssets.mp4)) {

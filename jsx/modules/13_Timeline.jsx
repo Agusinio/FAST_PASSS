@@ -63,6 +63,32 @@ FASTPASS.Timeline = {
         return "REFRESH_OK";
     },
 
+    /**
+     * duration: Retorna la durada total (Out point) de la seqüència.
+     */
+    duration: function() {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        return seq ? seq.outPoint.seconds : 0;
+    },
+
+    /**
+     * in: Estableix el punt d'entrada (In).
+     */
+    in: function(val) {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        if (seq) { seq.setInPoint(this._sec(val).ticks); return "OK"; }
+        return "ERR";
+    },
+
+    /**
+     * out: Estableix el punt de sortida (Out).
+     */
+    out: function(val) {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        if (seq) { seq.setOutPoint(this._sec(val).ticks); return "OK"; }
+        return "ERR";
+    },
+
     // --- HELPER INTERNO (BAJO NIVEL) ---
     _sec: function(s) {
         var t = new Time(); 

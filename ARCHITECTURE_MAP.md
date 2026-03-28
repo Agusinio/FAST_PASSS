@@ -48,6 +48,7 @@ El mòdul **`4_Context.js`** recull els informes dels 3 Inspectors i decideix l'
 | **`2_IO.jsx`** | `jsx_importFiles` | Ingesta massiva amb anclatge a Bin. |
 | **`13_Timeline.jsx`**| `Timeline.get()` | Mòdul unificat de navegació (CTI, Range). |
 | **`6_Clips.jsx`** | `Clips.at(time)` | Dades del clip sota el cabezal (CTI). |
+| **`13_Parse.js`** | `Parse.files()` | Singleton per a generació d'estructura i blocs. |
 | **`7_KF.jsx`** | `jsx_setClipXPosition`| Manipulació de la propietat Posi (Motion). |
 
 ---

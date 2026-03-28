@@ -31,7 +31,12 @@ Amb l'inici de la migració a nomenclatura literal, s'han consolidat els següen
 *   **Espai**: `FASTPASS.Project` (JSX) / `window.Project` (JS).
 *   **Fitxer**: `3_Project.jsx`.
 *   **Mètodes literals**: `save`, `saveAs`, `open`, `items`, `rename`, `move`, `clone`, `openSeq`, `list`, `bin`, `find`.
-*   **Cap Logica**: `Project.activate(path, seq)`, `Project.create(tpl, dest, seq)`.
+
+### E. PARSE (Refactor complet)
+*   **Espai**: `window.Parse` (JS).
+*   **Fitxer**: `13_Parse.js` (Legacy Parser simplificat).
+*   **Mètodes literals**: `files()`, `video()`, `meta()`, `classify()`, `theme()`.
+*   **Millora**: Conversió de prototip a Singleton Literal.
 
 ---
 
@@ -44,13 +49,14 @@ Amb l'inici de la migració a nomenclatura literal, s'han consolidat els següen
 
 ---
 
-## 🟠 PENDENT (Proper Refactor Literal)
-
-| Domini | Estat | Tasca |
-|--------|-------|-------|
-| **PARSE** | Legacy | Adoptar `Parse.files`, `Parse.wotts` (reemplaçant Parser.js). |
-
 ---
+
+## ✅ PROPEDÉUTICA DE REFACTORITZAT (LITERALS)
+| Domini | Estat | Proposta Literal |
+|--------|-------|-------|
+| **SCAN** | Refactor | `Scan.mediaAssets`, `Scan.wotts`, `_discardOld`. |
+| **SYSTEM** | Legacy | Migrar `1_System.jsx` a `System.ready()`. |
+| **IO** | Legacy | Migrar `2_IO.jsx` a `IO.import()`. |
 
 ## 🟡 MILLORES ESTRUCTURALS RECOMANADES
 

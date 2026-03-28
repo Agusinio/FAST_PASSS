@@ -127,6 +127,28 @@ FASTPASS.Project = (function() {
             return newBin ? newBin.name : "root";
         },
 
+        biggestIn: function(binName) {
+            try {
+                var bin = this.find(binName);
+                if (!bin || bin.children.numItems === 0) return "null";
+
+                var maxItem = null;
+                var maxSize = 0;
+                for (var i = 0; i < bin.children.numItems; i++) {
+                    var item = bin.children[i];
+                    if (item.type === 1) {
+                        var f = new File(item.getMediaPath());
+                        if (f.exists && f.length > maxSize) {
+                            maxSize = f.length;
+                            maxItem = item;
+                        }
+                    }
+                }
+                if (maxItem) return JSON.stringify({ name: maxItem.name, size: maxSize });
+                return "null";
+            } catch(e) { return "null"; }
+        },
+
         // --- 3. SEQCÜÈNCIES ---
 
         list: function() {

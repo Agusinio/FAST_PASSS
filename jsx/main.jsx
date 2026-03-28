@@ -27,7 +27,6 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         load("5_Tracks.jsx");
         load("6_Clips.jsx");
         load("7_KF.jsx");
-        load("8_Graphics.jsx");
         load("9_Render.jsx");
         load("11_Context.jsx");
         load("12_Diagnostic.jsx");
@@ -77,7 +76,8 @@ $.global.Project = {
     openSeq: function(n) { return FASTPASS.Project.openSeq(n); },
     list: function() { return FASTPASS.Project.list() || "[]"; },
     bin: function(n) { return FASTPASS.Project.bin(n); },
-    find: function(prog, bloc) { return FASTPASS.Project.byTokens(prog, bloc); }
+    find: function(prog, bloc) { return FASTPASS.Project.byTokens(prog, bloc); },
+    biggestIn: function(bin) { return FASTPASS.Project.biggestIn(bin); }
 };
 
 // 📍 Manteniment Retroactiu (Bridges antics)
@@ -100,7 +100,10 @@ $.global.Timeline = {
     get: function() { return FASTPASS.Timeline.get(); },
     set: function(s) { return FASTPASS.Timeline.set(s); },
     range: function(i, o) { return FASTPASS.Timeline.range(i, o); },
-    refresh: function() { return FASTPASS.Timeline.refresh(); }
+    refresh: function() { return FASTPASS.Timeline.refresh(); },
+    duration: function() { return FASTPASS.Timeline.duration(); },
+    in: function(v) { return FASTPASS.Timeline.in(v); },
+    out: function(v) { return FASTPASS.Timeline.out(v); }
 };
 
 // 📍 Manteniment Retroactiu (Bridges antics)
@@ -133,41 +136,54 @@ function jsx_getProjectFolder() {
 }
 
 // --- 4. CLIPS (SOPORTE TOTAL V/A/S) ---
-function jsx_getClipCount(trackIdx, type) {
-    // ENVIAMOS EL trackIdx TAL CUAL (1, 2, 3...)
-    return FASTPASS.Clips.getCount(trackIdx, type || "video");
-}
-function jsx_getClipDataByIndex(trackIdx, clipIdx, type) {
-    return FASTPASS.Clips.getDataByIndex(trackIdx, clipIdx, type || "video");
-}
+function jsx_getClipCount(trackIdx, type) { return FASTPASS.Clips.count(trackIdx, type || "video"); }
+function jsx_getClipDataByIndex(trackIdx, clipIdx, type) { return FASTPASS.Clips.get(trackIdx, clipIdx, type || "video"); }
 function jsx_removeClip(trackIdx, clipIdx, type) { try { return FASTPASS.Clips.remove(trackIdx, clipIdx, type || "video"); } catch (e) { return "ERR: " + e.message; } }
-function jsx_overwriteClip(name, trackIdx, time, type) { try { return FASTPASS.Clips.overwrite(name, trackIdx, time, type); } catch (e) { return "ERR: " + e.message; } }
-function jsx_getClipDataByTime(ti, t, type) { try { return FASTPASS.Clips.getDataByTime(ti, t, type); } catch (e) { return "null"; } }
-function jsx_getSelectedSubtitleClips() { try { return FASTPASS.Clips.getSelectedSubtitleClips(); } catch (e) { return "[]"; } }
-function jsx_detectScenes(trackIdx) { try { return FASTPASS.Clips.detectScenes(trackIdx); } catch (e) { return "ERR: " + e.message; } }
-function jsx_setClipStart(ti, ci, t, type) {
-    return FASTPASS.Clips.setStart(ti, ci, t, type);
-}
-
-function jsx_setClipInPoint(trackIdx, clipIdx, seconds, type) {
-    try { return FASTPASS.Clips.setInPoint(trackIdx, clipIdx, seconds, type); } catch (e) { return "ERR:" + e.message; }
-}
-function jsx_setClipEnd(ti, ci, t, type) { try { return FASTPASS.Clips.setEnd(ti, ci, t, type); } catch (e) { return "ERR: " + e.message; } }
-function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Clips.setProperty(ti, ci, comp, prop, val, type); }
+function jsx_overwriteClip(name, trackIdx, time, type) { try { return FASTPASS.Clips.insert(name, trackIdx, time, type); } catch (e) { return "ERR: " + e.message; } }
+function jsx_getClipDataByTime(ti, t, type) { try { return FASTPASS.Clips.at(ti, t, type); } catch (e) { return "null"; } }
+function jsx_getSelectedSubtitleClips() { try { return FASTPASS.Clips.getSubtitles(); } catch (e) { return "[]"; } }
+function jsx_detectScenes(trackIdx) { try { return FASTPASS.Clips.scenes(trackIdx); } catch (e) { return "ERR: " + e.message; } }
+function jsx_setClipStart(ti, ci, t, type) { return FASTPASS.Clips.start(ti, ci, t, type); }
+function jsx_setClipInPoint(trackIdx, clipIdx, seconds, type) { try { return FASTPASS.Clips.inPoint(trackIdx, clipIdx, seconds, type); } catch (e) { return "ERR:" + e.message; } }
+function jsx_setClipEnd(ti, ci, t, type) { try { return FASTPASS.Clips.end(ti, ci, t, type); } catch (e) { return "ERR: " + e.message; } }
+function jsx_setClipProperty(ti, ci, comp, prop, val, type) { return FASTPASS.Clips.setProp(ti, ci, comp, prop, val, type); }
 
 // --- 5. MOTION & KF ---
-function jsx_getXPosition() { try { return FASTPASS.KF.getXPosition(); } catch (e) { return "0"; } }
-function jsx_setClipXPosition(val, isFinal) { try { return FASTPASS.KF.setXPosition(val, isFinal); } catch (e) { return "ERR: " + e.message; } }
-function jsx_addKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.addKey(ti, ci, comp, prop, time); } catch (e) { return "ERR: " + e.message; } }
-function jsx_removeKey(ti, ci, comp, prop, time) { try { return FASTPASS.KF.removeKey(ti, ci, comp, prop, time); } catch (e) { return "ERR: " + e.message; } }
-function jsx_setKeyValue(ti, ci, comp, prop, time, val) { try { return FASTPASS.KF.setKeyValue(ti, ci, comp, prop, time, val); } catch (e) { return "ERR: " + e.message; } }
-function jsx_setInterpolation(ti, ci, comp, prop, time, type) { try { return FASTPASS.KF.setInterpolation(ti, ci, comp, prop, time, type); } catch (e) { return "ERR: " + e.message; } }
-function jsx_addKeyframe() { try { return FASTPASS.KF.addKeyframeAtCurrentTime(); } catch (e) { return "ERR: " + e.message; } }
-function jsx_applyAutoReframe(ti, ci) { try { return FASTPASS.KF.applyAutoReframe(ti, ci); } catch (e) { return "ERR: " + e.message; } }
+// --- 5. MOTION & ANIM ---
+$.global.Anim = {
+    add: function(ti, ci, comp, prop, t) { return FASTPASS.Anim.add(ti, ci, comp, prop, t); },
+    remove: function(ti, ci, comp, prop, t) { return FASTPASS.Anim.remove(ti, ci, comp, prop, t); },
+    set: function(ti, ci, comp, prop, t, v) { return FASTPASS.Anim.set(ti, ci, comp, prop, t, v); },
+    interp: function(ti, ci, comp, prop, t, i) { return FASTPASS.Anim.interp(ti, ci, comp, prop, t, i); },
+    list: function(ti, ci, comp, prop) { return FASTPASS.Anim.list(ti, ci, comp, prop); },
+    x: function(v, f) { return (arguments.length === 0) ? FASTPASS.Anim.x() : FASTPASS.Anim.x(v, f); },
+    reframe: function(ti, ci) { return FASTPASS.Anim.reframe(ti, ci); }
+};
+
+function jsx_getXPosition() { return Anim.x(); }
+function jsx_setClipXPosition(val, isFinal) { return Anim.x(val, isFinal); }
+function jsx_addKey(ti, ci, comp, prop, time) { return Anim.add(ti, ci, comp, prop, time); }
+function jsx_removeKey(ti, ci, comp, prop, time) { return Anim.remove(ti, ci, comp, prop, time); }
+function jsx_setKeyValue(ti, ci, comp, prop, time, val) { return Anim.set(ti, ci, comp, prop, time, val); }
+function jsx_setInterpolation(ti, ci, comp, prop, time, type) { return Anim.interp(ti, ci, comp, prop, time, type); }
+function jsx_addKeyframe() { 
+    var seq = app.project.activeSequence;
+    var cti = seq.getPlayerPosition();
+    var info = FASTPASS.Clips.at(1, cti.seconds, "video");
+    if (!info || info === "null") return "ERR";
+    return Anim.add(1, info.index, "ADBE Motion", "ADBE Video Position", cti.seconds);
+}
+function jsx_applyAutoReframe(ti, ci) { return Anim.reframe(ti, ci); }
 
 // --- 6. RENDER & EXPORT ---
-function jsx_exportFrameQE(tempPath, time) { try { return FASTPASS.Render.exportFrameQE(tempPath, time); } catch (e) { return "ERR: " + e.message; } }
-function jsx_renderActiveSequence(preset, output, name) { try { return FASTPASS.Render.addToAME(preset, output, name); } catch (e) { return "ERR: " + e.message; } }
+$.global.Render = {
+    frame: function(p, t) { return FASTPASS.Render.frame(p, t); },
+    snapshot: function(p, t) { return FASTPASS.Render.exportFrameQE(p, t); },
+    queue: function(pr, o, n) { return FASTPASS.Render.addToAME(pr, o, n); }
+};
+
+function jsx_exportFrameQE(tempPath, time) { return Render.snapshot(tempPath, time); }
+function jsx_renderActiveSequence(preset, output, name) { return Render.queue(preset, output, name); }
 
 // --- 7. CONTEXT (ATÓMICO Y SEGURO) ---
 function jsx_findSequenceByTokens(prog, bloc) {

@@ -45,6 +45,25 @@
                 await utils.callJSX(`Tracks.mute(${i}, ${shouldMute}, '${type}')`);
             }
             return "OK_ISOLATE";
+        },
+
+        /**
+         * clips: Obté tots els clips d'una pista.
+         */
+        clips: async function (trackIdx, type = "video") {
+            const countStr = await utils.callJSX(`Clips.count(${trackIdx}, '${type}')`);
+            const count = parseInt(countStr || 0);
+            const clips = [];
+            
+            for (let i = 0; i < count; i++) {
+                const dataRaw = await utils.callJSX(`Clips.get(${trackIdx}, ${i}, '${type}')`);
+                if (dataRaw && dataRaw !== "null") {
+                    const c = JSON.parse(dataRaw);
+                    c.index = i;
+                    clips.push(c);
+                }
+            }
+            return clips;
         }
     };
 

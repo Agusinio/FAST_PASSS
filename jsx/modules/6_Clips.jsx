@@ -93,9 +93,9 @@ FASTPASS.Clips = {
     },
 
     /**
-     * insert: Insereix un element del Bin (Overwrite).
+     * insert: Insereix un element del Bin (Overwrite) amb durada opcional.
      */
-    insert: function(itemName, trackIdx, timeSec, type) {
+    insert: function(itemName, trackIdx, startSec, endSec, type) {
         try {
             var nameToFind = decodeURIComponent(itemName);
             var item = FASTPASS.Project.findItem(nameToFind);
@@ -112,8 +112,15 @@ FASTPASS.Clips = {
             if (!track) return "ERR_TRACK_NOT_FOUND";
 
             var tStart = new Time();
-            tStart.seconds = parseFloat(timeSec);
+            tStart.seconds = parseFloat(startSec);
             track.overwriteClip(item, tStart);
+            
+            // Si passem temps de final -> Ajustar durada immediatament
+            if (endSec && parseFloat(endSec) > 0) {
+                var clip = track.clips[track.clips.numItems - 1]; // L'últim és el que s'acaba de posar
+                var tEnd = new Time(); tEnd.seconds = parseFloat(endSec);
+                clip.end = tEnd;
+            }
             return "OK";
         } catch (e) { return "ERR: " + e.message; }
     },

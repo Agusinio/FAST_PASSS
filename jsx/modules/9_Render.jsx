@@ -12,15 +12,31 @@ FASTPASS.Render = {
      * MÉTODE ATÒMIC: Exporta un frame PNG via QE.
      * @param {string} tempPathNoExt - Ruta absoluta sense extensió.
      */
-    exportFrameQE: function(tempPathNoExt, timecode) {
+    exportFrameQE: function(tempPathNoExt, timeSec) {
         try {
             app.enableQE();
             var qeSeq = qe.project.getActiveSequence();
             if (!qeSeq) return "ERR_NO_QE_SEQ";
-            
-            qeSeq.exportFramePNG(timecode, tempPathNoExt);
+            var time = (timeSec && timeSec !== "-1") ? timeSec : qeSeq.getPlayerPosition();
+            qeSeq.exportFramePNG(time, tempPathNoExt);
             return "OK_EXEC";
         } catch(e) { return "EXC: " + e.message; }
+    },
+
+    /**
+     * MÉTODE ATÒMIC: Exporta un frame via API estàndard (Motiu: Grafisme).
+     */
+    frame: function(path, timeSec) {
+        try {
+            var seq = FASTPASS.Context.getWorkSequence();
+            if (!seq) return "ERR_NO_SEQ";
+            var f = new File(path);
+            if (!f.parent.exists) f.parent.create();
+            var time = (timeSec && timeSec !== "-1") ? timeSec : seq.getPlayerPosition().seconds;
+            var t = new Time(); t.seconds = parseFloat(time);
+            var res = seq.exportFrame(t, f.fsName);
+            return res ? "OK" : "ERR_API";
+        } catch(e) { return "ERR: " + e.message; }
     },
 
     /**

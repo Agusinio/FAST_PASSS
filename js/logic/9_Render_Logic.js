@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: RENDER (Exportación orquestada)
+ * LOGIC: RENDER (Exportació orquestrada i Captura) - v2.5.6 literal
  * ============================================================================
  */
 
@@ -8,30 +8,26 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
+    const utils = {
+        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
+        delay: (ms) => window.FASTPASS_UI.Utils.delay(ms)
+    };
+
     FASTPASS_UI.Logic.Render = {
         
         /**
-         * Exportación orquestada de Snapshot.
-         * Sube la lógica de polling y gestión de archivos al JS.
+         * capture: Orquestra la captura d'un frame (PNG) amb polling de seguretat.
          */
-        exportSnapshot: async function(destPath) {
-            const utils = window.FASTPASS_UI.Utils;
-            
-            // 1. Obtenemos el tiempo actual en formato Timecode (o usamos el CTI bruto)
-            const cti = await utils.callJSX("jsx_getCTI()");
-            if (!cti) return { success: false, log: "No hay CTI" };
-
-            // 2. Ruta temporal (Usamos una carpeta de sistema)
+        capture: async function(destPath, timeSec = "-1") {
             const tempBase = "fast_snap_" + Date.now();
-            // In Premiere QE exportFramePNG adds .png automatically
-            const tempFileNoExt = "C:\\temp\\" + tempBase; // Ajustar según OS si es necesario
+            const tempFileNoExt = "C:\\temp\\" + tempBase; // TODO: Millorar ruta temp segons OS
             const tempFileFull = tempFileNoExt + ".png";
 
-            // 3. Llamada atómica a QE
-            const resExec = await utils.callJSX(`jsx_exportFrameQE('${tempFileNoExt}', '${cti}')`);
+            // 1. Exportació física via bridge literal
+            const resExec = await utils.callJSX(`Render.snapshot('${tempFileNoExt}', '${timeSec}')`);
             if (resExec !== "OK_EXEC") return { success: false, log: resExec };
 
-            // 4. Polling en JS (Mucho más eficiente que esperar en JSX)
+            // 2. Polling per verificar que s'ha escrit el fitxer
             let found = false;
             for (let i = 0; i < 30; i++) {
                 const stat = window.cep.fs.stat(tempFileFull);
@@ -39,29 +35,27 @@
                 await utils.delay(100);
             }
 
-            if (!found) return { success: false, log: "Timeout esperando frame" };
+            if (!found) return { success: false, log: "Timeout" };
 
-            // 5. Movemos a destino (Usando API de sistema de CEP)
-            // Primero borramos el destino si existe
+            // 3. Movem al destí final
             window.cep.fs.deleteFile(destPath);
             const moveRes = window.cep.fs.rename(tempFileFull, destPath);
             
-            if (moveRes.err === 0) {
-                return { success: true, log: "OK" };
-            } else {
-                // Si falla el rename (entre discos distintos), intentamos copia manual si fuera necesario
-                return { success: false, log: "Error moviendo archivo: " + moveRes.err };
-            }
+            return (moveRes.err === 0) 
+                ? { success: true, log: "OK" } 
+                : { success: false, log: "Error movent: " + moveRes.err };
         },
 
         /**
-         * Envío a AME.
+         * queue: Envia la seqüència activa a AME.
          */
-        queueRender: async function(preset, folder, name) {
-            const utils = window.FASTPASS_UI.Utils;
-            return await utils.callJSX(`jsx_renderActiveSequence('${preset}', '${folder}', '${name}')`);
+        queue: async function(preset, folder, name) {
+            return await utils.callJSX(`Render.queue('${preset}', '${folder}', '${name}')`);
         }
     };
+
+    // Alias global literal window.Render
+    window.Render = FASTPASS_UI.Logic.Render;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();

@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: CLIPS (Orquestación de acciones atómicas y Búsqueda) - Clips_Logic.js
+ * LOGIC: CLIPS (Orquestació de talls i Ripple Editing) - v2.5.2 literal
  * ============================================================================
  */
 
@@ -16,92 +16,67 @@
     FASTPASS_UI.Logic.Clips = {
 
         /**
-         * Troba el clip en una pista a un temps determinat.
-         * Orquestra la cerca via bridges atòmics (count + indexData).
+         * at: Troba el clip en una pista a un temps determinat (Bridge a JSX).
          */
-        findAtTime: async function (trackIdx, timeSec, type) {
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(${trackIdx}, '${type}')`));
-            if (count === 0) return null;
-
-            for (let i = 0; i < count; i++) {
-                const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${trackIdx}, ${i}, '${type}')`);
-                if (!dataRaw || dataRaw === "null") continue;
-
-                const clip = JSON.parse(dataRaw);
-                if (parseFloat(timeSec) >= clip.start && parseFloat(timeSec) <= clip.end) {
-                    clip.index = i;
-                    return clip;
-                }
-            }
-            return null;
+        at: async function (trackIdx, timeSec, type) {
+            const dataRaw = await utils.callJSX(`Clips.at(${trackIdx}, ${timeSec}, '${type || "video"}')`);
+            if (!dataRaw || dataRaw === "null") return null;
+            return JSON.parse(dataRaw);
         },
 
         /**
-         * Realiza un Ripple Trim del inicio de un clip.
+         * rippleIn: Ajusta l'entrada d'un clip (inPoint) i el mou a zero.
          */
-        rippleTrimStart: async function (trackIdx, clipIdx, cutSec, clipData) {
-            const diff = parseFloat(cutSec) - clipData.start;
+        rippleIn: async function (trackIdx, clipIdx, cutTime, clipData) {
+            const diff = parseFloat(cutTime) - clipData.start;
             if (diff <= 0.01) return "NO_DIFF";
 
-            const newInPoint = clipData.inPoint + diff;
+            const newIn = clipData.inPoint + diff;
 
-            // 1. Ajustar V1
-            await utils.callJSX(`jsx_setClipInPoint(${trackIdx}, ${clipIdx}, ${newInPoint}, 'video')`);
-            await utils.callJSX(`jsx_setClipStart(${trackIdx}, ${clipIdx}, 0, 'video')`);
+            // 1. Ajustar Clip Principal (Video)
+            await utils.callJSX(`Clips.inPoint(${trackIdx}, ${clipIdx}, ${newIn}, 'video')`);
+            await utils.callJSX(`Clips.start(${trackIdx}, ${clipIdx}, 0, 'video')`);
 
-            // 2. Intentar ajustar A1 (Audio)
-            // Normalment la música/audio va lligat al mateix temps
-            const audioClip = await this.findAtTime(trackIdx, cutSec, "audio");
+            // 2. Ajustar Audio sincronitzat (A1)
+            const audioClip = await this.at(trackIdx, cutTime, "audio");
             if (audioClip) {
-                const audioDiff = parseFloat(cutSec) - audioClip.start;
+                const audioDiff = parseFloat(cutTime) - audioClip.start;
                 const newAudioIn = audioClip.inPoint + audioDiff;
-                await utils.callJSX(`jsx_setClipInPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
-                await utils.callJSX(`jsx_setClipStart(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
+                await utils.callJSX(`Clips.inPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
+                await utils.callJSX(`Clips.start(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
             }
 
-            return "OK_RIPPLE_TRIM_START";
+            return "OK_RIPPLE_IN";
         },
 
         /**
-         * Neteja clips posteriors a un temps en múltiples pistes.
+         * rippleOut: Neteja un track eliminant clips a partir d'un temps (Outer trim).
          */
-        clearMultipleTracksAfter: async function (timeSec, videoTracks = [1], audioTracks = [], extendToTarget = false) {
-            let total = 0;
-            for (let vt of videoTracks) {
-                const res = await this.clearTrackAfter(vt, timeSec, "video", extendToTarget);
-                total += parseInt(res.replace("OK_CLEAN_", "") || 0);
-            }
-            for (let at of audioTracks) {
-                const res = await this.clearTrackAfter(at, timeSec, "audio", extendToTarget);
-                total += parseInt(res.replace("OK_CLEAN_", "") || 0);
-            }
-            return total;
-        },
+        rippleOut: async function (trackIdx, timeSec, type, extendToTarget = false) {
+            const countStr = await utils.callJSX(`Clips.count(${trackIdx}, '${type || "video"}')`);
+            const count = parseInt(countStr || 0);
+            if (count === 0) return "EMPTY";
 
-        clearTrackAfter: async function (trackIdx, timeSec, type, extendToTarget = false) {
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(${trackIdx}, '${type}')`));
-            if (count === 0) return "EMPTY_TRACK";
-
-            let removedCount = 0;
+            let removed = 0;
             const target = parseFloat(timeSec);
             let lastClipValid = null;
 
             for (let i = count - 1; i >= 0; i--) {
-                const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${trackIdx}, ${i}, '${type}')`);
+                const dataRaw = await utils.callJSX(`Clips.get(${trackIdx}, ${i}, '${type}')`);
                 if (!dataRaw || dataRaw === "null") continue;
 
                 const clip = JSON.parse(dataRaw);
 
-                // 1. Clips que comencen després del tall -> Esborrar
+                // 1. Clips que s'han de treure (Post-target)
                 if (clip.start >= target - 0.01) {
-                    await utils.callJSX(`jsx_removeClip(${trackIdx}, ${i}, '${type}')`);
-                    removedCount++;
+                    await utils.callJSX(`Clips.remove(${trackIdx}, ${i}, '${type}')`);
+                    removed++;
                 }
-                // 2. Clips que creuen el tall -> Retallar el final
+                // 2. Clips que s'han de retallar (Straddling target)
                 else if (clip.start < target && clip.end > target + 0.01) {
-                    await utils.callJSX(`jsx_setClipEnd(${trackIdx}, ${i}, ${target}, '${type}')`);
+                    await utils.callJSX(`Clips.end(${trackIdx}, ${i}, ${target}, '${type}')`);
                 }
-                // 3. Guardem la referència a l'últim clip que queda per estendre'l si cal
+                // 3. Captura per extreure si cal
                 else if (extendToTarget && clip.end < target - 0.01) {
                     if (!lastClipValid || clip.end > lastClipValid.end) {
                         lastClipValid = { index: i, end: clip.end };
@@ -109,30 +84,32 @@
                 }
             }
 
-            // Si cal estendre l'últim clip trobat abans del tall
             if (extendToTarget && lastClipValid) {
-                await utils.callJSX(`jsx_setClipEnd(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
+                await utils.callJSX(`Clips.end(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
             }
 
-            return "OK_CLEAN_" + removedCount;
+            return "OK_RIPPLE_OUT_" + removed;
         },
+
         /**
-         * Obté tots els clips d'una pista en un format manejable.
+         * rippleAllOut: Purga massiva de pistes després d'un tall.
          */
-        getTrackClips: async function (trackIdx, type = "video") {
-            const count = parseInt(await utils.callJSX(`jsx_getClipCount(${trackIdx}, '${type}')`));
-            const clips = [];
-            for (let i = 0; i < count; i++) {
-                const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${trackIdx}, ${i}, '${type}')`);
-                if (dataRaw && dataRaw !== "null") {
-                    const c = JSON.parse(dataRaw);
-                    c.index = i;
-                    clips.push(c);
-                }
+        rippleAllOut: async function (timeSec, videoTracks = [1], audioTracks = [], extend = false) {
+            let total = 0;
+            for (let v of videoTracks) {
+                const res = await this.rippleOut(v, timeSec, "video", extend);
+                total += parseInt(res.replace("OK_RIPPLE_OUT_", "") || 0);
             }
-            return clips;
+            for (let a of audioTracks) {
+                const res = await this.rippleOut(a, timeSec, "audio", extend);
+                total += parseInt(res.replace("OK_RIPPLE_OUT_", "") || 0);
+            }
+            return total;
         }
     };
+
+    // Alias literal global window.Clips
+    window.Clips = FASTPASS_UI.Logic.Clips;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();

@@ -1,46 +1,35 @@
 /**
  * ============================================================================
- * LOGIC: SRT (Subtítols orquestrats) (v12 - VARIABLES GLOBALS)
+ * LOGIC: SUB (Subtítols orquestrats i Neteja) - v2.5.4 literal
  * ============================================================================
- * Centralitza la lògica de manipulació de pistes de subtítols.
  */
 
-(function() {
+(function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
     const TYPE = "subtitle";
 
-    FASTPASS_UI.Logic.Srt = {
-        
+    FASTPASS_UI.Logic.Sub = {
+
         /**
-         * Obté tots els clips seleccionats a les pistes de subtítols de forma dinàmica.
+         * selected: Obté els clips de subtítols marcats en el timeline.
          */
-        getSelectedClips: async function() {
-            const utils = window.FASTPASS_UI.Utils;
+        selected: async function () {
             const res = [];
-            
-            // Obtenim quantes pistes de subtítols hi ha realment al timeline
-            const trackCountRaw = await utils.callJSX(`jsx_getTrackCount('${TYPE}')`);
-            const trackCount = parseInt(trackCountRaw || "0");
+            const trackCount = parseInt(await window.Tracks.count(TYPE) || 0);
 
             for (let t = 1; t <= trackCount; t++) {
-                const clipCountRaw = await utils.callJSX(`jsx_getClipCount(${t}, '${TYPE}')`);
-                const clipCount = parseInt(clipCountRaw || "0");
-                
-                for (let c = 0; c < clipCount; c++) {
-                    const dataRaw = await utils.callJSX(`jsx_getClipDataByIndex(${t}, ${c}, '${TYPE}')`);
-                    if (dataRaw) {
-                        const clip = JSON.parse(dataRaw);
-                        if (clip.selected) {
-                            res.push({
-                                trackIndex: t,
-                                clipIndex: c,
-                                start: clip.start,
-                                end: clip.end,
-                                name: clip.name
-                            });
-                        }
+                const clips = await window.Tracks.clips(t, TYPE);
+                for (let c of clips) {
+                    if (c.selected) {
+                        res.push({
+                            trackIndex: t,
+                            clipIndex: c.index,
+                            start: c.start,
+                            end: c.end,
+                            name: c.name
+                        });
                     }
                 }
             }
@@ -48,29 +37,25 @@
         },
 
         /**
-         * Neteja SRT IN: Elimina clips previs i aplica offset per alineeació.
+         * cleanIn: Purga clips antics i realinea el primer subtítol al 0.4s (In).
          */
-        cleanIn: async function(ctiSec) {
-            const cfg = window.FASTPASS_UI.Config.get();
-            const utils = window.FASTPASS_UI.Utils;
-            const T_S1 = cfg.tracks.subtitle.s1; // Pista 1 de SRT segons mapa
-            
-            const countRaw = await utils.callJSX(`jsx_getClipCount(${T_S1}, '${TYPE}')`);
-            const count = parseInt(countRaw || "0");
+        cleanIn: async function (ctiSec) {
+            const cfg = FASTPASS_UI.Config.get();
+            const T_S1 = cfg.tracks.subtitle.s1;
+
+            const clips = await window.Tracks.clips(T_S1, TYPE);
             const toMove = [];
-            
-            for (let i = count - 1; i >= 0; i--) {
-                const raw = await utils.callJSX(`jsx_getClipDataByIndex(${T_S1}, ${i}, '${TYPE}')`);
-                const clip = JSON.parse(raw || "{}");
-                
-                if (clip.end <= ctiSec) {
-                    await utils.callJSX(`jsx_removeClip(${T_S1}, ${i}, '${TYPE}')`);
+
+            // 1. Eliminar o Marcar per moure
+            for (let c of clips) {
+                if (c.end <= ctiSec) {
+                    await window.Clips.remove(T_S1, c.index, TYPE);
                 } else {
-                    toMove.push({ index: i, start: clip.start });
+                    toMove.push(c);
                 }
             }
 
-            // Aplicació d'offset proporcional si n'han quedat
+            // 2. Aplicar Offset d'alineació (In al 0.4s de seguretat)
             if (toMove.length > 0) {
                 toMove.sort((a, b) => a.start - b.start);
                 const firstStart = toMove[0].start;
@@ -78,21 +63,24 @@
 
                 for (let item of toMove) {
                     const newStart = Math.max(0, item.start + offset);
-                    await utils.callJSX(`jsx_setClipStart(${T_S1}, ${item.index}, ${newStart}, '${TYPE}')`);
+                    await window.Clips.start(T_S1, item.index, newStart, TYPE);
                 }
             }
-            return "OK_SRT_CLEAN_IN";
+            return "OK_SUB_CLEAN_IN";
         },
 
         /**
-         * Neteja SRT OUT: Elimina clips a partir del CTI a la pista principal.
+         * cleanOut: Purga massiva de cues de rètols (Out).
          */
-        cleanOut: async function(ctiSec) {
-            const cfg = window.FASTPASS_UI.Config.get();
+        cleanOut: async function (ctiSec) {
+            const cfg = FASTPASS_UI.Config.get();
             const T_S1 = cfg.tracks.subtitle.s1;
-            return await FASTPASS_UI.Logic.Clips.clearTrackAfter(T_S1, ctiSec, TYPE);
+            return await window.Clips.rippleOut(T_S1, ctiSec, TYPE);
         }
     };
+
+    // Alias global literal window.Sub
+    window.Sub = FASTPASS_UI.Logic.Sub;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();
