@@ -31,6 +31,16 @@
             return "OK_GLOBAL_" + action.toUpperCase();
         },
 
+        /**
+         * setGlobalState: Alias semántic de all() per a la crida des dels workflows.
+         * @param {string} type - "video" | "audio"
+         * @param {string} action - "mute" | "lock"
+         * @param {boolean} state - true = activar, false = desactivar
+         */
+        setGlobalState: async function(type, action, state) {
+            return this.all(type, action, state);
+        },
+
         unmuteAll: function(type) { return this.all(type || "video", "mute", false); },
         unlockAll: function(type) { return this.all(type || "video", "lock", false); },
 
