@@ -95,19 +95,16 @@ FASTPASS.Anim = {
             var info = FASTPASS.Clips.at(1, cti.seconds, "video");
             if (!info || info === "null") return 0.5;
             
-            var pPos = FASTPASS.Clips.getProp(1, info.index, "ADBE Motion", "ADBE Video Position", "video");
+            var pPos = FASTPASS.Clips.getProp(1, JSON.parse(info).index, "ADBE Motion", "ADBE Video Position", "video");
             
-            // --- GETTER ---
             if (arguments.length === 0) {
                 return pPos ? pPos.getValueAtTime(cti)[0] : 0.5;
             }
 
-            // --- SETTER ---
             var val = parseFloat(valNorm);
-            var pScale = FASTPASS.Clips.getProp(1, info.index, "ADBE Motion", "ADBE Video Scale", "video");
+            var pScale = FASTPASS.Clips.getProp(1, JSON.parse(info).index, "ADBE Motion", "ADBE Video Scale", "video");
             if (!pPos || !pScale) return "ERR_NO_PROP";
 
-            // Anti-Black Space Logic
             var seqW = seq.frameRect[2] - seq.frameRect[0];
             var scale = pScale.getValueAtTime(cti) / 100;
             var clipW = 1920 * scale; 
@@ -136,19 +133,29 @@ FASTPASS.Anim = {
     },
 
     /**
-     * reframe: Aplica l'efecte "Auto Reframe" a un clip.
+     * reframe: Aplica l'efecte "Auto Reframe" a un clip (o avisa si ja existeix)
      */
     reframe: function(ti, ci) {
         try {
-            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             var track = seq.videoTracks[ti - 1];
             var clip = track.clips[ci];
-            var effect = app.project.getVideoEffectByName("Auto Reframe");
-            if (effect && clip) {
-                clip.addVideoEffect(effect);
-                return "OK_REFRAME";
+            if (!clip) return "ERR_CLIP_NOT_FOUND";
+
+            // Buscar si ja té l'efecte
+            for (var i = 0; i < clip.components.numItems; i++) {
+                var comp = clip.components[i];
+                if (comp.displayName === "Auto Reframe" || comp.matchName === "AE.ADBE.AutoReframe") {
+                    return "INFO_ALREADY_HAS_REFRAME";
+                }
             }
-            return "ERR_EFFECT";
+
+            var effect = app.project.getVideoEffectByName("Auto Reframe");
+            if (effect) {
+                clip.addVideoEffect(effect);
+                return "OK_ADDED_REFRAME";
+            }
+            return "ERR_EFFECT_NOT_FOUND";
         } catch(e) { return "ERR: " + e.message; }
     }
 };

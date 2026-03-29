@@ -3,144 +3,136 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FAST >>> PASS (v70)</title>
+    <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
     <link rel="stylesheet" href="./style.css">
 </head>
 <body>
     <div id="main-content">
         
+        <!-- SECTION: SETUP -->
         <div class="section-container">
             <div class="section-label"><span>SETUP</span></div>
             <div class="section-content">
-                
                 <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">
                     <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
                 </div>
-
                 <div class="setup-grid">
                     <div class="setup-inputs">
                         <div class="inline-input-group">
                             <label for="programa">PROG:</label>
-                            <select id="programa">
-                                <option value="">Tria programa</option>
-                                <option value="MATINS">MATINS</option>
-                                <option value="TNCOMARQUES">TN COMARQUES</option>
-                                <option value="TNM">TN MIGDIA</option>
-                                <option value="TNV">TN VESPRE</option>
-                                <option value="VIDEOMATON">VIDEOMATON</option>
-                            </select>
+                            <select id="programa"><option value="">Tria...</option></select>
                         </div>
                         <div class="inline-input-group">
                             <label for="bloc">BLOC:</label>
-                            <select id="bloc">
-                                <option value="">Tria bloc</option>
-                                <option value="V1">V1</option>
-                                <option value="V2">V2</option>
-                                <option value="V3">V3</option>
-                                <option value="V4">V4</option>
-                            </select>
+                            <select id="bloc"><option value="">Tria...</option></select>
                         </div>
                         <div class="inline-input-group">
                             <label for="conductor">COND:</label>
-                            <select id="conductor">
-                                <option value="">Tria conductor</option>
-                            </select>
+                            <select id="conductor"><option value="">Tria...</option></select>
                         </div>
                     </div>
                     <div class="setup-button-container">
-                        <button id="btnMainAction" class="square-large">NOU</button>
+                        <button id="btnMainAction" class="btn-big-sq">NOU</button>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- SECTION: VÍDEO -->
         <div class="section-container">
             <div class="section-label"><span>VÍDEO</span></div>
             <div class="section-content">
-                <div class="video-edit-grid-wrapper">
-                    <div class="video-edit-grid">
-                        <button id="btnIn" class="secondary square-small">IN</button>
-                        <button id="btnScene" class="secondary wide-small">TROSEJA</button>
-                        <button id="btnOut" class="secondary square-small">OUT</button>
+                <div class="video-tactical-layout">
+                    <!-- Fila 1: IN, TROSEJA, OUT -->
+                    <div class="video-row-top">
+                        <button id="btnIn" class="secondary btn-sq-std">IN</button>
+                        <button id="btnScene" class="secondary btn-wide-flex">TROSEJA</button>
+                        <button id="btnOut" class="secondary btn-sq-std">OUT</button>
+                        <button id="btnCenter" class="secondary btn-sq-double-high" title="Toggle Auto Reframe">REFRAME</button>
                     </div>
-                </div>
-
-                <div class="video-slider-grid">
-                    <button id="btnPrevClip" class="secondary square-small">◀</button>
-                    <input type="range" id="slider-move" min="-355" max="962" value="304" aria-label="Posició X">
-                    <button id="btnNextClip" class="secondary square-small">▶</button>
-                    <button id="btnCenter" class="secondary square-small" title="Auto Reframe Pro">REFR</button>
-                    <button id="btnKey" class="secondary square-small">KEY</button>
+                    <!-- Fila 2: PREV, SLIDER, NEXT -->
+                    <div class="video-row-bottom">
+                        <button id="btnPrevClip" class="secondary btn-sq-std">◀</button>
+                        <div class="slider-container">
+                            <input type="range" id="slider-move" min="-1000" max="1000" value="0">
+                        </div>
+                        <button id="btnNextClip" class="secondary btn-sq-std">▶</button>
+                        <button id="btnKey" class="secondary btn-sq-double-high">KEYFRAME</button>
+                    </div>
                 </div>
             </div>
         </div>
         
+        <!-- SECTION: GRÀFICS -->
         <div class="section-container">
             <div class="section-label"><span>GRÀFICS</span></div>
             <div class="section-content">
-                 <div class="graphics-grid">
-                    <button id="btnPlaceChyrons" class="secondary square-large">RÈTOLS</button>
-                    <button id="btnPlaceGraph169" class="secondary square-large">FONS 16:9</button>
-                    <button id="btnBg" class="secondary square-large">FONS</button>
-                    <button id="btnDiagnostic" style="background:#444; color:#00ff00; border:1px solid #00ff00; margin-top:10px;">
-                        🔍 DIAGNÓSTICO POSICIÓN
-                    </button>
+                 <div class="graphics-strip">
+                    <button id="btnResetGrafs" class="secondary btn-sq-std reset-text" title="Limpiar Gráficos">RESET</button>
+                    
+                    <div class="retols-group">
+                        <button id="btnPlaceChyrons" class="secondary">RETOLS</button>
+                        <input type="text" id="txt-retol-part" placeholder="..." readonly>
+                    </div>
+
+                    <button id="btnPlaceGrafic" class="secondary btn-sq-std">GRAFIC</button>
+                    <button id="btnPlaceGraph169" class="secondary btn-sq-std">16:9</button>
+                    <button id="btnBg" class="secondary btn-sq-std">FONS</button>
                  </div>
             </div>
         </div>
 
+        <!-- SECTION: SUBTÍTOLS -->
         <div class="section-container">
             <div class="section-label"><span>SUBTÍTOLS</span></div>
             <div class="section-content">
-                <div class="srt-grid">
-                    <button id="btnSrtWork" class="secondary square-large" title="Importar i Preparar">PREPARAR</button>
+                <div class="srt-tactical-layout">
+                    <button id="btnSrtWork" class="secondary btn-big-sq">PREPARAR</button>
                     
-                    <div class="srt-inputs">
-                        <div class="srt-input-row">
-                            <button id="btnSrtIn" class="secondary square-small">IN</button>
-                            <label for="txt-srt-in">INICI:</label>
-                            <input type="text" id="txt-srt-in" placeholder="...">
+                    <div class="srt-central-column">
+                        <div class="srt-row">
+                            <button id="btnSrtIn" class="secondary btn-sq-std">IN</button>
+                            <input type="text" id="txt-srt-in" placeholder="Inici...">
                         </div>
-                        <div class="srt-input-row">
-                            <button id="btnSrtOut" class="secondary square-small">OUT</button>
-                            <label for="txt-srt-out">CUA:</label>
-                            <input type="text" id="txt-srt-out" placeholder="...">
+                        <div class="srt-row">
+                            <button id="btnSrtOut" class="secondary btn-sq-std">OUT</button>
+                            <input type="text" id="txt-srt-out" placeholder="Cua...">
                         </div>
                     </div>
 
-                    <button id="btnTimeAdjust" class="secondary square-large" title="Ajustar Temps">AJUSTAR</button>
+                    <button id="btnTimeAdjust" class="secondary btn-big-sq">AJUSTAR</button>
                 </div>
             </div>
         </div>
 
+        <!-- SECTION: RENDER -->
         <div class="section-container">
             <div class="section-label"><span>RENDER</span></div>
             <div class="section-content">
-                <div class="render-grid">
-                    <button id="btnRenderVideo" class="secondary square-large">VÍDEO</button>
-                    <button id="btnRenderPortada" class="secondary square-large">PORTADA</button>
+                <div class="render-strip">
+                    <button id="btnRenderVideo" class="secondary btn-big-sq-full">VÍDEO</button>
+                    <button id="btnRenderPortada" class="secondary btn-big-sq-full">PORTADA</button>
                 </div>
             </div>
         </div>
 
     </div> 
 
+    <!-- LOGS -->
     <div class="debug-wrapper">
         <div class="debug-header">
             <div class="debug-title">Consola</div>
             <div class="context-lights">
-                <div id="light-prog" class="light" title="Programa"></div>
-                <div id="light-bloc" class="light" title="Bloc"></div>
-                <div id="light-tema" class="light" title="Wotts"></div>
-                <div id="light-seq" class="light" title="Seqüència"></div>
+                <div id="light-prog" class="light"></div><div id="light-bloc" class="light"></div>
+                <div id="light-tema" class="light"></div><div id="light-seq" class="light"></div>
             </div>
             <div id="estado"></div>
         </div>
         <div id="console"></div>
     </div>
 
+    <!-- SCRIPTS -->
     <script src="js/lib/CSInterface.js"></script>
-
     <script src="js/core/utils.js"></script>
     <script src="js/core/config.js"></script>
     <script src="js/core/state.js"></script>
@@ -156,7 +148,6 @@
     <script src="js/logic/9_Render_Logic.js"></script>
     <script src="js/logic/10_Srt_Logic.js"></script>
     <script src="js/logic/13_Parser.js"></script>
-
     <script src="js/workflows/flow_mainButton.js"></script>
     <script src="js/workflows/flow_cut.js"></script>
     <script src="js/workflows/flow_retols.js"></script>
@@ -164,9 +155,7 @@
     <script src="js/workflows/flow_render.js"></script>
     <script src="js/workflows/flow_KF.js"></script>
     <script src="js/workflows/flow_assembly.js"></script>
-
     <script src="js/core/project_registry.js"></script>
-
     <script src="js/main.js"></script>
 </body>
 </html>

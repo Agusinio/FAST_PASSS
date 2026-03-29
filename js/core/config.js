@@ -1,143 +1,142 @@
 /**
  * ============================================================================
- * FASTPASS_UI.Config
- * Mòdul de configuració global, rutes de xarxa i mapatge de programes.
+ * FASTPASS_UI.Config - v2.7.0 (DYNAMIC CONFIG ENGINE)
  * ============================================================================
  */
 
 (function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
 
+    // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
+    let _activeConfig = {
+        general: { autor: "AGUS", guarda: 22, debug: false },
+        rutas: {
+            plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
+            conductors: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\",
+            vertical: "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\",
+            chyrons: "\\\\192.168.147.199\\public\\00_CHYRONS AUTOMATICS\\3CatInfo\\VERTICALITZACIO\\",
+            destino_base: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PROVES\\",
+            portadas: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PORTADES\\",
+            render1: "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\EXPORTS PROVISIONALS",
+            render2: "\\\\svftpccma\\videos\\MP4_3CATINFO_VERTICAL\\CONVERTITS_1080-1920\\608-1080"
+        },
+        estructuras: {
+            "TNs": {
+                tracks: { v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, s_s1: 1, s_s2: 2 },
+                programas: [
+                    { id: "TNCOMARQUES", archivo: "TN_COMARQUES", wott: "TNC", dir: "02_COMARQUES_PROJECTES", conductor: "Conduct_Nuria Sole Perez.mov" },
+                    { id: "TNM", archivo: "TN_MIGDIA", wott: "TNM", dir: "03_TN MIGDIA_PROJECTES", conductor: "Conduct_Xavi Coral Trullas.mov" },
+                    { id: "TNV", archivo: "TN_VESPRE", wott: "TNV", dir: "04_TN VESPRE_PROJECTES", conductor: "Conduct_Toni Cruanyes.mov" }
+                ]
+            }
+        }
+    };
+
     FASTPASS_UI.Config = {
 
         /**
-         * Retorna l'objecte de configuració centralitzat.
-         * @returns {Object} Objecte amb rutes, mapeig de programes i exportació.
+         * get: Retorna la configuració activa (Carregada o Fallback).
          */
         get: function () {
+            // Re-mapegat a l'estructura antiga per mantenir compatibilitat amb la resta del JS
+            const cfg = _activeConfig;
+            
+            // Trobar el programa per defecte o l'actiu per obtenir l'estructura
+            // De moment, estem a la fase 1, així que exposem una versió compatible
             return {
-                // Definicions de pistes (VUI 1-based) per a orquestració
                 tracks: {
-                    video: {
-                        mp4: 1,
-                        //template_1: 2, // NO TOCAR
-                        fondos: 2,
-                        graficos: 3, //Mapes, Gràfiques
-                        //mascara subtitulos: 4 // NO TOCAR
-                        tematitol: 5,
-                        chyrons: 6,    // NomCarrec, Firma, 
-                        llocdata: 7,
-                        //mosca: 8  // NO TOCAR
-                    },
-                    subtitle: {
-                        s1: 1,
-                        s2: 2
-                    }
+                    video: cfg.estructuras["TNs"].tracks,
+                    subtitle: { s1: cfg.estructuras["TNs"].tracks.s_s1, s2: cfg.estructuras["TNs"].tracks.s_s2 }
                 },
-
-                // Hores de tall per a l'escaneig de dates
-                guarda: 22,
-
-                // Rutes de Xarxa normalitzades per a Windows/Premiere
+                guarda: cfg.general.guarda,
                 rutas: {
-                    plantilla_net: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
-                    conductors: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\",
-                    verticalitzacio: "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\",
-                    chyrons: "\\\\192.168.147.199\\public\\00_CHYRONS AUTOMATICS\\3CatInfo\\VERTICALITZACIO\\",
-                    destinoBase: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PROVES\\",
-                    portadas: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PORTADES\\"
+                    plantilla_net: cfg.rutas.plantilla,
+                    conductors: cfg.rutas.conductors,
+                    verticalitzacio: cfg.rutas.vertical,
+                    chyrons: cfg.rutas.chyrons,
+                    destinoBase: cfg.rutas.destino_base,
+                    portadas: cfg.rutas.portadas,
+                    render1: cfg.rutas.render1,
+                    render2: cfg.rutas.render2
                 },
-
-                // Configuració específica per programa
-                mapeoProgramas: {
-                    "MATINS": {
-                        archivo: "MATINS",
-                        directorio: "01_MATINS_PROJECTES",
-                        archivo_wott: "MAT",
-                        conductors: {
-                            titular: "Conduct_Ariadna Oltra.mov",
-                            substituts: ["Conduct_Pere Bosch.mov", "Conduct_Marta Carreras.mov"]
-                        }
-                    },
-                    "TNCOMARQUES": {
-                        archivo: "TN_COMARQUES",
-                        directorio: "02_COMARQUES_PROJECTES",
-                        archivo_wott: "TNC",
-                        conductors: {
-                            titular: "Conduct_Nuria Sole Perez.mov",
-                            substituts: ["Conduct_Pere Bosch.mov"]
-                        }
-                    },
-                    "TNM": {
-                        archivo: "TN_MIGDIA",
-                        directorio: "03_TN MIGDIA_PROJECTES",
-                        archivo_wott: "TNM",
-                        conductors: {
-                            titular: ["Conduct_Anna Garnatxe Masmitja.mov", "Conduct_Xavi Coral Trullas.mov"],
-                            capsDesetmana: ["Conduct_Julia Lopez Romero.mov", "Conduct_Joan Raventos.mov"]
-                        }
-                    },
-                    "TNV": {
-                        archivo: "TN_VESPRE",
-                        directorio: "04_TN VESPRE_PROJECTES",
-                        archivo_wott: "TNV",
-                        conductors: {
-                            titular: "Conduct_Toni Cruanyes.mov",
-                            substituts: ["Conduct_Raquel Sans Duran.mov"]
-                        }
-                    }
-                },
-
-                // Rutes d'exportació persistents (localStorage)
+                mapeoProgramas: this._getLegacyMapping(cfg),
                 export: {
-                    video1: localStorage.getItem('fp_cfg_path_render_1') || "",
-                    video2: localStorage.getItem('fp_cfg_path_render_2') || "",
-                    portada: localStorage.getItem('fp_cfg_path_portada') || ""
+                    video1: cfg.rutas.render1,
+                    video2: cfg.rutas.render2,
+                    portada: cfg.rutas.portadas
                 },
-
                 naming: {
-                    // [Prog]_[Bloq]_[Autor]_[MMDD]_[Tema]
-                    getProjectName: function (ctx, sanitizedTema) {
+                    getProjectName: (ctx, sanitizedTema) => {
                         const prog = ctx.progData.archivo;
                         const bloq = ctx.bloque;
-                        const autor = ctx.userName || "USER";
-
-                        // Extraer MMDD de 24_03_2026 -> 0324
                         const d = ctx.dateDir.split('_');
                         const mmdd = d[1] + d[0];
-
-                        return `${prog}_${bloq}_${autor}_${mmdd}_${sanitizedTema}`;
+                        const user = cfg.general.autor || "USER";
+                        return `${prog}_${bloq}_${user}_${mmdd}_${sanitizedTema}`;
                     },
-                    getSequenceName: function (ctx, sanitizedTema) {
-                        const prog = ctx.progData.archivo;
-                        return `${prog}_${sanitizedTema}`;
+                    getSequenceName: (ctx, sanitizedTema) => {
+                        return `${ctx.progData.archivo}_${sanitizedTema}`;
                     }
-                }
+                },
+                debug: cfg.general.debug
             };
         },
 
+        _getLegacyMapping: function(cfg) {
+            const map = {};
+            // Unim tots els programes de totes les estructures
+            for (let k in cfg.estructuras) {
+                const est = cfg.estructuras[k];
+                est.programas.forEach(p => {
+                    map[p.id] = {
+                        archivo: p.archivo,
+                        directorio: p.dir,
+                        archivo_wott: p.wott,
+                        conductors: { titular: p.conductor, substituts: [] }
+                    };
+                });
+            }
+            return map;
+        },
+
         /**
-         * Persisteix la selecció del selector (Programa o Bloc) al localStorage.
-         * @param {HTMLElement} el - L'element select que ha canviat.
+         * init: Carrega el Profile.json físic usant el bridge literal de IO.
          */
+        init: async function () {
+            try {
+                const utils = window.FASTPASS_UI.Utils;
+                const extensionRoot = window.cep.fs.getSystemPath(window.cep.Extension.path);
+                const profilePath = extensionRoot + "/Profile.json";
+                
+                const exists = await utils.callJSX(`IO.exists('${profilePath.replace(/\\/g, '\\\\')}')`);
+                if (exists === "true") {
+                    const raw = await utils.callJSX(`IO.readTxt('${profilePath.replace(/\\/g, '\\\\')}')`);
+                    if (raw && raw !== "ERR") {
+                        const parsed = JSON.parse(raw);
+                        _activeConfig = parsed;
+                        utils.log("🧬 [CONFIG] Profile.json carregat amb èxit.");
+                    }
+                } else {
+                    utils.log("⚠️ [CONFIG] Profile.json no trobat. Usant memòria interna.");
+                }
+            } catch (e) {
+                console.error("❌ [CONFIG] Error en init:", e);
+            }
+        },
+
         saveSelection: function (el) {
             if (el && el.id) {
                 localStorage.setItem('fastpass_v1_' + el.id, el.value);
             }
         },
 
-        /**
-         * Recupera la darrera selecció de l'usuari i la aplica als selectors del DOM.
-         */
         loadSelection: function () {
             try {
                 var p = document.getElementById('programa');
                 var b = document.getElementById('bloc');
                 if (p) p.value = localStorage.getItem('fastpass_v1_programa') || "";
                 if (b) b.value = localStorage.getItem('fastpass_v1_bloc') || "";
-            } catch (e) {
-                console.error("❌ [CONFIG] Error carregant selecció:", e);
-            }
+            } catch (e) { console.error("❌ Error carregant selecció:", e); }
         }
     };
 

@@ -3,199 +3,309 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configuració - FAST >>> PASS</title>
+    <title>Dashboard Config - FAST >>> PASS</title>
     <script src="./lib/CSInterface.js"></script>
     <style>
         :root {
-            --bg-color: #2a2a2a;
-            --bg-secondary: #333;
-            --text-color: #d4d4d4;
-            --border-color: #444;
-            --input-bg: #1e1e1e;
-            --accent-color: #007acc;
-            --button-hover: #005f9e;
-            --danger-color: #d9534f;
-            --success-color: #5cb85c;
+            --bg-color: #1a1a1a;
+            --bg-card: #252525;
+            --bg-input: #0e0e0e;
+            --text-color: #e0e0e0;
+            --accent-color: #00a8ff;
+            --border-color: #333;
+            --hover-color: #444;
+            --success: #00c853;
+            --danger: #ff5252;
         }
 
         body {
-            font-family: 'Segoe UI', sans-serif;
-            margin: 0; padding: 15px;
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            margin: 0; padding: 20px;
             background-color: var(--bg-color);
             color: var(--text-color);
-            font-size: 12px;
-            display: flex; flex-direction: column; height: 95vh;
+            font-size: 13px;
+            display: flex; flex-direction: column; height: 98vh;
+            overflow: hidden;
         }
 
-        h2 { margin-top: 0; font-size: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; color: var(--accent-color); }
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color);
+        }
+
+        h1 { margin: 0; font-size: 18px; color: var(--accent-color); font-weight: 300; }
+
+        /* TABS */
+        .tabs { display: flex; gap: 5px; margin-bottom: 20px; }
+        .tab-btn {
+            padding: 8px 15px; background: var(--bg-card); border: 1px solid var(--border-color);
+            color: #888; cursor: pointer; border-radius: 4px; transition: all 0.2s;
+        }
+        .tab-btn.active { background: var(--accent-color); color: white; border-color: var(--accent-color); }
+        .tab-btn:hover:not(.active) { background: var(--hover-color); }
+
+        .tab-content { display: none; flex-grow: 1; overflow-y: auto; padding-right: 10px; }
+        .tab-content.active { display: block; }
+
+        /* CARDS */
+        .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 15px; margin-bottom: 15px; }
+        .card h2 { margin-top: 0; font-size: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 15px; color: #aaa; }
+
+        /* FORMS */
+        .input-group { margin-bottom: 12px; }
+        label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 11px; text-transform: uppercase; color: #777; }
         
-        .section { margin-bottom: 20px; }
-        
-        .input-group { margin-bottom: 10px; }
-        label { display: block; margin-bottom: 4px; font-weight: 600; color: #aaa; }
+        .row { display: flex; gap: 10px; }
         
         input[type="text"], input[type="number"] {
-            width: 100%; padding: 6px;
-            background-color: var(--input-bg);
+            width: 100%; padding: 8px;
+            background-color: var(--bg-input);
             border: 1px solid var(--border-color);
             color: var(--text-color);
-            border-radius: 3px; box-sizing: border-box;
+            border-radius: 4px; box-sizing: border-box; outline: none; transition: border-color 0.2s;
         }
-        
-        .input-number-small { text-align: center; width: 50px !important; }
-        
-        .number-control { display: flex; align-items: center; gap: 5px; }
-        .btn-mini {
-            width: 30px; height: 30px;
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            cursor: pointer; border-radius: 3px;
-            font-weight: bold; font-size: 16px;
-        }
-        .btn-mini:hover { background-color: var(--border-color); }
-        
-        .path-control { display: flex; gap: 5px; }
-        .btn-browse {
-            width: 30px; flex-shrink: 0;
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            cursor: pointer; border-radius: 3px;
-        }
+        input:focus { border-color: var(--accent-color); }
 
-        .footer {
-            margin-top: auto;
-            display: flex; justify-content: flex-end; gap: 10px;
+        .path-box { display: flex; gap: 5px; }
+        .btn-browse {
+            width: 32px; background: var(--bg-input); border: 1px solid var(--border-color);
+            color: #aaa; cursor: pointer; border-radius: 4px; font-size: 14px; display: flex; align-items: center; justify-content: center;
+        }
+        .btn-browse:hover { color: white; border-color: var(--accent-color); }
+
+        /* DEBUG TOGGLE */
+        .debug-row { display: flex; align-items: center; justify-content: space-between; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #444; transition: .4s; border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--success); }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        /* TRACK MAP */
+        .track-map { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .track-item { text-align: center; }
+        .track-item label { text-align: center; font-size: 9px; }
+
+        /* PROGRAM LIST */
+        .program-row { 
+            display: grid; grid-template-columns: 80px 100px 100px 120px 30px; 
+            gap: 10px; margin-bottom: 5px; align-items: center; background: #00000044; padding: 5px; border-radius: 4px;
+        }
+        .program-row input { font-size: 11px; padding: 4px; }
+        .btn-delete { color: var(--danger); cursor: pointer; font-size: 14px; border:none; background:none; }
+
+        footer {
+            margin-top: 20px;
+            display: flex; justify-content: space-between; align-items: center;
             padding-top: 15px; border-top: 1px solid var(--border-color);
         }
-        
-        button.primary { background-color: var(--accent-color); color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; }
-        button.secondary { background-color: transparent; color: var(--text-color); border: 1px solid var(--border-color); padding: 8px 15px; border-radius: 4px; cursor: pointer; }
-        button.danger { background-color: transparent; color: #ff6b6b; border: 1px solid #ff6b6b; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: auto; }
-        button:hover { opacity: 0.9; }
 
-        .content-scroll { flex-grow: 1; overflow-y: auto; padding-right: 5px; }
+        button.primary { background: var(--accent-color); color: white; border: none; padding: 10px 25px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        button.secondary { background: transparent; color: #888; border: 1px solid var(--border-color); padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        button:hover { filter: brightness(1.1); }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+
     </style>
 </head>
 <body>
-    <div class="content-scroll">
-        
-        <div class="section">
-            <h2>General</h2>
-            <div class="input-group">
-                <label for="val-autor">Autor (Nick d'usuari):</label>
-                <input type="text" id="val-autor" placeholder="Ex: AGUS">
-            </div>
-            
-            <div class="input-group">
-                <label for="val-guarda">Guarda (Hores enrere):</label>
-                <div class="number-control">
-                    <button class="btn-mini" id="btn-dec">-</button>
-                    <input type="number" id="val-guarda" value="23" class="input-number-small">
-                    <button class="btn-mini" id="btn-inc">+</button>
+    <header>
+        <h1>DASHBOARD <span>CONFIG v2.8</span></h1>
+        <div class="debug-row">
+            <span style="margin-right: 10px; font-size: 11px; color:#666">DEBUG MODE</span>
+            <label class="switch">
+                <input type="checkbox" id="check-debug">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </header>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('TNs', event)">TNs</button>
+        <button class="tab-btn" onclick="showTab('Sumari Matins', event)">Sumari</button>
+        <button class="tab-btn" onclick="showTab('Fotomató', event)">Fotomató</button>
+        <button class="tab-btn" onclick="showTab('User Defined', event)">User Dev</button>
+        <button class="tab-btn" id="btn-general" onclick="showTab('General', event)" style="margin-left: auto; border-color:#00a8ff22">Config Gral</button>
+    </div>
+
+    <!-- TAB: GENERAL -->
+    <div id="General" class="tab-content">
+        <div class="card">
+            <h2>Dades d'Editor</h2>
+            <div class="row">
+                <div class="input-group" style="flex:2">
+                    <label>Nom de l'Editor (Nick)</label>
+                    <input type="text" id="val-autor">
+                </div>
+                <div class="input-group" style="flex:1">
+                    <label>Finestra Guarda (h)</label>
+                    <input type="number" id="val-guarda" value="22">
                 </div>
             </div>
         </div>
 
-        <div class="section">
-            <h2>Rutes d'Entrada</h2>
-            <div class="input-group"><label>Plantilla (.prproj):</label><div class="path-control"><input type="text" id="path-plantilla"><button class="btn-browse" onclick="browseFile('path-plantilla')">📂</button></div></div>
-            <div class="input-group"><label>Vídeos i SRT (MP4/SRT):</label><div class="path-control"><input type="text" id="path-vertical"><button class="btn-browse" onclick="browseFolder('path-vertical')">📂</button></div></div>
-            <div class="input-group"><label>Rètols (Wott/MOV):</label><div class="path-control"><input type="text" id="path-chyrons"><button class="btn-browse" onclick="browseFolder('path-chyrons')">📂</button></div></div>
-            <div class="input-group"><label>Conductors (MOV):</label><div class="path-control"><input type="text" id="path-conductors"><button class="btn-browse" onclick="browseFolder('path-conductors')">📂</button></div></div>
-            <div class="input-group"><label>Destí Projectes:</label><div class="path-control"><input type="text" id="path-desti"><button class="btn-browse" onclick="browseFolder('path-desti')">📂</button></div></div>
+        <div class="card">
+            <h2>Rutes de Xarxa (Infraestructura)</h2>
+            <div class="input-group"><label>Plantilla del Canal</label><div class="path-box"><input type="text" id="path-plantilla"><button class="btn-browse" onclick="browseFile('path-plantilla')">📁</button></div></div>
+            <div class="input-group"><label>Repositori Media (MP4/SRT)</label><div class="path-box"><input type="text" id="path-vertical"><button class="btn-browse" onclick="browseFolder('path-vertical')">📁</button></div></div>
+            <div class="input-group"><label>Motor Rètols (Wott/MOV)</label><div class="path-box"><input type="text" id="path-chyrons"><button class="btn-browse" onclick="browseFolder('path-chyrons')">📁</button></div></div>
+            <div class="input-group"><label>Biblioteca Conductors</label><div class="path-box"><input type="text" id="path-conductors"><button class="btn-browse" onclick="browseFolder('path-conductors')">📁</button></div></div>
+            <div class="input-group"><label>Destí Projectes Locals</label><div class="path-box"><input type="text" id="path-destino_base"><button class="btn-browse" onclick="browseFolder('path-destino_base')">📁</button></div></div>
         </div>
 
-        <div class="section">
-            <h2>Rutes de Sortida (Render)</h2>
-            <div class="input-group">
-                <label>Render Vídeo 1 (Principal):</label>
-                <div class="path-control">
-                    <input type="text" id="path-render-1">
-                    <button class="btn-browse" onclick="browseFolder('path-render-1')">📂</button>
-                </div>
-            </div>
-            <div class="input-group">
-                <label>Render Vídeo 2 (Còpia/Seguretat):</label>
-                <div class="path-control">
-                    <input type="text" id="path-render-2">
-                    <button class="btn-browse" onclick="browseFolder('path-render-2')">📂</button>
-                </div>
-            </div>
-            <div class="input-group">
-                <label>Exportació Portada (PNG):</label>
-                <div class="path-control">
-                    <input type="text" id="path-portada">
-                    <button class="btn-browse" onclick="browseFolder('path-portada')">📂</button>
-                </div>
-            </div>
+        <div class="card">
+            <h2>Destins d'Exportació (Render)</h2>
+            <div class="input-group"><label>Carpeta Publicació 1</label><div class="path-box"><input type="text" id="path-render1"><button class="btn-browse" onclick="browseFolder('path-render1')">📁</button></div></div>
+            <div class="input-group"><label>Carpeta Publicació 2</label><div class="path-box"><input type="text" id="path-render2"><button class="btn-browse" onclick="browseFolder('path-render2')">📁</button></div></div>
+            <div class="input-group"><label>Carpeta Portades (PNG)</label><div class="path-box"><input type="text" id="path-portadas"><button class="btn-browse" onclick="browseFolder('path-portadas')">📁</button></div></div>
         </div>
     </div>
 
-    <div class="footer">
-        <button class="danger" onclick="resetConfig()">Restablir</button>
-        <button class="secondary" onclick="window.close()">Cancel·lar</button>
-        <button class="primary" onclick="saveSetup()">Desar Canvis</button>
-    </div>
+    <!-- TABS DINÀMIQUES -->
+    <div id="TNs" class="tab-content active"></div>
+    <div id="Sumari Matins" class="tab-content"></div>
+    <div id="Fotomató" class="tab-content"></div>
+    <div id="User Defined" class="tab-content"></div>
+
+    <footer>
+        <button class="secondary" onclick="window.close()">TANCAR SENSE DESAR</button>
+        <button class="primary" onclick="salvarTodo()">GUARDAR CONFIG [Profile.json]</button>
+    </footer>
 
     <script>
         const csInterface = new CSInterface();
+        let currentProfile = {};
 
-        function init() {
-            // Cargamos de localStorage o usamos tus rutas por defecto (fallbacks)
-            document.getElementById('val-autor').value = localStorage.getItem('fp_cfg_nick') || "AGUS";
-            document.getElementById('val-guarda').value = localStorage.getItem('fp_cfg_guarda') || "22";
+        async function init() {
+            const extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
+            const profilePath = extensionRoot + "/Profile.json";
             
-            // Rutes Entrada
-            document.getElementById('path-plantilla').value = localStorage.getItem('fp_cfg_plantilla_net') || "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj";
-            document.getElementById('path-vertical').value = localStorage.getItem('fp_cfg_verticalitzacio') || "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\";
-            document.getElementById('path-chyrons').value = localStorage.getItem('fp_cfg_chyrons') || "\\\\192.168.147.199\\public\\00_CHYRONS AUTOMATICS\\3CatInfo\\VERTICALITZACIO\\";
-            document.getElementById('path-conductors').value = localStorage.getItem('fp_cfg_conductors') || "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\";
-            document.getElementById('path-desti').value = localStorage.getItem('fp_cfg_destinoBase') || "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\";
-            
-            // Rutes Sortida (Render)
-            document.getElementById('path-render-1').value = localStorage.getItem('fp_cfg_path_render_1') || "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\EXPORTS PROVISIONALS";
-            document.getElementById('path-render-2').value = localStorage.getItem('fp_cfg_path_render_2') || "\\\\svftpccma\\videos\\MP4_3CATINFO_VERTICAL\\CONVERTITS_1080-1920\\608-1080";
-            document.getElementById('path-portada').value = localStorage.getItem('fp_cfg_path_portada') || "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\AAA_PORTADES";
+            csInterface.evalScript(`IO.readTxt('${profilePath.replace(/\\/g, '\\\\')}')`, function(res) {
+                if(res && res !== "ERR") {
+                    currentProfile = JSON.parse(res);
+                    drawConfig();
+                } else {
+                    alert("Error llegint Profile.json.");
+                }
+            });
         }
 
-        function saveSetup() {
-            localStorage.setItem('fp_cfg_nick', document.getElementById('val-autor').value);
-            localStorage.setItem('fp_cfg_guarda', document.getElementById('val-guarda').value);
+        function drawConfig() {
+            // General
+            document.getElementById('val-autor').value = currentProfile.general.autor;
+            document.getElementById('val-guarda').value = currentProfile.general.guarda;
+            document.getElementById('check-debug').checked = currentProfile.general.debug;
             
-            localStorage.setItem('fp_cfg_plantilla_net', document.getElementById('path-plantilla').value);
-            localStorage.setItem('fp_cfg_verticalitzacio', document.getElementById('path-vertical').value);
-            localStorage.setItem('fp_cfg_chyrons', document.getElementById('path-chyrons').value);
-            localStorage.setItem('fp_cfg_conductors', document.getElementById('path-conductors').value);
-            localStorage.setItem('fp_cfg_destinoBase', document.getElementById('path-desti').value);
-            
-            localStorage.setItem('fp_cfg_path_render_1', document.getElementById('path-render-1').value);
-            localStorage.setItem('fp_cfg_path_render_2', document.getElementById('path-render-2').value);
-            localStorage.setItem('fp_cfg_path_portada', document.getElementById('path-portada').value);
-            
-            alert("Configuració desada correctament.");
-            
-            // Notificar a Premiere que algo ha cambiado
-            csInterface.dispatchEvent(new CSXSEvent('FASTPASS_CONFIG_UPDATED', 'APPLICATION'));
-            window.close();
+            // Rutas
+            for(let key in currentProfile.rutas) {
+                const el = document.getElementById('path-' + key);
+                if(el) el.value = currentProfile.rutas[key];
+            }
+
+            // Pestañes d'Estructures
+            ["TNs", "Sumari Matins", "Fotomató", "User Defined"].forEach(tabName => {
+                const container = document.getElementById(tabName);
+                const est = currentProfile.estructuras[tabName] || { tracks: {}, programas: [] };
+                
+                let html = `
+                    <div class="card">
+                        <h2>Mapatge de Pistes (Track Mapping)</h2>
+                        <div class="track-map">
+                            ${Object.keys(est.tracks).map(k => `
+                                <div class="track-item">
+                                    <label>${k.replace('v_', 'V').replace('s_', 'S')}</label>
+                                    <input type="number" id="tr-${tabName}-${k}" value="${est.tracks[k]}" onchange="updateTrack('${tabName}', '${k}', this.value)">
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>Gestió de Programes</h2>
+                        <div class="program-row" style="background:transparent; border-bottom:1px solid #444; color:#666; font-size:9px">
+                            <span>ID (Selector)</span><span>NOM ARXIU</span><span>WOTT</span><span>CONDUCTOR</span><span></span>
+                        </div>
+                        <div id="prog-list-${tabName.replace(/ /g, '')}">
+                            ${est.programas.map((p, idx) => `
+                                <div class="program-row">
+                                    <input type="text" value="${p.id}" onchange="updateProg('${tabName}', ${idx}, 'id', this.value)">
+                                    <input type="text" value="${p.archivo}" onchange="updateProg('${tabName}', ${idx}, 'archivo', this.value)">
+                                    <input type="text" value="${p.wott}" onchange="updateProg('${tabName}', ${idx}, 'wott', this.value)" title="Prefixo Wott">
+                                    <input type="text" value="${p.conductor || ''}" onchange="updateProg('${tabName}', ${idx}, 'conductor', this.value)" placeholder="MOV file">
+                                    <button class="btn-delete" onclick="removeProg('${tabName}', ${idx})">✕</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button class="secondary" style="width:100%; margin-top:10px; font-size:11px" onclick="addProg('${tabName}')">+ AFEGIR PROGRAMA</button>
+                    </div>
+                `;
+                container.innerHTML = html;
+            });
         }
 
-        function resetConfig() {
-            if (confirm("Segur que vols restablir totes les rutes per defecte?")) {
-                const keys = [
-                    'fp_cfg_nick', 'fp_cfg_guarda', 'fp_cfg_plantilla_net', 
-                    'fp_cfg_verticalitzacio', 'fp_cfg_chyrons', 'fp_cfg_conductors', 
-                    'fp_cfg_destinoBase', 'fp_cfg_path_render_1', 'fp_cfg_path_render_2', 'fp_cfg_path_portada'
-                ];
-                keys.forEach(k => localStorage.removeItem(k));
-                init(); // Recarga los valores por defecto en los inputs
-                alert("Rutes restablertes.");
+        // Lògica de Edició Dinàmica
+        function updateTrack(tab, key, val) {
+            currentProfile.estructuras[tab].tracks[key] = parseInt(val);
+        }
+
+        function updateProg(tab, idx, key, val) {
+            currentProfile.estructuras[tab].programas[idx][key] = val;
+        }
+
+        function addProg(tab) {
+            currentProfile.estructuras[tab].programas.push({ id: "NOU", archivo: "NOU", wott: "XXX", conductor: "" });
+            drawConfig();
+        }
+
+        function removeProg(tab, idx) {
+            if(confirm("Segur que vols eliminar aquest programa?")) {
+                currentProfile.estructuras[tab].programas.splice(idx, 1);
+                drawConfig();
             }
         }
 
-        document.getElementById('btn-dec').onclick = function() { var el=document.getElementById('val-guarda'); el.value = Math.max(1, (parseInt(el.value)||0)-1); };
-        document.getElementById('btn-inc').onclick = function() { var el=document.getElementById('val-guarda'); el.value = (parseInt(el.value)||0)+1; };
+        function showTab(name, event) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(name).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        async function salvarTodo() {
+            // Recollir camps General i Rutas abans de salvar
+            currentProfile.general.autor = document.getElementById('val-autor').value;
+            currentProfile.general.guarda = parseInt(document.getElementById('val-guarda').value);
+            currentProfile.general.debug = document.getElementById('check-debug').checked;
+
+            for(let key in currentProfile.rutas) {
+                const el = document.getElementById('path-' + key);
+                if(el) currentProfile.rutas[key] = el.value;
+            }
+
+            const extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
+            const profilePath = extensionRoot + "/Profile.json";
+            
+            // Escapem cometes simples per al bridge JSX
+            const payload = JSON.stringify(currentProfile, null, 4).replace(/'/g, "\\'");
+
+            csInterface.evalScript(`IO.writeTxt('${profilePath.replace(/\\/g, '\\\\')}', '${payload}')`, function(res) {
+                if(res && res.indexOf("OK") !== -1) {
+                    alert("Configuració física desada al Profile.json");
+                    csInterface.dispatchEvent(new CSXSEvent('FASTPASS_CONFIG_UPDATED', 'APPLICATION'));
+                    window.close();
+                } else {
+                    alert("Error gravant configuración: " + res);
+                }
+            });
+        }
 
         window.browseFolder = function(id) { 
             var r = window.cep.fs.showOpenDialog(false, true, "Tria Carpeta", null); 

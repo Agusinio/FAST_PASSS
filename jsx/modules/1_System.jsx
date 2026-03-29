@@ -99,5 +99,30 @@ FASTPASS.System = {
      * os: Retorna el sistema operatiu de forma literal.
      * @returns {string} - "mac" o "win"
      */
-    os: function() { return (File.fs === "Macintosh") ? "mac" : "win"; }
+    os: function() { return (File.fs === "Macintosh") ? "mac" : "win"; },
+
+    /**
+     * tool: Estableix l'eina activa (Selection=0, Razor=3, etc).
+     */
+    tool: function(name) {
+        try {
+            if (typeof qe === "undefined") app.enableQE();
+            var qeSeq = qe.project.activeSequence;
+            if (!qeSeq) return "ERR_NO_QE_SEQ";
+            
+            if (name === "Selection") qeSeq.setTool(0);
+            else if (name === "Razor") qeSeq.setTool(3);
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * clear: Neteja forçada de memòria i referències (Pre-mouseenter).
+     */
+    clear: function() {
+        try { 
+            $.gc(); 
+            return "OK"; 
+        } catch(e) { return "ERR"; }
+    }
 };

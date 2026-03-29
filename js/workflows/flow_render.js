@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: RENDER (EXPORTACIÓ) - v2.6.0 literal
+ * WORKFLOW: RENDER (EXPORTACIÓ) - v2.9.5 Tactical
  * ============================================================================
  */
 
@@ -10,6 +10,7 @@
 
     const getUtils = () => window.FASTPASS_UI.Utils;
     const getRenderLogic = () => window.FASTPASS_UI.Logic.Render;
+    const getScanner = () => window.FASTPASS_UI.Logic.Scan;
 
     const log = (m) => getUtils().log(m, "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
@@ -17,7 +18,7 @@
     FASTPASS_UI.Workflows.Render = {
 
         /**
-         * Envia la seqüència activa a AME.
+         * MP4: Envia la seqüència activa a AME amb nom intel·ligent.
          */
         runVideo: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
@@ -25,13 +26,11 @@
             const config = FASTPASS_UI.Config.get();
 
             try {
-                // Literal: Context.folder()
                 let outputDir = await callJSX("Context.folder()");
                 if (!outputDir) outputDir = config.rutas.destinoBase || "C:\\Temp";
                 
                 getUtils().status("Processant nom...", "procesando");
 
-                // Literal: Context.activeSeq()
                 const seqName = await callJSX('Context.activeSeq()');
                 let fileName = "Export_TBD.mp4";
                 
@@ -49,66 +48,87 @@
 
                 log(`📤 Destí: ${outputDir}\\${fileName}`);
 
-                // Delegació a lògica
-                const res = await getRenderLogic().queueRender(presetPath, outputDir, fileName);
+                const res = await getRenderLogic().queue(presetPath, outputDir, fileName);
 
                 if (res && res.indexOf("OK") === 0) {
-                    getUtils().status(`Render OK: ${fileName}`, "exito");
-                    log("✅ Enviat a Media Encoder correctament.", "INFO");
+                    getUtils().status(`AME: ${fileName}`, "exito");
+                    log("✅ Enviat a Media Encoder.", "INFO");
                     FASTPASS_UI.State.lastRenderName = fileName.replace(".mp4", "");
                 } else {
-                    throw new Error("Error en el pont AME: " + res);
+                    throw new Error("Error Media Encoder: " + res);
                 }
 
             } catch (e) { getUtils().handleError(e, "RenderVideo"); }
         },
 
         /**
-         * Exporta un PNG del frame actual (Portada).
+         * PORTADA PRO: Importació, Aïllament i Snapshot automàtic del darrer PNG.
          */
         runPortada: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            log("📸 Generant Portada (Mode Aïllat)...");
-            const tracksLogic = window.FASTPASS_UI.Logic.Tracks;
+            log("📸 Iniciant Portada Pro (Modo Aïllat)...");
             
             try {
                 const config = FASTPASS_UI.Config.get();
-                const targetDir = config.rutas.portadas || config.rutas.destinoBase || "C:\\Temp";
-                const T_MP4 = config.tracks.video.mp4;
-                const T_THEME = config.tracks.video.tematitol;
+                const state = FASTPASS_UI.State;
+                const T_MP4 = config.tracks.video.mp4 || 1;
+                const T_PORTADA = 10; // Pista de seguretat V10 per la cara
 
-                // 🛡️ AÏLLAMENT DE PISTES
-                await tracksLogic.setGlobalState("video", "mute", true);
+                // 1. BUSCAR LA PORTADA RECENT (Logic.Scan)
+                const ctx = { config, progData: state.progData, bloque: state.bloque };
+                const portada = await getScanner().portada(ctx);
                 
-                // Literals: Tracks.mute()
-                await callJSX(`Tracks.mute(${T_MP4}, false, 'video')`);
-                await callJSX(`Tracks.mute(${T_THEME}, false, 'video')`);
-
-                // 📸 SNAPSHOT
-                let nameBase = FASTPASS_UI.State.lastRenderName;
-                if (!nameBase) {
-                    const seqName = await callJSX('Context.activeSeq()');
-                    nameBase = seqName ? seqName : "Portada_TBD";
+                if (!portada) {
+                    throw new Error("No s'ha trobat cap PNG de portada que coincideixi amb el Programa i el Bloc.");
                 }
 
-                const fullPath = `${targetDir}\\${nameBase}.png`;
-                log(`📍 Destí Portada: ${fullPath}`);
+                log(`🔍 Portada trobada: ${portada.name}`);
 
-                const res = await getRenderLogic().exportSnapshot(fullPath);
+                // 2. IMPORTAR PORTADA AL PROJECTE (Literal)
+                const importPayload = JSON.stringify([portada.path.replace(/\\/g, '\\\\')]);
+                await callJSX(`IO.importFiles('${importPayload}', 'root')`);
 
-                // 🔄 RESTAURACIÓ (Unmute All)
-                await tracksLogic.unmuteAll("video");
+                // 3. AÏLLAMENT DE PISTES (Solo V1 + V10)
+                log("🔒 Aïllant pistes per la captura...");
+                await callJSX(`Tracks.setGlobalState('video', 'mute', true)`);
+                await callJSX(`Tracks.mute(${T_MP4}, false, 'video')`); // Encenem V1
+                await callJSX(`Tracks.mute(${T_PORTADA}, false, 'video')`); // Encenem V10
 
-                if (res.success) {
-                    log("✅ Portada exportada amb èxit.", "INFO");
+                // 4. INSERIR PORTADA AL TIMELINE (En el cabezal)
+                const ctiRaw = await callJSX('Timeline.get()');
+                const cti = parseFloat(ctiRaw || "0");
+                
+                log(`📌 Inserint ${portada.name} a V${T_PORTADA}`);
+                await callJSX(`Clips.insert('${getUtils().escape(portada.name)}', ${T_PORTADA}, ${cti}, null, 'video')`);
+
+                // 5. EXPORTACIÓ FRAME (Snapshot a carpeta destino Portades)
+                const targetDir = config.rutas.portadas || config.rutas.destinoBase || "C:\\Temp";
+                let nameBase = state.lastRenderName || (await callJSX('Context.activeSeq()')) || "Portada_TBD";
+                const destPath = `${targetDir}\\${nameBase}.png`;
+
+                log(`📸 Generant Snapshot a: ${destPath}`);
+                const snapRes = await getRenderLogic().capture(destPath, cti);
+
+                // 6. NETEJA I RESTAURACIÓ
+                log("🧹 Netejant clip temporal i restaurant pistes...");
+                
+                // Borrar l'últim clip de V10 (el que acabem de posar)
+                const clipsCount = await callJSX(`Clips.count(${T_PORTADA}, 'video')`);
+                if (parseInt(clipsCount) > 0) {
+                    await callJSX(`Clips.remove(${T_PORTADA}, ${parseInt(clipsCount) - 1}, 'video')`);
+                }
+
+                // Restaurar visibilitat totes pistes
+                await callJSX(`Tracks.setGlobalState('video', 'mute', false)`);
+
+                if (snapRes.success) {
                     getUtils().status("Portada OK", "exito");
+                    log("✅ Portada generada amb èxit.");
                 } else {
-                    throw new Error(res.log || "Error capturant snapshot.");
+                    throw new Error("Error Snapshot: " + snapRes.log);
                 }
-            } catch (e) { 
-                if (window.FASTPASS_UI.Logic.Tracks) window.FASTPASS_UI.Logic.Tracks.unmuteAll("video");
-                getUtils().handleError(e, "RenderPortada"); 
-            }
+
+            } catch (e) { getUtils().handleError(e, "RenderPortadaPro"); }
         }
     };
 

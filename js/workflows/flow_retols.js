@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: RETOLS I GRÀFICS - v2.6.0 literal
+ * WORKFLOW: RETOLS I GRÀFICS - v2.9.5 Tactical
  * ============================================================================
  */
 
@@ -17,91 +17,121 @@
     FASTPASS_UI.Workflows.Retols = {
 
         /**
-         * Genera un Freeze Frame d'un clip de tema i el col·loca al timeline.
+         * RESET GRAPHICS: Neteja total de les pistes de gràfics (Pànic button)
          */
-        processThemeFreeze: async function (themeClipName, cti, folderPath, programPrefix) {
-            log("📸 Generant Freeze Frame...");
+        runResetGraphics: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            if (!confirm("Segur que vols ELIMINAR TOTS els gràfics de la línia de temps?")) return;
+
+            log("🧹 Netejant graella de gràfics...");
             const cfg = FASTPASS_UI.Config.get();
-            const T_THEME = cfg.tracks.video.tematitol;
+            const tracksToClear = [
+                cfg.tracks.video.tematitol, 
+                cfg.tracks.video.chyrons, 
+                cfg.tracks.video.llocdata,
+                cfg.tracks.video.graficos
+            ];
 
             try {
-                // Inserir literalment: Clips.insert(nom, pista, segons, duració, tipus)
-                await callJSX(`Clips.insert('${getUtils().escape(themeClipName)}', ${T_THEME}, 0.0, null, 'video')`);
-
-                await callJSX(`Timeline.set(7.0)`);
-                await callJSX("System.clear()");
-                await getUtils().delay(800);
-
-                let cleanName = themeClipName.split("Tema-Titol_")[1] || themeClipName;
-                cleanName = cleanName.replace(/\.\d+\.mov$/i, "").substring(0, 30);
-                const fileName = `${programPrefix}_${cleanName}_Freeze.png`;
-                const fullPath = `${folderPath}\\${fileName}`;
-
-                // Literal: Render.snapshot()
-                await callJSX(`Render.snapshot('${fullPath.replace(/\\/g, "\\\\")}', 7.0)`);
-
-                // Literal: IO.importFiles()
-                const payload = JSON.stringify([fullPath.replace(/\\/g, "\\\\")]);
-                await callJSX(`IO.importFiles('${payload}', 'root')`);
-                
-                await callJSX(`Clips.insert('${getUtils().escape(fileName)}', ${T_THEME}, 7.0, null, 'video')`);
-                
-                log("✅ Freeze Frame col·locat a V" + T_THEME, "INFO");
-
-            } catch (e) { getUtils().handleError(e, "ThemeFreeze"); }
+                for(let t of tracksToClear) {
+                    await callJSX(`Clips.clearTrack(${t}, 'video')`);
+                }
+                log("✅ Gràfics eliminats correctament.", "INFO");
+                getUtils().status("Gràfics Reiniciats", "exito");
+            } catch (e) { getUtils().handleError(e, "ResetGraphics"); }
         },
 
+        /**
+         * RETOLS (Chunk-based): Insereix els rètols només del TEMA/PART seleccionada al cabezal
+         */
         runPlaceChyrons: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            log("🎬 Aplicant rètols segons el nou mapa de pistes...");
             const cfg = FASTPASS_UI.Config.get();
             const state = FASTPASS_UI.State;
             const idx = state.pieceIndex;
             const struct = state.structure;
 
-            const T_THEME = cfg.tracks.video.tematitol; 
-            const T_GRAFICOS = cfg.tracks.video.graficos; 
-            const T_CHYRONS = cfg.tracks.video.chyrons; 
-            const T_LLOC = cfg.tracks.video.llocdata;   
-
             if (!struct || !struct[idx]) {
-                log("⚠️ No es troba l'estructura del lloc al State.", "WARN");
+                log("⚠️ No queden més parts per rotular (o escaneig buit).", "WARN");
                 return;
             }
 
             try {
-                const piece = struct[idx];
+                const part = struct[idx];
                 const ctiRaw = await callJSX('Timeline.get()');
                 const cti = parseFloat(ctiRaw || "0");
 
-                if (piece.themeTitle) {
-                    await callJSX(`Clips.insert('${getUtils().escape(piece.themeTitle.name)}', ${T_THEME}, ${cti}, null, 'video')`);
-                }
+                log(`🎬 Rotulant PART: ${part.id} (${part.theme || 'SENSE TEMA'})`);
 
-                if (piece.graphics) {
-                    for (const g of piece.graphics) {
-                        await callJSX(`Clips.insert('${getUtils().escape(g.cleanName)}', ${T_GRAFICOS}, ${cti}, null, 'video')`);
+                // 1. TEMA-TITOL (V5)
+                if (part.theme && part.chyrons) {
+                    // Busquem si hi ha un Tema-Titol a la llista de chyrons
+                    const themeChyron = part.chyrons.find(c => c.name.toLowerCase().includes("tema") || c.name.toLowerCase().includes("titol"));
+                    if (themeChyron) {
+                        await callJSX(`Clips.insert('${getUtils().escape(themeChyron.name)}', ${cfg.tracks.video.tematitol}, ${cti}, null, 'video')`);
                     }
                 }
 
-                if (piece.chyrons && piece.chyrons.length > 0) {
-                    let firstTs = piece.chyrons[0].timestamp || 0;
-                    for (let i = 0; i < piece.chyrons.length; i++) {
-                        const c = piece.chyrons[i];
-                        const diff = (c.timestamp > 0) ? (c.timestamp - firstTs) / 1000 : i * 4.0;
+                // 2. CHYRON(S) (V6 / V7)
+                if (part.chyrons && part.chyrons.length > 0) {
+                    const chyronsParaPoner = part.chyrons.filter(c => !c.name.toLowerCase().includes("tema") && !c.name.toLowerCase().includes("titol"));
+                    
+                    for (let i = 0; i < chyronsParaPoner.length; i++) {
+                        const c = chyronsParaPoner[i];
+                        const gap = i * 4.0; // Espaiat automàtic si no hi ha metadada de temps
                         
-                        let track = T_CHYRONS;
+                        let targetTrack = cfg.tracks.video.chyrons;
                         if (c.name.indexOf("Lloc") !== -1 || c.name.indexOf("Data") !== -1) {
-                            track = T_LLOC;
+                            targetTrack = cfg.tracks.video.llocdata;
                         }
                         
-                        await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${track}, ${cti + diff}, null, 'video')`);
+                        await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${cti + gap}, null, 'video')`);
                     }
                 }
 
+                // Salta a la següent part
                 state.pieceIndex++;
-                getUtils().status(`Peça ${piece.id} processada.`, "exito");
-            } catch (e) { getUtils().handleError(e, "PlaceChyrons"); }
+                this.updateUIChunk();
+                getUtils().status(`Part ${part.id} LLISTA.`, "exito");
+
+            } catch (e) { getUtils().handleError(e, "PlaceChyronsChunk"); }
+        },
+
+        updateUIChunk: function() {
+            const state = FASTPASS_UI.State;
+            const input = document.getElementById('txt-retol-part');
+            if (!input) return;
+
+            if (state.structure && state.structure[state.pieceIndex]) {
+                const p = state.structure[state.pieceIndex];
+                input.value = p.id + " (" + (p.theme || "???") + ")";
+            } else {
+                input.value = "FINALITZAT";
+            }
+        },
+
+        /**
+         * GRAFIC (Mask): Tapa el clip seleccionat amb un gràfic de la seva durada
+         */
+        runPlaceGraphic: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const T_MP4 = cfg.tracks.video.mp4;
+            const T_GRAFS = cfg.tracks.video.graficos;
+
+            try {
+                // Busquem clip a la pista de video (MP4) per saber on tallar el gràfic
+                const infoStr = await callJSX(`Clips.at(${T_MP4}, -1, 'video')`);
+                if (!infoStr || infoStr === "null") throw new Error("Has de posar el cabezal sobre un clip de video per fer de guia.");
+                
+                const info = JSON.parse(infoStr);
+                const graphicName = "GRAFIC_GENERIC.png"; // Placeholder: En el futur buscarem el real
+
+                log(`🎭 Tapant clip [${info.name}] amb gràfic a V${T_GRAFS}`);
+                await callJSX(`Clips.insert('${getUtils().escape(graphicName)}', ${T_GRAFS}, ${info.start}, ${info.end}, 'video')`);
+                
+                getUtils().status("Gràfic Ajustat", "exito");
+            } catch (e) { getUtils().handleError(e, "PlaceGraphicMask"); }
         },
 
         runPlaceGraph169: async function () {
@@ -111,34 +141,29 @@
             const T_FONS = cfg.tracks.video.fondos;  
 
             try {
-                const info = await getClipsLogic().findAtTime(T_MP4, -1, "video");
-                if (!info) throw new Error("No s'ha trobat clip a la pista mp4 (V" + T_MP4 + ")");
+                const infoStr = await callJSX(`Clips.at(${T_MP4}, -1, 'video')`);
+                if (!infoStr || infoStr === "null") throw new Error("Posa el cabezal sobre el clip.");
+                const info = JSON.parse(infoStr);
 
-                await getClipsLogic().apply169Preset(T_MP4, info.index);
+                // Apliquem preset 16:9 (via callJSX directament per simplificar)
+                await callJSX(`Clips.setProp(${T_MP4}, ${info.index}, 'ADBE Motion', 'ADBE Video Scale', 140, 'video')`);
 
                 const bgName = "Fons_16_9_GENERIC.png";
-                await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${info.start}, null, 'video')`);
+                await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${info.start}, ${info.end}, 'video')`);
                 
             } catch (e) { getUtils().handleError(e, "Graph169"); }
         },
 
         runPlaceBackground: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            log("🎬 Col·locant fons a V3 a partir del cabezal...");
+            log("🎬 Col·locant fons vertical...");
             const cfg = FASTPASS_UI.Config.get();
             const T_FONS = cfg.tracks.video.fondos;  
-
             try {
-                const ctiRaw = await callJSX('Timeline.get()');
-                const cti = parseFloat(ctiRaw || "0");
-
+                const cti = parseFloat(await callJSX('Timeline.get()') || "0");
                 const bgName = "Fons_Vertical_Generic.png";
-                
-                log(`📌 Inserint ${bgName} a V${T_FONS} (Time: ${cti})`);
                 await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${cti}, null, 'video')`);
-                
-                getUtils().status("Fons col·locat al cabezal", "exito");
-
+                getUtils().status("Fons colocat", "exito");
             } catch (e) { getUtils().handleError(e, "PlaceBackground"); }
         }
     };

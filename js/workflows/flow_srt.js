@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: SRT (SUBTÍTOLS) - v2.6.0 literal
+ * WORKFLOW: SRT (SUBTÍTOLS) - v2.9.5 Tactical
  * ============================================================================
  */
 
@@ -9,7 +9,7 @@
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
     const getUtils = () => window.FASTPASS_UI.Utils;
-    const getSrtLogic = () => window.FASTPASS_UI.Logic.Srt;
+    const getSrtLogic = () => window.FASTPASS_UI.Logic.Sub;
     const getTracksLogic = () => window.FASTPASS_UI.Logic.Tracks;
 
     const log = (m) => getUtils().log(m, "DEBUG");
@@ -18,10 +18,10 @@
     FASTPASS_UI.Workflows.Srt = {
 
         /**
-         * Activa/Desactiva el mode de treball de subtítols.
+         * toggleSrtWork: Protecció de pistes, Importació a S1 i Selecció Automàtica
          */
         toggleSrtWork: async function (force) {
-            log("📝 SRT: Canviant mode de treball.");
+            log("📝 SRT: Preparant entorn de treball táctique...");
             const state = FASTPASS_UI.State;
             state.srtWorkMode = !state.srtWorkMode;
 
@@ -33,61 +33,79 @@
                 if (btn) { btn.textContent = "TANCAR"; btn.classList.add('btn-active'); }
                 if (btnIn) btnIn.disabled = false;
                 if (btnOut) btnOut.disabled = false;
-                await getTracksLogic().setGlobalState("video", "lock", true);
+                
+                // BLOQUEIG DE TOTS ELS TRACKS (Video + Audio)
+                log("🔒 Bloquejant pistes de seguretat...");
+                await callJSX(`Tracks.setGlobalState('video', 'lock', true)`);
+                await callJSX(`Tracks.setGlobalState('audio', 'lock', true)`);
+
+                // SELECCIONAR ARREMPERAT (Herramienta V)
+                log("🖱️ Canviant a eina de SELECCIÓ (V)...");
+                await callJSX(`System.tool('Selection')`);
+
+                getUtils().status("SRT MODE ON", "exito");
             } else {
                 if (btn) { btn.textContent = "PREPARAR"; btn.classList.remove('btn-active'); }
                 if (btnIn) btnIn.disabled = true;
                 if (btnOut) btnOut.disabled = true;
-                await getTracksLogic().setGlobalState("video", "lock", false);
+                
+                // DESBLOQUEIG TOTAL
+                await callJSX(`Tracks.setGlobalState('video', 'lock', false)`);
+                await callJSX(`Tracks.setGlobalState('audio', 'lock', false)`);
+                
+                getUtils().status("SRT MODE OFF", "warn");
             }
         },
 
+        /**
+         * runSrtIn: Neteja d'inici (Text + Cabezal)
+         */
         runSrtIn: async function () {
-            log("📝 SRT: Marcar IN");
-            const cfg = FASTPASS_UI.Config.get();
-            const T_S1 = cfg.tracks.subtitle.s1;
-
+            log("📝 SRT: Marcar IN (Neteja intel·ligent)");
             try {
-                // Literal: Timeline.get()
                 const ctiRaw = await callJSX('Timeline.get()');
-                const cti = parseFloat(ctiRaw || "0");
+                const textIn = document.getElementById('txt-srt-in').value || "";
 
-                // Literal: Clips.count()
-                const clipCountRaw = await callJSX(`Clips.count(${T_S1}, "subtitle")`); 
-                let finalCti = cti;
-                if (parseInt(clipCountRaw || "0") === 0 && cti < 0.4) {
-                    finalCti = 0.4;
-                    log("📍 Inici de seqüència: Ajustant primer subtítol a 0.4s.");
+                const res = await getSrtLogic().cleanIn(parseFloat(ctiRaw || "0"), textIn);
+                
+                if (res.indexOf("OK") !== -1) {
+                    getUtils().status("Inici NETEJAT", "exito");
                 }
-
-                await getSrtLogic().cleanIn(finalCti);
             } catch (e) { getUtils().handleError(e, "SrtIn"); }
         },
 
+        /**
+         * runSrtOut: Neteja de cua (Text + Cabezal)
+         */
         runSrtOut: async function () {
-            log("📝 SRT: Marcar OUT");
+            log("📝 SRT: Marcar OUT (Neteja intel·ligent)");
             try {
                 const ctiRaw = await callJSX('Timeline.get()');
-                await getSrtLogic().cleanOut(parseFloat(ctiRaw || "0"));
+                const textOut = document.getElementById('txt-srt-out').value || "";
+
+                const res = await getSrtLogic().cleanOut(parseFloat(ctiRaw || "0"), textOut);
+                
+                if (res.indexOf("OK") !== -1) {
+                    getUtils().status("Cua NETEJADA", "exito");
+                }
             } catch (e) { getUtils().handleError(e, "SrtOut"); }
         },
 
         /**
-         * Re-ajust temporal (Acordió).
+         * runTimeAdjust: Acordió proporcional d'ajust
          */
         runTimeAdjust: async function () {
             log("⏳ Iniciant ajust proporcional de subtítols...");
             try {
-                // Literal: Clips.getSubtitles()
+                // Seleccionats literalment
                 const jsonClips = await callJSX('Clips.getSubtitles()');
                 const clips = JSON.parse(jsonClips || "[]");
 
                 if (!clips || clips.length === 0) {
-                    throw new Error("Selecciona els subtítols que vols ajustar.");
+                    throw new Error("Selecciona els subtítols que vols ajustar al Timeline.");
                 }
 
                 clips.sort((a, b) => a.start - b.start);
-
                 const firstIn = clips[0].start;
                 const lastOut = clips[clips.length - 1].end;
                 const currentDur = lastOut - firstIn;
@@ -101,17 +119,14 @@
                 const padding = 0.04; 
                 
                 let cursor = firstIn;
-
                 for (let i = 0; i < clips.length; i++) {
                     const c = clips[i];
                     const newDur = (c.end - c.start) * ratio;
                     const newStart = cursor;
                     const newEnd = newStart + newDur;
 
-                    // Literals: Clips.start i Clips.end
                     await callJSX(`Clips.start(${c.trackIndex + 1}, ${c.clipIndex}, ${newStart}, 'subtitle')`);
                     await callJSX(`Clips.end(${c.trackIndex + 1}, ${c.clipIndex}, ${newEnd}, 'subtitle')`);
-                    
                     cursor = newEnd + padding;
                 }
 

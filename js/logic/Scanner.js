@@ -117,6 +117,40 @@
                 console.error("💥 Error Scan.wotts:", e);
                 return { tema: "ERROR", list: [] };
             }
+        },
+
+        /**
+         * portada: Busca el darrer PNG de portada corresponent al bloc (estil Wotts).
+         */
+        portada: async function (ctx) {
+            try {
+                const pathNAS = ctx.config.rutas.chyrons;
+                utils.log(`📂 [SCAN PORTADA] Mirant a: ${pathNAS}`);
+
+                const allFiles = await utils.readFolder(pathNAS);
+                if (!allFiles || allFiles.length === 0) return null;
+
+                const freshFiles = this._discardOld(allFiles, 22);
+                const fProg = (ctx.progData && ctx.progData.archivo_wott) ? ctx.progData.archivo_wott.toUpperCase() : "TNC";
+                const fBloc = ctx.bloque ? `_${ctx.bloque}_`.toUpperCase() : "_V1_";
+
+                let filtered = freshFiles.filter(f => {
+                    const name = (f.name || f).toUpperCase();
+                    return name.includes(fProg) && name.includes(fBloc) && name.endsWith(".PNG");
+                });
+
+                if (filtered.length === 0) return null;
+
+                // Ordenar per mtime descendent (més recent primer)
+                filtered.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+
+                utils.log(`🖼️ Portada detectada: [${filtered[0].name}]`, "INFO");
+                return { name: filtered[0].name, path: pathNAS + filtered[0].name };
+
+            } catch (e) {
+                console.error("💥 Error Scan.portada:", e);
+                return null;
+            }
         }
     };
 

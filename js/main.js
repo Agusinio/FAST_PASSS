@@ -24,6 +24,10 @@ var isUserDraggingSlider = false;
         // 📍 PASO A: Llamada al Bootstrap (Manté el nom per ser el punt d'entrada)
         var result = await utils.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
 
+        // 📍 PASO B: Iniciar Motor de Configuración (Profile.json)
+        await FASTPASS_UI.Config.init();
+
+        // 📍 PASO C: Iniciar Inspectors
         if (result && result.indexOf("OK") !== -1) {
             utils.log("✅ Premiere Listo (Bootstrap OK).");
             utils.isJsxReady = true;
@@ -99,22 +103,17 @@ var isUserDraggingSlider = false;
         }
 
         // --- WORKFLOW: GRÀFICS ---
+        const btnResetGrafs = document.getElementById('btnResetGrafs');
         const btnChyrons = document.getElementById('btnPlaceChyrons');
+        const btnPlaceGrafic = document.getElementById('btnPlaceGrafic');
         const btnGraph169 = document.getElementById('btnPlaceGraph169');
         const btnBg = document.getElementById('btnBg');
-        const btnDiag = document.getElementById('btnDiagnostic');
 
+        if (btnResetGrafs) btnResetGrafs.addEventListener('click', () => callWorkflow('Retols', 'runResetGraphics'));
         if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Retols', 'runPlaceChyrons'));
+        if (btnPlaceGrafic) btnPlaceGrafic.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraphic'));
         if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
         if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
-        if (btnDiag) {
-            btnDiag.addEventListener('click', function () {
-                FASTPASS_UI.Utils.log("🛠️ Ejecutando Diagnóstico...");
-                FASTPASS_UI.Utils.callJSX('Diagnostic.report()').then(report => {
-                    console.log("📊 --- RESULTADO DEL DIAGNÓSTICO ---\n" + report);
-                });
-            });
-        }
 
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');
@@ -141,7 +140,10 @@ var isUserDraggingSlider = false;
         const selectPrograma = document.getElementById('programa');
         const selectBloc = document.getElementById('bloc');
 
-        if (btnSetup) btnSetup.addEventListener('click', () => console.log("⚙️ Setup Clicked"));
+        if (btnSetup) btnSetup.addEventListener('click', () => {
+            utils.log("⚙️ Obrint Dashboard de Configuració...");
+            window.location.href = "setup.html";
+        });
         if (selectPrograma) selectPrograma.addEventListener('change', handleSelectionChange);
         if (selectBloc) selectBloc.addEventListener('change', handleSelectionChange);
 

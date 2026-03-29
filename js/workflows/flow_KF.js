@@ -72,13 +72,16 @@
         runAutoReframe: async function() {
             log("🤖 Executant Auto Reframe Intel·ligent...");
             try {
-                // Literal: Anim.reframe()
-                const res = await callJSX("Anim.reframe()");
-                if (res === "OK_REFRAME") {
-                    getUtils().status("Reframe OK", "exito");
+                const res = await callJSX("Anim.reframe(1, -1)"); // V1, cabezal
+                if (res === "OK_ADDED_REFRAME") {
+                    getUtils().status("Reframe APLICAT", "exito");
                     log("✅ Auto Reframe aplicat al clip de V1.");
+                } else if (res === "INFO_ALREADY_HAS_REFRAME") {
+                    getUtils().status("Clip ja té Reframe", "warn");
+                    log("⚠️ El clip ja conté l'efecte Auto Reframe.");
                 } else {
-                    log("⚠️ Error Reframe: " + res, "WARN");
+                    getUtils().status("Error Reframe", "error");
+                    log("⚠️ Error d'aplicació: " + res, "WARN");
                 }
             } catch (e) {
                 console.error("Error en AutoReframe: " + e);

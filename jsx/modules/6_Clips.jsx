@@ -93,6 +93,22 @@ FASTPASS.Clips = {
     },
 
     /**
+     * clearTrack: Elimina tots els clips d'una pista (escombrat invers).
+     */
+    clearTrack: function(trackIdx, type) {
+        try {
+            var track = this._get(trackIdx, type || "video");
+            if (!track) return "ERR_TRACK_NOT_FOUND";
+            
+            var n = track.clips.numItems;
+            for (var i = n - 1; i >= 0; i--) {
+                track.clips[i].remove(true, true);
+            }
+            return "OK_CLEARED_" + n;
+        } catch(e) { return "EXC: " + e.message; }
+    },
+
+    /**
      * insert: Insereix un element del Bin (Overwrite) amb durada opcional.
      */
     insert: function(itemName, trackIdx, startSec, endSec, type) {
