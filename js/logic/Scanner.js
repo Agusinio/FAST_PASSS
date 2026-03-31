@@ -14,6 +14,18 @@
 
     FASTPASS_UI.Logic.Scan = {
 
+        selectedProject(fileList, progKey, blocKey) {
+            if (!fileList || fileList.length === 0) return null;
+            
+            // El patrón mínimo de identidad: Programa + Bloque
+            const pattern = `Pruebas_${progKey}_${blocKey}`.toLowerCase();
+            
+            // Buscamos en la lista de archivos (que ya trae SourceAssets.scan)
+            const match = fileList.find(f => f.name.toLowerCase().indexOf(pattern) === 0);
+            
+            return match ? match.name : null;
+        },
+        
         /**
          * _discardOld: Purga fitxers que superen la finestra de guarda (22h).
          */
@@ -110,7 +122,10 @@
 
                 return { 
                     tema: tema, 
-                    list: filtered.map(f => ({ name: f.name, path: pathNAS + f.name })) 
+                    list: filtered.map(f => ({
+                         name: f.name, 
+                         path: (pathNAS + f.name).replace(/\\/g, "/") // 📍 CAMBIO CRÍTICO: Forzar barras / 
+                    })) 
                 };
 
             } catch (e) {

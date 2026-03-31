@@ -6,16 +6,26 @@
 
 $.global.FASTPASS = $.global.FASTPASS || {};
 
+$.writeln("------- MOTOR JSX INICIADO -------");
+
 function jsx_BOOTSTRAP(extensionRootPath) {
     var currentFile = "INICIO";
     try {
-        var root = extensionRootPath.replace(/\\/g, "/");
+        // Limpieza extra de la ruta recibida
+        var root = extensionRootPath.toString().replace(/\\/g, "/");
+        
         var load = function (name) {
+            //$.writeln("📦 Intentando cargar: " + name);
             currentFile = name;
-            $.writeln("📂 Carregant mòdul: " + name);
             var f = new File(root + "/jsx/modules/" + name);
-            if (!f.exists) throw new Error("No existe: " + name);
+            if (!f.exists) {
+                //$.writeln("❌ ERROR: No existe " + f.fsName);
+                // Si no lo encuentra, intentamos sin la barra inicial por si acaso
+                f = new File(root.replace(/^\//, "") + "/jsx/modules/" + name);
+            }
+            if (!f.exists) throw new Error("No existe: " + name + " en la ruta " + root);
             $.evalFile(f);
+            //$.writeln("✅ " + name + " cargado OK.");
         };
 
         load("1_System.jsx");
@@ -30,31 +40,34 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         load("12_Diagnostic.jsx");
 
         return "OK_BOOT";
-    } catch (e) { return "ERROR_EN_ARCHIVO [" + currentFile + "] (Línea " + e.line + "): " + e.message; }
-}
+    } catch (e) { 
+        $.writeln("💥 CRASH en " + currentFile + ": " + e.message);
+        return "ERROR_JSX -> Archivo: " + currentFile + " | Msg: " + e.message + " | Linea: " + e.line; }
+};
 
 // ============================================================================
 // --- 1. FONAMENTS (System, Context, IO) ---
 // ============================================================================
 
 $.global.System = {
-    version: function() { return FASTPASS.System.version(); },
-    os: function() { return FASTPASS.System.os(); },
+    version: function() { return (FASTPASS.System) ? FASTPASS.System.version() : "0.0"; },
+    os: function() { return (FASTPASS.System) ? FASTPASS.System.os() : "win"; },
     ready: function() { return "READY"; },
-    clear: function() { return "OK"; }
+    clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; }
 };
 
 $.global.Context = {
-    list: function() { return FASTPASS.Context.getOpenNames(); },
+    list: function() { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getOpenNames() : "[]"; },
     activeProj: function() { try { return app.project.name; } catch(e) { return ""; } },
-    activeSeq: function() { try { return FASTPASS.Context.getSequenceName_FINAL(); } catch(e) { return ""; } },
+    activeSeq: function() { try { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getSequenceName_FINAL() : ""; } catch(e) { return ""; } },
     folder: function() { 
         try { 
-            var proj = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkProject() : app.project;
+            var proj = ($.global.FASTPASS.Context) ? FASTPASS.Context.getWorkProject() : app.project;
             return proj.path ? (new File(proj.path)).parent.fsName : ""; 
         } catch (e) { return ""; } 
     },
     set: function(name) { 
+        if (!$.global.FASTPASS.Context) return "ERR_NO_MODULE";
         try {
             for (var i = 0; i < app.projects.length; i++) {
                 if (app.projects[i].name === name) {
@@ -68,43 +81,105 @@ $.global.Context = {
 };
 
 $.global.IO = {
-    scanDirectory: function(p) { return FASTPASS.IO.scanDirectory(p); },
-    importFiles: function(p, b) { return FASTPASS.IO.importFiles(p, b); },
-    lookFor: function(n) { return FASTPASS.IO.lookFor(n); },
-    readTxt: function(p) { return FASTPASS.IO.readTxt(p); },
-    writeTxt: function(p, c) { return FASTPASS.IO.writeTxt(p, c); },
-    remove: function(p) { return FASTPASS.IO.remove(p); },
-    exists: function(p) { return FASTPASS.IO.exists(p); },
-    getUser: function() { return FASTPASS.IO.getUser(); }
+    scanDirectory: function(p) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.scanDirectory(p) : "[]"; 
+    },
+    importFiles: function(p, b) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.importFiles(p, b) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    lookFor: function(n) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.lookFor(n) : "false"; 
+    },
+    readTxt: function(p) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.readTxt(p) : ""; 
+    },
+    writeTxt: function(path, content) { 
+        if (!$.global.FASTPASS.IO) return "ERR_NO_IO_MODULE";
+        
+        // 📍 BLINDAJE 2: Si el path llega como undefined aquí, lo sabremos
+        if (typeof path === "undefined" || path === "undefined") {
+            return "ERR:path is undefined en el puente";
+        }
+        
+        return FASTPASS.IO.writeTxt(path, content); 
+    },
+    remove: function(p) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.remove(p) : "ERR_NOT_EXISTS"; 
+    },
+    exists: function(p) { 
+        // Importante: devolvemos string "true"/"false" para que el JS lo entienda bien
+        if (!$.global.FASTPASS.IO) return "false";
+        return FASTPASS.IO.exists(p) ? "true" : "false";
+    },
+    getUser: function() { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.getUser() : "UnknownUser"; 
+    }
 };
-
 // ============================================================================
 // --- 2. PROJECTE (Project, Timeline) ---
 // ============================================================================
 
 $.global.Project = {
-    save: function() { return FASTPASS.Project.save(); },
-    saveAs: function(path) { return FASTPASS.Project.saveAs(path); },
-    open: function(path) { return FASTPASS.Project.open(path); },
-    items: function(bin) { return FASTPASS.Project.items(bin); },
-    rename: function(n, newN) { return FASTPASS.Project.rename(n, newN); },
-    move: function(n, b) { return FASTPASS.Project.move(n, b); },
-    clone: function(src) { return FASTPASS.Project.clone(src); },
-    openSeq: function(n) { return FASTPASS.Project.openSeq(n); },
-    list: function() { return FASTPASS.Project.list() || "[]"; },
-    bin: function(n) { return FASTPASS.Project.bin(n); },
-    find: function(prog, bloc) { return FASTPASS.Project.byTokens(prog, bloc); },
-    biggestIn: function(bin) { return FASTPASS.Project.biggestIn(bin); }
+    save: function() { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.save() : "ERR_MODULE_NOT_LOADED"; 
+    },
+    saveAs: function(path) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.saveAs(path) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    open: function(path) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.open(path) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    items: function(bin) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.items(bin) : "[]"; 
+    },
+    rename: function(n, newN) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.rename(n, newN) : "ERR"; 
+    },
+    move: function(n, b) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.move(n, b) : "ERR"; 
+    },
+    clone: function(src) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.clone(src) : "ERR"; 
+    },
+    openSeq: function(n) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.openSeq(n) : "ERR"; 
+    },
+    list: function() { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.list() : "[]"; 
+    },
+    bin: function(n) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.bin(n) : null; 
+    },
+    find: function(prog, bloc) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.byTokens(prog, bloc) : "[]"; 
+    },
+    biggestIn: function(bin) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.biggestIn(bin) : null; 
+    }
 };
 
 $.global.Timeline = {
-    get: function() { return FASTPASS.Timeline.get(); },
-    set: function(s) { return FASTPASS.Timeline.set(s); },
-    range: function(i, o) { return FASTPASS.Timeline.range(i, o); },
-    refresh: function() { return FASTPASS.Timeline.refresh(); },
-    duration: function() { return FASTPASS.Timeline.duration(); },
-    in: function(v) { return FASTPASS.Timeline.in(v); },
-    out: function(v) { return FASTPASS.Timeline.out(v); }
+    get: function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.get() : null; 
+    },
+    set: function(s) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.set(s) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    range: function(i, o) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.range(i, o) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    refresh: function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.refresh() : "OK"; 
+    },
+    duration: function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.duration() : 0; 
+    },
+    "in": function(v) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.inPoint(v) : "ERR"; 
+    },
+    "out": function(v) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.outpoint(v) : "ERR"; 
+    }
 };
 
 // ============================================================================
@@ -112,24 +187,54 @@ $.global.Timeline = {
 // ============================================================================
 
 $.global.Tracks = {
-    count: function(type) { return FASTPASS.Tracks.count(type); },
-    mute: function(idx, m, type) { return FASTPASS.Tracks.mute(idx, m, type); },
-    lock: function(idx, l, type) { return FASTPASS.Tracks.lock(idx, l, type); },
-    target: function(idx, t, type) { return FASTPASS.Tracks.target(idx, t, type); }
+    count: function(type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.count(type) : 0; 
+    },
+    mute: function(idx, m, type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.mute(idx, m, type) : "ERR"; 
+    },
+    lock: function(idx, l, type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.lock(idx, l, type) : "ERR"; 
+    },
+    target: function(idx, t, type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.target(idx, t, type) : "ERR"; 
+    }
 };
 
 $.global.Clips = {
-    count: function(ti, type) { return FASTPASS.Clips.count(ti, type || "video"); },
-    get: function(ti, ci, type) { return FASTPASS.Clips.get(ti, ci, type || "video"); },
-    at: function(ti, t, type) { return FASTPASS.Clips.at(ti, t, type || "video"); },
-    remove: function(ti, ci, type) { return FASTPASS.Clips.remove(ti, ci, type || "video"); },
-    insert: function(n, ti, s, e, t) { return FASTPASS.Clips.insert(n, ti, s, e, t); },
-    start: function(ti, ci, v, type) { return FASTPASS.Clips.start(ti, ci, v, type || "video"); },
-    end: function(ti, ci, v, type) { return FASTPASS.Clips.end(ti, ci, v, type || "video"); },
-    inPoint: function(ti, ci, v, type) { return FASTPASS.Clips.inPoint(ti, ci, v, type || "video"); },
-    setProp: function(ti, ci, cp, pr, v, t) { return FASTPASS.Clips.setProp(ti, ci, cp, pr, v, t || "video"); },
-    getSubtitles: function() { return FASTPASS.Clips.getSubtitles(); },
-    scenes: function(ti) { return FASTPASS.Clips.scenes(ti); }
+    count: function(ti, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.count(ti, type || "video") : 0; 
+    },
+    get: function(ti, ci, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.get(ti, ci, type || "video") : null; 
+    },
+    at: function(ti, t, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.at(ti, t, type || "video") : null; 
+    },
+    remove: function(ti, ci, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.remove(ti, ci, type || "video") : "ERR"; 
+    },
+    insert: function(n, ti, s, e, t) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE"; 
+    },
+    start: function(ti, ci, v, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.start(ti, ci, v, type || "video") : "ERR"; 
+    },
+    end: function(ti, ci, v, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.end(ti, ci, v, type || "video") : "ERR"; 
+    },
+    inPoint: function(ti, ci, v, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.inPoint(ti, ci, v, type || "video") : "ERR"; 
+    },
+    setProp: function(ti, ci, cp, pr, v, t) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.setProp(ti, ci, cp, pr, v, t || "video") : "ERR"; 
+    },
+    getSubtitles: function() { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.getSubtitles() : "[]"; 
+    },
+    scenes: function(ti) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.scenes(ti) : "[]"; 
+    }
 };
 
 // ============================================================================
@@ -137,21 +242,44 @@ $.global.Clips = {
 // ============================================================================
 
 $.global.Anim = {
-    add: function(ti, ci, cp, pr, t) { return FASTPASS.Anim.add(ti, ci, cp, pr, t); },
-    remove: function(ti, ci, cp, pr, t) { return FASTPASS.Anim.remove(ti, ci, cp, pr, t); },
-    set: function(ti, ci, cp, pr, t, v) { return FASTPASS.Anim.set(ti, ci, cp, pr, t, v); },
-    interp: function(ti, ci, cp, pr, t, i) { return FASTPASS.Anim.interp(ti, ci, cp, pr, t, i); },
-    list: function(ti, ci, cp, pr) { return FASTPASS.Anim.list(ti, ci, cp, pr); },
-    x: function(v, f) { return (arguments.length === 0) ? FASTPASS.Anim.x() : FASTPASS.Anim.x(v, f); },
-    reframe: function(ti, ci) { return FASTPASS.Anim.reframe(ti, ci); }
+    add: function(ti, ci, cp, pr, t) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.add(ti, ci, cp, pr, t) : "ERR"; 
+    },
+    remove: function(ti, ci, cp, pr, t) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.remove(ti, ci, cp, pr, t) : "ERR"; 
+    },
+    set: function(ti, ci, cp, pr, t, v) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.set(ti, ci, cp, pr, t, v) : "ERR"; 
+    },
+    interp: function(ti, ci, cp, pr, t, i) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.interp(ti, ci, cp, pr, t, i) : "ERR"; 
+    },
+    list: function(ti, ci, cp, pr) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.list(ti, ci, cp, pr) : "[]"; 
+    },
+    x: function(v, f) { 
+        if (!$.global.FASTPASS.Anim) return "0";
+        return (arguments.length === 0) ? FASTPASS.Anim.x() : FASTPASS.Anim.x(v, f); 
+    },
+    reframe: function(ti, ci) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
+    }
 };
 
 $.global.Render = {
-    frame: function(p, t) { return FASTPASS.Render.frame(p, t); },
-    snapshot: function(p, t) { return FASTPASS.Render.exportFrameQE(p, t); },
-    queue: function(pr, o, n) { return FASTPASS.Render.addToAME(pr, o, n); }
+    frame: function(p, t) { 
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.frame(p, t) : "ERR"; 
+    },
+    snapshot: function(p, t) { 
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.exportFrameQE(p, t) : "ERR"; 
+    },
+    queue: function(pr, o, n) { 
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.addToAME(pr, o, n) : "ERR"; 
+    }
 };
 
 $.global.Diagnostic = {
-    report: function() { return FASTPASS.Diagnostic.runFullReport(); }
+    report: function() { 
+        return ($.global.FASTPASS.Diagnostic) ? FASTPASS.Diagnostic.runFullReport() : "ERR_NO_MODULE"; 
+    }
 };

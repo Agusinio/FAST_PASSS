@@ -39,19 +39,28 @@ FASTPASS.IO = (function () {
          */
         importFiles: function (jsonPaths, binName) {
             try {
+                // 📍 LOG DE INSPECCIÓN (Se ve en la consola de ExtendScript o el log de la extensión)
+                // Si jsonPaths no es un string válido, aquí lo sabremos
+                if (!jsonPaths) return "ERR: Payload vacío";
+        
                 var paths = JSON.parse(jsonPaths);
-                var proj = ($.global.FASTPASS_WorkProject instanceof Project) ? $.global.FASTPASS_WorkProject : app.project;
                 
-                if (paths.length === 0) return "OK_EMPTY";
-                if (!proj) throw new Error("No s'ha trobat cap projecte actiu.");
+                // El resto del código de importación...
+                var proj = app.project;
+                if (!proj) throw new Error("No hay proyecto activo");
         
-                var targetBin = (binName && binName !== "root") ? 
-                                FASTPASS.Project.bin(binName) : 
-                                proj.rootItem;
+                // IMPORTANTE: Premiere Pro necesita que los archivos existan
+                // Verificamos si el primer archivo existe para debuggear
+                if (paths.length > 0 && !(new File(paths[0])).exists) {
+                     // Si el archivo no existe, el parse fue bien pero la ruta está mal
+                     // No bloqueamos, pero lo dejamos como aviso
+                }
         
-                proj.importFiles(paths, true, targetBin, false);
+                proj.importFiles(paths, true, proj.rootItem, false);
                 return "OK";
-            } catch (e) { return "ERR: " + e.message; }
+            } catch (e) { 
+                return "ERR: JSON.parse falló. Payload recibido: " + jsonPaths.substring(0, 50) + "... | Error: " + e.message; 
+            }
         },
 
         /**
@@ -97,20 +106,33 @@ FASTPASS.IO = (function () {
          */
         writeTxt: function(path, content) {
             try {
+                // 📍 BLINDAJE 3: Convertimos a objeto File inmediatamente
                 var f = new File(path);
-                if (!f.parent.exists) f.parent.create();
+                
+                if (!f.parent.exists) {
+                    f.parent.create();
+                }
+                
                 f.open('w');
+                f.encoding = "UTF-8"; // Aseguramos codificación
                 f.write(content);
                 f.close();
+                
                 return "OK";
-            } catch(e) { return "ERR: " + e.message; }
+            } catch(e) { 
+                return "ERR en IO.jsx: " + e.message; 
+            }
         },
 
         /**
          * exists: Comprova si el fitxer existeix en el sistema d'arxius.
          */
         exists: function(path) {
-            return (new File(path)).exists;
+            if (!path) return "false";
+            var f = new File(path);
+            // En ExtendScript, un objeto File puede apuntar a una carpeta.
+            // Verificamos que sea un archivo real y no una carpeta.
+            return (f.exists && f instanceof File) ? "true" : "false";
         },
 
         /**

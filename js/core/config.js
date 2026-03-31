@@ -12,7 +12,7 @@
         general: { autor: "AGUS", guarda: 22, debug: false },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
-            conductors: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\",
+            conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
             vertical: "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\",
             chyrons: "\\\\192.168.147.199\\public\\00_CHYRONS AUTOMATICS\\3CatInfo\\VERTICALITZACIO\\",
             destino_base: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PROVES\\",
@@ -105,7 +105,8 @@
         init: async function () {
             try {
                 const utils = window.FASTPASS_UI.Utils;
-                const extensionRoot = window.cep.fs.getSystemPath(window.cep.Extension.path);
+                const csInterface = new CSInterface();
+                const extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
                 const profilePath = extensionRoot + "/Profile.json";
                 
                 const exists = await utils.callJSX(`IO.exists('${profilePath.replace(/\\/g, '\\\\')}')`);

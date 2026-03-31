@@ -17,104 +17,80 @@
 
         async checkContext() {
             if (!getUtils().isJsxReady) return;
-
-            // 📍 DEBOUNCE: Evitem saturar el NAS si el polling és molt ràpid
+        
+            // 📍 Capturamos los elementos del DOM al inicio
+            const elProg = document.getElementById('programa'); // <--- Faltaba esto
+            const elBloc = document.getElementById('bloc');     // <--- Faltaba esto
+        
+            // 📍 DEBOUNCE
             const now = Date.now();
             if (now - _lastCheckAt < 1000) return;
             _lastCheckAt = now;
-
-            // 📍 DINAMISMO: Pillamos los inspectors aquí dentro, no fuera.
-            // Así nos aseguramos de que ya están cargados en el window.
-            const assets = FASTPASS_UI.Inspectors.SourceAssets;
-            const appInfo = FASTPASS_UI.Inspectors.App;
-            const session = FASTPASS_UI.Inspectors.Session;
-
-            const elProg = document.getElementById('programa');
-            const elBloc = document.getElementById('bloc');
-
-            if (!elProg || !elBloc || !elProg.value || elBloc.value === "---") {
-                this.updateButton('DISABLED');
-                return;
-            }
-
+        
+            console.group("🔍 [DEBUG CONTEXT]"); 
+        
             try {
+                // Ahora ya puedes validar si existen
+                if (!elProg || !elBloc || !elProg.value || elBloc.value === "---") {
+                    console.log("⚠️ Selectores incompletos o no encontrados.");
+                    this.updateButton('DISABLED');
+                    console.groupEnd();
+                    return;
+                }
+        
                 const config = FASTPASS_UI.Config.get();
-                const progKey = elProg.value;
-                const progData = config.mapeoProgramas[progKey];
-                const dateDir = getUtils().getFormattedDate().replace(/"/g, "").trim();
-
-                // --- 1. INSPECCIÓ EXTERNA ---
-                const mediaSource = config.rutas.destinoBase + progData.directorio + "\\" + dateDir;
-                // CORREGIT: Ja no fem servir assets() amb parèntesis
-                const wottsRaw = await assets.scan(mediaSource, "*.wott");
-                const map = assets.getLatestDayMap(wottsRaw);
-                const theme = this._extractThemeFromFiles(map);
-
-                // --- 2. PARSING I ESTRUCTURA ---
-                const pieces = window.Parse.files(map, progKey, elBloc.value);
-                FASTPASS_UI.State.structure = pieces;
-
-                // --- 3. INSPECCIÓ INTERNA (ADUANA) ---
-                const openProjs = await appInfo.getOpenProjects();
-                const activeProj = await appInfo.getActiveProjectName();
-
-                // 1. Definim els "Pasaports" vàlids d'Identitat
-                const templateName = "3CatInfo_NET.prproj";
-                const sanitizedTheme = getUtils().sanitizeName(theme || 'PENDENT');
-                const projSlug = config.naming.getProjectName({
-                    progData,
+                const ctx = {
+                    config: config,
+                    progData: config.mapeoProgramas[elProg.value],
                     bloque: elBloc.value,
-                    userName: await getUtils().callJSX("IO.getUser()"),
-                    dateDir
-                }, sanitizedTheme);
+                    // Usamos la fecha de la utilidad
+                    dateDir: getUtils().getFormattedDate().replace(/"/g, "").trim()
+                };
+            
+                // 1. RUTA DE RECERCA
+                const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
+                
+                // 2. ESCANEIG GENÈRIC (Usant Utils.readFolder a través de Scanner)
+                const projectFiles = await getUtils().readFolder(folderPath); // Atòmic
 
-                const expectedProjName = `Pruebas_${projSlug}.prproj`;
-                const destPath = mediaSource + "\\" + expectedProjName;
-
-                // 2. Comprovacions de pertinença (Punt 5 Revisat: Obertura de Filtre)
-                const isTemplate = (activeProj === templateName);
-                const isTarget = activeProj.indexOf(progKey) !== -1 && activeProj.indexOf(elBloc.value) !== -1;
-                const isProjectAlreadyOpen = openProjs.some(p => p.indexOf(progKey) !== -1 && p.indexOf(elBloc.value) !== -1);
-
-                // 🚨 EL FILTRE CRÍTIC: Si no és el nostre negociat, "no existeix"
-                let isOurs = isTemplate || isTarget;
-
-                if (!isOurs) {
-                    // Si estem a TEST.prproj o qualsevol altre, ignorem el contingut del bin
-                    FASTPASS_UI.State.structure = [];
-                    FASTPASS_UI.State.activeSequenceName = "";
-                    getUtils().log("⚠️ Projecte ajè o sense guardar (" + activeProj + "). Ignorant contingut.");
-                } else {
-                    // NOMÉS si és un projecte oficial o la plantilla, analitzem el bin
-                    const piecesLocal = parser.parseFromFiles(map, progKey, elBloc.value);
-                    FASTPASS_UI.State.structure = piecesLocal;
-                    FASTPASS_UI.State.activeSequenceName = await session.getActiveSequenceName();
+                if (!projectFiles || projectFiles.length === 0) {
+                    getUtils().log("ℹ️ Carpeta buida o inexistent. Conclusió: NEW", "DEBUG");
                 }
-
-                // --- 5. CONCLUSIÓ D'ESTAT (Basada en Identitat, no en clips) ---
-                const fileExists = await getUtils().callJSX(`IO.exists('${destPath.replace(/\\/g, "\\\\")}')`);
-
+            
+                // 3. LÒGICA DE NEGOCI (Usant el teu Scanner.js)
+                const existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
+                    projectFiles, 
+                    ctx.progData.archivo, 
+                    ctx.bloque
+                );
+            
                 let conclusion = 'NEW';
-
-                if (isTarget) {
-                    conclusion = 'UPDATE'; // Estem dins del projecte correcte i guardat
-                } else if (isProjectAlreadyOpen) {
-                    conclusion = 'GO';     // El projecte correcte està obert però no és l'actiu
-                } else if (isTemplate) {
-                    conclusion = 'NEW';    // Estem a la plantilla, llestos per fer el "Save As"
-                } else {
-                    // Si estem a TEST.prproj (o qualsevol altre), mirem si el projecte real existeix a disc
-                    conclusion = (fileExists === "true") ? 'LOAD' : 'NEW';
+                let lockOwner = null;
+            
+                if (existingProjectName) {
+                    // Mirem si hi ha lock (Lògica JS pura sobre la llista ja descarregada)
+                    const lockFile = projectFiles.find(f => f.name === existingProjectName + ".lock");
+                    
+                    if (lockFile) {
+                        // Hi ha bloqueig: llegim el contingut (qui és l'amo)
+                        lockOwner = await getUtils().callJSX(`IO.readTxt('${folderPath + lockFile.name}')`);
+                        conclusion = 'LOCKED';
+                    } else {
+                        conclusion = 'LOAD';
+                    }
                 }
-                // --- 6. APLICACIÓ A LA UI ---
-                FASTPASS_UI.State.projectName = expectedProjName;
-                this.updateLights(progKey, elBloc.value, theme, FASTPASS_UI.State.activeSequenceName);
-                this.updateButton(conclusion, { progKey, bloc: elBloc.value, theme, name: expectedProjName });
-
+            
+                // 4. FEEDBACK UI
+                if (conclusion === 'LOCKED') {
+                    this.updateButton('LOCKED', { user: lockOwner });
+                } else {
+                    // Si és LOAD, el nom del projecte és el que hem trobat (amb el seu tema real)
+                    const finalName = existingProjectName || `Pruebas_${ctx.progData.archivo}_${ctx.bloque}_PENDENT.prproj`;
+                    this.updateButton(conclusion, { ...ctx, name: finalName });
+                }
+            
             } catch (e) {
-                console.error("💥 Error en el Core de Context:", e);
-                this.updateLights(false, false, false, false);
-                this.updateButton('DISABLED');
+                getUtils().log("💥 Error checkContext: " + e.message, "ERROR");
             }
         },
 
@@ -132,25 +108,40 @@
         updateButton(state, data) {
             const btn = document.getElementById('btnMainAction');
             if (!btn) return;
+        
+            // 📍 Forzamos tamaño mínimo por si el CSS falla
+            btn.style.minHeight = "60px"; 
+            btn.style.width = "100%";
             btn.disabled = (state === 'DISABLED' || state === 'WAITING');
-            btn.className = "square-large"; // Classe neutre única
+        
+            // Limpiamos eventos previos para evitar duplicados
+            btn.onclick = null;
+        
+            log("updateButton STATE: " + state);
 
             switch (state) {
+                case 'NEW':
+                    btn.innerText = "NOU PROJECTE";
+                    btn.className = "square-large btn-new"; // Asegúrate que btn-new existe o usa estilos inline
+                    btn.onclick = function() { 
+                        FASTPASS_UI.Workflows.MainButton.runMainAction('NEW', data); 
+                    };
+                    break;
                 case 'UPDATE':
                     btn.innerText = "ACTUALITZAR";
-                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('UPDATE', data);
+                    btn.onclick = function() { 
+                        FASTPASS_UI.Workflows.MainButton.runMainAction('UPDATE', data); 
+                    };
                     break;
                 case 'GO':
-                    btn.innerText = "ANAR-HI";
-                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('GO', data);
+                    btn.innerText = "ANAR AL PROJECTE";
+                    btn.onclick = function() { 
+                        FASTPASS_UI.Workflows.MainButton.runMainAction('GO', data); 
+                    };
                     break;
                 case 'LOAD':
                     btn.innerText = "OBRIR";
                     btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('LOAD', data);
-                    break;
-                case 'NEW':
-                    btn.innerText = "NOU";
-                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('NEW', data);
                     break;
                 case 'WAITING':
                     btn.innerText = data.msg || "ESPERANT...";
@@ -162,7 +153,7 @@
                     btn.style.color = "#dc3545";
                     break;
                 default:
-                    btn.innerText = "---";
+                    btn.innerText = "ESPERANT";
             }
         },
 
@@ -191,27 +182,63 @@
         init() {
             const p = document.getElementById('programa');
             const b = document.getElementById('bloc');
-
-            if (p && b) {
-                const trigger = () => {
-                    FASTPASS_UI.Config.saveSelection(p);
-                    FASTPASS_UI.Config.saveSelection(b);
-                    this.checkContext();
-
-                    // 📍 CRÍTIC: Ara fem servir la funció unificada que mira el NAS
-                    this.syncConductorUI();
-                };
-
-                p.addEventListener('change', trigger);
-                b.addEventListener('change', trigger);
-
-                // Arrencada inicial
-                setTimeout(() => {
-                    this.checkContext();
-                    // Poblem el desplegable només obrir el panell
-                    this.syncConductorUI();
-                }, 800);
+            const config = FASTPASS_UI.Config.get();
+        
+            if (!p || !b) {
+                console.error("❌ [CONTEXT] No se han encontrado los selects en el HTML");
+                return;
             }
+        
+            // 1. Rellenar programas
+            if (config.mapeoProgramas) {
+                p.innerHTML = ""; 
+                for (let id in config.mapeoProgramas) {
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = id;
+                    p.appendChild(opt);
+                }
+                console.log("✅ [CONTEXT] Programas cargados en el select");
+            }
+        
+            // 2. IMPORTANTE: Rellenar bloques si están vacíos (V1...V5)
+            if (b.options.length <= 1) {
+                const blocs = ["V1", "V2", "V3", "V4", "V5"];
+                b.innerHTML = ""; // Limpiar el "---"
+                blocs.forEach(val => {
+                    const opt = document.createElement('option');
+                    opt.value = val;
+                    opt.textContent = val;
+                    b.appendChild(opt);
+                });
+                console.log("✅ [CONTEXT] Bloques V1-V5 inyectados");
+            }
+        
+            // 3. Cargar lo que había guardado el usuario
+            if (FASTPASS_UI.Config.loadSelection) {
+                FASTPASS_UI.Config.loadSelection();
+                console.log("💾 [CONTEXT] Selección recuperada:", p.value, b.value);
+            }
+        
+            // 4. Definir el Trigger con LOGS
+            const trigger = () => {
+                console.log("🔄 [EVENT] Cambio en selectores detectado");
+                FASTPASS_UI.Config.saveSelection(p);
+                FASTPASS_UI.Config.saveSelection(b);
+                
+                // Ejecutamos la lógica de actualización
+                this.checkContext();
+                this.syncConductorUI();
+            };
+        
+            // 5. Vincular eventos
+            p.onchange = trigger; // Usamos onchange directo para asegurar que no hay duplicados
+            b.onchange = trigger;
+        
+            // 6. Arrencada inicial forzada
+            console.log("🚀 [CONTEXT] Forzando primer check...");
+            this.checkContext();
+            this.syncConductorUI();
         },
 
         async syncConductorUI() {
@@ -278,9 +305,17 @@
 
         _extractThemeFromFiles(fileList) {
             if (!fileList || fileList.length === 0) return null;
-            const f = fileList[0];
-            const match = f.name.match(/Tema-Titol_(.*?)\.\d+\.wott$/i);
-            return match ? match[1] : null;
+            
+            // Busquem el primer fitxer que tingui el patró de Tema-Titol
+            for (let i = 0; i < fileList.length; i++) {
+                const f = fileList[i];
+                const fileName = (f.name || f).toString();
+                
+                // Regex actualitzada: busca el text entre 'Tema-Titol_' i el següent punt/codi
+                const match = fileName.match(/Tema-Titol_(.*?)\.\d+/i);
+                if (match && match[1]) return match[1];
+            }
+            return null;
         }
     };
 

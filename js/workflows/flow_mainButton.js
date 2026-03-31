@@ -36,55 +36,118 @@
             }
         },
 
-        _runNew: async function () {
-            const utils = getUtils();
-            log("🚀 [FLOW-NEW]");
-            const ctx = await this._setupContext();
+        _runNew: async function (data) {
+            try {
+                const utils = FASTPASS_UI.Utils;
+                const config = FASTPASS_UI.Config.get();
+                const elProg = document.getElementById('programa');
+                const elBloc = document.getElementById('bloc');
+                const ctx = { 
+                    config, 
+                    progData: config.mapeoProgramas[elProg.value], 
+                    bloque: elBloc.value, 
+                    dateDir: utils.getFormattedDate().replace(/"/g, "").trim() 
+                };
+        
+                const wottData = await window.Scan.wotts(ctx); 
+                const sanitizedTheme = utils.sanitizeName(wottData.tema || 'PENDENT');
+                const projSlug = config.naming.getProjectName(ctx, sanitizedTheme);
+                const fileName = `Pruebas_${projSlug}.prproj`;
+                const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
+                const fullDestPath = folderPath + "/" + fileName;
+                // A. Forzamos barras inclinadas
+                const safePath = fullDestPath.replace(/\\/g, "/");
+        
+                // 1. ABRIR PLANTILLA
+                const plantillaPath = config.rutas.plantilla_net.replace(/\\/g, "/");
+                utils.log(`📂 Obrint plantilla: ${plantillaPath}`);
+                await utils.callJSX(`Project.open('${plantillaPath}')`);
+                
+                //await utils.delay(800); // Pausa para que Premiere registre el proyecto abierto
+        
+                // 2. PREPARAR EL BIN "CHY"
+                utils.log(`📂 Preparant carpeta CHY al projecte...`);
+                // Creamos el bin y capturamos el nombre confirmado (debería ser "CHY")
+                const binTarget = await utils.callJSX("Project.bin('CHY')");
 
-            // 1. Scanner (Hauria de ser literal via window.Scan)
-            const wottData = await window.Scan.wotts(ctx);
-            const temaReal = (wottData && wottData.tema) ? wottData.tema : "PENDENT";
-            const sanitizedTema = utils.sanitizeName(temaReal);
-
-            // 2. Generar nombres
-            const projectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
-            const seqName = ctx.config.naming.getSequenceName(ctx, sanitizedTema);
-
-            const fileName = `Pruebas_${projectName}.prproj`;
-            const destPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + fileName;
-
-            utils.ensureFolders(destPath.substring(0, destPath.lastIndexOf("\\")));
-
-            log(`🏗️ Creant projecte [${temaReal}]...`);
-            const projectResult = await window.Project.create(ctx.config.rutas.plantilla_net, destPath, seqName);
-
-            if (projectResult === "OK" || projectResult.success) {
-                await this._createLock(destPath);
-
-                log("📁 Creant estructura de Bins...");
-                await callJSX("Project.bin('CHYRON')");
-
-                ctx.mediaAssets = await window.Scan.mediaAssets(ctx);
-
-                if ((wottData.list && wottData.list.length > 0) || (ctx.mediaAssets && ctx.mediaAssets.mp4)) {
-                    log("🎞️ Iniciant sincronització de fitxers...");
-                    await this._performSync(ctx, wottData, ctx.mediaAssets);
-                }
-
-                if (ctx.mediaAssets && ctx.mediaAssets.mp4) {
-                    const mp4Name = ctx.mediaAssets.mp4.name;
-                    await utils.delay(1000);
-
-                    log(`🎬 Col·locant clip [${mp4Name}] al Timeline...`);
-                    // Literal: Clips.insert(nom, pista, segons, duració, tipus)
-                    const resTimeline = await callJSX(`Clips.insert('${utils.escape(mp4Name)}', 1, 0, null, 'video')`);
-
-                    if (resTimeline === "OK") {
-                        log("✅ Clip inserit i visible al V1.");
+                // 3. INGESTA DE RÈTOLS (Wotts)
+                if (wottData.list && wottData.list.length > 0) {
+                    utils.log(`📥 Ingestant ${wottData.list.length} rètols al ROOT...`);
+                    
+                    // 📍 SOLO normalizamos barras, SIN escapar comillas aquí
+                    const safeWotts = wottData.list.map(f => f.path.replace(/\\/g, "/"));
+                    
+                    // El importList usará JSON.stringify internamente, que ya es seguro
+                    await utils.importList(safeWotts, "root"); 
+                
+                    // B. MOVER A BIN (Aquí sí escapamos para la llamada directa)
+                    utils.log(`📂 Organitzant rètols a la carpeta CHY...`);
+                    await utils.callJSX("Project.bin('CHY')");
+                
+                    for (const wott of wottData.list) {
+                        // Escapamos solo para el comando Project.move
+                        const escapedName = wott.name.replace(/'/g, "\\'");
+                        await utils.callJSX(`Project.move('${escapedName}', 'CHY')`);
                     }
                 }
+        
+                const media = await window.Scan.mediaAssets(ctx);
+                if (media && media.mp4) {
+                    const plantillaSeq = "OTT VERTICAL"; 
+                    utils.log(`👥 Buscant i clonant: ${plantillaSeq}`);
+                    
+                    // 1. CLONAR (Enviamos codificado por seguridad)
+                    const newSeqName = await utils.callJSX(`Project.clone('${encodeURIComponent(plantillaSeq)}')`);
+                    
+                    if (newSeqName && newSeqName !== "" && newSeqName.indexOf("ERR") === -1) {
+                        const finalSeqName = config.naming.getSequenceName(ctx, sanitizedTheme);
+                        await utils.callJSX(`Project.rename('${encodeURIComponent(newSeqName)}', '${encodeURIComponent(finalSeqName)}')`);
+                        
+                        // Usamos Project.rename del Bridge
+                        await utils.callJSX(`Project.rename('${encodeURIComponent(newSeqName)}', '${encodeURIComponent(finalSeqName)}')`);
+                
+                        // 3. INSERTAR MP4
+                        utils.log(`🎬 Estampant vídeo a la V1...`);
+                        const escapedMediaName = encodeURIComponent(media.mp4.name);
+                        await utils.callJSX(`Clips.insert('${escapedMediaName}', 1, 0)`);
+                        
+                    } else {
+                        utils.log(`❌ No s'ha trobat la seqüència en cap carpeta del projecte.`, "ERROR");
+                    }
+                }
+        
+                // 5. ASEGURAR CARPETAS
+                await utils.ensureFolders(folderPath);
+        
+                // 6. GUARDADO FINAL (SAVE AS)
+                // A. Forzamos barras inclinadas
+                //const safePath = fullDestPath.replace(/\\/g, "/");
 
-                log("✅ Procés de creació finalitzat.");
+                // B. ESCAPADO CRÍTICO: Escapamos las comillas simples (') para que no rompan el callJSX
+                // Esto convertirá "L'ESCOLA" en "L\'ESCOLA" para que el bridge lo acepte
+                const escapedPath = safePath.replace(/'/g, "\\'");
+
+                utils.log(`🏗️ Enviant ordre de SaveAs per a: ${escapedPath}`);
+
+                // C. Llamada con la ruta protegida
+                let saveRes = await utils.callJSX(`Project.saveAs('${escapedPath}')`);
+                
+                // 🔄 RE-INTENTO: Si falla o Premiere no responde, esperamos y reintentamos una vez más
+                if (saveRes && saveRes.indexOf("ERR") !== -1) {
+                    utils.log("⚠️ Primer intent fallit, reintentant en 1/2 segon...", "WARN");
+                    await utils.delay(2000);
+                    saveRes = await utils.callJSX(`Project.saveAs('${safePath}')`);
+                }
+        
+                if (saveRes && saveRes.indexOf("ERR") !== -1) throw new Error("Premiere no ha permès guardar: " + saveRes);
+        
+                // 7. LOCK
+                await this._createLock(fullDestPath);
+        
+                utils.log("✅ Workflow NOU completat amb èxit.");
+        
+            } catch (e) {
+                FASTPASS_UI.Utils.log("💥 Error crític a runNew: " + e.message, "ERROR");
             }
         },
 
@@ -149,8 +212,10 @@
             const wottData = await window.Scan.wotts(ctx);
             const sanitizedTheme = getUtils().sanitizeName(wottData.tema || 'PENDENT');
             const projSlug = ctx.config.naming.getProjectName(ctx, sanitizedTheme);
-            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + `Pruebas_${projSlug}.prproj`;
-
+            //const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + `Pruebas_${projSlug}.prproj`;
+            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/" + `Pruebas_${projSlug}.prproj`;
+            await callJSX(`IO.writeTxt('${folderPath}/.keep', 'temp')`); // Truco para forzar creación de carpeta
+            
             await this._createLock(destPath);
             // Literal: Project.open()
             await callJSX(`Project.open('${destPath.replace(/\\/g, "\\\\")}')`);
@@ -160,10 +225,16 @@
         _createLock: async function (projPath) {
             try {
                 const lockPath = projPath + ".lock";
-                // Literal: IO.getUser() i IO.writeTxt()
                 const user = await callJSX("IO.getUser()");
+                
+                // 📍 BLINDAJE 1: Pasamos la ruta con barras / para que no haya líos de escape
+                const safeLockPath = lockPath.replace(/\\/g, "/"); 
+                
                 log(`🔒 Escrivint bloqueig per a ${user}...`);
-                await callJSX(`IO.writeTxt('${lockPath.replace(/\\/g, "\\\\")}', '${user}')`);
+                
+                // Enviamos el comando con la ruta ya normalizada
+                await callJSX(`IO.writeTxt('${safeLockPath}', '${user}')`);
+                
             } catch (e) { console.error("Error creant .lock", e); }
         },
 

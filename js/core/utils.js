@@ -98,18 +98,21 @@
                 if (!parts[i]) continue;
                 currentPath += '\\' + parts[i];
                 
-                // Verifiquem existència
                 let stat = fs.stat(currentPath);
-                if (stat.err === 2) { // 2 = No existeix
-                    this.log(`📂 [JS-FS] Creant carpeta: ${currentPath}...`, "DEBUG");
+                
+                // 📍 Si no existe (err 2) O si hay un error de acceso (err 3, etc.)
+                // intentamos crearla de todos modos por si es un subdirectorio nuevo.
+                if (stat.err !== 0) { 
                     let result = fs.makedir(currentPath);
-                    if (result.err !== 0) {
-                        this.log(`❌ [JS-FS] Error creant: ${currentPath} (Codi: ${result.err})`, "ERROR");
-                    } else {
+                    
+                    if (result.err === 0) {
                         this.log(`✅ [JS-FS] Carpeta creada: ${currentPath}`, "DEBUG");
+                    } else if (result.err === 82) { // 82 = Ya existe (pero el stat falló por red)
+                        this.log(`ℹ️ [JS-FS] La carpeta ya existía: ${currentPath}`, "DEBUG");
+                    } else {
+                        // Solo logueamos como error si realmente no podemos crearla
+                        this.log(`⚠️ [JS-FS] Intentant crear ${currentPath}: Codi ${result.err}`, "DEBUG");
                     }
-                } else if (stat.err !== 0) {
-                    this.log(`⚠️ [JS-FS] Stat error a ${currentPath}: ${stat.err}`, "WARN");
                 }
             }
             return true;
@@ -124,17 +127,16 @@
         importList: async function(pathList, binName) {
             if (!pathList || !pathList.length) return;
         
-            // Convertimos la lista de objetos a lista de strings (Rutas)
-            // El Scanner ahora nos da {name, path}. Solo queremos el path.
+            // Extraemos solo el path si es un objeto
             const rawPaths = pathList.map(item => item.path || item);
         
-            // 📍 LOG DE INSPECCIÓN
-            console.log(`🚀 [IMPORT] Enviant ${rawPaths.length} rutes al JSX:`);
-            console.table(rawPaths); 
-        
             try {
-                const payload = JSON.stringify(rawPaths);
-                const res = await this.callJSX(`IO.importFiles(${payload}, '${binName}')`);
+                // 📍 BLINDAJE: Convertimos a JSON y escapamos comillas simples para que no rompan el callJSX
+                const payload = JSON.stringify(rawPaths).replace(/'/g, "\\'");
+                
+                console.log("📤 Enviando Payload al JSX:", payload); // Veremos qué sale exactamente
+                
+                const res = await this.callJSX(`FASTPASS.IO.importFiles('${payload}', '${binName}')`);
                 
                 if (res !== "OK") throw new Error(res);
                 this.log(`✅ Ingesta OK a ${binName}`, "INFO");

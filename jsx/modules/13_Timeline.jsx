@@ -74,7 +74,7 @@ FASTPASS.Timeline = {
     /**
      * in: Estableix el punt d'entrada (In).
      */
-    in: function(val) {
+    inPoint: function(val) {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
         if (seq) { seq.setInPoint(this._sec(val).ticks); return "OK"; }
         return "ERR";
@@ -83,7 +83,7 @@ FASTPASS.Timeline = {
     /**
      * out: Estableix el punt de sortida (Out).
      */
-    out: function(val) {
+    outPoint: function(val) {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
         if (seq) { seq.setOutPoint(this._sec(val).ticks); return "OK"; }
         return "ERR";

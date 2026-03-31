@@ -14,12 +14,15 @@
 
     FASTPASS_UI.Inspectors.SourceAssets = {
         
-        async scan(path, pattern) {
+        async scan(path, extension) {
+            // 1. Herramienta básica: Pedir lista cruda al JSX
             const raw = await utils.callJSX(`IO.scanDirectory(${JSON.stringify(path)})`);
-            let files = JSON.parse(raw || "[]");
-            if (pattern && pattern !== "*.*") {
-                const targetExt = pattern.replace("*.", "").toLowerCase();
-                files = files.filter(f => f.name.split('.').pop().toLowerCase() === targetExt);
+            const files = JSON.parse(raw || "[]");
+            
+            // 2. Filtro genérico por extensión (si se pide)
+            if (extension && extension !== "*.*") {
+                const ext = extension.replace("*.", "").toLowerCase();
+                return files.filter(f => f.name.split('.').pop().toLowerCase() === ext);
             }
             return files;
         },

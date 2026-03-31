@@ -13,37 +13,40 @@ var isUserDraggingSlider = false;
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
-    var getUtils = () => window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
-    var utils = getUtils();
-    if (utils && utils.log) utils.log("🚀 Iniciando Panel...");
-
+    var utils = window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
+    
     try {
+        // 1. Obtenemos la ruta nativa
         var extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
+        
+        // 2. BLINDAJE TOTAL: 
+        // Convertimos todas las barras a inclinadas / (formato URL/Unix)
+        // Esto evita que Windows interprete \U o \T como caracteres especiales
         var safeRoot = extensionRoot.replace(/\\/g, "/");
 
-        // 📍 PASO A: Llamada al Bootstrap (Manté el nom per ser el punt d'entrada)
+        utils.log("📂 Ruta detectada: " + safeRoot, "DEBUG");
+
+        // 3. LLAMADA QUIRÚRGICA:
+        // Usamos comillas simples para el envoltorio y dobles para el contenido
         var result = await utils.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
 
-        // 📍 PASO B: Iniciar Motor de Configuración (Profile.json)
-        await FASTPASS_UI.Config.init();
-
-        // 📍 PASO C: Iniciar Inspectors
         if (result && result.indexOf("OK") !== -1) {
-            utils.log("✅ Premiere Listo (Bootstrap OK).");
-            utils.isJsxReady = true;
+            window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
+            utils.log("✅ Motor JSX montado con éxito.");
+            //utils.isJsxReady = true;
 
-            if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.init) {
-                utils.log("🧠 Vinculando lógica de estado...");
+            await FASTPASS_UI.Config.init();
+            
+            if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                 await FASTPASS_UI.Core.Context.init();
-                FASTPASS_UI.Core.Context.checkContext();
             }
         } else {
-            console.error("❌ El motor JSX no ha respondido correctamente: " + result);
-            if (utils.status) utils.status("Error de motor JSX", "error");
+            // Si el motor falla, ahora el 'result' nos dirá EXACTAMENTE en qué línea del JSX falló
+            console.error("❌ Fallo en el motor: " + result);
         }
 
     } catch (error) {
-        console.error("💥 Error fatal durante el arranque:", error);
+        console.error("💥 Error fatal:", error);
     }
 })();
 
@@ -151,8 +154,8 @@ var isUserDraggingSlider = false;
         if (FASTPASS_UI.Config && FASTPASS_UI.Config.loadSelection) FASTPASS_UI.Config.loadSelection();
 
         const progInicial = document.getElementById('programa').value;
-        if (progInicial && FASTPASS_UI.Core.Context.updateConductorSelector) {
-            FASTPASS_UI.Core.Context.updateConductorSelector(progInicial);
+        if (progInicial && FASTPASS_UI.Core.Context.syncConductorUI) {
+            FASTPASS_UI.Core.Context.syncConductorUI(progInicial);
         }
 
         callContextAudit();

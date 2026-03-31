@@ -114,12 +114,12 @@ FASTPASS.Clips = {
     insert: function(itemName, trackIdx, startSec, endSec, type) {
         try {
             var nameToFind = decodeURIComponent(itemName);
-            var item = FASTPASS.Project.findItem(nameToFind);
+            var item = FASTPASS.Project.find(nameToFind);
             if (!item) {
                 var lastDot = nameToFind.lastIndexOf(".");
                 if (lastDot > 0) {
                     var nameOnly = nameToFind.substring(0, lastDot);
-                    item = FASTPASS.Project.findItem(nameOnly);
+                    item = FASTPASS.Project.find(nameOnly);
                 }
             }
             if (!item) return "ERR_ITEM_NOT_FOUND";
@@ -129,7 +129,7 @@ FASTPASS.Clips = {
 
             var tStart = new Time();
             tStart.seconds = parseFloat(startSec);
-            track.overwriteClip(item, tStart);
+            Clips.insert(item, tStart);
             
             // Si passem temps de final -> Ajustar durada immediatament
             if (endSec && parseFloat(endSec) > 0) {

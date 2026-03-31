@@ -57,27 +57,86 @@ FASTPASS.Project = (function() {
         },
 
         saveAs: function(pathString) {
+            var log = [];
+            log.push("--- INICI SAVE AS ---");
+            
+            try {
+                // 1. Verificació de l'input
+                if (!pathString) return "ERR: Camí buit";
+                log.push("1. Rebut: " + pathString);
+        
+                // 2. Normalització de ruta per a Adobe
+                var cleanPath = pathString.replace(/\\/g, "/");
+                log.push("2. Ruta neta: " + cleanPath);
+        
+                var myFile = new File(cleanPath);
+                log.push("3. File object creat. fsName: " + myFile.fsName);
+        
+                // 3. Verificació de la carpeta pare
+                if (!myFile.parent.exists) {
+                    log.push("4. La carpeta pare no existeix. Intentant crear: " + myFile.parent.fsName);
+                    var created = myFile.parent.create();
+                    log.push("   Resultat creació carpeta: " + created);
+                } else {
+                    log.push("4. Carpeta pare confirmada.");
+                }
+        
+                // 4. Estat del projecte
+                var p = app.project; 
+                if (!p) {
+                    log.push("❌ ERROR: app.project és undefined");
+                    return "ERR: No hi ha projecte actiu al motor";
+                }
+                log.push("5. Projecte detectat: " + p.name);
+                log.push("   Ruta actual: " + p.path);
+        
+                // 5. INTENT DE GUARDAT
+                log.push("6. Llançant p.saveAs()...");
+                var success = p.saveAs(myFile.fsName);
+                
+                // 6. Verificació Post-Acció
+                if (success) {
+                    log.push("✅ Premiere ha retornat SUCCESS");
+                    $.global.FASTPASS_WorkProject = p;
+                    return "OK";
+                } else {
+                    log.push("❌ Premiere ha retornat FALSE (Rejected)");
+                    
+                    // Verificació "Física" (a vegades Premiere diu false però ho fa)
+                    if (myFile.exists) {
+                        log.push("⚠️ El fitxer existeix al disc malgrat el false de Premiere. Donem per OK.");
+                        $.global.FASTPASS_WorkProject = p;
+                        return "OK";
+                    }
+                    
+                    var errorReport = log.join(" | ");
+                    return "ERR: Guardat rebutjat per Premiere. Logs: " + errorReport;
+                }
+        
+            } catch(e) { 
+                return "ERR_EXCEPTION: " + e.message + " | Stack: " + log.join(" -> ");
+            }
+        },
+        
+        open: function(pathString) {
             try {
                 var cleanPath = pathString.replace(/\\/g, "/");
-                if (pathString.indexOf("\\\\") === 0) cleanPath = "//" + cleanPath.substring(2).replace(/\/+/g, "/");
-                var myFile = new File(cleanPath);
-                if (!myFile.parent.exists) myFile.parent.create();
+                var f = new File(cleanPath);
+                
+                if (!f.exists) return "ERR:NOT_EXISTS_AT_" + cleanPath;
         
-                var p = _focus();
-                var ok = p.saveAs(myFile.fsName);
-                if (ok) { $.global.FASTPASS_WorkProject = p; return "OK"; }
-                return "ERR:REJECTED";
-            } catch(e) { return "ERR:" + e.message; }
-        },
-
-        open: function(path) {
-            try {
-                var f = new File(path);
-                if (!f.exists) return "ERR:NOT_EXISTS";
+                // Intentamos abrir el documento
                 var ok = app.openDocument(f.fsName);
-                if (ok) $.global.FASTPASS_WorkProject = app.project;
-                return ok ? "OK" : "ERR:OPEN_FAILED";
-            } catch(e) { return "ERR:" + e.message; }
+                
+                // Premiere a veces devuelve true aunque el proyecto tarde unos ms en cargar
+                if (ok) {
+                    $.global.FASTPASS_WorkProject = app.project;
+                    return "OK";
+                }
+                return "ERR:OPEN_FAILED";
+            } catch(e) { 
+                return "ERR:" + e.message; 
+            }
         },
 
         // --- 2. ITEMS & BINS ---
@@ -165,16 +224,48 @@ FASTPASS.Project = (function() {
             } catch(e) { return "[]"; }
         },
 
-        clone: function(sourceName) {
+        clone: function(sourceNameEncoded) {
             try {
                 var p = _focus();
-                var seq = _item(p.sequences, sourceName);
-                if (seq) {
-                    seq.clone();
-                    return p.activeSequence.name; 
+                // 1. Decodificamos y limpiamos espacios
+                var sourceName = decodeURIComponent(sourceNameEncoded).replace(/^\s+|\s+$/g, '');
+                var foundItem = null;
+        
+                // 2. Buscador recursivo (recorre todos los Bins)
+                function searchEverywhere(folder) {
+                    for (var i = 0; i < folder.children.numItems; i++) {
+                        var item = folder.children[i];
+                        if (!item) continue;
+        
+                        if (item.type === ProjectItemType.BIN) {
+                            searchEverywhere(item);
+                        } else if (item.isSequence() && item.name.replace(/^\s+|\s+$/g, '') === sourceName) {
+                            foundItem = item;
+                        }
+                        if (foundItem) return;
+                    }
                 }
-                return "ERR:NOT_FOUND";
-            } catch (e) { return "ERR:" + e.message; }
+        
+                searchEverywhere(p.rootItem);
+        
+                // 3. Ejecución del clonaje
+                if (foundItem) {
+                    // Saltamos del ítem del proyecto a la secuencia real
+                    var seq = foundItem.getSequence();
+                    
+                    if (seq) {
+                        seq.clone(); 
+                        // Al clonar, Premiere activa automáticamente la nueva copia
+                        return app.project.activeSequence.name;
+                    } else {
+                        return "ERR:ITEM_HAS_NO_SEQUENCE_OBJECT";
+                    }
+                }
+                
+                return "ERR:SEQ_NOT_FOUND_IN_PROJECT";
+            } catch (e) { 
+                return "ERR:" + e.message; 
+            }
         },
 
         openSeq: function(name) {
