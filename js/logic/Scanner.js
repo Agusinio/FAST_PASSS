@@ -151,7 +151,10 @@
 
                 let filtered = freshFiles.filter(f => {
                     const name = (f.name || f).toUpperCase();
-                    return name.includes(fProg) && name.includes(fBloc) && name.endsWith(".PNG");
+                    return name.includes(fProg) && 
+                           name.includes(fBloc) && 
+                           name.includes("TEMA-TITOL") && 
+                           name.endsWith(".PNG");
                 });
 
                 if (filtered.length === 0) return null;

@@ -138,8 +138,8 @@ $.global.Project = {
     move: function(n, b) { 
         return ($.global.FASTPASS.Project) ? FASTPASS.Project.move(n, b) : "ERR"; 
     },
-    clone: function(src) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.clone(src) : "ERR"; 
+    cloneSeq: function(src) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.cloneSeq(src) : "ERR"; 
     },
     openSeq: function(n) { 
         return ($.global.FASTPASS.Project) ? FASTPASS.Project.openSeq(n) : "ERR"; 

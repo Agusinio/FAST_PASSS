@@ -160,26 +160,32 @@ FASTPASS.Project = (function() {
             } catch(e) { return "[]"; }
         },
 
-        find: function(name) {
+        find: function(nameEncoded) {
+            var name = decodeURIComponent(nameEncoded).replace(/^\s+|\s+$/g, '');
             return _search(_focus().rootItem, name);
         },
 
-        rename: function(name, newName) {
-            var it = this.find(name);
-            if (it) { it.name = newName; return "OK"; }
+        rename: function(nameEncoded, newNameEncoded) {
+            var it = this.find(nameEncoded); // find ya decodifica
+            if (it) { 
+                it.name = decodeURIComponent(newNameEncoded).replace(/^\s+|\s+$/g, ''); 
+                return "OK"; 
+            }
             return "ERR:NOT_FOUND";
         },
 
-        move: function(itemName, binName) {
+        move: function(itemNameEncoded, binNameEncoded) {
             var p = _focus();
-            var it = this.find(itemName);
+            var it = this.find(itemNameEncoded); // find ya decodifica
+            var binName = decodeURIComponent(binNameEncoded).replace(/^\s+|\s+$/g, '');
             var bin = _item(p.rootItem.children, binName) || p.rootItem;
             if (it && bin) { it.moveBin(bin); return "OK"; }
             return "ERR:MOVE_FAILED";
         },
 
-        bin: function(name) {
+        bin: function(nameEncoded) {
             var p = _focus();
+            var name = decodeURIComponent(nameEncoded).replace(/^\s+|\s+$/g, '');
             var existing = _item(p.rootItem.children, name);
             if (existing) return existing.name;
             var newBin = p.rootItem.createBin(name);
@@ -224,45 +230,33 @@ FASTPASS.Project = (function() {
             } catch(e) { return "[]"; }
         },
 
-        clone: function(sourceNameEncoded) {
+        cloneSeq: function(sourceNameEncoded) {
             try {
                 var p = _focus();
+                if (!p) return "ERR:NO_PROJECT";
+
                 // 1. Decodificamos y limpiamos espacios
                 var sourceName = decodeURIComponent(sourceNameEncoded).replace(/^\s+|\s+$/g, '');
-                var foundItem = null;
+                var foundSeq = null;
         
-                // 2. Buscador recursivo (recorre todos los Bins)
-                function searchEverywhere(folder) {
-                    for (var i = 0; i < folder.children.numItems; i++) {
-                        var item = folder.children[i];
-                        if (!item) continue;
-        
-                        if (item.type === ProjectItemType.BIN) {
-                            searchEverywhere(item);
-                        } else if (item.isSequence() && item.name.replace(/^\s+|\s+$/g, '') === sourceName) {
-                            foundItem = item;
-                        }
-                        if (foundItem) return;
+                // 2. Buscamos directamente en la colección de secuencias del proyecto
+                // Esto es más eficiente que recorrer los bins y evita el error de getSequence()
+                for (var i = 0; i < p.sequences.numSequences; i++) {
+                    var s = p.sequences[i];
+                    if (s && s.name.replace(/^\s+|\s+$/g, '') === sourceName) {
+                        foundSeq = s;
+                        break;
                     }
                 }
-        
-                searchEverywhere(p.rootItem);
         
                 // 3. Ejecución del clonaje
-                if (foundItem) {
-                    // Saltamos del ítem del proyecto a la secuencia real
-                    var seq = foundItem.getSequence();
-                    
-                    if (seq) {
-                        seq.clone(); 
-                        // Al clonar, Premiere activa automáticamente la nueva copia
-                        return app.project.activeSequence.name;
-                    } else {
-                        return "ERR:ITEM_HAS_NO_SEQUENCE_OBJECT";
-                    }
+                if (foundSeq) {
+                    foundSeq.clone(); 
+                    // Al clonar, Premiere activa automáticamente la nueva copia
+                    return app.project.activeSequence.name;
                 }
                 
-                return "ERR:SEQ_NOT_FOUND_IN_PROJECT";
+                return "ERR:SEQ_NOT_FOUND:" + sourceName;
             } catch (e) { 
                 return "ERR:" + e.message; 
             }

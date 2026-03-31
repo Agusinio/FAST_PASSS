@@ -14,9 +14,6 @@
 
     FASTPASS_UI.Workflows.MainButton = {
 
-        /**
-         * runMainAction: Acció principal orquestrada pel Context.
-         */
         runMainAction: async function (action, data) {
             log("⏯️ Iniciant workflow: [" + action + "]");
             getUtils().updateUIState('BUSY');
@@ -40,110 +37,32 @@
             try {
                 const utils = FASTPASS_UI.Utils;
                 const config = FASTPASS_UI.Config.get();
-                const elProg = document.getElementById('programa');
-                const elBloc = document.getElementById('bloc');
-                const ctx = { 
-                    config, 
-                    progData: config.mapeoProgramas[elProg.value], 
-                    bloque: elBloc.value, 
-                    dateDir: utils.getFormattedDate().replace(/"/g, "").trim() 
-                };
+                const ctx = await this._setupContext();
         
-                const wottData = await window.Scan.wotts(ctx); 
-                const sanitizedTheme = utils.sanitizeName(wottData.tema || 'PENDENT');
+                // 1. ESCANEIG
+                const assets = await this._fullScan(ctx);
+                
+                // 2. CÀLCUL DE RUTES
+                const sanitizedTheme = utils.sanitizeName(assets.wotts.tema || 'PENDENT');
                 const projSlug = config.naming.getProjectName(ctx, sanitizedTheme);
                 const fileName = `Pruebas_${projSlug}.prproj`;
                 const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
                 const fullDestPath = folderPath + "/" + fileName;
-                // A. Forzamos barras inclinadas
-                const safePath = fullDestPath.replace(/\\/g, "/");
-        
-                // 1. ABRIR PLANTILLA
-                const plantillaPath = config.rutas.plantilla_net.replace(/\\/g, "/");
-                utils.log(`📂 Obrint plantilla: ${plantillaPath}`);
-                await utils.callJSX(`Project.open('${plantillaPath}')`);
-                
-                //await utils.delay(800); // Pausa para que Premiere registre el proyecto abierto
-        
-                // 2. PREPARAR EL BIN "CHY"
-                utils.log(`📂 Preparant carpeta CHY al projecte...`);
-                // Creamos el bin y capturamos el nombre confirmado (debería ser "CHY")
-                const binTarget = await utils.callJSX("Project.bin('CHY')");
 
-                // 3. INGESTA DE RÈTOLS (Wotts)
-                if (wottData.list && wottData.list.length > 0) {
-                    utils.log(`📥 Ingestant ${wottData.list.length} rètols al ROOT...`);
-                    
-                    // 📍 SOLO normalizamos barras, SIN escapar comillas aquí
-                    const safeWotts = wottData.list.map(f => f.path.replace(/\\/g, "/"));
-                    
-                    // El importList usará JSON.stringify internamente, que ya es seguro
-                    await utils.importList(safeWotts, "root"); 
-                
-                    // B. MOVER A BIN (Aquí sí escapamos para la llamada directa)
-                    utils.log(`📂 Organitzant rètols a la carpeta CHY...`);
-                    await utils.callJSX("Project.bin('CHY')");
-                
-                    for (const wott of wottData.list) {
-                        // Escapamos solo para el comando Project.move
-                        const escapedName = wott.name.replace(/'/g, "\\'");
-                        await utils.callJSX(`Project.move('${escapedName}', 'CHY')`);
-                    }
-                }
-        
-                const media = await window.Scan.mediaAssets(ctx);
-                if (media && media.mp4) {
-                    const plantillaSeq = "OTT VERTICAL"; 
-                    utils.log(`👥 Buscant i clonant: ${plantillaSeq}`);
-                    
-                    // 1. CLONAR (Enviamos codificado por seguridad)
-                    const newSeqName = await utils.callJSX(`Project.clone('${encodeURIComponent(plantillaSeq)}')`);
-                    
-                    if (newSeqName && newSeqName !== "" && newSeqName.indexOf("ERR") === -1) {
-                        const finalSeqName = config.naming.getSequenceName(ctx, sanitizedTheme);
-                        await utils.callJSX(`Project.rename('${encodeURIComponent(newSeqName)}', '${encodeURIComponent(finalSeqName)}')`);
-                        
-                        // Usamos Project.rename del Bridge
-                        await utils.callJSX(`Project.rename('${encodeURIComponent(newSeqName)}', '${encodeURIComponent(finalSeqName)}')`);
-                
-                        // 3. INSERTAR MP4
-                        utils.log(`🎬 Estampant vídeo a la V1...`);
-                        const escapedMediaName = encodeURIComponent(media.mp4.name);
-                        await utils.callJSX(`Clips.insert('${escapedMediaName}', 1, 0)`);
-                        
-                    } else {
-                        utils.log(`❌ No s'ha trobat la seqüència en cap carpeta del projecte.`, "ERROR");
-                    }
-                }
-        
-                // 5. ASEGURAR CARPETAS
-                await utils.ensureFolders(folderPath);
-        
-                // 6. GUARDADO FINAL (SAVE AS)
-                // A. Forzamos barras inclinadas
-                //const safePath = fullDestPath.replace(/\\/g, "/");
+                const paths = {
+                    plantillaPath: config.rutas.plantilla_net,
+                    fullDestPath: fullDestPath,
+                    folderPath: folderPath,
+                    sanitizedTheme: sanitizedTheme
+                };
 
-                // B. ESCAPADO CRÍTICO: Escapamos las comillas simples (') para que no rompan el callJSX
-                // Esto convertirá "L'ESCOLA" en "L\'ESCOLA" para que el bridge lo acepte
-                const escapedPath = safePath.replace(/'/g, "\\'");
+                // 3. EXECUCIÓ LÒGICA (LIPO)
+                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada);
 
-                utils.log(`🏗️ Enviant ordre de SaveAs per a: ${escapedPath}`);
+                // 4. FOCUS
+                await callJSX("Tracks.target(1, true, 'video')");
+                await callJSX("Tracks.target(1, true, 'audio')");
 
-                // C. Llamada con la ruta protegida
-                let saveRes = await utils.callJSX(`Project.saveAs('${escapedPath}')`);
-                
-                // 🔄 RE-INTENTO: Si falla o Premiere no responde, esperamos y reintentamos una vez más
-                if (saveRes && saveRes.indexOf("ERR") !== -1) {
-                    utils.log("⚠️ Primer intent fallit, reintentant en 1/2 segon...", "WARN");
-                    await utils.delay(2000);
-                    saveRes = await utils.callJSX(`Project.saveAs('${safePath}')`);
-                }
-        
-                if (saveRes && saveRes.indexOf("ERR") !== -1) throw new Error("Premiere no ha permès guardar: " + saveRes);
-        
-                // 7. LOCK
-                await this._createLock(fullDestPath);
-        
                 utils.log("✅ Workflow NOU completat amb èxit.");
         
             } catch (e) {
@@ -154,40 +73,40 @@
         _runUpdate: async function () {
             log("🚀 [FLOW-UPDATE]");
             const ctx = await this._setupContext();
-            const wottData = await window.Scan.wotts(ctx);
+            
+            // 1. ESCANEIG I SYNC
+            const assets = await this._fullScan(ctx);
 
-            if (!wottData || !wottData.tema) {
+            if (!assets.wotts || !assets.wotts.tema) {
                 log("⚠️ Encara no hi ha rètols al NAS. Guardant progrés...");
                 return await callJSX("Project.save()");
             }
 
-            // Literal: Project.path()
             const currentPath = await callJSX("Project.path()");
 
             if (currentPath.indexOf("PENDENT") !== -1) {
                 log("🧬 Projecte PENDENT detectat. Promocionant...");
 
-                const sanitizedTema = getUtils().sanitizeName(wottData.tema);
+                const sanitizedTema = getUtils().sanitizeName(assets.wotts.tema);
                 const newProjectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
                 const newPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + "Pruebas_" + newProjectName + ".prproj";
 
-                const media = await window.Scan.mediaAssets(ctx);
-                await this._performSync(ctx, wottData, media);
+                // INGESTA I SYNC
+                await this._completeSyncUI(ctx, assets);
 
                 log(`💾 Guardant com a: ${newPath}`);
-                // Literal: Project.saveAs()
                 const saveRes = await callJSX(`Project.saveAs('${getUtils().escape(newPath)}')`);
 
                 if (saveRes === "OK") {
                     log(`🗑️ Eliminant rastre PENDENT...`);
                     getUtils().deleteFile(currentPath);
                     getUtils().deleteFile(currentPath + ".lock");
-                    await this._createLock(newPath);
+                    await FASTPASS_UI.Logic.Project.lock(newPath);
                     log("🟢 Projecte promocionat amb èxit!");
                 }
             } else {
-                const media = await window.Scan.mediaAssets(ctx);
-                await this._performSync(ctx, wottData, media);
+                // INGESTA I SYNC ESTÀNDARD
+                await this._completeSyncUI(ctx, assets);
                 await callJSX("Project.save()");
                 log("✅ Actualització completada.");
             }
@@ -195,9 +114,12 @@
 
         _runGo: async function (projName) {
             log(`🚀 [FLOW-GO] Canviant focus a: ${projName}...`);
-            // Literal: Context.set()
             const res = await callJSX(`Context.set('${getUtils().escape(projName)}')`);
             if (res === "OK") {
+                const ctx = await this._setupContext();
+                const assets = await this._fullScan(ctx);
+                await this._completeSyncUI(ctx, assets);
+                
                 if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                     await FASTPASS_UI.Core.Context.checkContext();
                 }
@@ -209,58 +131,65 @@
             const ctx = await this._setupContext();
             const cfg = ctx.config;
 
-            const wottData = await window.Scan.wotts(ctx);
-            const sanitizedTheme = getUtils().sanitizeName(wottData.tema || 'PENDENT');
+            const assets = await this._fullScan(ctx);
+            const sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema || 'PENDENT');
             const projSlug = ctx.config.naming.getProjectName(ctx, sanitizedTheme);
-            //const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + `Pruebas_${projSlug}.prproj`;
             const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/" + `Pruebas_${projSlug}.prproj`;
-            await callJSX(`IO.writeTxt('${folderPath}/.keep', 'temp')`); // Truco para forzar creación de carpeta
             
-            await this._createLock(destPath);
-            // Literal: Project.open()
+            await FASTPASS_UI.Logic.Project.lock(destPath);
             await callJSX(`Project.open('${destPath.replace(/\\/g, "\\\\")}')`);
+            
+            // Sync después de abrir
+            await this._completeSyncUI(ctx, assets);
+            
             log("✅ Projecte obert.");
         },
 
-        _createLock: async function (projPath) {
-            try {
-                const lockPath = projPath + ".lock";
-                const user = await callJSX("IO.getUser()");
-                
-                // 📍 BLINDAJE 1: Pasamos la ruta con barras / para que no haya líos de escape
-                const safeLockPath = lockPath.replace(/\\/g, "/"); 
-                
-                log(`🔒 Escrivint bloqueig per a ${user}...`);
-                
-                // Enviamos el comando con la ruta ya normalizada
-                await callJSX(`IO.writeTxt('${safeLockPath}', '${user}')`);
-                
-            } catch (e) { console.error("Error creant .lock", e); }
+        /**
+         * _fullScan: Escaneja rètols, media i portada, i actualitza flags de Context.
+         */
+        _fullScan: async function(ctx) {
+            const wotts = await window.Scan.wotts(ctx); 
+            const media = await window.Scan.mediaAssets(ctx);
+            const portada = await window.Scan.portada(ctx);
+
+            FASTPASS_UI.Core.Context.missing.wotts = (!wotts.list || wotts.list.length === 0);
+            FASTPASS_UI.Core.Context.missing.media = (!media || !media.mp4);
+            FASTPASS_UI.Core.Context.missing.srt = (!media || !media.srt);
+            FASTPASS_UI.Core.Context.missing.portada = (!portada);
+
+            return { wotts, media, portada };
         },
 
-        _performSync: async function (ctx, wottData, media) {
-            const utils = getUtils();
-            log("🎞️ [SYNC] Iniciant ingesta segmentada...");
+        /**
+         * _completeSyncUI: Ingesta assets, autocol·loca MP4 i activa targeting.
+         */
+        _completeSyncUI: async function(ctx, assets) {
+            // 1. Ingesta
+            await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
 
-            let mediaPaths = [];
-            if (media?.mp4?.path) mediaPaths.push(media.mp4.path);
-            if (media?.srt?.path) mediaPaths.push(media.srt.path);
-
-            if (mediaPaths.length > 0) {
-                log(`📥 Ingestant media a root...`);
-                await utils.importList(mediaPaths, "root");
+            // 2. Auto-Insert MP4 si V1 es buida
+            if (assets.media && assets.media.mp4) {
+                const v1Count = await FASTPASS_UI.Logic.Clips.count(1, "video");
+                if (parseInt(v1Count) === 0) {
+                    getUtils().log("🎞️ V1 buida detectada. Autocol·locant MP4...");
+                    const escapedMediaName = encodeURIComponent(assets.media.mp4.name);
+                    await callJSX(`Clips.insert('${escapedMediaName}', 1, 0)`);
+                }
             }
 
-            if (wottData.list && wottData.list.length > 0) {
-                const wottPaths = wottData.list.map(w => w.path);
-                log(`📥 Ingestant ${wottPaths.length} rètols al Bin CHYRON...`);
-                await utils.importList(wottPaths, "CHYRON");
-            }
+            // 3. Focas Track Targeting
+            await callJSX("Tracks.target(1, true, 'video')");
+            await callJSX("Tracks.target(1, true, 'audio')");
         },
 
         _setupContext: async function () {
             const config = FASTPASS_UI.Config.get();
-            const idProg = document.getElementById('programa').value;
+            const elProg = document.getElementById('programa');
+            const elBloc = document.getElementById('bloc');
+            if (!elProg || !elBloc) return null;
+
+            const idProg = elProg.value;
             const progData = config.mapeoProgramas[idProg];
             const dateStr = getUtils().getFormattedDate();
             const dateDir = dateStr.replace(/["\s]/g, "").trim();
@@ -269,7 +198,7 @@
                 config,
                 progData,
                 programa: idProg,
-                bloque: document.getElementById('bloc').value,
+                bloque: elBloc.value,
                 dateDir
             };
         }

@@ -14,6 +14,9 @@
     let _lastCheckAt = 0; // Guard de debounce
 
     FASTPASS_UI.Core.Context = {
+        
+        // Reporte de activos para UI "externa"
+        missing: { wotts: false, media: false, srt: false, portada: false },
 
         async checkContext() {
             if (!getUtils().isJsxReady) return;

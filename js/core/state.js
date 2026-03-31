@@ -9,7 +9,6 @@ FASTPASS_UI.State = {
     isKeyframeMode: false,
     activeSequenceName: "", 
     
-    // Almacenamiento de clips activos (MasterTheme / SRT)
     masterTheme: null, 
     srt: null,
 
