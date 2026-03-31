@@ -39,5 +39,16 @@
 - [x] `jsx/modules/1_System.jsx` -> Afegit `tool` i `clear`.
 
 ---
+
+### 🚀 ESTABILITZACIÓ REFACTOR (31/03/2026)
+| Mòdul | Canvi Realitzat | Resultat |
+| :--- | :--- | :--- |
+| **Logic Layer** | `ingestAssets` | Unificació de rètols, media i portades per a UPD/LOAD/GO. |
+| **Workflow** | `MainButton` | "Liposucció" total delegant a Project_Logic. |
+| **UX Automata** | `Auto-Insert` | Col·locació de MP4 en V1 automàtica si el track està buit. |
+| **UX Focus** | `Targeting` | Activació forçada de V1/A1 al finalitzar qualsevol acció. |
+| **Bridge Safety**| `Decode URI` | Blindatge contra caràcters especials en noms de projecte. |
+
+---
 **Verdict Final: SISTEMA ESTABLE I TÀCTIC.**
 🚀 Prêt per a producció en entorns de notícies de alta pressió.

@@ -1,5 +1,6 @@
 
 
+
 // --- BOOTSTRAP ---
 
 jsx_BOOTSTRAP               replace, load, evalfile
@@ -139,3 +140,19 @@ jsx_debugPosition           getClipPositionDebug
 jsx_getTargetingDebug       getTargetingDebug
 jsx_reflectTrack            reflectTrackProperties
 jsx_getKFDiagnostic         runFullReport                       getPlayerPosition, getKeys, isTimeVarying
+
+// --- ESTABILITZACIÓ WORKFLOWS (31/03/2026) ---
+// S'ha completat la fase de "Liposucció" dels workflows principals (MainButton).
+// Tota la lògica pesada d'infraestructura s'ha mogut a Project_Logic.js.
+
+Project_Logic.create         Orquestra plantilla, bins, ingesta i sequences.
+Project_Logic.ingestAssets   Unifica ingesta de Wotts, Media (MP4/SRT) i Portada (PNG).
+Project_Logic.lock           Centralitza la creació de fitxers .lock.
+
+// Millores Atòmiques en JSX (3_Project.jsx, 5_Tracks.jsx, 6_Clips.jsx):
+// - Robustesa en l'escapat de caràcters (decodeURIComponent).
+// - Track Targeting unificat (V1/A1).
+// - Inserció condicionada de MP4 si el track està buit.
+
+---
+© 2026 FAST >>> PASS | Lògica Depurada i Estabilitzada.
