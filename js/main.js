@@ -90,14 +90,14 @@ var isUserDraggingSlider = false;
                 isUserDraggingSlider = true;
                 var val = parseInt(slider.value, 10);
                 // Moviment visual literal
-                FASTPASS_UI.Utils.callJSX(`Anim.x(${val}, false)`);
+                FASTPASS_UI.Utils.callJSX(`Animacio.x(${val}, false)`);
             };
 
             slider.onchange = function () {
                 isUserDraggingSlider = false;
                 var val = parseInt(slider.value, 10);
                 // Clavat de KF i suavitzat literal
-                FASTPASS_UI.Utils.callJSX(`Anim.x(${val}, true)`).then(() => {
+                FASTPASS_UI.Utils.callJSX(`Animacio.x(${val}, true)`).then(() => {
                     if (FASTPASS_UI.Workflows.KF && FASTPASS_UI.Workflows.KF.runSmoothKF) {
                         FASTPASS_UI.Workflows.KF.runSmoothKF();
                     }
@@ -202,7 +202,7 @@ var isUserDraggingSlider = false;
 // 4. SINCRONIZACIÓN (POLLING DEL SLIDER)
 FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
     if (isUserDraggingSlider) return;
-    FASTPASS_UI.Utils.callJSX('Anim.x()').then(val => {
+    FASTPASS_UI.Utils.callJSX('Animacio.x()').then(val => {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
             const pxValue = Math.round(parseFloat(val) * 608);
@@ -222,7 +222,7 @@ setInterval(function () {
 
 // Neteja de memòria al entrar amb el ratolí
 window.onmouseenter = function () {
-    FASTPASS_UI.Utils.callJSX('System.clear()');
+    FASTPASS_UI.Utils.callJSX('Sistema.clear()');
 };
 
 // Escalfament de rutes de xarxa
@@ -230,7 +230,7 @@ async function warmUpNetwork() {
     var config = FASTPASS_UI.Config.get();
     if (config.rutas) {
         console.log("🔥 [SYSTEM] Escalfant rutes de xarxa...");
-        FASTPASS_UI.Utils.callJSX(`IO.exists('${config.rutas.verticalitzacio.replace(/\\/g, '\\\\')}')`);
-        FASTPASS_UI.Utils.callJSX(`IO.exists('${config.rutas.chyrons.replace(/\\/g, '\\\\')}')`);
+        FASTPASS_UI.Utils.callJSX(`Arxiu.exists('${config.rutas.verticalitzacio.replace(/\\/g, '\\\\')}')`);
+        FASTPASS_UI.Utils.callJSX(`Arxiu.exists('${config.rutas.chyrons.replace(/\\/g, '\\\\')}')`);
     }
 };

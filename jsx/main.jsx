@@ -28,16 +28,16 @@ function jsx_BOOTSTRAP(extensionRootPath) {
             //$.writeln("✅ " + name + " cargado OK.");
         };
 
-        load("1_System.jsx");
-        load("2_IO.jsx");
-        load("3_Project.jsx");
-        load("13_Timeline.jsx"); 
-        load("5_Tracks.jsx");
-        load("6_Clips.jsx");
-        load("7_KF.jsx");
-        load("9_Render.jsx");
-        load("11_Context.jsx");
-        load("12_Diagnostic.jsx");
+        load("10_Sistema.jsx");
+        load("12_Arxiu.jsx");
+        load("20_Projecte.jsx");
+        load("30_Cronologia.jsx");
+        load("31_Pistes.jsx");
+        load("32_Segments.jsx");
+        load("33_Animacio.jsx");
+        load("34_Exportacio.jsx");
+        load("11_Entorn.jsx");
+        load("19_Diagnosi.jsx");
 
         return "OK_BOOT";
     } catch (e) { 
@@ -49,14 +49,14 @@ function jsx_BOOTSTRAP(extensionRootPath) {
 // --- 1. FONAMENTS (System, Context, IO) ---
 // ============================================================================
 
-$.global.System = {
+$.global.Sistema = {
     version: function() { return (FASTPASS.System) ? FASTPASS.System.version() : "0.0"; },
     os: function() { return (FASTPASS.System) ? FASTPASS.System.os() : "win"; },
     ready: function() { return "READY"; },
     clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; }
 };
 
-$.global.Context = {
+$.global.Entorn = {
     list: function() { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getOpenNames() : "[]"; },
     activeProj: function() { try { return app.project.name; } catch(e) { return ""; } },
     activeSeq: function() { try { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getSequenceName_FINAL() : ""; } catch(e) { return ""; } },
@@ -86,7 +86,7 @@ $.global.Context = {
     }
 };
 
-$.global.IO = {
+$.global.Arxiu = {
     scanDirectory: function(p) { 
         return ($.global.FASTPASS.IO) ? FASTPASS.IO.scanDirectory(p) : "[]"; 
     },
@@ -125,7 +125,7 @@ $.global.IO = {
 // --- 2. PROJECTE (Project, Timeline) ---
 // ============================================================================
 
-$.global.Project = {
+$.global.Projecte = {
     getLogic: function() {
         return $.global.FASTPASS.Project;
     },
@@ -192,7 +192,7 @@ $.global.Project = {
     }
 };
 
-$.global.Timeline = {
+$.global.Cronologia = {
     get: function() { 
         return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.get() : null; 
     },
@@ -220,7 +220,7 @@ $.global.Timeline = {
 // --- 3. EDICIÓ (Tracks, Clips) ---
 // ============================================================================
 
-$.global.Tracks = {
+$.global.Pistes = {
     count: function(type) { 
         return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.count(type) : 0; 
     },
@@ -235,7 +235,7 @@ $.global.Tracks = {
     }
 };
 
-$.global.Clips = {
+$.global.Segments = {
     count: function(ti, type) { 
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.count(ti, type || "video") : 0; 
     },
@@ -275,7 +275,7 @@ $.global.Clips = {
 // --- 4. EFECTES I CAPTURA (Anim, Render, Diagnostic) ---
 // ============================================================================
 
-$.global.Anim = {
+$.global.Animacio = {
     add: function(ti, ci, cp, pr, t) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.add(ti, ci, cp, pr, t) : "ERR"; 
     },
@@ -300,7 +300,7 @@ $.global.Anim = {
     }
 };
 
-$.global.Render = {
+$.global.Exportacio = {
     frame: function(p, t) { 
         return ($.global.FASTPASS.Render) ? FASTPASS.Render.frame(p, t) : "ERR"; 
     },
@@ -312,7 +312,7 @@ $.global.Render = {
     }
 };
 
-$.global.Diagnostic = {
+$.global.Diagnosi = {
     report: function() { 
         return ($.global.FASTPASS.Diagnostic) ? FASTPASS.Diagnostic.runFullReport() : "ERR_NO_MODULE"; 
     }
