@@ -1,4 +1,8 @@
-/* flow_KF.js - El Negociador de Animació - v2.6.0 literal */
+/**
+ * ============================================================================
+ * flux_animacio.js (Workflow d'Animació i Keyframes)
+ * ============================================================================
+ */
 (function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};

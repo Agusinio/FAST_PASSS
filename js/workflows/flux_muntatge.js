@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * WORKFLOW: ASSEMBLY (Montatge Automàtic i Orquestració) - v2.6.0 literal
+ * flux_muntatge.js (Workflow de Muntatge Automàtic)
  * ============================================================================
  */
 

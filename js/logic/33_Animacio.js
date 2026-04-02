@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: ANIM (Orquestació d'animacions i Keyframes) - v2.5.3 literal
+ * 33_Animacio.js (Orquestració d'Animacions i Keyframes)
  * ============================================================================
  */
 

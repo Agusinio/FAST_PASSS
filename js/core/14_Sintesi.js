@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * CORE: 4_Context (Sintetitzador de Context) - REVISAT v2.4.2
+ * 14_Sintesi.js (Sintetitzador de Context i Reactivitat)
  * ============================================================================
  */
 

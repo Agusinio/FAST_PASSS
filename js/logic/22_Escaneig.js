@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: SCAN (Motor de cerca de materials) - v2.6.0 literal-premium
+ * 22_Escaneig.js (Motor de Cerca de Materials i Projectes)
  * ============================================================================
  */
 (function () {

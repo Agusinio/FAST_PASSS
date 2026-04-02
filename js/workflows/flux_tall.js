@@ -1,6 +1,6 @@
-/** flow_cut.js
+/**
  * ============================================================================
- * WORKFLOW: CUT - v2.6.0 literal
+ * flux_tall.js (Workflow de Tall i Ripple Editing)
  * ============================================================================
  */
 
@@ -57,11 +57,11 @@
                 const ctiRaw = await callJSX('Cronologia.get()');
                 const val = parseFloat(ctiRaw || "0");
 
-                const clip = await getClipsLogic().findAtTime(T_MP4, val, "video");
+                const clip = await getClipsLogic().at(T_MP4, val, "video");
 
                 if (clip) {
                     log(`✂️ Aplicant Ripple Trim In a V${T_MP4} (Time: ${val}s)`);
-                    await getClipsLogic().rippleTrimStart(T_MP4, clip.index, val, clip);
+                    await getClipsLogic().rippleIn(T_MP4, clip.index, val, clip);
                     await callJSX('Cronologia.set(0)');
                     getUtils().status("IN: Tall OK", "exito");
                 } else {
@@ -87,7 +87,8 @@
                 const ctiRaw = await callJSX('Cronologia.get()');
                 const val = parseFloat(ctiRaw || "0");
 
-                await getClipsLogic().clearMultipleTracksAfter(val, [1, 2, 3, 4, 5, 6], [T_MP4], true);
+                // Netegem totes les cues a partir del CTI
+                await getClipsLogic().rippleAllOut(val, [1, 2, 3, 4, 5, 6], [], true);
 
                 const outPoint = (val - 0.04).toFixed(2);
                 await callJSX(`Cronologia.range(0.0, ${outPoint})`);

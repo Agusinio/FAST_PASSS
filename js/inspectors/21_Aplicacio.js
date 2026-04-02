@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * INSPECTOR: 2_App (Report Intern de Premiere) - VERSIÓN ULTRA-ROBUSTA
+ * 21_Aplicacio.js (Report Intern d'Estat de Premiere)
  * ============================================================================
  */
 (function() {

@@ -1,3 +1,8 @@
+/**
+ * ============================================================================
+ * logger.js (Sistema de Logs i Diagnosi de la UI)
+ * ============================================================================
+ */
 (function () {
     // 1. Protección de Namespace (Igual que hicimos en Utils)
     var FASTPASS_UI = window.FASTPASS_UI || {};

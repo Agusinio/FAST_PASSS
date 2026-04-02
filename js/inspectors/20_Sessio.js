@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * INSPECTOR: 3_Session (Contingut Projecte Actiu) - v2.6.0 literal
+ * 20_Sessio.js (Contingut del Projecte Actiu)
  * ============================================================================
  */
 (function() {

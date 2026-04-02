@@ -1,6 +1,6 @@
 /**
  * =================================================================================
- * 11_Context.jsx
+ * 11_Entorn.jsx
  * Módulo especializado en la obtención de datos del entorno de Premiere.
  * =================================================================================
  */
@@ -8,8 +8,8 @@
 if (typeof $.global.FASTPASS === "undefined") { $.global.FASTPASS = {}; }
 var FASTPASS = $.global.FASTPASS;
 
-// Inicializamos el objeto Context dentro de FASTPASS
-FASTPASS.Context = {
+// Inicializamos el objeto Entorn dentro de FASTPASS
+FASTPASS.Entorn = {
     getActiveName: function() {
         try {
             if (app && app.project && app.project.name) {
@@ -112,7 +112,7 @@ FASTPASS.Context = {
 
     getWorkSequence: function() {
         try {
-            var proj = ($.global.FASTPASS_WorkProject instanceof Project)
+            var proj = ($.global.FASTPASS_WorkProject instanceof Projecte)
                 ? $.global.FASTPASS_WorkProject
                 : app.project;
             if (!proj) return null;
@@ -125,11 +125,11 @@ FASTPASS.Context = {
      */
     getWorkProject: function() {
         try {
-            return ($.global.FASTPASS_WorkProject instanceof Project)
+            return ($.global.FASTPASS_WorkProject instanceof Projecte)
                 ? $.global.FASTPASS_WorkProject
                 : app.project;
         } catch(e) { return app.project; }
     }
 };
 
-var Context = FASTPASS.Context;
+var Entorn = FASTPASS.Entorn;

@@ -1,6 +1,6 @@
-/** Logic_Clips.js
+/** 
  * ============================================================================
- * LOGIC: CLIPS (Orquestació de talls i Ripple Editing) - v2.5.2 literal
+ * 32_Segments.js (Orquestració de Segments i Ripple Editing)
  * ============================================================================
  */
 

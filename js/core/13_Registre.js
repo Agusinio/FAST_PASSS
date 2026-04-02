@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * PROJECTE REGISTRY (js/core/project_registry.js)
+ * 13_Registre.js (Detector de Canvis de Projecte)
  * Detecta canvis de projecte actiu a Premiere i adapta l'UI del panell.
  * ============================================================================
  */

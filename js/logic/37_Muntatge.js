@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * LOGIC: ASSEMBLY (Orquestació de muntatge i acabats) - v2.6.0 literal
+ * 37_Muntatge.js (Orquestració de Muntatge Automàtic)
  * ============================================================================
  */
 

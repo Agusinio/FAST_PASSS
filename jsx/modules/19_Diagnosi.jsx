@@ -1,23 +1,21 @@
 // ============================================================================
-// 8_Diagnostic.jsx (MÓDULO DE INSPECCIÓN REFACTORIZADO)
+// 19_Diagnosi.jsx (MÓDULO DE INSPECCIÓN REFACTORIZADO)
 // ============================================================================
 
 var FASTPASS = FASTPASS || {};
 
-FASTPASS.Diagnostic = (function() {
+FASTPASS.Diagnosi = (function() {
 
     return {
         runFullReport: function() {
             try {
-                var seq = FASTPASS.Context.getWorkSequence();
+                var seq = FASTPASS.Entorn.getWorkSequence();
                 if (!seq) return "DIAG: No hay secuencia activa.";
                 
-                // Buscamos clip en V1
                 var trackV1 = seq.videoTracks[0];
                 var time = seq.getPlayerPosition();
                 var clip = null;
                 
-                // Helper interno temporal para no depender de otros archivos
                 for (var i = 0; i < trackV1.clips.numItems; i++) {
                     var c = trackV1.clips[i];
                     if (c.start.seconds <= time.seconds && c.end.seconds > time.seconds) {
@@ -31,7 +29,6 @@ FASTPASS.Diagnostic = (function() {
                 var report = "📊 INFORME TÉCNICO V1: " + clip.name + "\n";
                 report += "-----------------------------------------\n";
                 
-                // Inspección de Motion
                 var motion = null;
                 for (var j = 0; j < clip.components.numItems; j++) {
                     if (clip.components[j].matchName === "AE.ADBE Motion") {
@@ -53,7 +50,6 @@ FASTPASS.Diagnostic = (function() {
     };
 })();
 
-// Puente Global exclusivo para el diagnóstico
 $.global.jsx_getKFDiagnostic = function() { 
-    return FASTPASS.Diagnostic.runFullReport(); 
+    return FASTPASS.Diagnosi.runFullReport(); 
 };

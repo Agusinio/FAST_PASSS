@@ -1,7 +1,6 @@
 /* * =================================================================================
- * 1_System.jsx
+ * 10_Sistema.jsx
  * Recursos del Sistema, Polyfills y Namespace Global.
- * (v12 - ULTRA-ADELGAZADO)
  * =================================================================================
  */
 
@@ -88,7 +87,7 @@ if (typeof JSON !== 'object') {
 }
 
 // --- 3. MÓDULO SYSTEM (Atómico y Seguro) ---
-FASTPASS.System = {
+FASTPASS.Sistema = {
 
     /**
      * version: Obté la versió nativa de Premiere (Ex: "24.1").
