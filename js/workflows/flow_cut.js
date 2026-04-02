@@ -1,4 +1,4 @@
-/**
+/** flow_cut.js
  * ============================================================================
  * WORKFLOW: CUT - v2.6.0 literal
  * ============================================================================
@@ -22,21 +22,28 @@
         runCutIn: async function () {
             try {
                 const config = FASTPASS_UI.Config.get();
-                const elProg = document.getElementById('programa').value;
+                const elProg = document.getElementById('programa').value; // Ej: "04_TN VESPRE"
                 const elBloc = document.getElementById('bloc').value;
 
+                // 📍 LOG DE CONTROL: Mira qué vale elProg en la consola
+                console.log("DEBUG: Valor del select programa:", elProg);
+
+                // Buscamos en el mapeo. Si no existe, usamos el State o un fallback.
                 const progData = config.mapeoProgramas[elProg];
-                const progToken = progData ? progData.archivo : elProg;
 
-                log(`🔍 Sincronitzant per tokens: [${progToken}] + [${elBloc}]`);
+                // Si progData es undefined, el token será "TNV" por defecto para que no rompa el JSX
+                const shortToken = (progData && progData.wott) ? progData.wott : "TNV"; 
 
-                // Literal: Project.find()
-                const foundName = await callJSX(`Project.find('${progToken}', '${elBloc}')`);
-                if (!foundName || foundName.indexOf("ERR:") !== -1 || foundName === "null") {
+                log(`🔍 Buscant seqüència per tokens: [${shortToken}] + [${elBloc}]`);
+                // LLAMADA DIRECTA AL NUEVO BRIDGE
+                const foundName = await callJSX(`Context.findSequence('${shortToken}', '${elBloc}')`);
+                
+                if (!foundName || foundName.indexOf("ERR:") !== -1) {
                     getUtils().status("⚠️ No trobo la seqüència!", "error");
                     return;
                 }
 
+                // Si la encuentra, actualizamos el estado y seguimos con el Ripple Trim
                 window.FASTPASS_UI.State.activeSequenceName = foundName;
                 if (!(await getUtils().validateActiveSequence())) return;
 

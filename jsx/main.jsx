@@ -1,4 +1,4 @@
-/*
+/*main.jsx
  * Projecte: FAST >>> PASS
  * Main Router (Version 2.6.0 - PURE LITERAL BRIDGE)
  * ============================================================================
@@ -77,6 +77,12 @@ $.global.Context = {
             }
             return "ERR:NOT_FOUND";
         } catch (e) { return "ERR:" + e.message; }
+    },
+    findSequence: function(prog, bloc) {
+        // Esta en concreto dijimos de usar la de Context, que es la especialista
+        return ($.global.FASTPASS && $.global.FASTPASS.Context) 
+            ? $.global.FASTPASS.Context.findSequenceByTokens(prog, bloc) 
+            : "ERR:CONTEXT_NOT_FOUND";
     }
 };
 
@@ -120,41 +126,69 @@ $.global.IO = {
 // ============================================================================
 
 $.global.Project = {
-    save: function() { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.save() : "ERR_MODULE_NOT_LOADED"; 
+    getLogic: function() {
+        return $.global.FASTPASS.Project;
     },
-    saveAs: function(path) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.saveAs(path) : "ERR_MODULE_NOT_LOADED"; 
+  
+    _isReady: function() {
+        return ($.global.FASTPASS && $.global.FASTPASS.Project);
     },
+
     open: function(path) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.open(path) : "ERR_MODULE_NOT_LOADED"; 
+        var m = this.getLogic(); return m ? m.open(path) : "ERR:MODULE_NOT_FOUND"; 
     },
+    
+    saveAs: function(path) { 
+        var m = this.getLogic(); return m ? m.saveAs(path) : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    save: function() { 
+        var m = this.getLogic(); return m ? m.save() : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    bin: function(name) { 
+        var m = this.getLogic(); return m ? m.bin(name) : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    move: function(item, targetBin) { 
+        var m = this.getLogic(); return m ? m.move(item, targetBin) : "ERR:MODULE_NOT_FOUND"; 
+    },
+    
+    moveByID: function(id, targetBin) { 
+        var m = this.getLogic(); return m ? m.moveByID(id, targetBin) : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    rename: function(oldName, newName) { 
+        var m = this.getLogic(); return m ? m.rename(oldName, newName) : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    cloneSeq: function(name) { 
+        var m = this.getLogic(); return m ? m.cloneSeq(name) : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    findItemByID: function(id) {
+        var m = this.getLogic();
+        return (m) ? m.findItemByID(id) : null;
+    },
+
     items: function(bin) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.items(bin) : "[]"; 
+        return (this._isReady()) ? FASTPASS.Project.items(bin) : "[]"; 
     },
-    rename: function(n, newN) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.rename(n, newN) : "ERR"; 
-    },
-    move: function(n, b) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.move(n, b) : "ERR"; 
-    },
-    cloneSeq: function(src) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.cloneSeq(src) : "ERR"; 
-    },
+
     openSeq: function(n) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.openSeq(n) : "ERR"; 
+        return (this._isReady()) ? FASTPASS.Project.openSeq(n) : "ERR_MODULE_NOT_LOADED"; 
     },
+
     list: function() { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.list() : "[]"; 
+        return (this._isReady()) ? FASTPASS.Project.list() : "[]"; 
     },
-    bin: function(n) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.bin(n) : null; 
+
+    find: function(nameEncoded) { 
+        return (this._isReady()) ? FASTPASS.Project.find(nameEncoded) : null; 
     },
-    find: function(prog, bloc) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.byTokens(prog, bloc) : "[]"; 
-    },
+
     biggestIn: function(bin) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.biggestIn(bin) : null; 
+        return (this._isReady()) ? FASTPASS.Project.biggestIn(bin) : null; 
     }
 };
 

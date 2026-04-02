@@ -214,6 +214,55 @@ FASTPASS.Project = (function() {
             } catch(e) { return "null"; }
         },
 
+        findItemByID: function(id) {
+            var p = app.project;
+            for (var i = 0; i < p.rootItem.children.numItems; i++) {
+                var item = p.rootItem.children[i];
+                // Si el nombre del item contiene el ID numérico
+                if (item.name.indexOf(id) !== -1) {
+                    return item;
+                }
+            }
+            return null;
+        },
+        
+        moveByID: function(id, binName) {
+            var p = app.project;
+            var targetBin = this.bin(binName);
+            var found = false;
+        
+            // Log inicial para saber qué recibe el motor
+            $.writeln("🔍 [JSX-DEBUG] Buscant ID: '" + id + "' per moure a: " + binName);
+        
+            if (!targetBin) {
+                return "ERR:BIN_NOT_CREATED";
+            }
+        
+            // Busquem a tots els fills del Root
+            for (var i = 0; i < p.rootItem.children.numItems; i++) {
+                var item = p.rootItem.children[i];
+                
+                // Log de cada item que inspeccionem (ajuda a veure si Premiere ha canviat el nom)
+                // $.writeln("   - Analitzant item [" + i + "]: " + item.name);
+        
+                if (item.name.indexOf(id) !== -1) {
+                    $.writeln("   ✅ COINCIDÈNCIA TROBADA! Movent '" + item.name + "'...");
+                    try {
+                        item.moveBin(targetBin);
+                        found = true;
+                        break;
+                    } catch (e) {
+                        return "ERR:EXCEPTION_DURING_MOVE: " + e.message;
+                    }
+                }
+            }
+        
+            if (found) return "OK";
+            
+            $.writeln("   ❌ No s'ha trobat cap item que contingui l'ID: " + id);
+            return "ERR:NOT_FOUND_IN_ROOT";
+        },
+
         // --- 3. SEQCÜÈNCIES ---
 
         list: function() {
@@ -289,3 +338,5 @@ FASTPASS.Project = (function() {
         }
     };
 })();
+
+var Project = FASTPASS.Project;

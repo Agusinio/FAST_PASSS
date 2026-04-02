@@ -113,32 +113,55 @@ FASTPASS.Clips = {
      */
     insert: function(itemName, trackIdx, startSec, endSec, type) {
         try {
+            var p = app.project;
+            var seq = p.activeSequence;
+            if (!seq) return "ERR_NO_ACTIVE_SEQUENCE";
+    
             var nameToFind = decodeURIComponent(itemName);
             var item = FASTPASS.Project.find(nameToFind);
+            
+            // Buscador de respaldo sin extensión
             if (!item) {
                 var lastDot = nameToFind.lastIndexOf(".");
                 if (lastDot > 0) {
-                    var nameOnly = nameToFind.substring(0, lastDot);
-                    item = FASTPASS.Project.find(nameOnly);
+                    item = FASTPASS.Project.find(nameToFind.substring(0, lastDot));
                 }
             }
             if (!item) return "ERR_ITEM_NOT_FOUND";
-
-            var track = this._get(trackIdx, type || "video"); 
-            if (!track) return "ERR_TRACK_NOT_FOUND";
-
-            var tStart = new Time();
-            tStart.seconds = parseFloat(startSec);
-            Clips.insert(item, tStart);
+    
+            // 1. Localizar la pista (Video o Audio)
+            var targetTrack = null;
+            var isVideo = (type !== "audio"); // Por defecto video
             
-            // Si passem temps de final -> Ajustar durada immediatament
-            if (endSec && parseFloat(endSec) > 0) {
-                var clip = track.clips[track.clips.numItems - 1]; // L'últim és el que s'acaba de posar
-                var tEnd = new Time(); tEnd.seconds = parseFloat(endSec);
-                clip.end = tEnd;
+            if (isVideo) {
+                targetTrack = seq.videoTracks[parseInt(trackIdx) - 1];
+            } else {
+                targetTrack = seq.audioTracks[parseInt(trackIdx) - 1];
             }
+    
+            if (!targetTrack) return "ERR_TRACK_NOT_FOUND";
+    
+            // 2. Configurar el tiempo de inserción
+            var tStart = new Time();
+            tStart.seconds = parseFloat(startSec || 0);
+    
+            // 3. LA LLAMADA REAL A PREMIERE (overwriteClip)
+            // Esto es lo que faltaba. Usamos overwrite para no desplazar el resto
+            targetTrack.overwriteClip(item, tStart);
+    
+            // 4. Ajustar duración si se especifica endSec
+            if (endSec && parseFloat(endSec) > 0) {
+                var clips = targetTrack.clips;
+                var lastClip = clips[clips.numItems - 1];
+                var tEnd = new Time(); 
+                tEnd.seconds = parseFloat(endSec);
+                lastClip.end = tEnd;
+            }
+    
             return "OK";
-        } catch (e) { return "ERR: " + e.message; }
+        } catch (e) { 
+            return "ERR: " + e.message; 
+        }
     },
 
     /**

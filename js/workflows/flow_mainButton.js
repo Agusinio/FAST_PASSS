@@ -33,37 +33,32 @@
             }
         },
 
-        _runNew: async function (data) {
+        _runNew: async function () {
             try {
-                const utils = FASTPASS_UI.Utils;
-                const config = FASTPASS_UI.Config.get();
                 const ctx = await this._setupContext();
-        
-                // 1. ESCANEIG
                 const assets = await this._fullScan(ctx);
                 
-                // 2. CÀLCUL DE RUTES
-                const sanitizedTheme = utils.sanitizeName(assets.wotts.tema || 'PENDENT');
-                const projSlug = config.naming.getProjectName(ctx, sanitizedTheme);
+                const sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema).toUpperCase();
+                const shortProg = ctx.progData.wott || "TNV"; 
+                const projSlug = `${shortProg}_${ctx.bloque}_${sanitizedTheme}`;
+                
                 const fileName = `Pruebas_${projSlug}.prproj`;
-                const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
-                const fullDestPath = folderPath + "/" + fileName;
+                const folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
+                const fullDestPath = (folderPath + "/" + fileName).replace(/\\/g, "/");
 
                 const paths = {
-                    plantillaPath: config.rutas.plantilla_net,
+                    plantillaPath: ctx.config.rutas.plantilla_net,
                     fullDestPath: fullDestPath,
                     folderPath: folderPath,
                     sanitizedTheme: sanitizedTheme
                 };
 
-                // 3. EXECUCIÓ LÒGICA (LIPO)
-                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada);
+                log(`🏗️ Generant projecte: ${fileName}`);
 
-                // 4. FOCUS
-                await callJSX("Tracks.target(1, true, 'video')");
-                await callJSX("Tracks.target(1, true, 'audio')");
+                // 1. CREACIÓ FÍSICA (AQUÍ YA SE INGESTAN LOS ARCHIVOS)
+                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg);
 
-                utils.log("✅ Workflow NOU completat amb èxit.");
+                log("✅ Workflow NOU completat amb èxit.");
         
             } catch (e) {
                 FASTPASS_UI.Utils.log("💥 Error crític a runNew: " + e.message, "ERROR");
@@ -148,16 +143,27 @@
         /**
          * _fullScan: Escaneja rètols, media i portada, i actualitza flags de Context.
          */
-        _fullScan: async function(ctx) {
-            const wotts = await window.Scan.wotts(ctx); 
+        _fullScan: async function (ctx) {
+            log("🔍 [SCAN] Analitzant context i materials...");
+            
+            // 1. Busquem materials al NAS
+            const wotts = await window.Scan.wotts(ctx);
             const media = await window.Scan.mediaAssets(ctx);
-            const portada = await window.Scan.portada(ctx);
+            const portada = await window.Scan.portadas(ctx);
+            
+            // 2. Actualitzem State global
+            window.FASTPASS_UI.State.detectedTheme = wotts.tema;
+            window.FASTPASS_UI.State.hasMedia = !!media.mp4;
+            
+            // 3. Verificació de projecte existent al destí
+            const folderDest = ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
+            const projectFiles = await getUtils().readFolder(folderDest);
+            const existingProj = window.Scan.selectedProject(projectFiles, ctx.progData.wott, ctx.bloque);
+            
+            window.FASTPASS_UI.State.activeProjectName = existingProj;
+            window.FASTPASS_UI.State.buttonState = existingProj ? "OPEN" : "NEW";
 
-            FASTPASS_UI.Core.Context.missing.wotts = (!wotts.list || wotts.list.length === 0);
-            FASTPASS_UI.Core.Context.missing.media = (!media || !media.mp4);
-            FASTPASS_UI.Core.Context.missing.srt = (!media || !media.srt);
-            FASTPASS_UI.Core.Context.missing.portada = (!portada);
-
+            // Retornem el paquet d'assets per a ús immediat
             return { wotts, media, portada };
         },
 
@@ -165,40 +171,37 @@
          * _completeSyncUI: Ingesta assets, autocol·loca MP4 i activa targeting.
          */
         _completeSyncUI: async function(ctx, assets) {
-            // 1. Ingesta
+            log("🎞️ [SYNC] Ingestant assets i fixant focus...");
+            
+            // 1. Ingesta (Rètols, Media)
             await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
 
-            // 2. Auto-Insert MP4 si V1 es buida
+            // 2. Auto-Insert MP4 si V1 està buida
             if (assets.media && assets.media.mp4) {
-                const v1Count = await FASTPASS_UI.Logic.Clips.count(1, "video");
+                const v1Count = await callJSX("Clips.count(1, 'video')");
                 if (parseInt(v1Count) === 0) {
-                    getUtils().log("🎞️ V1 buida detectada. Autocol·locant MP4...");
+                    log("🎞️ V1 buida. Autocol·locant vídeo...");
                     const escapedMediaName = encodeURIComponent(assets.media.mp4.name);
                     await callJSX(`Clips.insert('${escapedMediaName}', 1, 0)`);
                 }
             }
 
-            // 3. Focas Track Targeting
+            // 3. Focus i Targeting
             await callJSX("Tracks.target(1, true, 'video')");
             await callJSX("Tracks.target(1, true, 'audio')");
         },
 
         _setupContext: async function () {
             const config = FASTPASS_UI.Config.get();
-            const elProg = document.getElementById('programa');
-            const elBloc = document.getElementById('bloc');
-            if (!elProg || !elBloc) return null;
-
-            const idProg = elProg.value;
+            const idProg = document.getElementById('programa').value;
             const progData = config.mapeoProgramas[idProg];
-            const dateStr = getUtils().getFormattedDate();
-            const dateDir = dateStr.replace(/["\s]/g, "").trim();
+            const dateDir = getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
 
             return {
                 config,
                 progData,
                 programa: idProg,
-                bloque: elBloc.value,
+                bloque: document.getElementById('bloc').value,
                 dateDir
             };
         }

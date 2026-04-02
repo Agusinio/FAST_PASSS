@@ -22,7 +22,16 @@
         },
         estructuras: {
             "TNs": {
-                tracks: { v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, s_s1: 1, s_s2: 2 },
+                tracks: { 
+                    v_mp4: 1, 
+                    v_fondos: 2, 
+                    v_graf: 3, 
+                    v_tema: 4, 
+                    v_chyrons: 5, 
+                    v_lloc: 6, 
+                    s_s1: 1, 
+                    s_s2: 2 
+                },
                 programas: [
                     { id: "TNCOMARQUES", archivo: "TN_COMARQUES", wott: "TNC", dir: "02_COMARQUES_PROJECTES", conductor: "Conduct_Nuria Sole Perez.mov" },
                     { id: "TNM", archivo: "TN_MIGDIA", wott: "TNM", dir: "03_TN MIGDIA_PROJECTES", conductor: "Conduct_Xavi Coral Trullas.mov" },

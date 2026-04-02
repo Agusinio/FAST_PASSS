@@ -134,7 +134,7 @@
                 // 📍 BLINDAJE: Convertimos a JSON y escapamos comillas simples para que no rompan el callJSX
                 const payload = JSON.stringify(rawPaths).replace(/'/g, "\\'");
                 
-                console.log("📤 Enviando Payload al JSX:", payload); // Veremos qué sale exactamente
+                //console.log("📤 Enviando Payload al JSX:", payload); // Veremos qué sale exactamente
                 
                 const res = await this.callJSX(`FASTPASS.IO.importFiles('${payload}', '${binName}')`);
                 
