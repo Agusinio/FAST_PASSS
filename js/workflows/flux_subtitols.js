@@ -8,12 +8,12 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const getUtils = () => window.FASTPASS_UI.Utils;
+    const getEines = () => window.FASTPASS_UI.Eines;
     const getSrtLogic = () => window.FASTPASS_UI.Logic.Sub;
-    const getTracksLogic = () => window.FASTPASS_UI.Logic.Tracks;
+    const getTracksLogic = () => window.FASTPASS_UI.Logic.Pistes;
 
-    const log = (m) => getUtils().log(m, "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const log = (m) => getEines().log(m, "DEBUG");
+    const callJSX = (s) => getEines().callJSX(s);
 
     FASTPASS_UI.Workflows.Srt = {
 
@@ -43,7 +43,7 @@
                 log("🖱️ Canviant a eina de SELECCIÓ (V)...");
                 await callJSX(`Sistema.tool('Selection')`);
 
-                getUtils().status("SRT MODE ON", "exito");
+                getEines().status("SRT MODE ON", "exito");
             } else {
                 if (btn) { btn.textContent = "PREPARAR"; btn.classList.remove('btn-active'); }
                 if (btnIn) btnIn.disabled = true;
@@ -53,7 +53,7 @@
                 await callJSX(`Pistes.setGlobalState('video', 'lock', false)`);
                 await callJSX(`Pistes.setGlobalState('audio', 'lock', false)`);
                 
-                getUtils().status("SRT MODE OFF", "warn");
+                getEines().status("SRT MODE OFF", "warn");
             }
         },
 
@@ -69,9 +69,9 @@
                 const res = await getSrtLogic().cleanIn(parseFloat(ctiRaw || "0"), textIn);
                 
                 if (res.indexOf("OK") !== -1) {
-                    getUtils().status("Inici NETEJAT", "exito");
+                    getEines().status("Inici NETEJAT", "exito");
                 }
-            } catch (e) { getUtils().handleError(e, "SrtIn"); }
+            } catch (e) { getEines().handleError(e, "SrtIn"); }
         },
 
         /**
@@ -86,9 +86,9 @@
                 const res = await getSrtLogic().cleanOut(parseFloat(ctiRaw || "0"), textOut);
                 
                 if (res.indexOf("OK") !== -1) {
-                    getUtils().status("Cua NETEJADA", "exito");
+                    getEines().status("Cua NETEJADA", "exito");
                 }
-            } catch (e) { getUtils().handleError(e, "SrtOut"); }
+            } catch (e) { getEines().handleError(e, "SrtOut"); }
         },
 
         /**
@@ -130,8 +130,8 @@
                     cursor = newEnd + padding;
                 }
 
-                getUtils().status(`Ajustat ${clips.length} rètols.`, "exito");
-            } catch (e) { getUtils().handleError(e, "SrtTimeAdjust"); }
+                getEines().status(`Ajustat ${clips.length} rètols.`, "exito");
+            } catch (e) { getEines().handleError(e, "SrtTimeAdjust"); }
         }
     };
 

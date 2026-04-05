@@ -2,7 +2,7 @@
 <ExtensionManifest Version="6.0" ExtensionBundleId="com.test.debug" ExtensionBundleVersion="9.0.0" ExtensionBundleName="FAST_PASSS">
     
     <ExtensionList>
-        <Extension Id="com.test.debug.panel" Version="8.0.0"/>
+        <Extension Id="com.test.debug.panel" Version="8.5.0"/>
         <HostList>
             <Host Name="PPRO" Port="8907"/>
         </HostList>

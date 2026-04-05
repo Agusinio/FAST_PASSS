@@ -8,12 +8,12 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const getUtils = () => window.FASTPASS_UI.Utils;
+    const getEines = () => window.FASTPASS_UI.Eines;
     const getRenderLogic = () => window.FASTPASS_UI.Logic.Render;
     const getScanner = () => window.FASTPASS_UI.Logic.Scan;
 
-    const log = (m) => getUtils().log(m, "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const log = (m) => getEines().log(m, "DEBUG");
+    const callJSX = (s) => getEines().callJSX(s);
 
     FASTPASS_UI.Workflows.Render = {
 
@@ -21,7 +21,9 @@
          * MP4: Envia la seqüència activa a AME amb nom intel·ligent.
          */
         runVideo: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            const activeSeqName = await callJSX('Entorn.activeSeq()');
+            window.FASTPASS_UI.State.activeSequenceName = activeSeqName;
+            if (!(await getEines().validateActiveSequence())) return;
             log("🚀 Preparant enviament a AME...");
             const config = FASTPASS_UI.Config.get();
 
@@ -29,7 +31,7 @@
                 let outputDir = await callJSX("Entorn.folder()");
                 if (!outputDir) outputDir = config.rutas.destinoBase || "C:\\Temp";
                 
-                getUtils().status("Processant nom...", "procesando");
+                getEines().status("Processant nom...", "procesando");
 
                 const seqName = await callJSX('Entorn.activeSeq()');
                 let fileName = "Export_TBD.mp4";
@@ -51,21 +53,23 @@
                 const res = await getRenderLogic().queue(presetPath, outputDir, fileName);
 
                 if (res && res.indexOf("OK") === 0) {
-                    getUtils().status(`AME: ${fileName}`, "exito");
+                    getEines().status(`AME: ${fileName}`, "exito");
                     log("✅ Enviat a Media Encoder.", "INFO");
                     FASTPASS_UI.State.lastRenderName = fileName.replace(".mp4", "");
                 } else {
                     throw new Error("Error Media Encoder: " + res);
                 }
 
-            } catch (e) { getUtils().handleError(e, "RenderVideo"); }
+            } catch (e) { getEines().handleError(e, "RenderVideo"); }
         },
 
         /**
          * PORTADA PRO: Importació, Aïllament i Snapshot automàtic del darrer PNG.
          */
         runPortada: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            const activeSeqName = await callJSX('Entorn.activeSeq()');
+            window.FASTPASS_UI.State.activeSequenceName = activeSeqName;
+            if (!(await getEines().validateActiveSequence())) return;
             log("📸 Iniciant Portada Pro (Modo Aïllat)...");
             
             try {
@@ -99,7 +103,7 @@
                 const cti = parseFloat(ctiRaw || "0");
                 
                 log(`📌 Inserint ${portada.name} a V${T_PORTADA}`);
-                await callJSX(`Segments.insert('${getUtils().escape(portada.name)}', ${T_PORTADA}, ${cti}, null, 'video')`);
+                await callJSX(`Segments.insert('${getEines().escape(portada.name)}', ${T_PORTADA}, ${cti}, null, 'video')`);
 
                 // 5. EXPORTACIÓ FRAME (Snapshot a carpeta destino Portades)
                 const targetDir = config.rutas.portadas || config.rutas.destinoBase || "C:\\Temp";
@@ -122,13 +126,13 @@
                 await callJSX(`Pistes.setGlobalState('video', 'mute', false)`);
 
                 if (snapRes.success) {
-                    getUtils().status("Portada OK", "exito");
+                    getEines().status("Portada OK", "exito");
                     log("✅ Portada generada amb èxit.");
                 } else {
                     throw new Error("Error Snapshot: " + snapRes.log);
                 }
 
-            } catch (e) { getUtils().handleError(e, "RenderPortadaPro"); }
+            } catch (e) { getEines().handleError(e, "RenderPortadaPro"); }
         }
     };
 

@@ -10,32 +10,50 @@ var FASTPASS = $.global.FASTPASS;
 
 FASTPASS.Cronologia = {
 
+    makeTime: function(seconds) {
+        var t = new Time(); // Intentamos el estándar
+        if (!t || typeof t !== "object") {
+            // Si falla, lo forzamos a través de la secuencia (Fallback)
+            var seq = FASTPASS.Entorn.getWorkSequence();
+            if (seq) t = seq.getPlayerPosition(); 
+        }
+        t.seconds = parseFloat(seconds);
+        return t;
+    },
+
     get: function() {
-        var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
-        return seq ? seq.getPlayerPosition().seconds : 0;
+        try {
+            var seq = FASTPASS.Entorn.getWorkSequence();
+            if (!seq) {
+                $.writeln("⏲️ [JSX:Cronologia] get: activeSequence null (ignorable)");
+                return 0;
+            }
+            var pos = seq.getPlayerPosition().seconds;
+            $.writeln("⏲️ [JSX:Cronologia] get: " + pos);
+            return pos;
+        } catch(e) { return 0; }
     },
 
     set: function(seconds) {
-        var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
+        var seq = FASTPASS.Entorn.getWorkSequence();
         if (!seq) return "ERR_NO_SEQ";
-        var t = new Time(); 
-        t.seconds = parseFloat(seconds);
+        // ✅ Usamos la nueva fábrica
+        var t = this.makeTime(seconds); 
         seq.setPlayerPosition(t.ticks);
         return "OK";
     },
 
     range: function(inSec, outSec) {
-        var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
+        var seq = FASTPASS.Entorn.getWorkSequence();
         if (!seq) return "ERR_NO_SEQ";
-        var tIn = new Time(); tIn.seconds = parseFloat(inSec);
-        var tOut = new Time(); tOut.seconds = parseFloat(outSec);
-        seq.setInPoint(tIn.ticks);
-        seq.setOutPoint(tOut.ticks);
+        // ✅ Usamos la nueva fábrica dos veces
+        seq.setInPoint(this.makeTime(inSec).ticks);
+        seq.setOutPoint(this.makeTime(outSec).ticks);
         return "OK";
     },
 
     refresh: function() {
-        var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
+        var seq = FASTPASS.Entorn.getWorkSequence();
         if (!seq) return "ERR_NO_SEQ";
         var pos = seq.getPlayerPosition();
         var next = new Time(); 
@@ -46,7 +64,7 @@ FASTPASS.Cronologia = {
     },
 
     duration: function() {
-        var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
+        var seq = FASTPASS.Entorn.getWorkSequence();
         return seq ? seq.outPoint.seconds : 0;
     }
 };

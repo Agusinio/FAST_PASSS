@@ -11,7 +11,7 @@ var FASTPASS = $.global.FASTPASS;
 FASTPASS.Pistes = {
 
     _get: function(idx, type) {
-        var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
+        var seq = FASTPASS.Entorn.getWorkSequence();
         if (!seq) return null;
         var i = parseInt(idx) - 1; 
         if (i < 0) i = 0;
@@ -22,7 +22,7 @@ FASTPASS.Pistes = {
 
     count: function(type) {
         try {
-            var seq = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkSequence() : app.project.activeSequence;
+            var seq = FASTPASS.Entorn.getWorkSequence();
             if (!seq) return 0;
             if (type === "audio") return seq.audioTracks.numTracks;
             if (type === "subtitle") return seq.subtitleTracks.numTracks;

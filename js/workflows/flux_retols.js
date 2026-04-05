@@ -8,11 +8,11 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const getUtils = () => window.FASTPASS_UI.Utils;
-    const getClipsLogic = () => window.FASTPASS_UI.Logic.Clips;
+    const getEines = () => window.FASTPASS_UI.Eines;
+    const getClipsLogic = () => window.FASTPASS_UI.Logic.Segments;
 
-    const log = (m) => getUtils().log(m, "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const log = (m) => getEines().log(m, "DEBUG");
+    const callJSX = (s) => getEines().callJSX(s);
 
     FASTPASS_UI.Workflows.Retols = {
 
@@ -20,7 +20,7 @@
          * RESET GRAPHICS: Neteja total de les pistes de gràfics (Pànic button)
          */
         runResetGraphics: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            if (!(await getEines().validateActiveSequence())) return;
             if (!confirm("Segur que vols ELIMINAR TOTS els gràfics de la línia de temps?")) return;
 
             log("🧹 Netejant graella de gràfics...");
@@ -37,15 +37,18 @@
                     await callJSX(`Segments.clearTrack(${t}, 'video')`);
                 }
                 log("✅ Gràfics eliminats correctament.", "INFO");
-                getUtils().status("Gràfics Reiniciats", "exito");
-            } catch (e) { getUtils().handleError(e, "ResetGraphics"); }
+                getEines().status("Gràfics Reiniciats", "exito");
+            } catch (e) { getEines().handleError(e, "ResetGraphics"); }
         },
 
         /**
          * RETOLS (Chunk-based): Insereix els rètols només del TEMA/PART seleccionada al cabezal
          */
         runPlaceChyrons: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            const activeSeqName = await callJSX('Entorn.activeSeq()');
+            window.FASTPASS_UI.State.activeSequenceName = activeSeqName;
+            if (!(await getEines().validateActiveSequence())) return;
+
             const cfg = FASTPASS_UI.Config.get();
             const state = FASTPASS_UI.State;
             const idx = state.pieceIndex;
@@ -68,7 +71,7 @@
                     // Busquem si hi ha un Tema-Titol a la llista de chyrons
                     const themeChyron = part.chyrons.find(c => c.name.toLowerCase().includes("tema") || c.name.toLowerCase().includes("titol"));
                     if (themeChyron) {
-                        await callJSX(`Segments.insert('${getUtils().escape(themeChyron.name)}', ${cfg.tracks.video.tematitol}, ${cti}, null, 'video')`);
+                        await callJSX(`Segments.insert('${getEines().escape(themeChyron.name)}', ${cfg.tracks.video.tematitol}, ${cti}, null, 'video')`);
                     }
                 }
 
@@ -85,16 +88,16 @@
                             targetTrack = cfg.tracks.video.llocdata;
                         }
                         
-                        await callJSX(`Segments.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${cti + gap}, null, 'video')`);
+                        await callJSX(`Segments.insert('${getEines().escape(c.name)}', ${targetTrack}, ${cti + gap}, null, 'video')`);
                     }
                 }
 
                 // Salta a la següent part
                 state.pieceIndex++;
                 this.updateUIChunk();
-                getUtils().status(`Part ${part.id} LLISTA.`, "exito");
+                getEines().status(`Part ${part.id} LLISTA.`, "exito");
 
-            } catch (e) { getUtils().handleError(e, "PlaceChyronsChunk"); }
+            } catch (e) { getEines().handleError(e, "PlaceChyronsChunk"); }
         },
 
         updateUIChunk: function() {
@@ -114,7 +117,10 @@
          * GRAFIC (Mask): Tapa el clip seleccionat amb un gràfic de la seva durada
          */
         runPlaceGraphic: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            const activeSeqName = await callJSX('Entorn.activeSeq()');
+            window.FASTPASS_UI.State.activeSequenceName = activeSeqName;
+            if (!(await getEines().validateActiveSequence())) return;
+
             const cfg = FASTPASS_UI.Config.get();
             const T_MP4 = cfg.tracks.video.mp4;
             const T_GRAFS = cfg.tracks.video.graficos;
@@ -128,13 +134,17 @@
                 const graphicName = "GRAFIC_GENERIC.png"; // Placeholder: En el futur buscarem el real
 
                 log(`🎭 Tapant clip [${info.name}] amb gràfic a V${T_GRAFS}`);
-                await callJSX(`Segments.insert('${getUtils().escape(graphicName)}', ${T_GRAFS}, ${info.start}, ${info.end}, 'video')`);
+                await callJSX(`Segments.insert('${getEines().escape(graphicName)}', ${T_GRAFS}, ${info.start}, ${info.end}, 'video')`);
                 
-                getUtils().status("Gràfic Ajustat", "exito");
-            } catch (e) { getUtils().handleError(e, "PlaceGraphicMask"); }
+                getEines().status("Gràfic Ajustat", "exito");
+            } catch (e) { getEines().handleError(e, "PlaceGraphicMask"); }
         },
 
         runPlaceGraph169: async function () {
+            const activeSeqName = await callJSX('Entorn.activeSeq()');
+            window.FASTPASS_UI.State.activeSequenceName = activeSeqName;
+            if (!(await getEines().validateActiveSequence())) return;
+
             log("🎬 Aplicant format 16:9 amb fondos...");
             const cfg = FASTPASS_UI.Config.get();
             const T_MP4 = cfg.tracks.video.mp4;     
@@ -149,13 +159,16 @@
                 await callJSX(`Segments.setProp(${T_MP4}, ${info.index}, 'ADBE Motion', 'ADBE Video Scale', 140, 'video')`);
 
                 const bgName = "Fons_16_9_GENERIC.png";
-                await callJSX(`Segments.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${info.start}, ${info.end}, 'video')`);
+                await callJSX(`Segments.insert('${getEines().escape(bgName)}', ${T_FONS}, ${info.start}, ${info.end}, 'video')`);
                 
-            } catch (e) { getUtils().handleError(e, "Graph169"); }
+            } catch (e) { getEines().handleError(e, "Graph169"); }
         },
 
         runPlaceBackground: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            const activeSeqName = await callJSX('Entorn.activeSeq()');
+            window.FASTPASS_UI.State.activeSequenceName = activeSeqName;
+            if (!(await getEines().validateActiveSequence())) return;
+
             log("🎬 Col·locant fons vertical...");
             const cfg = FASTPASS_UI.Config.get();
             const T_FONS = cfg.tracks.video.fondos;  
@@ -163,9 +176,9 @@
             try {
                 const cti = parseFloat(await callJSX('Cronologia.get()') || "0");
                 const bgName = "Fons_Vertical_Generic.png";
-                await callJSX(`Segments.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${cti}, null, 'video')`);
-                getUtils().status("Fons colocat", "exito");
-            } catch (e) { getUtils().handleError(e, "PlaceBackground"); }
+                await callJSX(`Segments.insert('${getEines().escape(bgName)}', ${T_FONS}, ${cti}, null, 'video')`);
+                getEines().status("Fons colocat", "exito");
+            } catch (e) { getEines().handleError(e, "PlaceBackground"); }
         }
     };
 

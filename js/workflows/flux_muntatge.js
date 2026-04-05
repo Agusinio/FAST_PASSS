@@ -8,12 +8,12 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const getUtils = () => window.FASTPASS_UI.Utils;
-    const getClipsLogic = () => window.FASTPASS_UI.Logic.Clips;
+    const getEines = () => window.FASTPASS_UI.Eines;
+    const getClipsLogic = () => window.FASTPASS_UI.Logic.Pistes;
     const getParse = () => window.Parse;
 
-    const log = (m) => getUtils().log(m, "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const log = (m) => getEines().log(m, "DEBUG");
+    const callJSX = (s) => getEines().callJSX(s);
 
     FASTPASS_UI.Workflows.Assembly = {
 
@@ -83,7 +83,7 @@
 
                 log("✅ Assemblatge Màgic completat.");
 
-            } catch (e) { getUtils().handleError(e, "Assembly_Magic"); }
+            } catch (e) { getEines().handleError(e, "Assembly_Magic"); }
         },
 
         /**
@@ -98,11 +98,11 @@
             const conductor = block.chyrons.find(c => c.rol === "CONDUCTOR");
 
             if (duration >= 10) {
-                if (tematitol) await callJSX(`Segments.insert('${getUtils().escape(tematitol.name)}', ${tracks.tematitol}, ${start}, null, 'video')`);
-                if (conductor) await callJSX(`Segments.insert('${getUtils().escape(conductor.name)}', ${tracks.chyrons}, ${start + 6.3}, null, 'video')`);
+                if (tematitol) await callJSX(`Segments.insert('${getEines().escape(tematitol.name)}', ${tracks.tematitol}, ${start}, null, 'video')`);
+                if (conductor) await callJSX(`Segments.insert('${getEines().escape(conductor.name)}', ${tracks.chyrons}, ${start + 6.3}, null, 'video')`);
             } else {
-                if (conductor) await callJSX(`Segments.insert('${getUtils().escape(conductor.name)}', ${tracks.chyrons}, ${start}, null, 'video')`);
-                if (tematitol) await callJSX(`Segments.insert('${getUtils().escape(tematitol.name)}', ${tracks.tematitol}, ${clip.end - 2.0}, null, 'video')`);
+                if (conductor) await callJSX(`Segments.insert('${getEines().escape(conductor.name)}', ${tracks.chyrons}, ${start}, null, 'video')`);
+                if (tematitol) await callJSX(`Segments.insert('${getEines().escape(tematitol.name)}', ${tracks.tematitol}, ${clip.end - 2.0}, null, 'video')`);
             }
         },
 
@@ -115,7 +115,7 @@
             let anchors = [];
             for (const c of block.chyrons) {
                 if (c.rol !== "NOMCARREC") continue;
-                const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
+                const idealPos = clips[0].start + getEines().timeToSeconds(c.tc);
                 const candidate = clips.find(clip => clip.start <= (idealPos + 2) && clip.start >= (idealPos - 2) && (clip.end - clip.start) > 2.5);
                 if (candidate) {
                     anchors.push({ delta: candidate.start - idealPos });
@@ -129,7 +129,7 @@
             let hasFirma = false;
 
             for (const c of block.chyrons) {
-                const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
+                const idealPos = clips[0].start + getEines().timeToSeconds(c.tc);
                 const adjustedTime = idealPos + avgDelta;
 
                 if (c.rol === "NOMCARREC") hasNom = true;
@@ -147,7 +147,7 @@
                 if (c.name.indexOf("   ") === 0) targetTrack = tracks.graficos;
 
                 log(`      📍 Snap: ${c.name} -> ${bestCut.toFixed(2)}s (V${targetTrack})`);
-                await callJSX(`Segments.insert('${getUtils().escape(c.name)}', ${targetTrack}, bestCut, null, 'video')`);
+                await callJSX(`Segments.insert('${getEines().escape(c.name)}', ${targetTrack}, bestCut, null, 'video')`);
             }
 
             return { isInsert: (hasNom && hasFirma) };

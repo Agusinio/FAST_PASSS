@@ -4,7 +4,7 @@
  * ============================================================================
  */
 (function () {
-    // 1. Protección de Namespace (Igual que hicimos en Utils)
+    // 1. Protección de Namespace (Igual que hicimos en Eines)
     var FASTPASS_UI = window.FASTPASS_UI || {};
 
     FASTPASS_UI.Logger = {

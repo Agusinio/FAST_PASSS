@@ -7,9 +7,9 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const getUtils = () => window.FASTPASS_UI.Utils;
-    const log = (m) => getUtils().log(m, "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const getEines = () => window.FASTPASS_UI.Eines;
+    const log = (m) => getEines().log(m, "DEBUG");
+    const callJSX = (s) => getEines().callJSX(s);
 
     const COMPANT = 'AE.ADBE Motion';
     const PROPPOS = 'ADBE Video Position';
@@ -17,7 +17,7 @@
     FASTPASS_UI.Workflows.KF = {
 
         runAddKF: async function () {
-            if (!(await getUtils().validateActiveSequence())) return;
+            if (!(await getEines().validateActiveSequence())) return;
             var self = this;
             log("💎 Sol·licitant nou KF...");
 
@@ -34,7 +34,7 @@
 
         runSmoothKF: async function () {
             try {
-                await getUtils().delay(50);
+                await getEines().delay(50);
                 log("🧠 Negociant corbes...");
 
                 // Literal: Anim.get()
@@ -78,13 +78,13 @@
             try {
                 const res = await callJSX("Animacio.reframe(1, -1)"); // V1, cabezal
                 if (res === "OK_ADDED_REFRAME") {
-                    getUtils().status("Reframe APLICAT", "exito");
+                    getEines().status("Reframe APLICAT", "exito");
                     log("✅ Auto Reframe aplicat al clip de V1.");
                 } else if (res === "INFO_ALREADY_HAS_REFRAME") {
-                    getUtils().status("Clip ja té Reframe", "warn");
+                    getEines().status("Clip ja té Reframe", "warn");
                     log("⚠️ El clip ja conté l'efecte Auto Reframe.");
                 } else {
-                    getUtils().status("Error Reframe", "error");
+                    getEines().status("Error Reframe", "error");
                     log("⚠️ Error d'aplicació: " + res, "WARN");
                 }
             } catch (e) {

@@ -8,15 +8,15 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
-    const getUtils = () => window.FASTPASS_UI.Utils;
-    const log = (...args) => getUtils().log(...args);
-    const callJSX = (s) => getUtils().callJSX(s);
+    const getEines = () => window.FASTPASS_UI.Eines;
+    const log = (...args) => getEines().log(...args);
+    const callJSX = (s) => getEines().callJSX(s);
 
     FASTPASS_UI.Workflows.MainButton = {
 
         runMainAction: async function (action, data) {
             log("⏯️ Iniciant workflow: [" + action + "]");
-            getUtils().updateUIState('BUSY');
+            getEines().updateUIState('BUSY');
 
             try {
                 switch (action) {
@@ -25,11 +25,11 @@
                     case 'LOAD': await this._runLoad(); break;
                     case 'GO': await this._runGo(data.name); break;
                 }
-                getUtils().status('Procés completat!', 'exito');
+                getEines().status('Procés completat!', 'exito');
             } catch (e) {
-                getUtils().handleError(e, "MainAction");
+                getEines().handleError(e, "MainAction");
             } finally {
-                getUtils().updateUIState('READY');
+                getEines().updateUIState('READY');
             }
         },
 
@@ -38,7 +38,7 @@
                 const ctx = await this._setupContext();
                 const assets = await this._fullScan(ctx);
                 
-                const sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema).toUpperCase();
+                const sanitizedTheme = getEines().sanitizeName(assets.wotts.tema).toUpperCase();
                 const shortProg = ctx.progData.wott || "TNV"; 
                 const projSlug = `${shortProg}_${ctx.bloque}_${sanitizedTheme}`;
                 
@@ -56,12 +56,12 @@
                 log(`🏗️ Generant projecte: ${fileName}`);
 
                 // 1. CREACIÓ FÍSICA (AQUÍ YA SE INGESTAN LOS ARCHIVOS)
-                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg);
+                await FASTPASS_UI.Logic.Projecte.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg);
 
                 log("✅ Workflow NOU completat amb èxit.");
         
             } catch (e) {
-                FASTPASS_UI.Utils.log("💥 Error crític a runNew: " + e.message, "ERROR");
+                FASTPASS_UI.Eines.log("💥 Error crític a runNew: " + e.message, "ERROR");
             }
         },
 
@@ -82,7 +82,7 @@
             if (currentPath.indexOf("PENDENT") !== -1) {
                 log("🧬 Projecte PENDENT detectat. Promocionant...");
 
-                const sanitizedTema = getUtils().sanitizeName(assets.wotts.tema);
+                const sanitizedTema = getEines().sanitizeName(assets.wotts.tema);
                 const newProjectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
                 const newPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + "Pruebas_" + newProjectName + ".prproj";
 
@@ -90,13 +90,13 @@
                 await this._completeSyncUI(ctx, assets);
 
                 log(`💾 Guardant com a: ${newPath}`);
-                const saveRes = await callJSX(`Projecte.saveAs('${getUtils().escape(newPath)}')`);
+                const saveRes = await callJSX(`Projecte.saveAs('${getEines().escape(newPath)}')`);
 
                 if (saveRes === "OK") {
                     log(`🗑️ Eliminant rastre PENDENT...`);
-                    getUtils().deleteFile(currentPath);
-                    getUtils().deleteFile(currentPath + ".lock");
-                    await FASTPASS_UI.Logic.Project.lock(newPath);
+                    getEines().deleteFile(currentPath);
+                    getEines().deleteFile(currentPath + ".lock");
+                    await FASTPASS_UI.Logic.Projecte.lock(newPath);
                     log("🟢 Projecte promocionat amb èxit!");
                 }
             } else {
@@ -109,7 +109,7 @@
 
         _runGo: async function (projName) {
             log(`🚀 [FLOW-GO] Canviant focus a: ${projName}...`);
-            const res = await callJSX(`Entorn.set('${getUtils().escape(projName)}')`);
+            const res = await callJSX(`Entorn.set('${getEines().escape(projName)}')`);
             if (res === "OK") {
                 const ctx = await this._setupContext();
                 const assets = await this._fullScan(ctx);
@@ -127,11 +127,11 @@
             const cfg = ctx.config;
 
             const assets = await this._fullScan(ctx);
-            const sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema || 'PENDENT');
+            const sanitizedTheme = getEines().sanitizeName(assets.wotts.tema || 'PENDENT');
             const projSlug = ctx.config.naming.getProjectName(ctx, sanitizedTheme);
             const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/" + `Pruebas_${projSlug}.prproj`;
             
-            await FASTPASS_UI.Logic.Project.lock(destPath);
+            await FASTPASS_UI.Logic.Projecte.lock(destPath);
             await callJSX(`Projecte.open('${destPath.replace(/\\/g, "\\\\")}')`);
             
             // Sync después de abrir
@@ -157,7 +157,7 @@
             
             // 3. Verificació de projecte existent al destí
             const folderDest = ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
-            const projectFiles = await getUtils().readFolder(folderDest);
+            const projectFiles = await getEines().readFolder(folderDest);
             const existingProj = window.Scan.selectedProject(projectFiles, ctx.progData.wott, ctx.bloque);
             
             window.FASTPASS_UI.State.activeProjectName = existingProj;
@@ -174,7 +174,7 @@
             log("🎞️ [SYNC] Ingestant assets i fixant focus...");
             
             // 1. Ingesta (Rètols, Media)
-            await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
+            await FASTPASS_UI.Logic.Projecte.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
 
             // 2. Auto-Insert MP4 si V1 està buida
             if (assets.media && assets.media.mp4) {
@@ -195,7 +195,7 @@
             const config = FASTPASS_UI.Config.get();
             const idProg = document.getElementById('programa').value;
             const progData = config.mapeoProgramas[idProg];
-            const dateDir = getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
+            const dateDir = getEines().getFormattedDate().replace(/["\s]/g, "").trim();
 
             return {
                 config,

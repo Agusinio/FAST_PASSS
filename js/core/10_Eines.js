@@ -7,7 +7,7 @@
     var csInterface = new CSInterface();
     window.FASTPASS_UI = window.FASTPASS_UI || {};
     
-    window.FASTPASS_UI.Utils = {
+    window.FASTPASS_UI.Eines = {
         isJsxReady: false,
         csInterface: csInterface,
 
@@ -27,7 +27,7 @@
                         resolve("");
                     } else if (res.indexOf("ERR:") === 0) {
                         // 📍 Si hay un error, lo logueamos pero NO intentamos parsearlo como JSON
-                        window.FASTPASS_UI.Utils.log("💥 [JSX ERROR]: " + res, "ERROR");
+                        window.FASTPASS_UI.Eines.log("💥 [JSX ERROR]: " + res, "ERROR");
                         resolve("[]"); // Devolvemos un array vacío para que el resto no explote
                     } else {
                         resolve(res);
@@ -225,15 +225,15 @@
             }
 
             // Validació per paraules clau (Tokens)
-            // Busquem si el nom de la seqüència inclou el codi del programa i el bloc
+            // Busquem si el nom de la seqüència inclou el codi del programa (WOTT) i el bloc
             const progData = config.mapeoProgramas[progKey];
-            const progFileName = progData ? progData.archivo : "";
+            const shortToken = progData ? progData.wott : "";
             
-            const hasProg = activeSeq.indexOf(progFileName) !== -1;
+            const hasProg = shortToken && activeSeq.indexOf(shortToken) !== -1;
             const hasBloc = activeSeq.indexOf(blocVal) !== -1;
 
             if (!hasProg || !hasBloc) {
-                const msg = `⚠️ Sincronia Perduda! Estàs a '${activeSeq.substring(0,15)}...' però el panell diu ${progKey}/${blocVal}`;
+                const msg = `⚠️ Sincronia Perduda! Estàs a '${activeSeq.substring(0,25)}...' pero el panell diu ${shortToken}/${blocVal}`;
                 this.status(msg, "error");
                 this.log(msg, "WARN");
                 return false;

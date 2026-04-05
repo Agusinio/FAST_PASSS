@@ -49,13 +49,27 @@
         get: function () {
             // Re-mapegat a l'estructura antiga per mantenir compatibilitat amb la resta del JS
             const cfg = _activeConfig;
+            const rawTracks = cfg.estructuras["TNs"].tracks;
             
-            // Trobar el programa per defecte o l'actiu per obtenir l'estructura
-            // De moment, estem a la fase 1, així que exposem una versió compatible
+            // 📍 REMAPEIG DE CLAUS (v_mp4 -> mp4, etc.)
+            const vTracks = {
+                mp4:       rawTracks.v_mp4,
+                fondos:    rawTracks.v_fondos,
+                graficos:  rawTracks.v_graf,
+                tematitol: rawTracks.v_tema,
+                chyrons:   rawTracks.v_chyrons,
+                llocdata:  rawTracks.v_lloc
+            };
+
+            if (cfg.general.debug) {
+                console.log("🛠️ [CONFIG] Video Tracks:", vTracks);
+                console.log("🛠️ [CONFIG] Verify MP4 Track:", vTracks.mp4);
+            }
+
             return {
                 tracks: {
-                    video: cfg.estructuras["TNs"].tracks,
-                    subtitle: { s1: cfg.estructuras["TNs"].tracks.s_s1, s2: cfg.estructuras["TNs"].tracks.s_s2 }
+                    video: vTracks,
+                    subtitle: { s1: rawTracks.s_s1, s2: rawTracks.s_s2 }
                 },
                 guarda: cfg.general.guarda,
                 rutas: {
@@ -84,7 +98,9 @@
                         return `${prog}_${bloq}_${user}_${mmdd}_${sanitizedTema}`;
                     },
                     getSequenceName: (ctx, sanitizedTema) => {
-                        return `${ctx.progData.archivo}_${sanitizedTema}`;
+                        // 📍 CANVI: Usar wott (TNV) en comptes d'archivo (TN_VESPRE)
+                        const shortToken = ctx.progData.wott || "TBD";
+                        return `${shortToken}_${sanitizedTema}`;
                     }
                 },
                 debug: cfg.general.debug
@@ -113,21 +129,21 @@
          */
         init: async function () {
             try {
-                const utils = window.FASTPASS_UI.Utils;
+                const Eines = window.FASTPASS_UI.Eines;
                 const csInterface = new CSInterface();
                 const extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
                 const profilePath = extensionRoot + "/Profile.json";
                 
-                const exists = await utils.callJSX(`Arxiu.exists('${profilePath.replace(/\\/g, '\\\\')}')`);
+                const exists = await Eines.callJSX(`Arxiu.exists('${profilePath.replace(/\\/g, '\\\\')}')`);
                 if (exists === "true") {
-                    const raw = await utils.callJSX(`Arxiu.readTxt('${profilePath.replace(/\\/g, '\\\\')}')`);
+                    const raw = await Eines.callJSX(`Arxiu.readTxt('${profilePath.replace(/\\/g, '\\\\')}')`);
                     if (raw && raw !== "ERR") {
                         const parsed = JSON.parse(raw);
                         _activeConfig = parsed;
-                        utils.log("🧬 [CONFIG] Profile.json carregat amb èxit.");
+                        Eines.log("🧬 [CONFIG] Profile.json carregat amb èxit.");
                     }
                 } else {
-                    utils.log("⚠️ [CONFIG] Profile.json no trobat. Usant memòria interna.");
+                    Eines.log("⚠️ [CONFIG] Profile.json no trobat. Usant memòria interna.");
                 }
             } catch (e) {
                 console.error("❌ [CONFIG] Error en init:", e);

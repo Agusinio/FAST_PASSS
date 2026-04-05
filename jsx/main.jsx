@@ -55,7 +55,12 @@ $.global.Sistema = {
 $.global.Entorn = {
     list: function() { return (FASTPASS.Entorn) ? FASTPASS.Entorn.getOpenNames() : "[]"; },
     activeProj: function() { try { return app.project.name; } catch(e) { return ""; } },
-    activeSeq: function() { try { return (FASTPASS.Entorn) ? FASTPASS.Entorn.getSequenceName_FINAL() : ""; } catch(e) { return ""; } },
+    activeSeq: function() {
+        // Verificamos si la cadena de objetos existe antes de tocar nada
+        if (typeof $.global.FASTPASS === "undefined") return "ERR:FASTPASS_LOST";
+        if (!$.global.FASTPASS.Entorn) return "ERR:MODULE_LOST";
+        return $.global.FASTPASS.Entorn.getSequenceName();
+    },
     folder: function() { 
         try { 
             var proj = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkProject() : app.project;
@@ -109,7 +114,10 @@ $.global.Projecte = {
 };
 
 $.global.Cronologia = {
-    get: function() { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.get() : 0; },
+    get: function() {
+        if (typeof $.global.FASTPASS === "undefined" || !$.global.FASTPASS.Cronologia) return 0;
+        return $.global.FASTPASS.Cronologia.get();
+    },
     set: function(s) { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.set(s) : "ERR"; },
     range: function(i, o) { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.range(i, o) : "ERR"; },
     refresh: function() { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.refresh() : "ERR"; },
@@ -128,14 +136,27 @@ $.global.Pistes = {
 };
 
 $.global.Segments = {
+    // Lectura
+    count: function(t, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.count(t, ty) : 0; },
     get: function(t, i, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.get(t, i, ty) : "null"; },
-    at: function(t, ti, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.at(t, ti, ty) : "null"; },
-    remove: function(t, i, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.remove(t, i, ty) : "ERR"; },
+    at: function(t, ti, ty) { 
+        if (typeof FASTPASS === "undefined") return "ERR:GLOBAL_FASTPASS_NULL";
+        if (!FASTPASS.Segments) return "ERR:MODULE_SEGMENTS_NULL";
+        
+        // Llamada al motor
+        return FASTPASS.Segments.at(t, ti, ty); 
+    },
+    // Acción
     insert: function(n, t, s, e, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.insert(n, t, s, e, ty) : "ERR"; },
+    remove: function(t, i, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.remove(t, i, ty) : "ERR"; },
+    
+    // Transformación (Tiempos)
     inPoint: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.inPoint(t, i, v, ty) : "ERR"; },
     outPoint: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.outPoint(t, i, v, ty) : "ERR"; },
     start: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.start(t, i, v, ty) : "ERR"; },
     end: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.end(t, i, v, ty) : "ERR"; },
+    
+    // Propiedades (Efectos/Posición)
     setProp: function(t, i, cm, pm, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.setProp(t, i, cm, pm, v, ty) : "ERR"; }
 };
 

@@ -8,8 +8,8 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Core = FASTPASS_UI.Core || {};
 
-    const log = (...args) => FASTPASS_UI.Utils.log(...args);
-    const getUtils = () => window.FASTPASS_UI.Utils;
+    const log = (...args) => FASTPASS_UI.Eines.log(...args);
+    const getEines = () => window.FASTPASS_UI.Eines;
 
     let _lastCheckAt = 0; // Guard de debounce
 
@@ -19,7 +19,7 @@
         missing: { wotts: false, media: false, srt: false, portada: false },
 
         async checkContext() {
-            if (!getUtils().isJsxReady) return;
+            if (!getEines().isJsxReady) return;
         
             // 📍 Capturamos los elementos del DOM al inicio
             const elProg = document.getElementById('programa'); // <--- Faltaba esto
@@ -47,17 +47,17 @@
                     progData: config.mapeoProgramas[elProg.value],
                     bloque: elBloc.value,
                     // Usamos la fecha de la utilidad
-                    dateDir: getUtils().getFormattedDate().replace(/"/g, "").trim()
+                    dateDir: getEines().getFormattedDate().replace(/"/g, "").trim()
                 };
             
                 // 1. RUTA DE RECERCA
                 const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
                 
-                // 2. ESCANEIG GENÈRIC (Usant Utils.readFolder a través de Scanner)
-                const projectFiles = await getUtils().readFolder(folderPath); // Atòmic
+                // 2. ESCANEIG GENÈRIC (Usant Eines.readFolder a través de Scanner)
+                const projectFiles = await getEines().readFolder(folderPath); // Atòmic
 
                 if (!projectFiles || projectFiles.length === 0) {
-                    getUtils().log("ℹ️ Carpeta buida o inexistent. Conclusió: NEW", "DEBUG");
+                    getEines().log("ℹ️ Carpeta buida o inexistent. Conclusió: NEW", "DEBUG");
                 }
             
                 // 3. LÒGICA DE NEGOCI (Usant el teu Scanner.js)
@@ -76,7 +76,7 @@
                     
                     if (lockFile) {
                         // Hi ha bloqueig: llegim el contingut (qui és l'amo)
-                        lockOwner = await getUtils().callJSX(`Arxiu.readTxt('${folderPath + lockFile.name}')`);
+                        lockOwner = await getEines().callJSX(`Arxiu.readTxt('${folderPath + lockFile.name}')`);
                         conclusion = 'LOCKED';
                     } else {
                         conclusion = 'LOAD';
@@ -93,7 +93,7 @@
                 }
             
             } catch (e) {
-                getUtils().log("💥 Error checkContext: " + e.message, "ERROR");
+                getEines().log("💥 Error checkContext: " + e.message, "ERROR");
             }
         },
 
@@ -245,7 +245,7 @@
         },
 
         async syncConductorUI() {
-            const utils = FASTPASS_UI.Utils;
+            const Eines = FASTPASS_UI.Eines;
             const config = FASTPASS_UI.Config.get();
             const select = document.getElementById('conductor');
             const programKey = document.getElementById('programa').value;
@@ -260,7 +260,7 @@
             }
 
             // 2. Llegim el NAS (Ara torna [{name: "...", mtime: ...}])
-            const nasFiles = utils.readFolder(config.rutas.conductors);
+            const nasFiles = Eines.readFolder(config.rutas.conductors);
 
             // 📍 CANVI 1: Filtrem usant f.name
             const validNasFiles = nasFiles.filter(f => {

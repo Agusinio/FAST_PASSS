@@ -8,11 +8,11 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    const utils = {
-        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
-        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG"),
-        delay: (ms) => window.FASTPASS_UI.Utils.delay(ms),
-        escape: (s) => window.FASTPASS_UI.Utils.escape(s)
+    const Eines = {
+        callJSX: (s) => window.FASTPASS_UI.Eines.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Eines.log(m, "DEBUG"),
+        delay: (ms) => window.FASTPASS_UI.Eines.delay(ms),
+        escape: (s) => window.FASTPASS_UI.Eines.escape(s)
     };
 
     FASTPASS_UI.Logic.Assembly = {
@@ -21,7 +21,7 @@
          * setup: Orquestra el muntatge decoratiu base (Temes, SRTs, Chyrons).
          */
         setup: async function(state) {
-            utils.log("🏗️ Assembly: Orquestrant muntatge decoratiu...");
+            Eines.log("🏗️ Assembly: Orquestrant muntatge decoratiu...");
             const cfg = window.FASTPASS_UI.Config.get();
             
             // 1. TEMA-TITOL (V4)
@@ -35,11 +35,11 @@
             }
             
             // 3. CHYRON MASTER (V6)
-            const masterChyronRaw = await utils.callJSX("Projecte.biggestIn('CHYRONS')");
+            const masterChyronRaw = await Eines.callJSX("Projecte.biggestIn('CHYRONS')");
             const masterChyron = JSON.parse(masterChyronRaw || "null");
             
             if (masterChyron) {
-                utils.log(`🎯 Chyron principal detectat: ${masterChyron.name}`);
+                Eines.log(`🎯 Chyron principal detectat: ${masterChyron.name}`);
                 await window.Clips.insert(masterChyron.name, cfg.tracks.video.chyrons, 0.4, 6.6);
             }
 
@@ -50,17 +50,17 @@
          * freeze: Genera el freeze frame final automatitzat.
          */
         freeze: async function(targetTime = 6.6) {
-            utils.log(`📸 Assembly: Generant Freeze Frame a ${targetTime}s...`);
+            Eines.log(`📸 Assembly: Generant Freeze Frame a ${targetTime}s...`);
             const cfg = window.FASTPASS_UI.Config.get();
             const T_THEME = cfg.tracks.video.tematitol;
 
             // 1. Aïllament visual de la pista de Temes
             await window.Tracks.isolate(T_THEME, "video");
             await window.Timeline.set(targetTime);
-            await utils.delay(1000);
+            await Eines.delay(1000);
 
             // 2. Captura orquestrada (Literal: Context.folder)
-            const folder = await utils.callJSX("Entorn.folder()");
+            const folder = await Eines.callJSX("Entorn.folder()");
             const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`.replace(/\\/g, "\\\\");
             const res = await window.Render.capture(snapPath, targetTime);
             
@@ -72,10 +72,10 @@
                 const fileName = snapPath.split("\\\\").pop();
                 const payload = JSON.stringify([snapPath]);
                 // Literal: IO.importFiles
-                await utils.callJSX(`Arxiu.importFiles('${payload}', 'root')`);
+                await Eines.callJSX(`Arxiu.importFiles('${payload}', 'root')`);
                 
                 // Literal: Timeline.duration()
-                const dur = await utils.callJSX("Cronologia.duration()");
+                const dur = await Eines.callJSX("Cronologia.duration()");
                 await window.Clips.insert(fileName, T_THEME, targetTime, dur);
                 return "OK_FREEZE";
             }
@@ -90,10 +90,10 @@
             const cfg = window.FASTPASS_UI.Config.get();
             const pathRaw = `${cfg.rutas.conductors}${conductorFile}`;
             
-            utils.log(`👤 Assembly: Inserint conductor ${conductorFile}`);
+            Eines.log(`👤 Assembly: Inserint conductor ${conductorFile}`);
             const payload = JSON.stringify([pathRaw.replace(/\\/g, "\\\\")]);
             // Literal: IO.importFiles
-            await utils.callJSX(`Arxiu.importFiles('${payload}', 'root')`);
+            await Eines.callJSX(`Arxiu.importFiles('${payload}', 'root')`);
             await window.Clips.insert(conductorFile, cfg.tracks.video.chyrons, targetTime);
             
             return "OK_CONDUCTOR";

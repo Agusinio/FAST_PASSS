@@ -9,8 +9,8 @@
     var FASTPASS_UI = globalScope.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    const utils = {
-        log: (m) => (FASTPASS_UI.Utils && FASTPASS_UI.Utils.log) ? FASTPASS_UI.Utils.log(m, "DEBUG") : console.log(m)
+    const Eines = {
+        log: (m) => (FASTPASS_UI.Eines && FASTPASS_UI.Eines.log) ? FASTPASS_UI.Eines.log(m, "DEBUG") : console.log(m)
     };
 
     FASTPASS_UI.Logic.Parse = {

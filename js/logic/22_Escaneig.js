@@ -7,9 +7,9 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    const utils = {
-        log: (m, type) => (FASTPASS_UI.Utils) ? FASTPASS_UI.Utils.log(m, type || "DEBUG") : console.log(m),
-        readFolder: (p) => (FASTPASS_UI.Utils) ? FASTPASS_UI.Utils.readFolder(p) : []
+    const Eines = {
+        log: (m, type) => (FASTPASS_UI.Eines) ? FASTPASS_UI.Eines.log(m, type || "DEBUG") : console.log(m),
+        readFolder: (p) => (FASTPASS_UI.Eines) ? FASTPASS_UI.Eines.readFolder(p) : []
     };
 
     FASTPASS_UI.Logic.Scan = {
@@ -42,7 +42,7 @@
         mediaAssets: async function (ctx) {
             try {
                 const pathNAS = ctx.config.rutas.verticalitzacio;
-                const allFiles = await utils.readFolder(pathNAS);
+                const allFiles = await Eines.readFolder(pathNAS);
                 if (!allFiles || allFiles.length === 0) return { mp4: null, srt: null };
     
                 // 🕒 FILTRO ÚNICO: Solo lo que esté dentro de las X horas (ej: 22h)
@@ -72,7 +72,7 @@
         wotts: async function (ctx) {
             try {
                 const pathNAS = ctx.config.rutas.chyrons;
-                const allFiles = await utils.readFolder(pathNAS);
+                const allFiles = await Eines.readFolder(pathNAS);
                 if (!allFiles || allFiles.length === 0) return { tema: "PENDENT", list: [] };
     
                 const freshFiles = this._discardOld(allFiles, ctx.config.guarda || 22);
@@ -130,7 +130,7 @@
                     tema = fallback[5] ? fallback[5].replace(/\..+$/, "") : "TEMA";
                 }
 
-                utils.log(`🏷️ Tema detectat (Smart Filter): [${tema}]`, "INFO");
+                Eines.log(`🏷️ Tema detectat (Smart Filter): [${tema}]`, "INFO");
 
                 return { 
                     tema: tema, 
@@ -140,7 +140,7 @@
                     }))
                 };
             } catch (e) {
-                utils.log("💥 Error Scan.wotts: " + e.message, "ERROR");
+                Eines.log("💥 Error Scan.wotts: " + e.message, "ERROR");
                 return { tema: "ERROR", list: [] };
             }
         },
@@ -148,7 +148,7 @@
         portadas: async function (ctx) {
             try {
                 const pathNAS = ctx.config.rutas.chyrons;
-                const allFiles = await utils.readFolder(pathNAS);
+                const allFiles = await Eines.readFolder(pathNAS);
                 if (!allFiles || allFiles.length === 0) return [];
     
                 // 🕒 FILTRO ÚNICO: Ventana de tiempo estricta
@@ -181,16 +181,16 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Inspectors = FASTPASS_UI.Inspectors || {};
 
-    const utils = {
-        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
-        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
+    const Eines = {
+        callJSX: (s) => window.FASTPASS_UI.Eines.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Eines.log(m, "DEBUG")
     };
 
     FASTPASS_UI.Inspectors.SourceAssets = {
         
         async scan(path, extension) {
             // 1. Herramienta básica: Pedir lista cruda al JSX
-            const raw = await utils.callJSX(`Arxiu.scanDirectory(${JSON.stringify(path)})`);
+            const raw = await Eines.callJSX(`Arxiu.scanDirectory(${JSON.stringify(path)})`);
             const files = JSON.parse(raw || "[]");
             
             // 2. Filtro genérico por extensión (si se pide)

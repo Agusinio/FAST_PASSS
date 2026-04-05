@@ -8,19 +8,16 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    const utils = {
-        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
-        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
+    const Eines = {
+        callJSX: (s) => window.FASTPASS_UI.Eines.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Eines.log(m, "DEBUG")
     };
 
-    FASTPASS_UI.Logic.Clips = {
+    FASTPASS_UI.Logic.Segments = {
 
-        /**
-         * at: Troba el clip en una pista a un temps determinat (Bridge a JSX).
-         */
         at: async function (trackIdx, timeSec, type) {
-            const dataRaw = await utils.callJSX(`Segments.at(${trackIdx}, ${timeSec}, '${type || "video"}')`);
-            if (!dataRaw || dataRaw === "null") return null;
+            // Esta línea envía la orden al motor de Premiere
+            const dataRaw = await Eines.callJSX(`Segments.at(${trackIdx}, ${timeSec}, '${type || "video"}')`);
             return JSON.parse(dataRaw);
         },
 
@@ -34,16 +31,16 @@
             const newIn = clipData.inPoint + diff;
 
             // 1. Ajustar Clip Principal (Video)
-            await utils.callJSX(`Segments.inPoint(${trackIdx}, ${clipIdx}, ${newIn}, 'video')`);
-            await utils.callJSX(`Segments.start(${trackIdx}, ${clipIdx}, 0, 'video')`);
+            await Eines.callJSX(`Segments.inPoint(${trackIdx}, ${clipIdx}, ${newIn}, 'video')`);
+            await Eines.callJSX(`Segments.start(${trackIdx}, ${clipIdx}, 0, 'video')`);
 
             // 2. Ajustar Audio sincronitzat (A1)
             const audioClip = await this.at(trackIdx, cutTime, "audio");
             if (audioClip) {
                 const audioDiff = parseFloat(cutTime) - audioClip.start;
                 const newAudioIn = audioClip.inPoint + audioDiff;
-                await utils.callJSX(`Segments.inPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
-                await utils.callJSX(`Segments.start(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
+                await Eines.callJSX(`Segments.inPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
+                await Eines.callJSX(`Segments.start(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
             }
 
             return "OK_RIPPLE_IN";
@@ -53,7 +50,7 @@
          * rippleOut: Neteja un track eliminant clips a partir d'un temps (Outer trim).
          */
         rippleOut: async function (trackIdx, timeSec, type, extendToTarget = false) {
-            const countStr = await utils.callJSX(`Segments.count(${trackIdx}, '${type || "video"}')`);
+            const countStr = await Eines.callJSX(`Segments.count(${trackIdx}, '${type || "video"}')`);
             const count = parseInt(countStr || 0);
             if (count === 0) return "EMPTY";
 
@@ -62,19 +59,19 @@
             let lastClipValid = null;
 
             for (let i = count - 1; i >= 0; i--) {
-                const dataRaw = await utils.callJSX(`Segments.get(${trackIdx}, ${i}, '${type}')`);
+                const dataRaw = await Eines.callJSX(`Segments.get(${trackIdx}, ${i}, '${type}')`);
                 if (!dataRaw || dataRaw === "null") continue;
 
                 const clip = JSON.parse(dataRaw);
 
                 // 1. Clips que s'han de treure (Post-target)
                 if (clip.start >= target - 0.01) {
-                    await utils.callJSX(`Segments.remove(${trackIdx}, ${i}, '${type}')`);
+                    await Eines.callJSX(`Segments.remove(${trackIdx}, ${i}, '${type}')`);
                     removed++;
                 }
                 // 2. Clips que s'han de retallar (Straddling target)
                 else if (clip.start < target && clip.end > target + 0.01) {
-                    await utils.callJSX(`Segments.end(${trackIdx}, ${i}, ${target}, '${type}')`);
+                    await Eines.callJSX(`Segments.end(${trackIdx}, ${i}, ${target}, '${type}')`);
                 }
                 // 3. Captura per extreure si cal
                 else if (extendToTarget && clip.end < target - 0.01) {
@@ -85,7 +82,7 @@
             }
 
             if (extendToTarget && lastClipValid) {
-                await utils.callJSX(`Segments.end(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
+                await Eines.callJSX(`Segments.end(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
             }
 
             return "OK_RIPPLE_OUT_" + removed;
@@ -109,7 +106,7 @@
     };
 
     // Alias literal global window.Clips
-    window.Clips = FASTPASS_UI.Logic.Clips;
+    window.Segments = FASTPASS_UI.Logic.Segments;
 
     window.FASTPASS_UI = FASTPASS_UI;
 })();

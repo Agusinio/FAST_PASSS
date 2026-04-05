@@ -8,9 +8,9 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    const utils = {
-        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
-        delay: (ms) => window.FASTPASS_UI.Utils.delay(ms)
+    const Eines = {
+        callJSX: (s) => window.FASTPASS_UI.Eines.callJSX(s),
+        delay: (ms) => window.FASTPASS_UI.Eines.delay(ms)
     };
 
     FASTPASS_UI.Logic.Render = {
@@ -24,7 +24,7 @@
             const tempFileFull = tempFileNoExt + ".png";
 
             // 1. Exportació física via bridge literal
-            const resExec = await utils.callJSX(`Exportacio.snapshot('${tempFileNoExt}', '${timeSec}')`);
+            const resExec = await Eines.callJSX(`Exportacio.snapshot('${tempFileNoExt}', '${timeSec}')`);
             if (resExec !== "OK_EXEC") return { success: false, log: resExec };
 
             // 2. Polling per verificar que s'ha escrit el fitxer
@@ -32,7 +32,7 @@
             for (let i = 0; i < 30; i++) {
                 const stat = window.cep.fs.stat(tempFileFull);
                 if (stat.err === 0) { found = true; break; }
-                await utils.delay(100);
+                await Eines.delay(100);
             }
 
             if (!found) return { success: false, log: "Timeout" };
@@ -50,7 +50,7 @@
          * queue: Envia la seqüència activa a AME.
          */
         queue: async function(preset, folder, name) {
-            return await utils.callJSX(`Exportacio.queue('${preset}', '${folder}', '${name}')`);
+            return await Eines.callJSX(`Exportacio.queue('${preset}', '${folder}', '${name}')`);
         }
     };
 

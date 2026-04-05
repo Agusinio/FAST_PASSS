@@ -48,7 +48,7 @@
                                   .sort((a, b) => b.index - a.index);
 
             for (let c of toDelete) {
-                await window.FASTPASS_UI.Utils.callJSX(`Segments.remove(${T_S1}, ${c.index}, 'subtitle')`);
+                await window.FASTPASS_UI.Eines.callJSX(`Segments.remove(${T_S1}, ${c.index}, 'subtitle')`);
             }
 
             return "OK_CLEAN_IN_" + toDelete.length;
@@ -90,7 +90,7 @@
                                   .sort((a, b) => b.index - a.index);
 
             for (let c of toDelete) {
-                await window.FASTPASS_UI.Utils.callJSX(`Segments.remove(${T_S1}, ${c.index}, 'subtitle')`);
+                await window.FASTPASS_UI.Eines.callJSX(`Segments.remove(${T_S1}, ${c.index}, 'subtitle')`);
             }
 
             return "OK_CLEAN_OUT_" + toDelete.length;

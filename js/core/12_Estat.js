@@ -12,7 +12,8 @@ FASTPASS_UI.State = {
     pieceIndex: 0,
     srtWorkMode: false,
     isKeyframeMode: false,
-    activeSequenceName: "", 
+    isWorking: false,
+    activeSequenceName: null, 
     
     masterTheme: null, 
     srt: null,

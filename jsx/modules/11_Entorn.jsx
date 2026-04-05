@@ -73,22 +73,30 @@ FASTPASS.Entorn = {
         } catch(e) { return "ERR:" + e.message; }
     },
 
-    getSequenceName_FINAL: function() {
+    getSequenceName: function() {
+        $.writeln("🔍 [JSX:Entorn] Iniciant getSequenceName...");
         try {
-            if (!app.project) return "ERROR:NO_PROJECT";
-            
+            if (typeof app === "undefined") { $.writeln("❌ [JSX:Entorn] app es UNDEFINED"); return "ERR:APP_NULL"; }
+            if (!app.project) { $.writeln("❌ [JSX:Entorn] app.project es NULL"); return "ERR:PROJECT_NULL"; }
+
             var seq = app.project.activeSequence;
             
-            // Fallback: Si no hi ha focus al Timeline, mirem si n'hi ha alguna oberta
-            if (!seq && app.project.sequences.numSequences > 0) {
-                seq = app.project.sequences[0];
+            if (!seq) {
+                $.writeln("⚠️ [JSX:Entorn] activeSequence es NULL. Provant fallback...");
+                if (app.project.sequences && app.project.sequences.numSequences > 0) {
+                    var fallbackName = app.project.sequences[0].name;
+                    $.writeln("✅ [JSX:Entorn] Fallback a seq[0]: " + fallbackName);
+                    return String(fallbackName);
+                }
+                $.writeln("❌ [JSX:Entorn] No hi ha cap seqüència al projecte.");
+                return "ERR:NO_SEQUENCES";
             }
-            
-            if (!seq) return "ERROR:NO_SEQUENCE";
-            
-            return String(seq.name); 
-        } catch(e) { 
-            return "ERROR_JSX:" + e.message; 
+
+            $.writeln("✅ [JSX:Entorn] Seqüència detectada: " + seq.name);
+            return String(seq.name);
+        } catch(e) {
+            $.writeln("💥 [JSX:Entorn] CRASH: " + e.message);
+            return "ERR_EXCEPTION:" + e.message;
         }
     },
 

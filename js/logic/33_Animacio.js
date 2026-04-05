@@ -8,9 +8,9 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    const utils = {
-        callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
-        log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG")
+    const Eines = {
+        callJSX: (s) => window.FASTPASS_UI.Eines.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Eines.log(m, "DEBUG")
     };
 
     FASTPASS_UI.Logic.Anim = {
@@ -23,17 +23,17 @@
             const prop = "ADBE Video Position";
             
             // 1. Add Key principal al temps T
-            await utils.callJSX(`Animacio.add(${ti}, ${ci}, '${comp}', '${prop}', ${t})`);
+            await Eines.callJSX(`Animacio.add(${ti}, ${ci}, '${comp}', '${prop}', ${t})`);
             
             // 2. Auxiliar per forçar corba (0.04s després)
             const auxT = t + 0.04;
-            await utils.callJSX(`Animacio.add(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
+            await Eines.callJSX(`Animacio.add(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
             
             // 3. Interpolació Bezier (5)
-            await utils.callJSX(`Animacio.interp(${ti}, ${ci}, '${comp}', '${prop}', ${t}, 5)`);
+            await Eines.callJSX(`Animacio.interp(${ti}, ${ci}, '${comp}', '${prop}', ${t}, 5)`);
             
             // 4. Neteja auxiliar
-            await utils.callJSX(`Animacio.remove(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
+            await Eines.callJSX(`Animacio.remove(${ti}, ${ci}, '${comp}', '${prop}', ${auxT})`);
 
             return "OK_EXTREME";
         },
@@ -44,14 +44,14 @@
         slider: async function(valPx, isFinal) {
             // Conversió literal del canvas (608px) a Normalitzat (0-1)
             const valNorm = parseFloat(valPx) / 608.0;
-            return await utils.callJSX(`Animacio.x(${valNorm}, ${isFinal})`);
+            return await Eines.callJSX(`Animacio.x(${valNorm}, ${isFinal})`);
         },
 
         /**
          * reframe: Aplica Auto Reframe.
          */
         reframe: async function(ti, ci) {
-            return await utils.callJSX(`Animacio.reframe(${ti}, ${ci})`);
+            return await Eines.callJSX(`Animacio.reframe(${ti}, ${ci})`);
         }
     };
 

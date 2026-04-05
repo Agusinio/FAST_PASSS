@@ -13,7 +13,7 @@
         
         async getOpenProjects() {
             try {
-                const raw = await window.FASTPASS_UI.Utils.callJSX("Entorn.list()");
+                const raw = await window.FASTPASS_UI.Eines.callJSX("Entorn.list()");
                 if (!raw || raw.startsWith("ERR") || raw.startsWith("Eval")) return [];
                 return JSON.parse(raw);
             } catch (e) { return []; }
@@ -21,7 +21,7 @@
 
         async getActiveProjectName() {
             try {
-                const name = await window.FASTPASS_UI.Utils.callJSX("Entorn.activeProj()");
+                const name = await window.FASTPASS_UI.Eines.callJSX("Entorn.activeProj()");
                 if (!name || name.startsWith("ERR") || name.startsWith("Eval")) return "";
                 return name;
             } catch (e) { return ""; }

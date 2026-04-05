@@ -13,7 +13,7 @@ var isUserDraggingSlider = false;
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
-    var utils = window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
+    var Eines = window.FASTPASS_UI ? window.FASTPASS_UI.Eines : null;
     
     try {
         // 1. Obtenemos la ruta nativa
@@ -24,16 +24,16 @@ var isUserDraggingSlider = false;
         // Esto evita que Windows interprete \U o \T como caracteres especiales
         var safeRoot = extensionRoot.replace(/\\/g, "/");
 
-        utils.log("📂 Ruta detectada: " + safeRoot, "DEBUG");
+        Eines.log("📂 Ruta detectada: " + safeRoot, "DEBUG");
 
         // 3. LLAMADA QUIRÚRGICA:
         // Usamos comillas simples para el envoltorio y dobles para el contenido
-        var result = await utils.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
+        var result = await Eines.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
 
         if (result && result.indexOf("OK") !== -1) {
-            window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
-            utils.log("✅ Motor JSX montado con éxito.");
-            //utils.isJsxReady = true;
+            window.FASTPASS_UI.Eines.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
+            Eines.log("✅ Motor JSX montado con éxito.");
+            //Eines.isJsxReady = true;
 
             await FASTPASS_UI.Config.init();
             
@@ -55,10 +55,11 @@ var isUserDraggingSlider = false;
     'use strict';
 
     function initPanel() {
-        FASTPASS_UI.Utils.log("🚀 Vinculando botones...");
+        FASTPASS_UI.Eines.log("🚀 Vinculando botones...");
 
         // --- WORKFLOW: CUT ---
         const btnIn = document.getElementById('btnIn');
+        console.log("🔍 Buscando botón IN...", btnIn);
         const btnOut = document.getElementById('btnOut');
         const btnScene = document.getElementById('btnScene');
         const btnPrevClip = document.getElementById('btnPrevClip');
@@ -66,7 +67,14 @@ var isUserDraggingSlider = false;
         const btnCenter = document.getElementById('btnCenter');
         const btnKey = document.getElementById('btnKey');
 
-        if (btnIn) btnIn.addEventListener('click', function () { callWorkflow('Cut', 'runCutIn'); });
+        if (btnIn) {
+            btnIn.onclick = function() { 
+                alert("¡BOTÓN CLICADO DIRECTAMENTE!"); 
+                callWorkflow('Cut', 'runCutIn'); 
+            };
+        } else {
+            console.error("❌ NO SE ENCUENTRA EL ELEMENTO btnIn EN EL HTML");
+        }
         if (btnOut) btnOut.addEventListener('click', function () { callWorkflow('Cut', 'runCutOut'); });
         if (btnScene) btnScene.addEventListener('click', function () { callWorkflow('Cut', 'runScene'); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
@@ -90,14 +98,14 @@ var isUserDraggingSlider = false;
                 isUserDraggingSlider = true;
                 var val = parseInt(slider.value, 10);
                 // Moviment visual literal
-                FASTPASS_UI.Utils.callJSX(`Animacio.x(${val}, false)`);
+                FASTPASS_UI.Eines.callJSX(`Animacio.x(${val}, false)`);
             };
 
             slider.onchange = function () {
                 isUserDraggingSlider = false;
                 var val = parseInt(slider.value, 10);
                 // Clavat de KF i suavitzat literal
-                FASTPASS_UI.Utils.callJSX(`Animacio.x(${val}, true)`).then(() => {
+                FASTPASS_UI.Eines.callJSX(`Animacio.x(${val}, true)`).then(() => {
                     if (FASTPASS_UI.Workflows.KF && FASTPASS_UI.Workflows.KF.runSmoothKF) {
                         FASTPASS_UI.Workflows.KF.runSmoothKF();
                     }
@@ -144,7 +152,7 @@ var isUserDraggingSlider = false;
         const selectBloc = document.getElementById('bloc');
 
         if (btnSetup) btnSetup.addEventListener('click', () => {
-            utils.log("⚙️ Obrint Dashboard de Configuració...");
+            Eines.log("⚙️ Obrint Dashboard de Configuració...");
             window.location.href = "setup.html";
         });
         if (selectPrograma) selectPrograma.addEventListener('change', handleSelectionChange);
@@ -159,7 +167,7 @@ var isUserDraggingSlider = false;
         }
 
         callContextAudit();
-        FASTPASS_UI.Utils.log("✅ TODOS LOS BOTONES VINCULADOS");
+        FASTPASS_UI.Eines.log("✅ TODOS LOS BOTONES VINCULADOS");
     }
 
     async function callWorkflow(module, method) {
@@ -168,8 +176,8 @@ var isUserDraggingSlider = false;
                 await FASTPASS_UI.Workflows[module][method]();
             } catch (e) {
                 console.error("💥 Error en Workflow " + module + "." + method + ":", e);
-                if (FASTPASS_UI.Utils && FASTPASS_UI.Utils.handleError) {
-                    FASTPASS_UI.Utils.handleError(e, module + "." + method);
+                if (FASTPASS_UI.Eines && FASTPASS_UI.Eines.handleError) {
+                    FASTPASS_UI.Eines.handleError(e, module + "." + method);
                 }
             }
         } else {
@@ -186,7 +194,7 @@ var isUserDraggingSlider = false;
     }
 
     function callContextAudit() {
-        if (!window.FASTPASS_UI.Utils.isJsxReady) return;
+        if (!window.FASTPASS_UI.Eines.isJsxReady) return;
         if (FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.checkContext) {
             FASTPASS_UI.Core.Context.checkContext();
         }
@@ -202,7 +210,7 @@ var isUserDraggingSlider = false;
 // 4. SINCRONIZACIÓN (POLLING DEL SLIDER)
 FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
     if (isUserDraggingSlider) return;
-    FASTPASS_UI.Utils.callJSX('Animacio.x()').then(val => {
+    FASTPASS_UI.Eines.callJSX('Animacio.x()').then(val => {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
             const pxValue = Math.round(parseFloat(val) * 608);
@@ -212,9 +220,17 @@ FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
 };
 
 setInterval(function () {
+    // 🛑 BLOQUEO DE SEGURIDAD: 
+    // Si el sistema está ocupado en un workflow (Guardando, Ingestando, etc), 
+    // detenemos el refresco automático para evitar colisiones y errores 'null'.
+    if ( window.FASTPASS_UI.State.isWorking) {
+        return; 
+    }
+
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
         FASTPASS_UI.Sync.updateSliderFromPremiere();
     }
+    
     if (FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
         FASTPASS_UI.Registry.poll();
     }
@@ -222,7 +238,7 @@ setInterval(function () {
 
 // Neteja de memòria al entrar amb el ratolí
 window.onmouseenter = function () {
-    FASTPASS_UI.Utils.callJSX('Sistema.clear()');
+    FASTPASS_UI.Eines.callJSX('Sistema.clear()');
 };
 
 // Escalfament de rutes de xarxa
@@ -230,7 +246,7 @@ async function warmUpNetwork() {
     var config = FASTPASS_UI.Config.get();
     if (config.rutas) {
         console.log("🔥 [SYSTEM] Escalfant rutes de xarxa...");
-        FASTPASS_UI.Utils.callJSX(`Arxiu.exists('${config.rutas.verticalitzacio.replace(/\\/g, '\\\\')}')`);
-        FASTPASS_UI.Utils.callJSX(`Arxiu.exists('${config.rutas.chyrons.replace(/\\/g, '\\\\')}')`);
+        FASTPASS_UI.Eines.callJSX(`Arxiu.exists('${config.rutas.verticalitzacio.replace(/\\/g, '\\\\')}')`);
+        FASTPASS_UI.Eines.callJSX(`Arxiu.exists('${config.rutas.chyrons.replace(/\\/g, '\\\\')}')`);
     }
 };
