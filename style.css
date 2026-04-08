@@ -96,9 +96,5 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* RENDER */
 .render-strip { display: flex; gap: 10px; }
-
-/* LOGS */
-.debug-wrapper { border-top: 1px solid #333; padding: 8px; display: flex; flex-direction: column; flex-grow: 1; }
-#console { background: #0a0a0a; color: #777; font-family: monospace; font-size: 10px; padding: 8px; border-radius: 4px; flex-grow: 1; overflow-y: auto; }
 .light { width: 6px; height: 6px; border-radius: 50%; background: #333; }
 .light.on { background: var(--color-accent); box-shadow: 0 0 5px var(--color-accent); }

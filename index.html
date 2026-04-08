@@ -125,52 +125,32 @@
 
     </div> 
 
-    <!-- LOGS -->
-    <div class="debug-wrapper">
-        <div class="debug-header">
-            <div class="debug-title">Consola</div>
-            <div class="context-lights">
-                <div id="light-prog" class="light"></div><div id="light-bloc" class="light"></div>
-                <div id="light-tema" class="light"></div><div id="light-seq" class="light"></div>
-            </div>
-            <div id="estado"></div>
-        </div>
-        <div id="console"></div>
-    </div>
 
     <!-- SCRIPTS -->
     <script src="js/lib/CSInterface.js"></script>
-    <!-- Core: Infraestructura -->
-    <script src="js/core/logger.js"></script>
-    <script src="js/core/10_Eines.js"></script>
-    <script src="js/core/11_Configuracio.js"></script>
-    <script src="js/core/12_Estat.js"></script>
-    <!-- Inspectors: Dades -->
-    <script src="js/logic/22_Escaneig.js"></script>
-    <script src="js/inspectors/21_Aplicacio.js"></script>
-    <script src="js/inspectors/20_Sessio.js"></script>
-    <!-- Core: Context -->
-    <script src="js/core/13_Registre.js"></script>
-    <script src="js/core/14_Sintesi.js"></script>
-    <!-- Logic: Anàlisi i Dades -->
-    <script src="js/logic/23_Analisi.js"></script>
-    <!-- Logic: Edició -->
-    <script src="js/logic/36_Projecte.js"></script>
-    <script src="js/logic/31_Pistes.js"></script>
-    <script src="js/logic/32_Segments.js"></script>
-    <script src="js/logic/33_Animacio.js"></script>
-    <script src="js/logic/34_Exportacio.js"></script>
-    <script src="js/logic/35_Subtitols.js"></script>
-    <script src="js/logic/37_Muntatge.js"></script>
-    <!-- Workflows -->
-    <script src="js/workflows/flux_principal.js"></script>
-    <script src="js/workflows/flux_tall.js"></script>
-    <script src="js/workflows/flux_retols.js"></script>
-    <script src="js/workflows/flux_subtitols.js"></script>
-    <script src="js/workflows/flux_exportacio.js"></script>
-    <script src="js/workflows/flux_animacio.js"></script>
-    <script src="js/workflows/flux_muntatge.js"></script>
-    <!-- Registre de projectes i arrencada -->
+    <script src="js/core/utils.js"></script>
+    <script src="js/core/config.js"></script>
+    <script src="js/core/state.js"></script>
+    <script src="js/inspectors/1_SourceAssets.js"></script>
+    <script src="js/logic/Scanner.js"></script>
+    <script src="js/inspectors/2_App.js"></script>
+    <script src="js/inspectors/3_Session.js"></script>
+    <script src="js/core/4_Context.js"></script>
+    <script src="js/logic/3_Project_Logic.js"></script>
+    <script src="js/logic/5_Tracks_Logic.js"></script>
+    <script src="js/logic/6_Clips_Logic.js"></script>
+    <script src="js/logic/7_KF_Logic.js"></script>
+    <script src="js/logic/9_Render_Logic.js"></script>
+    <script src="js/logic/10_Srt_Logic.js"></script>
+    <script src="js/logic/13_Parse.js"></script>
+    <script src="js/workflows/flow_mainButton.js"></script>
+    <script src="js/workflows/flow_cut.js"></script>
+    <script src="js/workflows/flow_retols.js"></script>
+    <script src="js/workflows/flow_srt.js"></script>
+    <script src="js/workflows/flow_render.js"></script>
+    <script src="js/workflows/flow_KF.js"></script>
+    <script src="js/workflows/flow_assembly.js"></script>
+    <script src="js/core/project_registry.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

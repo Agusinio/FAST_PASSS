@@ -1,6 +1,6 @@
 /*main.jsx
  * Projecte: FAST >>> PASS
- * Main Router (Version 2.7.0 - CATALANIZED INTERNAL BRIDGE)
+ * Main Router (Version 2.6.0 - PURE LITERAL BRIDGE)
  * ============================================================================
  */
 
@@ -11,64 +11,64 @@ $.writeln("------- MOTOR JSX INICIADO -------");
 function jsx_BOOTSTRAP(extensionRootPath) {
     var currentFile = "INICIO";
     try {
+        // Limpieza extra de la ruta recibida
         var root = extensionRootPath.toString().replace(/\\/g, "/");
         
         var load = function (name) {
+            $.writeln("📦 Intentando cargar: " + name);
             currentFile = name;
             var f = new File(root + "/jsx/modules/" + name);
             if (!f.exists) {
+                $.writeln("❌ ERROR: No existe " + f.fsName);
+                // Si no lo encuentra, intentamos sin la barra inicial por si acaso
                 f = new File(root.replace(/^\//, "") + "/jsx/modules/" + name);
             }
-            if (!f.exists) throw new Error("No existe: " + name);
+            if (!f.exists) throw new Error("No existe: " + name + " en la ruta " + root);
             $.evalFile(f);
+            $.writeln("✅ " + name + " cargado OK.");
         };
 
-        load("10_Sistema.jsx");
-        load("12_Arxiu.jsx");
-        load("20_Projecte.jsx");
-        load("30_Cronologia.jsx");
-        load("31_Pistes.jsx");
-        load("32_Segments.jsx");
-        load("33_Animacio.jsx");
-        load("34_Exportacio.jsx");
-        load("11_Entorn.jsx");
-        load("19_Diagnosi.jsx");
+        load("1_System.jsx");
+        load("2_IO.jsx");
+        load("3_Project.jsx");
+        $.writeln("   -> FASTPASS.Project definido? " + ($.global.FASTPASS && $.global.FASTPASS.Project ? "SÍ" : "NO"));
+        load("13_Timeline.jsx");
+        load("5_Tracks.jsx");
+        load("6_Clips.jsx");
+        load("7_KF.jsx");
+        load("9_Render.jsx");
+        load("11_Context.jsx");
+        load("12_Diagnostic.jsx");
 
         return "OK_BOOT";
     } catch (e) { 
         $.writeln("💥 CRASH en " + currentFile + ": " + e.message);
-        return "ERROR_JSX -> Archivo: " + currentFile + " | Msg: " + e.message; 
-    }
+        return "ERROR_JSX -> Archivo: " + currentFile + " | Msg: " + e.message + " | Linea: " + e.line; }
 };
 
 // ============================================================================
-// --- 1. FONAMENTS (Sistema, Entorn, Arxiu) ---
+// --- 1. FONAMENTS (System, Context, IO) ---
 // ============================================================================
 
-$.global.Sistema = {
-    version: function() { return (FASTPASS.Sistema) ? FASTPASS.Sistema.version() : "0.0"; },
-    os: function() { return (FASTPASS.Sistema) ? FASTPASS.Sistema.os() : "win"; },
+$.global.System = {
+    version: function() { return (FASTPASS.System) ? FASTPASS.System.version() : "0.0"; },
+    os: function() { return (FASTPASS.System) ? FASTPASS.System.os() : "win"; },
     ready: function() { return "READY"; },
-    clear: function() { return (FASTPASS.Sistema) ? FASTPASS.Sistema.clear() : "OK"; }
+    clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; }
 };
 
-$.global.Entorn = {
-    list: function() { return (FASTPASS.Entorn) ? FASTPASS.Entorn.getOpenNames() : "[]"; },
+$.global.Context = {
+    list: function() { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getOpenNames() : "[]"; },
     activeProj: function() { try { return app.project.name; } catch(e) { return ""; } },
-    activeSeq: function() {
-        // Verificamos si la cadena de objetos existe antes de tocar nada
-        if (typeof $.global.FASTPASS === "undefined") return "ERR:FASTPASS_LOST";
-        if (!$.global.FASTPASS.Entorn) return "ERR:MODULE_LOST";
-        return $.global.FASTPASS.Entorn.getSequenceName();
-    },
+    activeSeq: function() { try { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getSequenceName_FINAL() : ""; } catch(e) { return ""; } },
     folder: function() { 
         try { 
-            var proj = (FASTPASS.Entorn) ? FASTPASS.Entorn.getWorkProject() : app.project;
+            var proj = ($.global.FASTPASS.Context) ? FASTPASS.Context.getWorkProject() : app.project;
             return proj.path ? (new File(proj.path)).parent.fsName : ""; 
         } catch (e) { return ""; } 
     },
     set: function(name) { 
-        if (!FASTPASS.Entorn) return "ERR_NO_MODULE";
+        if (!$.global.FASTPASS.Context) return "ERR_NO_MODULE";
         try {
             for (var i = 0; i < app.projects.length; i++) {
                 if (app.projects[i].name === name) {
@@ -80,93 +80,326 @@ $.global.Entorn = {
         } catch (e) { return "ERR:" + e.message; }
     },
     findSequence: function(prog, bloc) {
-        return (FASTPASS.Entorn) ? FASTPASS.Entorn.findSequenceByTokens(prog, bloc) : "ERR:NO_MODULE";
+        // Esta en concreto dijimos de usar la de Context, que es la especialista
+        return ($.global.FASTPASS && $.global.FASTPASS.Context) 
+            ? $.global.FASTPASS.Context.findSequenceByTokens(prog, bloc) 
+            : "ERR:CONTEXT_NOT_FOUND";
     }
 };
 
-$.global.Arxiu = {
-    scanDirectory: function(p) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.scanDirectory(p) : "[]"; },
-    importFiles: function(p, b) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.importFiles(p, b) : "ERR"; },
-    lookFor: function(n) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.lookFor(n) : "false"; },
-    readTxt: function(p) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.readTxt(p) : ""; },
-    writeTxt: function(path, content) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.writeTxt(path, content) : "ERR"; },
-    remove: function(p) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.remove(p) : "ERR"; },
-    exists: function(p) { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.exists(p) : "false"; },
-    getUser: function() { return (FASTPASS.Arxiu) ? FASTPASS.Arxiu.getUser() : "Unknown"; }
-};
-
-// ============================================================================
-// --- 2. PROJECTE (Projecte, Cronologia) ---
-// ============================================================================
-
-$.global.Projecte = {
-    open: function(path) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.open(path) : "ERR"; },
-    path: function() { return (FASTPASS.Projecte) ? FASTPASS.Projecte.path() : ""; },
-    save: function() { return (FASTPASS.Projecte) ? FASTPASS.Projecte.save() : "ERR"; },
-    saveAs: function(path) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.saveAs(path) : "ERR"; },
-    items: function(bin) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.items(bin) : "[]"; },
-    find: function(n) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.find(n) : null; },
-    rename: function(n, newN) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.rename(n, newN) : "ERR"; },
-    move: function(n, b) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.move(n, b) : "ERR"; },
-    moveByPath: function(p, b) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.moveByPath(p, b) : "ERR"; },
-    bin: function(n) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.bin(n) : "root"; },
-    cloneSeq: function(n) { return (FASTPASS.Projecte) ? FASTPASS.Projecte.cloneSeq(n) : "ERR"; }
-};
-
-$.global.Cronologia = {
-    get: function() {
-        if (typeof $.global.FASTPASS === "undefined" || !$.global.FASTPASS.Cronologia) return 0;
-        return $.global.FASTPASS.Cronologia.get();
+$.global.IO = {
+    scanDirectory: function(p) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.scanDirectory(p) : "[]"; 
     },
-    set: function(s) { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.set(s) : "ERR"; },
-    range: function(i, o) { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.range(i, o) : "ERR"; },
-    refresh: function() { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.refresh() : "ERR"; },
-    duration: function() { return (FASTPASS.Cronologia) ? FASTPASS.Cronologia.duration() : 0; }
-};
-
-// ============================================================================
-// --- 3. EDICIÓ (Pistes, Segments, Animacio) ---
-// ============================================================================
-
-$.global.Pistes = {
-    count: function(t) { return (FASTPASS.Pistes) ? FASTPASS.Pistes.count(t) : 0; },
-    mute: function(i, s, t) { return (FASTPASS.Pistes) ? FASTPASS.Pistes.mute(i, s, t) : "ERR"; },
-    lock: function(i, s, t) { return (FASTPASS.Pistes) ? FASTPASS.Pistes.lock(i, s, t) : "ERR"; },
-    target: function(i, s, t) { return (FASTPASS.Pistes) ? FASTPASS.Pistes.target(i, s, t) : "ERR"; }
-};
-
-$.global.Segments = {
-    // Lectura
-    count: function(t, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.count(t, ty) : 0; },
-    get: function(t, i, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.get(t, i, ty) : "null"; },
-    at: function(t, ti, ty) { 
-        if (typeof FASTPASS === "undefined") return "ERR:GLOBAL_FASTPASS_NULL";
-        if (!FASTPASS.Segments) return "ERR:MODULE_SEGMENTS_NULL";
+    importFiles: function(p, b) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.importFiles(p, b) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    lookFor: function(n) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.lookFor(n) : "false"; 
+    },
+    readTxt: function(p) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.readTxt(p) : ""; 
+    },
+    writeTxt: function(path, content) { 
+        if (!$.global.FASTPASS.IO) return "ERR_NO_IO_MODULE";
         
-        // Llamada al motor
-        return FASTPASS.Segments.at(t, ti, ty); 
+        // 📍 BLINDAJE 2: Si el path llega como undefined aquí, lo sabremos
+        if (typeof path === "undefined" || path === "undefined") {
+            return "ERR:path is undefined en el puente";
+        }
+        
+        return FASTPASS.IO.writeTxt(path, content); 
     },
-    // Acción
-    insert: function(n, t, s, e, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.insert(n, t, s, e, ty) : "ERR"; },
-    remove: function(t, i, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.remove(t, i, ty) : "ERR"; },
+    remove: function(p) { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.remove(p) : "ERR_NOT_EXISTS"; 
+    },
+    exists: function(p) { 
+        // Importante: devolvemos string "true"/"false" para que el JS lo entienda bien
+        if (!$.global.FASTPASS.IO) return "false";
+        return FASTPASS.IO.exists(p) ? "true" : "false";
+    },
+    getUser: function() { 
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.getUser() : "UnknownUser"; 
+    }
+};
+// ============================================================================
+// --- 2. PROJECTE (Project, Timeline) ---
+// ============================================================================
+
+$.global.Project = {
+    getLogic: function() {
+        var mod = $.global.FASTPASS.Project;
+        if (!mod) {
+            $.writeln("❌ [JSX-DIAG] FASTPASS.Project no está definido.");
+        } else {
+            $.writeln("✅ [JSX-DIAG] FASTPASS.Project encontrado, typeof mod.open: " + typeof mod.open);
+            if (!mod.open) {
+                var keys = [];
+                for (var k in mod) keys.push(k);
+                $.writeln("❌ [JSX-DIAG] FASTPASS.Project.open no es una función. Keys: " + keys.join(','));
+            }
+        }
+        return mod;
+    },
+  
+    _isReady: function() {
+        return ($.global.FASTPASS && $.global.FASTPASS.Project);
+    },
+
+    open: function(path) {
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("❌ [JSX-DIAG] Project.open: módulo no encontrado.");
+            return "ERR:MODULE_NOT_FOUND";
+        }
+        if (typeof m.open !== "function") {
+            $.writeln("❌ [JSX-DIAG] Project.open: m.open no es función, tipo: " + typeof m.open);
+            return "ERR:OPEN_NOT_FUNCTION";
+        }
+        $.writeln("✅ [JSX-DIAG] Project.open llamando con path: " + path);
+        return m.open(path);
+    },
     
-    // Transformación (Tiempos)
-    inPoint: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.inPoint(t, i, v, ty) : "ERR"; },
-    outPoint: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.outPoint(t, i, v, ty) : "ERR"; },
-    start: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.start(t, i, v, ty) : "ERR"; },
-    end: function(t, i, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.end(t, i, v, ty) : "ERR"; },
+    saveAs: function(path) {
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("❌ [JSX-DIAG] Project.saveAs: módulo no encontrado.");
+            return "ERR:MODULE_NOT_FOUND";
+        }
+        if (typeof m.saveAs !== "function") {
+            $.writeln("❌ [JSX-DIAG] Project.saveAs: m.saveAs no es función, tipo: " + typeof m.saveAs);
+            return "ERR:SAVEAS_NOT_FUNCTION";
+        }
+        $.writeln("✅ [JSX-DIAG] Project.saveAs llamando con path: " + path);
+        return m.saveAs(path);
+    },
+
+    save: function() { 
+        var m = this.getLogic(); return m ? m.save() : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    bin: function(name) {
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("❌ [JSX-DIAG] Project.bin: módulo no encontrado.");
+            return "ERR:MODULE_NOT_FOUND";
+        }
+        if (typeof m.bin !== "function") {
+            $.writeln("❌ [JSX-DIAG] Project.bin: m.bin no es función, tipo: " + typeof m.bin);
+            return "ERR:BIN_NOT_FUNCTION";
+        }
+        $.writeln("✅ [JSX-DIAG] Project.bin llamando con name: " + name);
+        return m.bin(name);
+    },
+
+    move: function(item, targetBin) {
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("❌ [JSX-DIAG] Project.move: módulo no encontrado.");
+            return "ERR:MODULE_NOT_FOUND";
+        }
+        if (typeof m.move !== "function") {
+            $.writeln("❌ [JSX-DIAG] Project.move: m.move no es función, tipo: " + typeof m.move);
+            return "ERR:MOVE_NOT_FUNCTION";
+        }
+        $.writeln("✅ [JSX-DIAG] Project.move llamando con item: " + item + ", targetBin: " + targetBin);
+        return m.move(item, targetBin);
+    },
     
-    // Propiedades (Efectos/Posición)
-    setProp: function(t, i, cm, pm, v, ty) { return (FASTPASS.Segments) ? FASTPASS.Segments.setProp(t, i, cm, pm, v, ty) : "ERR"; }
+    moveByID: function(id, targetBin) {
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("❌ [JSX-DIAG] Project.moveByID: módulo no encontrado.");
+            return "ERR:MODULE_NOT_FOUND";
+        }
+        if (typeof m.moveByID !== "function") {
+            $.writeln("❌ [JSX-DIAG] Project.moveByID: m.moveByID no es función, tipo: " + typeof m.moveByID);
+            return "ERR:MOVEBYID_NOT_FUNCTION";
+        }
+        $.writeln("✅ [JSX-DIAG] Project.moveByID llamando con id: " + id + ", targetBin: " + targetBin);
+        return m.moveByID(id, targetBin);
+    },
+
+    rename: function(oldName, newName) { 
+        var m = this.getLogic(); return m ? m.rename(oldName, newName) : "ERR:MODULE_NOT_FOUND"; 
+    },
+
+    cloneSeq: function(name) {
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("❌ [JSX-DIAG] Project.cloneSeq: módulo no encontrado.");
+            return "ERR:MODULE_NOT_FOUND";
+        }
+        if (typeof m.cloneSeq !== "function") {
+            $.writeln("❌ [JSX-DIAG] Project.cloneSeq: m.cloneSeq no es función, tipo: " + typeof m.cloneSeq);
+            return "ERR:CLONESEQ_NOT_FUNCTION";
+        }
+        $.writeln("✅ [JSX-DIAG] Project.cloneSeq llamando con name: " + name);
+        return m.cloneSeq(name);
+    },
+
+    findItemByID: function(id) {
+        var m = this.getLogic();
+        return (m) ? m.findItemByID(id) : null;
+    },
+
+    items: function(bin) { 
+        return (this._isReady()) ? FASTPASS.Project.items(bin) : "[]"; 
+    },
+
+    openSeq: function(n) { 
+        return (this._isReady()) ? FASTPASS.Project.openSeq(n) : "ERR_MODULE_NOT_LOADED"; 
+    },
+
+    list: function() { 
+        return (this._isReady()) ? FASTPASS.Project.list() : "[]"; 
+    },
+
+    find: function(nameEncoded) { 
+        return (this._isReady()) ? FASTPASS.Project.find(nameEncoded) : null; 
+    },
+
+    biggestIn: function(bin) { 
+        return (this._isReady()) ? FASTPASS.Project.biggestIn(bin) : null; 
+    }
 };
 
-$.global.Animacio = {
-    add: function(ti, ci, cm, pm, t) { return (FASTPASS.Animacio) ? FASTPASS.Animacio.add(ti, ci, cm, pm, t) : "ERR"; },
-    set: function(ti, ci, cm, pm, t, v) { return (FASTPASS.Animacio) ? FASTPASS.Animacio.set(ti, ci, cm, pm, t, v) : "ERR"; },
-    x: function(v, f) { return (FASTPASS.Animacio) ? FASTPASS.Animacio.x(v, f) : 0.5; }
+// DIAGNÓSTICO DE CARGA
+$.writeln("✅ [JSX-DIAG] Módulos cargados:");
+$.writeln("   - FASTPASS.Project: " + ($.global.FASTPASS.Project ? "DEFINIDO" : "NO DEFINIDO"));
+if ($.global.FASTPASS.Project) {
+    $.writeln("   - FASTPASS.Project.open: " + (typeof $.global.FASTPASS.Project.open));
+}
+$.writeln("   - $.global.Project: " + ($.global.Project ? "DEFINIDO" : "NO DEFINIDO"));
+if ($.global.Project) {
+    $.writeln("   - $.global.Project.open: " + (typeof $.global.Project.open));
+}
+$.writeln("===============================");
+$.global.Timeline = {
+    get: function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.get() : null; 
+    },
+    set: function(s) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.set(s) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    range: function(i, o) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.range(i, o) : "ERR_MODULE_NOT_LOADED"; 
+    },
+    refresh: function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.refresh() : "OK"; 
+    },
+    duration: function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.duration() : 0; 
+    },
+    "in": function(v) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.inPoint(v) : "ERR"; 
+    },
+    "out": function(v) { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.outpoint(v) : "ERR"; 
+    }
 };
 
-$.global.Exportacio = {
-    frame: function(p, t) { return (FASTPASS.Exportacio) ? FASTPASS.Exportacio.frame(p, t) : "ERR"; },
-    addToAME: function(pr, o, fn) { return (FASTPASS.Exportacio) ? FASTPASS.Exportacio.addToAME(pr, o, fn) : "ERR"; }
+// ============================================================================
+// --- 3. EDICIÓ (Tracks, Clips) ---
+// ============================================================================
+
+$.global.Tracks = {
+    count: function(type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.count(type) : 0; 
+    },
+    mute: function(idx, m, type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.mute(idx, m, type) : "ERR"; 
+    },
+    lock: function(idx, l, type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.lock(idx, l, type) : "ERR"; 
+    },
+    target: function(idx, t, type) { 
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.target(idx, t, type) : "ERR"; 
+    }
 };
+
+$.global.Clips = {
+    count: function(ti, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.count(ti, type || "video") : 0; 
+    },
+    get: function(ti, ci, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.get(ti, ci, type || "video") : null; 
+    },
+    at: function(ti, t, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.at(ti, t, type || "video") : null; 
+    },
+    remove: function(ti, ci, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.remove(ti, ci, type || "video") : "ERR"; 
+    },
+    insert: function(n, ti, s, e, t) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE"; 
+    },
+    start: function(ti, ci, v, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.start(ti, ci, v, type || "video") : "ERR"; 
+    },
+    end: function(ti, ci, v, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.end(ti, ci, v, type || "video") : "ERR"; 
+    },
+    inPoint: function(ti, ci, v, type) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.inPoint(ti, ci, v, type || "video") : "ERR"; 
+    },
+    setProp: function(ti, ci, cp, pr, v, t) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.setProp(ti, ci, cp, pr, v, t || "video") : "ERR"; 
+    },
+    getSubtitles: function() { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.getSubtitles() : "[]"; 
+    },
+    scenes: function(ti) { 
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.scenes(ti) : "[]"; 
+    }
+};
+
+// ============================================================================
+// --- 4. EFECTES I CAPTURA (Anim, Render, Diagnostic) ---
+// ============================================================================
+
+$.global.Anim = {
+    add: function(ti, ci, cp, pr, t) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.add(ti, ci, cp, pr, t) : "ERR"; 
+    },
+    remove: function(ti, ci, cp, pr, t) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.remove(ti, ci, cp, pr, t) : "ERR"; 
+    },
+    set: function(ti, ci, cp, pr, t, v) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.set(ti, ci, cp, pr, t, v) : "ERR"; 
+    },
+    interp: function(ti, ci, cp, pr, t, i) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.interp(ti, ci, cp, pr, t, i) : "ERR"; 
+    },
+    list: function(ti, ci, cp, pr) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.list(ti, ci, cp, pr) : "[]"; 
+    },
+    x: function(v, f) { 
+        if (!$.global.FASTPASS.Anim) return "0";
+        return (arguments.length === 0) ? FASTPASS.Anim.x() : FASTPASS.Anim.x(v, f); 
+    },
+    reframe: function(ti, ci) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
+    }
+};
+
+$.global.Render = {
+    frame: function(p, t) { 
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.frame(p, t) : "ERR"; 
+    },
+    snapshot: function(p, t) { 
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.exportFrameQE(p, t) : "ERR"; 
+    },
+    queue: function(pr, o, n) { 
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.addToAME(pr, o, n) : "ERR"; 
+    }
+};
+
+$.global.Diagnostic = {
+    report: function() {
+        return ($.global.FASTPASS.Diagnostic) ? FASTPASS.Diagnostic.runFullReport() : "ERR_NO_MODULE";
+    }
+};
+
+// Exponer FASTPASS globalmente para acceso directo en evalScript
+FASTPASS = $.global.FASTPASS;

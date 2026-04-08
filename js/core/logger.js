@@ -1,10 +1,5 @@
-/**
- * ============================================================================
- * logger.js (Sistema de Logs i Diagnosi de la UI)
- * ============================================================================
- */
 (function () {
-    // 1. Protección de Namespace (Igual que hicimos en Eines)
+    // 1. Protección de Namespace (Igual que hicimos en Utils)
     var FASTPASS_UI = window.FASTPASS_UI || {};
 
     FASTPASS_UI.Logger = {
@@ -45,16 +40,6 @@
             // A) Siempre imprimir en la consola del depurador
             console.log(`%c${prefix} [${new Date().toLocaleTimeString()}] ${msg}`, `color: ${color}`);
 
-            // B) Intentar imprimir en la ventanita negra de la extensión
-            const c = document.getElementById('console');
-            if (c) {
-                const e = document.createElement('div');
-                e.textContent = `[${new Date().toLocaleTimeString()}] ${prefix} ${msg}`;
-                e.style.color = color;
-                e.style.borderBottom = "1px solid #333";
-                c.appendChild(e);
-                c.scrollTop = c.scrollHeight;
-            }
         },
 
         // Función de ESTADO (Barrita de colores)
