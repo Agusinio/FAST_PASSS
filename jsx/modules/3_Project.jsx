@@ -157,6 +157,59 @@ FASTPASS.Project = (function() {
             }
         },
 
+        close: function() {
+            try {
+                $.writeln("[3_Project.close] Cerrando proyecto...");
+                var p = _focus();
+                if (p) {
+                    // Guardar antes de cerrar solo si el proyecto tiene ruta
+                    if (p.path && p.path !== "") {
+                        try {
+                            p.save();
+                            $.writeln("[3_Project.close] Proyecto guardado.");
+                        } catch (saveErr) {
+                            $.writeln("[3_Project.close] Advertencia: No se pudo guardar: " + saveErr.message);
+                        }
+                    } else {
+                        $.writeln("[3_Project.close] Proyecto sin ruta, no se guarda.");
+                    }
+                    // Cerrar documento
+                    var ok = app.project.closeDocument();
+                    $.writeln("[3_Project.close] Resultado de closeDocument: " + ok);
+                    // Limpiar referencia global
+                    $.global.FASTPASS_WorkProject = null;
+                    if (ok) {
+                        return "OK";
+                    } else {
+                        return "ERR:CLOSE_FAILED";
+                    }
+                } else {
+                    $.writeln("[3_Project.close] No hay proyecto activo.");
+                    return "ERR:NO_PROJECT";
+                }
+            } catch(e) {
+                $.writeln("[3_Project.close] EXCEPCIÓN: " + e.message);
+                return "ERR:" + e.message;
+            }
+        },
+
+        path: function() {
+            $.writeln("[3_Project.path] Llamada a path");
+            try {
+                var p = _focus();
+                $.writeln("[3_Project.path] p: " + (p ? "defined" : "null"));
+                if (p && p.path) {
+                    $.writeln("[3_Project.path] p.path: " + p.path);
+                    return p.path;
+                }
+                $.writeln("[3_Project.path] No hay proyecto o ruta");
+                return "";
+            } catch(e) {
+                $.writeln("[3_Project.path] Error: " + e.message);
+                return "";
+            }
+        },
+
         // --- 2. ITEMS & BINS ---
 
         items: function(binName) {

@@ -129,6 +129,22 @@
                 }
 
             } catch (e) { getUtils().handleError(e, "RenderPortadaPro"); }
+        },
+
+        runClose: async function () {
+            getUtils().log("🔘 Botó CLOSE clicat", "INFO");
+            getUtils().log("🔍 isJsxReady: " + getUtils().isJsxReady, "DEBUG");
+            if (!getUtils().isJsxReady) {
+                getUtils().log("⚠️ JSX no preparat. Espera...", "INFO");
+                return;
+            }
+            getUtils().log("🔒 Tancant projecte...", "INFO");
+            try {
+                await FASTPASS_UI.Logic.Project.close();
+                getUtils().status("Projecte tancat i lock eliminat", "exito");
+            } catch (e) {
+                getUtils().handleError(e, "RenderClose");
+            }
         }
     };
 

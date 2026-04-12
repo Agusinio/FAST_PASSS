@@ -9,7 +9,7 @@
 
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     let _activeConfig = {
-        general: { autor: "AGUS", guarda: 22, debug: false },
+        general: { autor: "USER", guarda: 22, debug: false },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
@@ -58,6 +58,7 @@
                     subtitle: { s1: cfg.estructuras["TNs"].tracks.s_s1, s2: cfg.estructuras["TNs"].tracks.s_s2 }
                 },
                 guarda: cfg.general.guarda,
+                autor: cfg.general.autor,
                 rutas: {
                     plantilla_net: cfg.rutas.plantilla,
                     conductors: cfg.rutas.conductors,
@@ -101,6 +102,7 @@
                         archivo: p.archivo,
                         directorio: p.dir,
                         archivo_wott: p.wott,
+                        wott: p.wott,
                         conductors: { titular: p.conductor, substituts: [] }
                     };
                 });

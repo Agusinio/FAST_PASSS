@@ -111,40 +111,45 @@
          */
         ingestAssets: async function(ctx, wottData, media, portadas) { // <--- Nombre unificado
             utils.log("🎞️ [SYNC] Iniciant ingesta segmentada...");
-        
+
+            // Obtener archivos ya presentes en el proyecto
+            const existing = await this._getExistingAssets();
+            utils.log(`🔍 Assets existentes: ${existing.wotts.length} wotts, ${existing.media.length} media, ${existing.portadas.length} portadas`);
+
             // A. RÈTOLS (Wotts) -> Bin CHY
             if (wottData && wottData.list && wottData.list.length > 0) {
-                utils.log(`📥 Ingestant ${wottData.list.length} rètols...`);
-                
-                // 1. Primer creem el Bin (Això assegura que el destí existeix)
-                await callJSX(`FASTPASS.Project.bin('${encodeURIComponent('CHY')}')`);
-                
-                // 2. Importem la llista al Root
-                const safeWotts = wottData.list.map(f => f.path.replace(/\\/g, "/"));
-                await utils.importList(safeWotts, "root"); 
-                
-                // 3. Parem un segon per donar temps a Premiere a indexar (Opcional però segur)
-                await utils.delay(500);
-            
-                // 4. Movem TOTS els fitxers de la llista del Scanner
-                for (const wott of wottData.list) {
-                    const escapedName = encodeURIComponent(wott.name);
-                    const safeName = escapedName.replace(/'/g, "\\'");
-                    // utils.log(`📦 Movent a CHY: ${wott.name}`);
+                // Filtrar wotts que aún no están en el proyecto
+                const newWotts = wottData.list.filter(w => !existing.wotts.includes(w.name));
+                if (newWotts.length === 0) {
+                    utils.log("✅ Todos los wotts ya están en el proyecto. Se omite importación.");
+                } else {
+                    utils.log(`📥 Ingestant ${newWotts.length} rètols nuevos de ${wottData.list.length} detectados...`);
+
+                    // 1. Primer creem el Bin (Això assegura que el destí existeix)
+                    await callJSX(`FASTPASS.Project.bin('${encodeURIComponent('CHY')}')`);
                     
-                    // Intento 1: Por nombre exacto
-                    let moveRes = await callJSX(`FASTPASS.Project.move('${safeName}', 'CHY')`);
-                    // utils.log(`📊 Resultado move: ${moveRes}`);
+                    // 2. Importem la llista al Root
+                    const safeWotts = newWotts.map(f => f.path.replace(/\\/g, "/"));
+                    await utils.importList(safeWotts, "root");
                     
-                    // Intento 2: Si falla, extraemos el ID (ej: 336346) y movemos por ID
-                    if (moveRes !== "OK") {
-                        // Buscamos el ID numérico en el nombre del archivo
-                        const idMatch = wott.name.match(/[0-9]{6}/); // Busca cualquier secuencia de 6 números
-                        if (idMatch) {
-                            const wottID = idMatch[0];
-                            utils.log(`⚠️ Intentant moure per ID estricte: ${wottID}`);
-                            const res = await callJSX(`FASTPASS.Project.moveByID('${wottID}', 'CHY')`);
-                            utils.log(`📊 Resultat moveByID: ${res}`);
+                    // 3. Parem un segon per donar temps a Premiere a indexar (Opcional però segur)
+                    await utils.delay(200);
+                
+                    // 4. Movem TOTS els fitxers de la llista del Scanner
+                    for (const wott of newWotts) {
+                        const escapedName = encodeURIComponent(wott.name);
+                        const safeName = escapedName.replace(/'/g, "\\'");
+                        
+                        // Intento 1: Por nombre exacto
+                        let moveRes = await callJSX(`FASTPASS.Project.move('${safeName}', 'CHY')`);
+                        
+                        // Intento 2: Si falla, extraemos el ID (ej: 336346) y movemos por ID
+                        if (moveRes !== "OK") {
+                            const idMatch = wott.name.match(/[0-9]{6}/);
+                            if (idMatch) {
+                                const wottID = idMatch[0];
+                                await callJSX(`FASTPASS.Project.moveByID('${wottID}', 'CHY')`);
+                            }
                         }
                     }
                 }
@@ -152,34 +157,72 @@
         
             // B. MEDIA ASSETS (MP4 / SRT) -> Root
             const mediaList = [];
-            if (media?.mp4?.path) mediaList.push(media.mp4.path.replace(/\\/g, "/"));
-            if (media?.srt?.path) mediaList.push(media.srt.path.replace(/\\/g, "/"));
+            if (media?.mp4?.path && !existing.media.includes(media.mp4.name)) {
+                mediaList.push(media.mp4.path.replace(/\\/g, "/"));
+            }
+            if (media?.srt?.path && !existing.media.includes(media.srt.name)) {
+                mediaList.push(media.srt.path.replace(/\\/g, "/"));
+            }
         
             if (mediaList.length > 0) {
                 utils.log(`📥 Ingestant assets media al ROOT...`);
                 await utils.importList(mediaList, "root");
+            } else if (media?.mp4 || media?.srt) {
+                utils.log("✅ Los assets de media ya están en el proyecto. Se omite importación.");
             }
         
             // C. PORTADES (Múltiples PNGs) -> Bin PORTADES
-            // 📍 FIX: Cambiado 'portadasList' por 'portadas' para que coincida con el argumento
             if (portadas && portadas.length > 0) {
-                utils.log(`🖼️ Ingestant ${portadas.length} portades al bin PORTADES...`);
-                
-                // 1. Crear el Bin PORTADES
-                await callJSX(`FASTPASS.Project.bin('${encodeURIComponent('PORTADES')}')`);
-        
-                // 2. Importar todas al Root primero
-                const safePortadas = portadas.map(p => p.path.replace(/\\/g, "/"));
-                await utils.importList(safePortadas, "root");
-        
-                // 3. Moverlas una a una al Bin PORTADES
-                for (const p of portadas) {
-                    const escapedName = encodeURIComponent(p.name);
-                    const safeName = escapedName.replace(/'/g, "\\'");
-                    const safeBinName = encodeURIComponent('PORTADES').replace(/'/g, "\\'");
-                    let moveRes = await callJSX(`FASTPASS.Project.move('${safeName}', '${safeBinName}')`);
-                    // utils.log(`📊 Resultado move portada: ${moveRes}`);
+                // Filtrar portadas que no están en el proyecto
+                const newPortadas = portadas.filter(p => !existing.portadas.includes(p.name));
+                if (newPortadas.length === 0) {
+                    utils.log("✅ Todas las portadas ya están en el proyecto. Se omite importación.");
+                } else {
+                    utils.log(`🖼️ Ingestant ${newPortadas.length} portades nuevas de ${portadas.length} detectades...`);
+                    
+                    // 1. Crear el Bin PORTADES
+                    await callJSX(`FASTPASS.Project.bin('${encodeURIComponent('PORTADES')}')`);
+            
+                    // 2. Importar todas al Root primero
+                    const safePortadas = newPortadas.map(p => p.path.replace(/\\/g, "/"));
+                    await utils.importList(safePortadas, "root");
+            
+                    // 3. Moverlas una a una al Bin PORTADES
+                    for (const p of newPortadas) {
+                        const escapedName = encodeURIComponent(p.name);
+                        const safeName = escapedName.replace(/'/g, "\\'");
+                        const safeBinName = encodeURIComponent('PORTADES').replace(/'/g, "\\'");
+                        await callJSX(`FASTPASS.Project.move('${safeName}', '${safeBinName}')`);
+                    }
                 }
+            }
+        },
+
+        /**
+         * _getExistingAssets: Obtiene los nombres de archivos ya presentes en los bins del proyecto.
+         * Retorna un objeto { wotts: [...], media: [...], portadas: [...] }.
+         */
+        _getExistingAssets: async function() {
+            try {
+                // Obtener items del bin CHY
+                const chyItemsRaw = await callJSX("FASTPASS.Project.items('CHY')");
+                const chyItems = JSON.parse(chyItemsRaw || "[]");
+                const wotts = chyItems.map(item => item.name);
+
+                // Obtener items del bin PORTADES
+                const portadasItemsRaw = await callJSX("FASTPASS.Project.items('PORTADES')");
+                const portadasItems = JSON.parse(portadasItemsRaw || "[]");
+                const portadas = portadasItems.map(item => item.name);
+
+                // Media (MP4/SRT) están en root; obtener todos los items del root
+                const rootItemsRaw = await callJSX("FASTPASS.Project.items('')");
+                const rootItems = JSON.parse(rootItemsRaw || "[]");
+                const media = rootItems.map(item => item.name);
+
+                return { wotts, media, portadas };
+            } catch (e) {
+                utils.log("⚠️ Error obteniendo assets existentes: " + e.message, "WARN");
+                return { wotts: [], media: [], portadas: [] };
             }
         },
 
@@ -189,7 +232,7 @@
         lock: async function (projPath) {
             try {
                 const lockPath = projPath + ".lock";
-                const user = await callJSX("IO.getUser()");
+                const user = window.FASTPASS_UI.Config.get().autor;
                 const safeLockPath = lockPath.replace(/\\/g, "/").replace(/'/g, "\\'");
                 const safeUser = String(user).replace(/'/g, "\\'");
                 utils.log(`🔒 Escrivint bloqueig per a ${user}...`);
@@ -199,6 +242,47 @@
                 utils.log("✅ Lock escrit correctament.");
             } catch (e) {
                 utils.log("Error creant .lock: " + e.message, "WARN");
+            }
+        },
+
+        close: async function () {
+            try {
+                utils.log("🔒 Tancant projecte i eliminant lock...", "INFO");
+                // 1. Obtener ruta del proyecto activo
+                const projectPath = await callJSX("FASTPASS.Project.path()");
+                if (!projectPath) {
+                    utils.log("⚠️ No hi ha projecte obert.", "WARN");
+                    return;
+                }
+                utils.log(`🔍 Ruta del projecte: ${projectPath}`, "INFO");
+                
+                // 2. Borrar archivo .lock si existe
+                const lockPath = projectPath + ".lock";
+                const safeLockPath = lockPath.replace(/\\/g, "/").replace(/'/g, "\\'");
+                const deleteScript = `IO.remove('${safeLockPath}')`;
+                utils.log(`🗑️ Eliminant lock: ${deleteScript}`, "INFO");
+                const deleteResult = await callJSX(deleteScript);
+                if (deleteResult !== "OK") {
+                    utils.log("⚠️ No s'ha pogut eliminar el lock (potser no existeix). Resultat: " + deleteResult, "INFO");
+                } else {
+                    utils.log("✅ Lock eliminat.", "INFO");
+                }
+                
+                // 3. Guardar y cerrar proyecto via JSX
+                const closeResult = await callJSX("FASTPASS.Project.close()");
+                utils.log(`🔍 Resultat de tancament: ${closeResult}`, "INFO");
+                
+                if (closeResult !== "OK") {
+                    throw new Error("Error al tancar el projecte: " + closeResult);
+                }
+                
+                utils.log("✅ Projecte tancat correctament.", "INFO");
+                // 4. Actualizar contexto
+                if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
+                    await FASTPASS_UI.Core.Context.checkContext();
+                }
+            } catch (e) {
+                utils.log("💥 Error en tancar projecte: " + e.message, "ERROR");
             }
         }
     };

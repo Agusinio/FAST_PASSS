@@ -62,9 +62,11 @@
                 }
             
                 // 3. LÒGICA DE NEGOCI (Usant el teu Scanner.js)
+                const progKey = ctx.progData.archivo_wott || ctx.progData.archivo;
+                getUtils().log("🔍 [CONTEXT DEBUG] progKey: " + progKey + ", bloque: " + ctx.bloque, "DEBUG");
                 const existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
                     projectFiles,
-                    ctx.progData.archivo_wott || ctx.progData.archivo,
+                    progKey,
                     ctx.bloque
                 );
                 getUtils().log("🔍 [CONTEXT DEBUG] projectFiles: " + projectFiles.length + " items", "DEBUG");
@@ -74,47 +76,92 @@
                 let lockOwner = null;
             
                 if (existingProjectName) {
+                    // Obtener lista de proyectos abiertos en Premiere
+                    let openProjects = [];
+                    try {
+                        const openProjectsRaw = await getUtils().callJSX("Context.list()");
+                        openProjects = JSON.parse(openProjectsRaw || "[]");
+                        getUtils().log("🔍 [CONTEXT DEBUG] openProjects raw: " + JSON.stringify(openProjects), "DEBUG");
+                    } catch (e) {
+                        getUtils().log("⚠️ No se pudo obtener lista de proyectos abiertos: " + e.message, "DEBUG");
+                    }
+                    let isProjectOpen = false;
+                    let isProjectActive = false;
+                    let activeProjectName = '';
+                    // Obtener proyecto activo (vía Project.path o Context.activeProj)
+                    try {
+                        const activeProjectPath = await getUtils().callJSX("FASTPASS.Project.path()");
+                        if (activeProjectPath) {
+                            const parts = activeProjectPath.split(/[\\/]/);
+                            activeProjectName = parts[parts.length - 1];
+                        }
+                    } catch (e) {
+                        // Ignorar error
+                    }
+                    // Si no se pudo obtener ruta, intentar con Context.activeProj()
+                    if (!activeProjectName) {
+                        try {
+                            activeProjectName = await getUtils().callJSX("Context.activeProj()");
+                        } catch (e) {
+                            // Ignorar
+                        }
+                    }
+                    getUtils().log("🔍 [CONTEXT DEBUG] activeProjectName: " + activeProjectName, "DEBUG");
+                    
+                    if (openProjects.length > 0) {
+                        // openProjects es array de strings (nombres de proyecto con extensión)
+                        isProjectOpen = openProjects.includes(existingProjectName);
+                        // Determinar si el proyecto activo coincide con existingProjectName
+                        isProjectActive = activeProjectName === existingProjectName;
+                        // Si no hay activeProjectName, asumir que el primer proyecto de la lista es el activo (fallback)
+                        if (!activeProjectName && openProjects.length > 0) {
+                            isProjectActive = openProjects[0] === existingProjectName;
+                        }
+                    } else {
+                        // Fallback a Project.path() para determinar si el proyecto está abierto y activo
+                        if (activeProjectName) {
+                            isProjectOpen = activeProjectName === existingProjectName;
+                            isProjectActive = isProjectOpen; // Si está abierto, asumimos que es activo (no hay lista)
+                        }
+                    }
+                    getUtils().log("🔍 [CONTEXT DEBUG] openProjects: " + openProjects.length + ", isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
+
                     // Mirem si hi ha lock (Lògica JS pura sobre la llista ja descarregada)
                     const lockFile = projectFiles.find(f => f.name === existingProjectName + ".lock");
+                    const currentUser = config.autor;
+                    let lockOwner = null;
                     
                     if (lockFile) {
                         // Hi ha bloqueig: llegim el contingut (qui és l'amo)
-                        // Escapar la ruta para JSX
                         const lockPath = folderPath + lockFile.name;
                         const safeLockPath = lockPath.replace(/\\/g, '/').replace(/'/g, "\\'");
                         getUtils().log("🔍 [LOCK DEBUG] Leyendo lock: " + safeLockPath, "DEBUG");
                         lockOwner = await getUtils().callJSX(`IO.readTxt('${safeLockPath}')`);
-                        // Verificar si el lock es del usuario actual
-                        const currentUser = await getUtils().callJSX("IO.getUser()");
                         // Si el lock está vacío, asumir que es nuestro (puede ser un lock recién creado)
                         if (lockOwner.trim() === "") {
                             getUtils().log("⚠️ Lock file vacío, asumiendo pertenece al usuario actual", "DEBUG");
                             lockOwner = currentUser;
                         }
-                        if (lockOwner.trim() === currentUser.trim()) {
-                            // El lock es nuestro, no está bloqueado
-                            // Verificar si el proyecto está abierto
-                            let activeProjectPath = '';
-                            try {
-                                activeProjectPath = await getUtils().callJSX("Project.path()");
-                            } catch (e) {
-                                // Ignorar error
-                            }
-                            const isProjectOpen = activeProjectPath && activeProjectPath.indexOf(existingProjectName) !== -1;
-                            conclusion = isProjectOpen ? 'UPDATE' : 'LOAD';
-                        } else {
-                            conclusion = 'LOCKED';
-                        }
+                        getUtils().log("🔍 [CONTEXT DEBUG] lockOwner: " + lockOwner + ", currentUser: " + currentUser, "DEBUG");
+                    }
+                    
+                    // Determinar si el lock es nuestro (si no hay lock, se considera nuestro)
+                    const isLockOwned = lockFile ? lockOwner.trim() === currentUser.trim() : true;
+                    
+                    if (lockFile && !isLockOwned) {
+                        getUtils().log("🔍 [CONTEXT DEBUG] lockOwner diferente: " + lockOwner + " vs " + currentUser, "DEBUG");
+                        conclusion = 'LOCKED';
                     } else {
-                        // Verificar si el proyecto está actualmente abierto en Premiere
-                        let activeProjectPath = '';
-                        try {
-                            activeProjectPath = await getUtils().callJSX("Project.path()");
-                        } catch (e) {
-                            // Ignorar error
+                        // El lock es nuestro o no hay lock
+                        // Usamos isProjectOpen e isProjectActive ya calculadas
+                        getUtils().log("🔍 [CONTEXT DEBUG] isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
+                        if (isProjectActive) {
+                            conclusion = 'UPDATE';
+                        } else if (isProjectOpen && !isProjectActive) {
+                            conclusion = 'GO';
+                        } else {
+                            conclusion = 'LOAD';
                         }
-                        const isProjectOpen = activeProjectPath && activeProjectPath.indexOf(existingProjectName) !== -1;
-                        conclusion = isProjectOpen ? 'UPDATE' : 'LOAD';
                     }
                 }
             

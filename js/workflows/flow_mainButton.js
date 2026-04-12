@@ -22,8 +22,8 @@
                 switch (action) {
                     case 'NEW': await this._runNew(); break;
                     case 'UPDATE': await this._runUpdate(); break;
-                    case 'LOAD': await this._runLoad(); break;
-                    case 'GO': await this._runGo(data.name); break;
+                    case 'LOAD': await this._runLoad(data); break;
+                    case 'GO': await this._runGo(data); break;
                 }
                 getUtils().status('Procés completat!', 'exito');
             } catch (e) {
@@ -119,34 +119,75 @@
             }
         },
 
-        _runGo: async function (projName) {
+        _runGo: async function (data) {
+            const projName = data.name;
             log(`🚀 [FLOW-GO] Canviant focus a: ${projName}...`);
-            const res = await callJSX(`Context.set('${getUtils().escape(projName)}')`);
-            if (res === "OK") {
-                const ctx = await this._setupContext();
-                const assets = await this._fullScan(ctx);
-                await this._completeSyncUI(ctx, assets);
-                
-                if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
-                    await FASTPASS_UI.Core.Context.checkContext();
+            // Intentar cambiar el foco via Context.set
+            let setResult = await callJSX(`Context.set('${getUtils().escape(projName)}')`);
+            log(`🔍 [FLOW-GO] Resultado de Context.set: ${setResult}`);
+            
+            // Construir ruta completa del proyecto
+            const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
+            const fullPath = (folderPath + "/" + projName).replace(/\\/g, "/");
+            log(`🔍 [FLOW-GO] Ruta del proyecto: ${fullPath}`);
+            
+            // Si Context.set falla, intentar con Project.open
+            if (setResult !== "OK") {
+                log(`⚠️ [FLOW-GO] Context.set falló, intentando Project.open...`);
+                const openResult = await callJSX(`FASTPASS.Project.open('${getUtils().escape(fullPath)}')`);
+                log(`🔍 [FLOW-GO] Resultado de Project.open: ${openResult}`);
+                if (openResult !== "OK") {
+                    log(`❌ [FLOW-GO] No se pudo cambiar el foco al proyecto.`);
+                    return;
                 }
+            } else {
+                // Aunque Context.set tuvo éxito, forzar apertura para asegurar foco visual
+                const openResult = await callJSX(`FASTPASS.Project.open('${getUtils().escape(fullPath)}')`);
+                log(`🔍 [FLOW-GO] Project.open adicional: ${openResult}`);
+            }
+            
+            // Verificar el proyecto activo después del cambio
+            let activeName = '';
+            try {
+                activeName = await callJSX("Context.activeProj()");
+            } catch (e) {
+                // Ignorar error
+            }
+            log(`🔍 [FLOW-GO] Proyecto activo después del cambio: ${activeName}`);
+            
+            // Sincronizar assets (igual que antes)
+            const ctx = await this._setupContext();
+            const assets = await this._fullScan(ctx);
+            await this._completeSyncUI(ctx, assets);
+            
+            if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
+                await FASTPASS_UI.Core.Context.checkContext();
             }
         },
 
-        _runLoad: async function () {
+        _runLoad: async function (data) {
             log("🚀 [FLOW-LOAD]");
-            const ctx = await this._setupContext();
-            const cfg = ctx.config;
-
-            const assets = await this._fullScan(ctx);
-            const sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema || 'PENDENT');
-            const projSlug = ctx.config.naming.getProjectName(ctx, sanitizedTheme);
-            const destPath = cfg.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/" + `Pruebas_${projSlug}.prproj`;
+            // Usar el proyecto existente pasado en data
+            const projName = data.name; // Nombre completo del archivo .prproj
+            const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
+            const destPath = (folderPath + "/" + projName).replace(/\\/g, "/");
+            log(`🔍 [FLOW-LOAD] Abriendo proyecto existente: ${destPath}`);
             
+            // Bloquear el proyecto (lock)
             await FASTPASS_UI.Logic.Project.lock(destPath);
-            await callJSX(`Project.open('${destPath.replace(/\\/g, "\\\\")}')`);
             
-            // Sync después de abrir
+            // Abrir proyecto
+            const openResult = await callJSX(`FASTPASS.Project.open('${getUtils().escape(destPath)}')`);
+            log(`🔍 [FLOW-LOAD] Resultado de Project.open: ${openResult}`);
+            
+            if (openResult !== "OK") {
+                log(`❌ [FLOW-LOAD] No se pudo abrir el proyecto.`);
+                return;
+            }
+            
+            // Sincronizar assets (importar solo los faltantes)
+            const ctx = await this._setupContext();
+            const assets = await this._fullScan(ctx);
             await this._completeSyncUI(ctx, assets);
             
             log("✅ Projecte obert.");

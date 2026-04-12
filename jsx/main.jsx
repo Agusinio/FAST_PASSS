@@ -67,12 +67,14 @@ $.global.Context = {
             return proj.path ? (new File(proj.path)).parent.fsName : ""; 
         } catch (e) { return ""; } 
     },
-    set: function(name) { 
+    set: function(name) {
         if (!$.global.FASTPASS.Context) return "ERR_NO_MODULE";
         try {
             for (var i = 0; i < app.projects.length; i++) {
                 if (app.projects[i].name === name) {
                     $.global.FASTPASS_WorkProject = app.projects[i];
+                    // Intentar cambiar el proyecto activo en Premiere
+                    app.project = app.projects[i];
                     return "OK";
                 }
             }
@@ -174,8 +176,24 @@ $.global.Project = {
         return m.saveAs(path);
     },
 
-    save: function() { 
-        var m = this.getLogic(); return m ? m.save() : "ERR:MODULE_NOT_FOUND"; 
+    save: function() {
+        var m = this.getLogic(); return m ? m.save() : "ERR:MODULE_NOT_FOUND";
+    },
+
+    path: function() {
+        $.writeln("[JSX-DIAG] Project.path llamado");
+        var m = this.getLogic();
+        if (!m) {
+            $.writeln("[JSX-DIAG] Project.path: módulo no encontrado");
+            return "";
+        }
+        if (typeof m.path !== "function") {
+            $.writeln("[JSX-DIAG] Project.path: m.path no es función, tipo: " + typeof m.path);
+            return "";
+        }
+        var result = m.path();
+        $.writeln("[JSX-DIAG] Project.path resultado: " + result);
+        return result;
     },
 
     bin: function(name) {

@@ -134,9 +134,11 @@ var isUserDraggingSlider = false;
         // --- WORKFLOW: RENDER ---
         const btnRenderVideo = document.getElementById('btnRenderVideo');
         const btnRenderPortada = document.getElementById('btnRenderPortada');
+        const btnRenderClose = document.getElementById('btnRenderClose');
 
         if (btnRenderVideo) btnRenderVideo.addEventListener('click', () => callWorkflow('Render', 'runVideo'));
         if (btnRenderPortada) btnRenderPortada.addEventListener('click', () => callWorkflow('Render', 'runPortada'));
+        if (btnRenderClose) btnRenderClose.addEventListener('click', () => callWorkflow('Render', 'runClose'));
 
         // --- SETUP Y SELECTORES ---
         const btnSetup = document.getElementById('btnSetup');

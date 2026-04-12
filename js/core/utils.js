@@ -23,12 +23,12 @@
             return new Promise(function(resolve) {
                 var isAnimX = script.indexOf("Anim.x") !== -1;
                 if (!isAnimX) {
-                    window.FASTPASS_UI.Utils.log("🔍 [JSX CALL]: " + script, "INFO");
+                    //window.FASTPASS_UI.Utils.log("🔍 [JSX CALL]: " + script, "INFO");
                 }
                 var safeScript = "try{" + script + "}catch(e){'ERR:'+e.message}";
                 csInterface.evalScript(safeScript, function(res) {
                     if (!isAnimX) {
-                        window.FASTPASS_UI.Utils.log("🔍 [JSX RESULT]: " + res, "INFO");
+                        //window.FASTPASS_UI.Utils.log("🔍 [JSX RESULT]: " + res, "INFO");
                     }
                     if (!res || res === "undefined") {
                         resolve("");
@@ -161,7 +161,7 @@
                 const res = await this.callJSX(`FASTPASS.IO.importFiles('${payload}', '${binName}')`);
                 
                 if (res !== "OK") throw new Error(res);
-                this.log(`✅ Ingesta OK a ${binName}`, "INFO");
+                //this.log(`✅ Ingesta OK a ${binName}`, "INFO");
             } catch (e) {
                 this.log(`🔴 Error Ingesta: ${e.message}`, "ERROR");
             }
