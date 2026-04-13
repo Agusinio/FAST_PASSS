@@ -26,9 +26,16 @@
             const cfg = FASTPASS_UI.Config.get();
             if (!cfg || !cfg.mapeoProgramas) return false;
             for (var key in cfg.mapeoProgramas) {
-                var token = cfg.mapeoProgramas[key].archivo;
-                if (projectName && projectName.indexOf(token) !== -1) return true;
+                var prog = cfg.mapeoProgramas[key];
+                var tokenArchivo = prog.archivo.toLowerCase();
+                var tokenWott = prog.wott.toLowerCase();
+                var name = projectName.toLowerCase();
+                if (name && (name.indexOf(tokenArchivo) !== -1 || name.indexOf(tokenWott) !== -1)) {
+                    console.log('✅ [Registry] Proyecto compatible:', projectName, 'tokenArchivo:', tokenArchivo, 'tokenWott:', tokenWott);
+                    return true;
+                }
             }
+            console.log('❌ [Registry] Proyecto NO compatible:', projectName);
             return false;
         },
 
@@ -112,6 +119,7 @@
          * Habilita o inhabilita els botons de workflow (tot excepte selectors i btnMain).
          */
         _setWorkflowEnabled: function (enabled) {
+            console.log('🔄 [Registry] _setWorkflowEnabled:', enabled);
             const workflowButtonIds = [
                 'btnIn', 'btnOut', 'btnScene',
                 'btnPrevClip', 'btnNextClip', 'btnCenter', 'btnKey',

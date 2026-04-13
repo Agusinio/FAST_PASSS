@@ -1,0 +1,28 @@
+# Adobe Premiere / CEP
+.debug
+.dev/
+.env
+*.env
+Premier.dmp
+*.dmp
+*.log
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs
+.vscode/project_settings.json
+# (Mantenemos .vscode de momento si tiene configuraciones útiles específicas)
+
+# Backups
+*.bak
+*.old
+FAST _PASSS_OLD/

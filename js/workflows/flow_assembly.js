@@ -33,9 +33,11 @@
             try {
                 // 1. Obtenir clips de la línia de temps
                 const clips = await getClipsLogic().getTrackClips(mainTrack, "video");
+                log(`📊 Clips obtinguts: ${clips.length}`);
                 if (clips.length === 0) return;
 
                 const struct = state.structure;
+                log(`📊 Estructura carregada: ${struct.length} blocs`);
                 let clipIndex = 0;
 
                 for (let bIndex = 0; bIndex < struct.length; bIndex++) {
@@ -143,11 +145,15 @@
                 }
 
                 let targetTrack = tracks.chyrons;
-                if (c.name.includes("Lloc") || c.name.includes("Data")) targetTrack = tracks.llocdata;
-                if (c.name.indexOf("   ") === 0) targetTrack = tracks.graficos;
+                if (c.name.includes("Lloc") || c.name.includes("Data")) targetTrack = tracks.lloc || tracks.chyrons;
+                if (c.name.indexOf("   ") === 0) targetTrack = tracks.graf || tracks.chyrons;
+                // Si targetTrack es undefined, usar un valor por defecto (pista 5)
+                if (targetTrack === undefined) {
+                    targetTrack = tracks.chyrons || 5;
+                }
 
                 log(`      📍 Snap: ${c.name} -> ${bestCut.toFixed(2)}s (V${targetTrack})`);
-                await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, bestCut, null, 'video')`);
+                await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${bestCut}, null, 'video')`);
             }
 
             return { isInsert: (hasNom && hasFirma) };

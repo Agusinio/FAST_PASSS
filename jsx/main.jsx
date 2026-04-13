@@ -60,7 +60,7 @@ $.global.System = {
 $.global.Context = {
     list: function() { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getOpenNames() : "[]"; },
     activeProj: function() { try { return app.project.name; } catch(e) { return ""; } },
-    activeSeq: function() { try { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getSequenceName_FINAL() : ""; } catch(e) { return ""; } },
+    activeSeq: function() { try { return ($.global.FASTPASS.Context) ? FASTPASS.Context.getSequenceName() : ""; } catch(e) { return ""; } },
     folder: function() { 
         try { 
             var proj = ($.global.FASTPASS.Context) ? FASTPASS.Context.getWorkProject() : app.project;

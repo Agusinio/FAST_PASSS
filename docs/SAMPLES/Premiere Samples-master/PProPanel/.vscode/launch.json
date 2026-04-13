@@ -1,0 +1,22 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "extendscript-debug",
+            "request": "launch",
+            "name": "Debug ExtendScript in PPro",
+            "script": "${workspaceFolder}/jsx/PPRO/Premiere.jsx",
+            "stopOnEntry": false,
+            "trace": true,
+            "logFile" : "~/Desktop/AMEPanel_Log.txt",
+            "selectTargetColor": "green"
+        },
+        {
+            "type": "chrome",
+            "request": "attach",
+            "name": "Attach to Chrome",
+            "port": 7777,
+            "webRoot": "${workspaceRoot}"
+        }
+    ]
+}

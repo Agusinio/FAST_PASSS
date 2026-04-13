@@ -74,6 +74,8 @@
             
                 let conclusion = 'NEW';
                 let lockOwner = null;
+                let lockFile = null;
+                let isLockOwned = true;
             
                 if (existingProjectName) {
                     // Obtener lista de proyectos abiertos en Premiere
@@ -126,10 +128,16 @@
                     }
                     getUtils().log("🔍 [CONTEXT DEBUG] openProjects: " + openProjects.length + ", isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
 
+                    // Fallback: si el proyecto no aparece en openProjects pero fue el último abierto por nosotros, asumir que está abierto
+                    if (!isProjectOpen && window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.lastOpenedProjectName === existingProjectName) {
+                        getUtils().log("🔍 [CONTEXT DEBUG] Proyecto detectado via lastOpenedProjectName fallback", "DEBUG");
+                        isProjectOpen = true;
+                        // No asumimos que esté activo (isProjectActive permanece como estaba)
+                    }
+
                     // Mirem si hi ha lock (Lògica JS pura sobre la llista ja descarregada)
-                    const lockFile = projectFiles.find(f => f.name === existingProjectName + ".lock");
+                    lockFile = projectFiles.find(f => f.name === existingProjectName + ".lock");
                     const currentUser = config.autor;
-                    let lockOwner = null;
                     
                     if (lockFile) {
                         // Hi ha bloqueig: llegim el contingut (qui és l'amo)
@@ -146,34 +154,35 @@
                     }
                     
                     // Determinar si el lock es nuestro (si no hay lock, se considera nuestro)
-                    const isLockOwned = lockFile ? lockOwner.trim() === currentUser.trim() : true;
+                    isLockOwned = lockFile ? lockOwner.trim() === currentUser.trim() : true;
                     
+                    // Si hay lock de otro usuario, lo registramos pero no cambiamos la conclusión
                     if (lockFile && !isLockOwned) {
                         getUtils().log("🔍 [CONTEXT DEBUG] lockOwner diferente: " + lockOwner + " vs " + currentUser, "DEBUG");
-                        conclusion = 'LOCKED';
+                        // No establecemos conclusion = 'LOCKED', seguimos con la lógica normal
+                    }
+                    
+                    // Usamos isProjectOpen e isProjectActive ya calculadas
+                    getUtils().log("🔍 [CONTEXT DEBUG] isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
+                    if (isProjectActive) {
+                        conclusion = 'UPDATE';
+                    } else if (isProjectOpen && !isProjectActive) {
+                        conclusion = 'GO';
                     } else {
-                        // El lock es nuestro o no hay lock
-                        // Usamos isProjectOpen e isProjectActive ya calculadas
-                        getUtils().log("🔍 [CONTEXT DEBUG] isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
-                        if (isProjectActive) {
-                            conclusion = 'UPDATE';
-                        } else if (isProjectOpen && !isProjectActive) {
-                            conclusion = 'GO';
-                        } else {
-                            conclusion = 'LOAD';
-                        }
+                        conclusion = 'LOAD';
                     }
                 }
             
                 getUtils().log("🔍 Conclusión contexto: " + conclusion + (existingProjectName ? " (projecte: " + existingProjectName + ")" : ""), "DEBUG");
                 // 4. FEEDBACK UI
-                if (conclusion === 'LOCKED') {
-                    this.updateButton('LOCKED', { user: lockOwner });
-                } else {
-                    // Si és LOAD, el nom del projecte és el que hem trobat (amb el seu tema real)
-                    const finalName = existingProjectName || `Pruebas_${ctx.progData.archivo}_${ctx.bloque}_PENDENT.prproj`;
-                    this.updateButton(conclusion, { ...ctx, name: finalName });
+                const finalName = existingProjectName || `Pruebas_${ctx.progData.archivo}_${ctx.bloque}_PENDENT.prproj`;
+                const data = { ...ctx, name: finalName };
+                if (lockFile) {
+                    data.lockExists = true;
+                    data.lockOwner = lockOwner;
+                    data.isLockOwned = lockOwner.trim() === ctx.config.autor.trim();
                 }
+                this.updateButton(conclusion, data);
             
             } catch (e) {
                 getUtils().log("💥 Error checkContext: " + e.message, "ERROR");
@@ -235,10 +244,14 @@
                     btn.innerText = data.msg || "ESPERANT...";
                     break;
                 case 'LOCKED':
-                    btn.innerText = "BLOQUEJAT: " + (data.user || "ALTRE");
-                    btn.disabled = true;
+                    btn.innerText = "BLOQUEJAT: " + (data.lockOwner || data.user || "ALTRE");
+                    btn.disabled = false;
                     btn.style.border = "1px solid #dc3545";
                     btn.style.color = "#dc3545";
+                    btn.onclick = function() {
+                        const forceData = { ...data, forceOverride: true };
+                        FASTPASS_UI.Workflows.MainButton.runMainAction('LOAD', forceData);
+                    };
                     break;
                 default:
                     btn.innerText = "ESPERANT";

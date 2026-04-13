@@ -239,7 +239,7 @@ FASTPASS.Clips = {
                 prop.setValue(parseFloat(val), true);
             }
             return "OK";
-        } catch (e) { return "ERR: " + e.message; }
+        } catch (e) { return "ERR: " + e.message + " (trackIdx=" + trackIdx + ")"; }
     },
 
     /**
@@ -247,13 +247,19 @@ FASTPASS.Clips = {
      */
     scenes: function(trackIdx) {
         try {
+            $.writeln("DEBUG scenes: trackIdx=" + trackIdx);
             var track = this._get(trackIdx, "video");
             if (!track || track.clips.numItems == 0) return "ERR_EMPTY_TRACK";
+            
+            // Deseleccionar todo
             for (var i = 0; i < track.clips.numItems; i++) {
-                track.clips[i].setSelected(true, true);
+                track.clips[i].setSelected(false, false);
             }
-            app.project.activeSequence.performSceneEditDetectionOnSelection();
-            return "OK";
+            // Seleccionar solo el primer clip (MP4)
+            track.clips[0].setSelected(true, true);
+            
+            var success = app.project.activeSequence.performSceneEditDetectionOnSelection('applyCuts');
+            return success ? "OK_SCENES" : "NO_SCENES_DETECTED";
         } catch (e) { return "ERR: " + e.message; }
     },
 

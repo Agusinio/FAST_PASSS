@@ -69,7 +69,7 @@
                     const shortProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott : "TNV";
                     const temaNet = wottData.tema.toUpperCase();
                     
-                    const finalSeqName = `${shortProg}_${temaNet}`; // <--- ADIÓS AL "PROG_" FIJO
+                    const finalSeqName = `${shortProg}_${ctx.bloque}_${temaNet}`; // <--- INCLUIMOS BLOQUE
                     
                     utils.log(`📝 Seqüència clonada [${resClone}]. Renombrant a: ${finalSeqName}`);
                     const safeResClone = encodeURIComponent(resClone).replace(/'/g, "\\'");
@@ -277,6 +277,10 @@
                 }
                 
                 utils.log("✅ Projecte tancat correctament.", "INFO");
+                // Limpiar último proyecto abierto
+                if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                    window.FASTPASS_UI.State.lastOpenedProjectName = "";
+                }
                 // 4. Actualizar contexto
                 if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                     await FASTPASS_UI.Core.Context.checkContext();

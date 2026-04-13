@@ -13,6 +13,7 @@ var isUserDraggingSlider = false;
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
+    console.log('🔴 MAIN.JS cargado');
     var utils = window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
     
     try {
@@ -55,10 +56,13 @@ var isUserDraggingSlider = false;
     'use strict';
 
     function initPanel() {
+        //alert('initPanel ejecutado');
         FASTPASS_UI.Utils.log("🚀 Vinculando botones...");
 
         // --- WORKFLOW: CUT ---
         const btnIn = document.getElementById('btnIn');
+        console.log('🔍 btnIn:', btnIn);
+        if (!btnIn) alert('❌ btnIn no encontrado en el DOM');
         const btnOut = document.getElementById('btnOut');
         const btnScene = document.getElementById('btnScene');
         const btnPrevClip = document.getElementById('btnPrevClip');
@@ -66,7 +70,7 @@ var isUserDraggingSlider = false;
         const btnCenter = document.getElementById('btnCenter');
         const btnKey = document.getElementById('btnKey');
 
-        if (btnIn) btnIn.addEventListener('click', function () { callWorkflow('Cut', 'runCutIn'); });
+        if (btnIn) btnIn.addEventListener('click', function () { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
         if (btnOut) btnOut.addEventListener('click', function () { callWorkflow('Cut', 'runCutOut'); });
         if (btnScene) btnScene.addEventListener('click', function () { callWorkflow('Cut', 'runScene'); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
@@ -165,6 +169,7 @@ var isUserDraggingSlider = false;
     }
 
     async function callWorkflow(module, method) {
+        console.log(`🔘 callWorkflow: ${module}.${method}`);
         if (FASTPASS_UI.Workflows[module] && FASTPASS_UI.Workflows[module][method]) {
             try {
                 await FASTPASS_UI.Workflows[module][method]();

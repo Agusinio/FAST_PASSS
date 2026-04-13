@@ -16,6 +16,7 @@
             if (!(await getUtils().validateActiveSequence())) return;
             var self = this;
             log("💎 Sol·licitant nou KF...");
+            console.log('DEBUG runAddKF: called');
 
             // Literal: Anim.add(track, clip, component, property, time)
             // Posem -1 per a que el motor busque la selecció actual
@@ -71,6 +72,7 @@
 
         runAutoReframe: async function() {
             log("🤖 Executant Auto Reframe Intel·ligent...");
+            console.log('DEBUG runAutoReframe: called');
             try {
                 const res = await callJSX("Anim.reframe(1, -1)"); // V1, cabezal
                 if (res === "OK_ADDED_REFRAME") {
@@ -89,5 +91,5 @@
         }
     };
 
-    window.FASTPASS_UI = FASTPASS_UI;
+    window.FASTPASS_UI.Workflows.KF = FASTPASS_UI.Workflows.KF;
 })();

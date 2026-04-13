@@ -236,9 +236,11 @@
             
             if (!elProg || !elBloc) return true; // Fail-safe si no hi ha UI
             
+            // Actualizar la secuencia activa desde Premiere
+            const activeSeq = await this.refreshActiveSequence();
+            
             const progKey = elProg.value;
             const blocVal = elBloc.value;
-            const activeSeq = state.activeSequenceName || "";
             
             // Si estem en una seqüència buida o NO n'hi ha cap de activa
             if (!activeSeq) {
@@ -250,18 +252,41 @@
             // Busquem si el nom de la seqüència inclou el codi del programa i el bloc
             const progData = config.mapeoProgramas[progKey];
             const progFileName = progData ? progData.archivo : "";
+            const progWott = progData ? progData.wott : "";
             
-            const hasProg = activeSeq.indexOf(progFileName) !== -1;
+            const hasProg = activeSeq.indexOf(progFileName) !== -1 || activeSeq.indexOf(progWott) !== -1;
             const hasBloc = activeSeq.indexOf(blocVal) !== -1;
 
-            if (!hasProg || !hasBloc) {
-                const msg = `⚠️ Sincronia Perduda! Estàs a '${activeSeq.substring(0,15)}...' però el panell diu ${progKey}/${blocVal}`;
+            if (!hasProg) {
+                const msg = `⚠️ Sincronia Perduda! Estàs a '${activeSeq.substring(0,15)}...' però el panell diu ${progKey}`;
                 this.status(msg, "error");
                 this.log(msg, "WARN");
                 return false;
             }
+            // Opcional: advertir si el bloque no coincide pero no bloquear
+            if (!hasBloc) {
+                this.log(`⚠️ El bloque ${blocVal} no aparece en la secuencia activa. Continuando...`, "DEBUG");
+            }
 
             return true;
+        },
+
+        /**
+         * Obtiene el nombre de la secuencia activa desde Premiere y actualiza el estado.
+         * @returns {Promise<string>} Nombre de la secuencia activa (vacío si no hay).
+         */
+        refreshActiveSequence: async function() {
+            const state = window.FASTPASS_UI.State;
+            try {
+                const seqName = await this.callJSX("Context.activeSeq()");
+                state.activeSequenceName = seqName && seqName.indexOf("ERROR") === -1 ? seqName : "";
+                this.log(`🔍 Secuencia activa actualizada: ${state.activeSequenceName || "(ninguna)"}`, "DEBUG");
+                return state.activeSequenceName;
+            } catch (e) {
+                this.log(`⚠️ Error al refrescar secuencia activa: ${e.message}`, "WARN");
+                state.activeSequenceName = "";
+                return "";
+            }
         },
 
         deleteFile: function(path) {

@@ -58,6 +58,11 @@
                 // 1. CREACIÓ FÍSICA (AQUÍ YA SE INGESTAN LOS ARCHIVOS)
                 await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg);
 
+                // Registrar como último proyecto abierto
+                if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                    window.FASTPASS_UI.State.lastOpenedProjectName = fileName;
+                }
+
                 log("✅ Workflow NOU completat amb èxit.");
                 // Actualizar contexto para que el botón cambie a UPDATE si el proyecto está abierto
                 if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
@@ -172,8 +177,39 @@
             const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
             const destPath = (folderPath + "/" + projName).replace(/\\/g, "/");
             log(`🔍 [FLOW-LOAD] Abriendo proyecto existente: ${destPath}`);
+
+            const forceOverride = data.forceOverride || false;
             
-            // Bloquear el proyecto (lock)
+            // Verificar lock solo si no estamos forzando
+            if (!forceOverride) {
+                const lockPath = destPath + ".lock";
+                log(`🔍 [FLOW-LOAD] Verificando lock: ${lockPath}`);
+                const lockExists = await callJSX(`IO.exists('${getUtils().escape(lockPath)}')`);
+                log(`🔍 [FLOW-LOAD] lockExists = ${lockExists}`);
+                let lockOwner = null;
+                if (lockExists === "true") {
+                    lockOwner = await callJSX(`IO.readTxt('${getUtils().escape(lockPath)}')`);
+                    lockOwner = lockOwner.trim();
+                    log(`🔍 [FLOW-LOAD] lockOwner = "${lockOwner}"`);
+                }
+                const currentUser = data.config.autor;
+                log(`🔍 [FLOW-LOAD] currentUser = "${currentUser}"`);
+                if (lockOwner && lockOwner !== currentUser) {
+                    log(`⚠️ [FLOW-LOAD] Lock pertenece a otro usuario. Mostrando alerta.`);
+                    // Mostrar alerta
+                    alert(`${lockOwner} ya está editando ${data.progData.archivo} ${data.bloque}.`);
+                    // Cambiar botón a LOCKED
+                    if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
+                        log(`🔍 [FLOW-LOAD] Actualizando botón a LOCKED.`);
+                        FASTPASS_UI.Core.Context.updateButton('LOCKED', { ...data, lockOwner });
+                    }
+                    return;
+                } else {
+                    log(`🔍 [FLOW-LOAD] Lock propio o inexistente, continuando.`);
+                }
+            }
+            
+            // Bloquear el proyecto (lock) - sobrescribirá si forceOverride es true
             await FASTPASS_UI.Logic.Project.lock(destPath);
             
             // Abrir proyecto
@@ -189,6 +225,11 @@
             const ctx = await this._setupContext();
             const assets = await this._fullScan(ctx);
             await this._completeSyncUI(ctx, assets);
+            
+            // Registrar como último proyecto abierto
+            if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                window.FASTPASS_UI.State.lastOpenedProjectName = projName;
+            }
             
             log("✅ Projecte obert.");
             // Actualizar contexto para que el botón cambie a UPDATE si el proyecto está abierto
@@ -211,6 +252,16 @@
             // 2. Actualitzem State global
             window.FASTPASS_UI.State.detectedTheme = wotts.tema;
             window.FASTPASS_UI.State.hasMedia = !!media.mp4;
+            // Generar estructura de bloques a partir de los Wotts
+            if (wotts.list && wotts.list.length > 0) {
+                window.FASTPASS_UI.State.structure = window.Parse.files(wotts.list, ctx.progData.wott, ctx.bloque);
+                window.FASTPASS_UI.State.pieceIndex = 0;
+                log(`🏗️ Estructura generada: ${window.FASTPASS_UI.State.structure.length} blocs`);
+            } else {
+                window.FASTPASS_UI.State.structure = [];
+                window.FASTPASS_UI.State.pieceIndex = 0;
+                log("⚠️ No hi ha Wotts per generar estructura");
+            }
             
             // 3. Verificació de projecte existent al destí
             const folderDest = ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;

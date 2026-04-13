@@ -54,7 +54,14 @@
             // De moment, estem a la fase 1, així que exposem una versió compatible
             return {
                 tracks: {
-                    video: cfg.estructuras["TNs"].tracks,
+                    video: {
+                        mp4: cfg.estructuras["TNs"].tracks.v_mp4,
+                        fondos: cfg.estructuras["TNs"].tracks.v_fondos,
+                        graf: cfg.estructuras["TNs"].tracks.v_graf,
+                        tema: cfg.estructuras["TNs"].tracks.v_tema,
+                        chyrons: cfg.estructuras["TNs"].tracks.v_chyrons,
+                        lloc: cfg.estructuras["TNs"].tracks.v_lloc
+                    },
                     subtitle: { s1: cfg.estructuras["TNs"].tracks.s_s1, s2: cfg.estructuras["TNs"].tracks.s_s2 }
                 },
                 guarda: cfg.general.guarda,
@@ -85,7 +92,7 @@
                         return `${prog}_${bloq}_${user}_${mmdd}_${sanitizedTema}`;
                     },
                     getSequenceName: (ctx, sanitizedTema) => {
-                        return `${ctx.progData.archivo}_${sanitizedTema}`;
+                        return `${ctx.progData.wott}_${ctx.bloque}_${sanitizedTema}`;
                     }
                 },
                 debug: cfg.general.debug

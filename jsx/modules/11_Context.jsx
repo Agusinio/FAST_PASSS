@@ -64,17 +64,30 @@ FASTPASS.Context = {
             if (!app.project) return "ERR:NO_PROJECT";
             
             var num = app.project.sequences.numSequences;
+            var fallback = null;
             for (var i = 0; i < num; i++) {
                 var s = app.project.sequences[i];
-                if (s && s.name.indexOf(tokenProg) !== -1 && s.name.indexOf(tokenBloc) !== -1) {
-                    return String(s.name);
+                if (!s) continue;
+                var name = String(s.name);
+                if (name.indexOf(tokenProg) !== -1 && name.indexOf(tokenBloc) !== -1) {
+                    return name;
+                }
+                if (name.indexOf(tokenProg) !== -1 && !fallback) {
+                    fallback = name;
                 }
             }
+            if (fallback) {
+                return fallback;
+            }
+            // Si no hay ninguna con tokenProg, devolver la secuencia activa o la primera
+            var active = app.project.activeSequence;
+            if (active) return String(active.name);
+            if (num > 0) return String(app.project.sequences[0].name);
             return "ERR:NOT_FOUND";
         } catch(e) { return "ERR:" + e.message; }
     },
 
-    getSequenceName_FINAL: function() {
+    getSequenceName: function() {
         try {
             if (!app.project) return "ERROR:NO_PROJECT";
             
@@ -87,9 +100,9 @@ FASTPASS.Context = {
             
             if (!seq) return "ERROR:NO_SEQUENCE";
             
-            return String(seq.name); 
-        } catch(e) { 
-            return "ERROR_JSX:" + e.message; 
+            return String(seq.name);
+        } catch(e) {
+            return "ERROR_JSX:" + e.message;
         }
     },
 

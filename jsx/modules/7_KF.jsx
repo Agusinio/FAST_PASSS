@@ -150,7 +150,22 @@ FASTPASS.Anim = {
                 }
             }
 
-            var effect = app.project.getVideoEffectByName("Auto Reframe");
+            var effect = null;
+            // Intentar varios métodos para obtener el efecto Auto Reframe
+            if (app.project.getVideoEffectByName && typeof app.project.getVideoEffectByName === 'function') {
+                effect = app.project.getVideoEffectByName("Auto Reframe");
+            } else if (app.project.videoEffects && app.project.videoEffects.getVideoEffectByName) {
+                effect = app.project.videoEffects.getVideoEffectByName("Auto Reframe");
+            } else if (app.project.videoEffects) {
+                // iterar sobre la colección de efectos de video
+                for (var j = 0; j < app.project.videoEffects.numItems; j++) {
+                    var eff = app.project.videoEffects[j];
+                    if (eff.displayName === "Auto Reframe" || eff.matchName === "AE.ADBE.AutoReframe") {
+                        effect = eff;
+                        break;
+                    }
+                }
+            }
             if (effect) {
                 clip.addVideoEffect(effect);
                 return "OK_ADDED_REFRAME";

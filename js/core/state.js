@@ -7,9 +7,10 @@ FASTPASS_UI.State = {
     pieceIndex: 0,
     srtWorkMode: false,
     isKeyframeMode: false,
-    activeSequenceName: "", 
+    activeSequenceName: "",
+    lastOpenedProjectName: "",
     
-    masterTheme: null, 
+    masterTheme: null,
     srt: null,
 
     reset: function() {
@@ -18,6 +19,7 @@ FASTPASS_UI.State = {
         this.pieceIndex = 0;
         this.masterTheme = null;
         this.srt = null;
+        this.lastOpenedProjectName = "";
     }
 };
 
