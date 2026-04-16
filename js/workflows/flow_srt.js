@@ -34,12 +34,12 @@
                 if (btnIn) btnIn.disabled = false;
                 if (btnOut) btnOut.disabled = false;
                 
-                // BLOQUEIG DE TOTS ELS TRACKS (Video + Audio)
+                // BLOQUEIG DE TOTS ELS TRACKS (Video + Audio) via Logic.Tracks (JS module)
                 log("🔒 Bloquejant pistes de seguretat...");
-                await callJSX(`Tracks.setGlobalState('video', 'lock', true)`);
-                await callJSX(`Tracks.setGlobalState('audio', 'lock', true)`);
+                await getTracksLogic().setGlobalState('video', 'lock', true);
+                await getTracksLogic().setGlobalState('audio', 'lock', true);
 
-                // SELECCIONAR ARREMPERAT (Herramienta V)
+                // SELECCIONAR ARREMPERAT (Herramienta V) via JSX
                 log("🖱️ Canviant a eina de SELECCIÓ (V)...");
                 await callJSX(`System.tool('Selection')`);
 
@@ -49,9 +49,9 @@
                 if (btnIn) btnIn.disabled = true;
                 if (btnOut) btnOut.disabled = true;
                 
-                // DESBLOQUEIG TOTAL
-                await callJSX(`Tracks.setGlobalState('video', 'lock', false)`);
-                await callJSX(`Tracks.setGlobalState('audio', 'lock', false)`);
+                // DESBLOQUEIG TOTAL via Logic.Tracks (JS module)
+                await getTracksLogic().setGlobalState('video', 'lock', false);
+                await getTracksLogic().setGlobalState('audio', 'lock', false);
                 
                 getUtils().status("SRT MODE OFF", "warn");
             }
