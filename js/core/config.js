@@ -33,9 +33,9 @@
                     s_s2: 2 
                 },
                 programas: [
-                    { id: "TNCOMARQUES", archivo: "TN_COMARQUES", wott: "TNC", dir: "02_COMARQUES_PROJECTES", conductor: "Conduct_Nuria Sole Perez.mov" },
-                    { id: "TNM", archivo: "TN_MIGDIA", wott: "TNM", dir: "03_TN MIGDIA_PROJECTES", conductor: "Conduct_Xavi Coral Trullas.mov" },
-                    { id: "TNV", archivo: "TN_VESPRE", wott: "TNV", dir: "04_TN VESPRE_PROJECTES", conductor: "Conduct_Toni Cruanyes.mov" }
+                    { id: "TN COMARQUES", archivo: "TN_COMARQUES", wott: "TNC", dir: "02_COMARQUES_PROJECTES", conductor: "Conduct_Nuria Sole Perez.mov" },
+                    { id: "TN MIGDIA", archivo: "TN_MIGDIA", wott: "TNM", dir: "03_TN MIGDIA_PROJECTES", conductor: "Conduct_Xavi Coral Trullas.mov" },
+                    { id: "TN VESPRE", archivo: "TN_VESPRE", wott: "TNV", dir: "04_TN VESPRE_PROJECTES", conductor: "Conduct_Toni Cruanyes.mov" }
                 ]
             }
         }
@@ -59,6 +59,7 @@
                         fondos: cfg.estructuras["TNs"].tracks.v_fondos,
                         graf: cfg.estructuras["TNs"].tracks.v_graf,
                         tema: cfg.estructuras["TNs"].tracks.v_tema,
+                        tematitol: cfg.estructuras["TNs"].tracks.v_tema, // alias
                         chyrons: cfg.estructuras["TNs"].tracks.v_chyrons,
                         lloc: cfg.estructuras["TNs"].tracks.v_lloc
                     },

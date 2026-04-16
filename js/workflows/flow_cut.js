@@ -148,9 +148,9 @@
                 await callJSX(`Tracks.target(${T_MP4}, true, 'video')`);
                 log(`🔍 [FLOW-CUT] Target OK. Llamando scenes...`);
                 await callJSX(`Clips.scenes(${T_MP4})`);
-                log(`🔍 [FLOW-CUT] Scenes OK. Iniciant auto-placement...`);
-                await FASTPASS_UI.Workflows.Assembly.runAutoPlacement(T_MP4);
-                getUtils().status("Trossejat i Muntatge OK", "exito");
+                log(`🔍 [FLOW-CUT] Scenes OK. Guardant projecte...`);
+                await callJSX('Project.save()');
+                getUtils().status("Trossejat i Projecte guardat", "exito");
             } catch (e) { getUtils().handleError(e, "Troseja"); }
         },
 

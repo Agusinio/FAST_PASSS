@@ -67,8 +67,9 @@
                     s = s.toLowerCase();
                     if (s === "lead") return 0;
                     if (s === "i") return 1;
-                    if (s === "") return 2;
-                    return 3;
+                    if (s === "f") return 2;
+                    if (s === "") return 3;
+                    return 4;
                 };
                 
                 var w1 = weight(a.suffix);
@@ -195,9 +196,21 @@
 
             for(var i=0; i<block.chyrons.length; i++) {
                 var c = block.chyrons[i];
-                if(c.rol === "CONDUCTOR") hasConductor = true;
+                if((c.rol || '').toUpperCase() === "CONDUCTOR") hasConductor = true;
                 if(c.name && c.name.indexOf("   ") === 0) isGraphicIntro = true;
             }
+
+            // Detectar OFF per suffix "f"
+            if (block.suffix === "f") return "OFF";
+            // Detectar INSERT per presència a nom de chyron (case-insensitive)
+            var hasInsert = false;
+            for(var j=0; j<block.chyrons.length; j++) {
+                if(block.chyrons[j].name && block.chyrons[j].name.toUpperCase().includes("INSERT")) {
+                    hasInsert = true;
+                    break;
+                }
+            }
+            if (hasInsert) return "INSERT";
 
             if (isGraphicIntro) return "GRAPHIC_INTRO";
 

@@ -1,0 +1,217 @@
+{
+  "cleanFeed": {
+    "titol": "TN COMARQUES [senyal net]",
+    "mediaPath": "\\\\DSMEDIA13\\DSMEDIA13_BACT_A\\50634645_20260409134522_TN_COMARQUES_senyal_net.MP4",
+    "mediaStart": "13:45:00:00",
+    "data": "2026-04-09T00:00:00+02:00",
+    "clips": [
+      {
+        "id": "V1",
+        "in": "13:55:41",
+        "out": "13:59:52",
+        "titol": "TN_COMARQUES_V1_--p2_DADES_BENZINA__intro__GASOLINERES_LA_JONQUERA_FAN_CAIXA_AMB_FRANCESOS",
+        "liniesEscaleta": [
+          {
+            "titol": "--\u003ep2 DADES BENZINA",
+            "sequencia": 25,
+            "font": "OFP",
+            "durada": "0:00",
+            "num": "01te3",
+            "teVideo": true,
+            "duradaOnAir": null,
+            "horaEntradaPrevista": "13:56:41",
+            "horaSortidaPrevista": "13:56:41"
+          },
+          {
+            "titol": "intro",
+            "sequencia": 26,
+            "font": "ILLAE",
+            "durada": "0:27",
+            "num": "01i",
+            "teVideo": false,
+            "duradaOnAir": null,
+            "horaEntradaPrevista": "13:56:41",
+            "horaSortidaPrevista": "13:57:08",
+            "chyrons": [
+                  {
+                    "id": "000001",
+                    "in": "00:00:01:00",
+                    "out": "00:00:11:00",
+                    "rol": "Tema-Titol",
+                    "text": "GASOLINERES_LA_JONQUERA_FAN_CAIXA_AMB_FRANCESOS"
+                  },
+                  {
+                    "id": "000002",
+                    "in": "00:00:10:00",
+                    "out": "00:00:20:00",
+                    "rol": "Tema-Titol",
+                    "text": "GASOLINERES_LA_JONQUERA_FAN_CAIXA_AMB_FRANCESOS"
+                  }
+            ]
+          },
+          {
+            "titol": "GASOLINERES LA JONQUERA FAN CAIXA AMB FRANCESOS",
+            "sequencia": 27,
+            "font": "BV",
+            "durada": "1:44",
+            "num": "01",
+            "teVideo": true,
+            "duradaOnAir": "1:44",
+            "horaEntradaPrevista": "13:57:08",
+            "horaSortidaPrevista": "13:58:52",
+            "chyrons": [
+                {
+                  "id": "000003",
+                  "in": "00:00:01:00",
+                  "out": "00:00:07:00",
+                  "rol": "Llocdata",
+                  "text": "Vilallonga de Ter, Ripollès"
+                },
+                {
+                  "id": "000004",
+                  "in": "00:00:14:00",
+                  "out": "00:00:20:00",
+                  "rol": "Nomcarrec",
+                  "text": "Gemma Valverde directora de l'Escola La Daina"
+                },
+                {
+                  "id": "000005",
+                  "in": "00:00:22:00",
+                  "out": "00:00:26:00",
+                  "rol": "Nomcarrec",
+                  "text": "Marc Griguta"
+                },
+                {
+                  "id": "000006",
+                  "in": "00:01:04:00",
+                  "out": "00:01:08:00",
+                  "rol": "Nomcarrec",
+                  "text": "Felip Pons Pellicer veí de Vilallonga vinculat a Romania"
+                },
+                {
+                  "id": "000007",
+                  "in": "00:00:55:00",
+                  "out": "00:01:02:00",
+                  "rol": "Nomcarrec",
+                  "text": "Gabriel Meresca"
+                },
+                {
+                  "id": "000008",
+                  "in": "00:01:30:00",
+                  "out": "00:01:37:00",
+                  "rol": "Nomcarrec",
+                  "text": "Paul Tetru Gogulan"
+                },
+                {
+                  "id": "000009",
+                  "in": "00:01:45:00",
+                  "out": "00:01:51:00",
+                  "rol": "Nomcarrec",
+                  "text": "Heresioan Florin"
+                },
+                {
+                  "id": "000010",
+                  "in": "00:02:01:00",
+                  "out": "00:02:06:00",
+                  "rol": "Nomcarrec",
+                  "text": "Pere Sau Moret alcalde de Vilallonga de Ter"
+                },
+                {
+                  "id": "000011",
+                  "in": "00:02:17:00",
+                  "out": "00:02:22:00",
+                  "rol": "Firma",
+                  "text": "Neus Santamaria Bosch Oriol Durà Pipó"
+                }
+            ]
+              
+          }
+        ]
+      },
+      {
+        "id": "V2",
+        "in": "14:09:41",
+        "out": "14:13:37",
+        "titol": "TN_COMARQUES_V2_intro__SENSE_JUDICI_DE_CACHOU_SIS_ANYS_DESPRES",
+        "blocs": [],
+        "liniesEscaleta": [
+          {
+            "titol": "intro",
+            "sequencia": 41,
+            "font": "TE",
+            "durada": "0:13",
+            "num": "08i",
+            "teVideo": false,
+            "duradaOnAir": null,
+            "horaEntradaPrevista": "14:10:41",
+            "horaSortidaPrevista": "14:10:54"
+          },
+          {
+            "titol": "SENSE JUDICI DE CACHOU, SIS ANYS DESPRÉS",
+            "sequencia": 42,
+            "font": "BVU",
+            "durada": "1:43",
+            "num": "08",
+            "teVideo": true,
+            "duradaOnAir": "1:42",
+            "horaEntradaPrevista": "14:10:54",
+            "horaSortidaPrevista": "14:12:37"
+          }
+        ]
+      },
+      {
+        "id": "V3",
+        "in": "14:18:08",
+        "out": "14:22:11",
+        "titol": "TN_COMARQUES_V3_LEAD_EL_TARLA_DE_GIRONA__TE_foto_EL_TARLA_GI__intro__EL_TARLA_DE_GIRONA_ES_RENOVA",
+        "blocs": [],
+        "liniesEscaleta": [
+          {
+            "titol": "LEAD EL TARLA DE GIRONA",
+            "sequencia": 57,
+            "font": "OFT",
+            "durada": "0:00",
+            "num": "14lead",
+            "teVideo": true,
+            "duradaOnAir": "0:19",
+            "horaEntradaPrevista": "14:19:08",
+            "horaSortidaPrevista": "14:19:28"
+          },
+          {
+            "titol": "TE foto EL TARLA GI",
+            "sequencia": 58,
+            "font": "LLIB",
+            "durada": "0:00",
+            "num": "14te",
+            "teVideo": false,
+            "duradaOnAir": null,
+            "horaEntradaPrevista": "14:19:28",
+            "horaSortidaPrevista": "14:19:28"
+          },
+          {
+            "titol": "intro",
+            "sequencia": 59,
+            "font": "TE",
+            "durada": "0:32",
+            "num": "14i",
+            "teVideo": false,
+            "duradaOnAir": null,
+            "horaEntradaPrevista": "14:19:28",
+            "horaSortidaPrevista": "14:20:00"
+          },
+          {
+            "titol": "EL TARLA DE GIRONA ES RENOVA",
+            "sequencia": 60,
+            "font": "BVU",
+            "durada": "1:27",
+            "num": "14",
+            "teVideo": true,
+            "duradaOnAir": "1:30",
+            "horaEntradaPrevista": "14:19:41",
+            "horaSortidaPrevista": "14:21:11"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -111,27 +111,19 @@
         },
 
         /**
-         * GRAFIC (Mask): Tapa el clip seleccionat amb un gràfic de la seva durada
+         * GRAFIC (Auto‑placement): Col·loca automàticament tots els rètols, traduccions i llocdata
+         * sense fer scene‑detection ni guardar el projecte.
          */
         runPlaceGraphic: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const T_MP4 = cfg.tracks.video.mp4;
-            const T_GRAFS = cfg.tracks.video.graficos;
+            log("🎬 Executant auto‑placement de gràfics (sense guardar)...");
 
             try {
-                // Busquem clip a la pista de video (MP4) per saber on tallar el gràfic
-                const infoStr = await callJSX(`Clips.at(${T_MP4}, -1, 'video')`);
-                if (!infoStr || infoStr === "null") throw new Error("Has de posar el cabezal sobre un clip de video per fer de guia.");
-                
-                const info = JSON.parse(infoStr);
-                const graphicName = "GRAFIC_GENERIC.png"; // Placeholder: En el futur buscarem el real
-
-                log(`🎭 Tapant clip [${info.name}] amb gràfic a V${T_GRAFS}`);
-                await callJSX(`Clips.insert('${getUtils().escape(graphicName)}', ${T_GRAFS}, ${info.start}, ${info.end}, 'video')`);
-                
-                getUtils().status("Gràfic Ajustat", "exito");
-            } catch (e) { getUtils().handleError(e, "PlaceGraphicMask"); }
+                await FASTPASS_UI.Workflows.Assembly.runAutoPlacement(T_MP4);
+                getUtils().status("Auto‑placement completat", "exito");
+            } catch (e) { getUtils().handleError(e, "PlaceGraphic"); }
         },
 
         runPlaceGraph169: async function () {
