@@ -52,13 +52,51 @@ Log analizado: log de ejecución del ensamblaje automático (THE MAGIC)
 - **Situación**: Gracias a los cambios realizados (cálculo de duración limitada al clip candidato y uso de `endTime` absoluto), las traducciones ya no se extienden más allá del clip base. El log muestra que la última traducción del bloque 12 termina exactamente en `clipEnd` (43.44s).
 - **Acción requerida**: Ninguna, se considera resuelto. Mantener la lógica actual.
 
-### 9. Flash white cleanup extra deletion bug
-- **Situación**: Durante la limpieza física de clips flash whites (cortos), el algoritmo detecta correctamente el triplete (clipA anterior, clipB corto, clipC posterior) y llama a `Clips.end` y `Clips.remove` con los índices apropiados. Sin embargo, después de la operación, **el clip anterior a clipA también se elimina**, provocando solapamientos en el timeline.
-- **Evidencia en el log**:
-  - Detección: `🎯 Detección flash white: clipB=6 (64.24‑64.36), clipA=5 (54.88‑59.60), clipC=7 (64.36‑74.32)`.
-  - Diagnóstico: los índices 5,6,7 corresponden a los clips esperados (confirmado con `Clips.get`).
-  - Después de extender clip 5 y eliminar clips 7 y 6, el clip con índice 4 desaparece.
-- **Acción requerida**: Investigar la causa del desplazamiento de índices. Posibles causas: indexado 0‑based vs 1‑based en ExtendScript, re‑numeración incorrecta después de cada eliminación, trackIdx erróneo. Consultar el documento detallado [`docs/FLASH_WHITE_CLEANUP_PROBLEM.md`](docs/FLASH_WHITE_CLEANUP_PROBLEM.md) para el análisis completo y los próximos pasos.
+### 9. Flash white cleanup extra deletion bug — ✅ RESOLT (2026-04-16)
+- **Causa arrel**: Els índexs `idxA/idxB/idxC` usats en les crides JSX corresponien a posicions dins el sub-array `blockClips` (un `slice()` que comença a la posició 1 del array global), mentre que `track.clips[]` de Premiere indexa des del 0 del timeline complet. Offset de 1 per cada operació, acumulatiu.
+- **Solució aplicada**:
+  1. Afegides `Clips.endAt(trackIdx, startSec, newEnd)` i `Clips.removeAt(trackIdx, startSec)` a `6_Clips.jsx`. Localitzen el clip per temps d'inici, immunitzades contra renumeració.
+  2. Extret tot el bloc de neteja a `Clips.cleanFlashWhites(clips, mainTrack)` a `6_Clips_Logic.js`. Usa `endAt`/`removeAt` i refresca el array des de Premiere despres de cada operació.
+  3. La crida s'ha mogut de `_placeMagicChyrons` a `runAutoPlacement` (una sola vegada, sobre el timeline complet, **abans** del loop de blocs).
+- **Arxius modificats**: `jsx/modules/6_Clips.jsx`, `js/logic/6_Clips_Logic.js`, `js/workflows/flow_assembly.js`
+
+---
+
+## Modularitzacio de flow_assembly.js — ✅ COMPLETAT (2026-04-16)
+
+Com a part de la sessio de refactoritzacio (vegeu `AUDITORIA_FLOW_ASSEMBLY.md`), s'han migrat les seguents funcions de negoci fora de `flow_assembly.js`:
+
+| Funcio | Origen | Desti |
+|--------|--------|-------|
+| `cleanFlashWhites` | inline a `_placeMagicChyrons` | `6_Clips_Logic.js` |
+| `findCandidateClip` | funcio interna local | `14_Assembly_Logic.js` |
+| `calcFootprintDelta` | inline a `_placeMagicChyrons` | `14_Assembly_Logic.js` |
+| `classifyChyrons` | inline a `_placeMagicChyrons` | `14_Assembly_Logic.js` |
+| `mergeOffBlocks` | inline a `runAutoPlacement` | `13_Parse.js` |
+
+**Reduccio**: `flow_assembly.js` passa de 662 linies a ~505 linies.
+**Beneficis**: funcions pures testables, logica de negoci centralitzada, eliminacio de 5 duplicacions del patro `c.name.includes("Tema-Titol")`.
+
+---
+
+## Progres realitzat avui (2026-04-16)
+
+1. Resolucio del bug de flash whites (problem 9) amb endAt/removeAt i refresh desde Premiere.
+2. Modularitzacio de flow_assembly.js migrando 5 funcions als moduls de logica corresponents.
+3. Generats documents DIAGNOSTICO_FLASH_CLEANUP.md i AUDITORIA_FLOW_ASSEMBLY.md a /docs.
+
+---
+
+## Proxims passos suggerits
+
+1. **Ajustar outpoints de chyrons**: Modificar la insercion de NOMCARREC, FIRMA y Llocdata para que su duracion se recorte al final del clip candidato.
+2. **Corregir comparacion de roles**: Cambiar `c.rol === "NOMCARREC"` por comparacion insensible a mayusculas/minusculas.
+3. **Verificar colocacion de Tema-Titol**: Confirmar que se coloca en todos los bloques necesarios y en el track correcto.
+4. **Implementar colocacion del Conductor**: Revisar logica de seleccion del conductor.
+5. **Validar visibilidad de la primera traduccion**: Solicitar confirmacion al usuario.
+6. **Revisar solapamiento entre grupos de traducciones**: Decidir si es necesario evitar que traducciones de distintos timecodes ocupen el mismo espacio temporal.
+
+Este archivo servira como referencia para la siguiente sesion de desarrollo.
 
 ## Progreso realizado hoy (2026‑04‑16)
 Se ha trabajado en la implementación de la limpieza física de flash whites. Las siguientes tareas se han completado:

@@ -11,6 +11,7 @@
     const getUtils = () => window.FASTPASS_UI.Utils;
     const getClipsLogic = () => window.FASTPASS_UI.Logic.Clips;
     const getParse = () => window.Parse;
+    const getAssemblyLogic = () => window.FASTPASS_UI.Logic.Assembly;
 
     const log = (m) => getUtils().log(m, "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
@@ -44,6 +45,8 @@
             try {
                 // 1. Obtenir clips de la línia de temps
                 const clips = await getClipsLogic().getTrackClips(mainTrack, "video");
+                // Netejar flash whites del timeline abans del processament de blocs
+                await getClipsLogic().cleanFlashWhites(clips, mainTrack);
                 log(`📊 Clips obtinguts: ${clips.length}`);
                 // Log detallat dels clips
                 clips.forEach((clip, idx) => log(`   Clip ${idx}: start=${clip.start.toFixed(2)}, end=${clip.end.toFixed(2)}, duration=${(clip.end - clip.start).toFixed(2)}`));
@@ -65,30 +68,8 @@
                 let conductorPlaced = false;
 
                 const struct = state.structure;
-                // Fusionar bloques OFF: si hay un bloque con suffix 'f' y el siguiente tiene el mismo número base, combinarlos
-                const mergedStruct = [];
-                for (let i = 0; i < struct.length; i++) {
-                    const block = struct[i];
-                    const suffix = block.id.match(/[a-z]+$/)?.[0] || '';
-                    const baseId = block.id.replace(/[a-z]+$/, '');
-                    if (suffix === 'f' && i + 1 < struct.length) {
-                        const nextBlock = struct[i + 1];
-                        const nextBaseId = nextBlock.id.replace(/[a-z]+$/, '');
-                        if (nextBaseId === baseId) {
-                            // Combinar chyrons
-                            const combinedChyrons = [...block.chyrons, ...nextBlock.chyrons];
-                            const mergedBlock = {
-                                ...block,
-                                chyrons: combinedChyrons,
-                                originalIds: [block.id, nextBlock.id]
-                            };
-                            mergedStruct.push(mergedBlock);
-                            i++; // saltar el siguiente bloque
-                            continue;
-                        }
-                    }
-                    mergedStruct.push(block);
-                }
+                // Fusionar bloques OFF (delega a Parse.mergeOffBlocks)
+                const mergedStruct = getParse().mergeOffBlocks(struct);
                 log(`📊 Estructura carregada: ${struct.length} blocs → fusionats a ${mergedStruct.length} blocs`);
                 // Log detallat de cada bloc i els seus chirons
                 for (const blk of mergedStruct) {
@@ -315,80 +296,9 @@
         _placeMagicChyrons: async function (block, clips, tracks, options = {}) {
             log(`   🔮 Aplicant Footprint Matching a ${block.id}...`);
 
-            let anchors = [];
-            for (const c of block.chyrons) {
-                if ((c.rol || '').toUpperCase() !== "NOMCARREC") continue;
-                const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
-                const candidate = clips.find(clip => clip.start <= (idealPos + 2) && clip.start >= (idealPos - 2) && (clip.end - clip.start) > 2.5);
-                if (candidate) {
-                    anchors.push({ delta: candidate.start - idealPos });
-                }
-            }
-
-            const avgDelta = anchors.length > 0 ? (anchors.reduce((s, a) => s + a.delta, 0) / anchors.length) : 0;
+            // Calcular decalatge mig (Footprint Matching) — delega a Assembly_Logic
+            const avgDelta = getAssemblyLogic().calcFootprintDelta(block, clips);
             log(`      📐 Decalatge mig detectat per al bloc: ${avgDelta.toFixed(2)}s`);
-
-            // Limpieza física de clips cortos (flash blanco) con gap <5 frames
-            const maxGap = 0.2; // 5 frames a 25 fps
-            const minDuration = 0.2; // clips más cortos que esto se consideran artefactos
-            const frameDuration = 0.04; // 1 frame a 25 fps
-            let changed = true;
-            while (changed) {
-                changed = false;
-                for (let i = 1; i < clips.length - 1; i++) {
-                    const clipB = clips[i];
-                    const clipA = clips[i - 1];
-                    const clipC = clips[i + 1];
-                    const gapAB = clipB.start - clipA.end;
-                    const durationB = clipB.end - clipB.start;
-                    // Condición: gap pequeño y clipB corto (flash blanco)
-                    if (gapAB < maxGap && durationB < minDuration) {
-                        // Determinar hasta dónde extender clipA (final del hueco)
-                        const clipD = i + 2 < clips.length ? clips[i + 2] : null;
-                        let newEnd = clipD ? clipD.start : clipC.end;
-                        // Si clipD existe y no hay gap significativo (clipC.end ≈ clipD.start), restar un frame para evitar solapamiento
-                        if (clipD && Math.abs(clipC.end - clipD.start) < 0.001) {
-                            newEnd -= frameDuration;
-                        }
-                        const trackIdx = tracks.video || 1;
-                        const idxA = i - 1;
-                        const idxB = i;
-                        const idxC = i + 1;
-                        log(`      🔧 Detectat flash blanco: clip ${idxB} (${clipB.start.toFixed(2)}‑${clipB.end.toFixed(2)}) amb gap ${gapAB.toFixed(2)}s. Eliminant clip ${idxB} i ${idxC}, estenent clip ${idxA} fins a ${newEnd.toFixed(2)}s`);
-                        log(`      🎯 trackIdx=${trackIdx}, idxA=${idxA}, idxB=${idxB}, idxC=${idxC}`);
-                        // Verificar clips en los índices antes de operar
-                        const clipInfoA = await callJSX(`Clips.get(${trackIdx}, ${idxA}, 'video')`);
-                        const clipInfoB = await callJSX(`Clips.get(${trackIdx}, ${idxB}, 'video')`);
-                        const clipInfoC = await callJSX(`Clips.get(${trackIdx}, ${idxC}, 'video')`);
-                        log(`      🔍 Clip A: ${clipInfoA}`);
-                        log(`      🔍 Clip B: ${clipInfoB}`);
-                        log(`      🔍 Clip C: ${clipInfoC}`);
-                        try {
-                            // Extender clipA
-                            await callJSX(`Clips.end(${trackIdx}, ${idxA}, ${newEnd})`);
-                            // Eliminar clipC (posterior) primero para mantener índices
-                            await callJSX(`Clips.remove(${trackIdx}, ${idxC}, 'video')`);
-                            // Eliminar clipB (flash blanco) después
-                            await callJSX(`Clips.remove(${trackIdx}, ${idxB}, 'video')`);
-                            // Actualizar el array en memoria
-                            clipA.end = newEnd;
-                            // Eliminar clipB y clipC del array (primero C, luego B para mantener índices)
-                            clips.splice(i + 1, 1); // elimina clipC (posición i+1)
-                            clips.splice(i, 1); // elimina clipB (ahora posición i)
-                            log(`      ✅ Clip eliminat i anterior estès fins a ${newEnd.toFixed(2)}s`);
-                            changed = true;
-                            break; // salir del for y reiniciar while
-                        } catch (err) {
-                            log(`      ❌ Error en la fusió física: ${err.message}`);
-                        }
-                    }
-                }
-            }
-
-            log(`      📋 Clips després de la neteja física: ${clips.length} clips`);
-            clips.forEach((clip, idx) => {
-                log(`         Clip ${idx}: start=${clip.start.toFixed(2)}, end=${clip.end.toFixed(2)}, duration=${(clip.end - clip.start).toFixed(2)}`);
-            });
 
             // Extraer índice de segmento para traduccions
             function extractSegmentIndex(name) {
@@ -396,91 +306,17 @@
                 return match ? parseInt(match[1]) : null;
             }
 
-
-            // Función auxiliar para encontrar clip contenedor (similar a NOMCARREC)
-            function findCandidateClip(idealPos, tc) {
-                // log(`      🔍 findCandidateClip: tc=${tc}, idealPos=${idealPos.toFixed(2)}, clips disponibles: ${clips.length}`);
-                // Márgenes mínimos (segundos)
-                const minMarginBefore = 0.5;   // margen respecto al inicio del clip
-                const minMarginAfter = 3.0;    // margen respecto al final del clip
-                // 1. Buscar clips que contengan idealPos (con pequeña tolerancia) y tengan margen suficiente
-                let containerClips = clips.filter(clip =>
-                    clip.start <= idealPos + 0.1 &&
-                    clip.end >= idealPos - 0.1 &&
-                    (clip.end - clip.start) > 2.5 &&
-                    (idealPos - clip.start) >= minMarginBefore &&
-                    (clip.end - idealPos) >= minMarginAfter
-                );
-                // log(`      🔍 containerClips trobats: ${containerClips.length}`);
-                if (containerClips.length > 0) {
-                    // Elegir el clip que termina antes (más corto) para evitar sobrepasar el clip base V1
-                    let chosenClip = containerClips.reduce((prev, curr) => prev.end < curr.end ? prev : curr);
-                    // log(`      🔍 Clip contenedor trobat per a tc ${tc}: [${chosenClip.start.toFixed(2)}-${chosenClip.end.toFixed(2)}] (seleccionat el més curt)`);
-                    return chosenClip;
-                }
-                // 2. Si no hay clips con margen suficiente, buscar clips contenedores sin restricción de margen (fallback)
-                let containerClipsFallback = clips.filter(clip =>
-                    clip.start <= idealPos + 0.1 &&
-                    clip.end >= idealPos - 0.1 &&
-                    (clip.end - clip.start) > 2.5
-                );
-                if (containerClipsFallback.length > 0) {
-                    let chosenClip = containerClipsFallback.reduce((prev, curr) => prev.end < curr.end ? prev : curr);
-                    // log(`      ⚠️ Clip contenedor sense margè suficient, seleccionat: [${chosenClip.start.toFixed(2)}-${chosenClip.end.toFixed(2)}]`);
-                    return chosenClip;
-                }
-                // 3. Fallback: clip cuyo inicio esté dentro de ±2 segundos
-                let nearbyClip = clips.find(clip =>
-                    clip.start <= (idealPos + 2) &&
-                    clip.start >= (idealPos - 2) &&
-                    (clip.end - clip.start) > 2.5
-                );
-                if (nearbyClip) {
-                    // log(`      ⚠️ Clip contenedor no trobat, es fa servir clip proper: [${nearbyClip.start.toFixed(2)}-${nearbyClip.end.toFixed(2)}]`);
-                    return nearbyClip;
-                }
-                // 4. Ultimo fallback: primer clip del bloc
-                // log(`      ⚠️ No s'ha trobat clip candidat per a tc ${tc}, es fa servir el primer clip del bloc`);
-                return clips[0];
-            }
-
-            // Separar chirons por tipus
-            // log(`      📋 Chirons del bloc ${block.id}: ${block.chyrons.length}`);
-            // block.chyrons.forEach((c, i) => log(`        ${i}: rol="${c.rol}", nom="${c.name}"`));
-            const temaTitols = [];
-            const traduccions = [];
-            const otros = [];
-            for (const c of block.chyrons) {
-                if (c.name.includes("Tema-Titol") || c.name.includes("TITOL")) {
-                    temaTitols.push(c);
-                } else if ((c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO")) {
-                    traduccions.push(c);
-                } else {
-                    otros.push(c);
-                }
-            }
-
-            // Log de classificació per a depuració
-            // log(`      📊 Chirons classificats: ${temaTitols.length} tema‑titols, ${traduccions.length} traduccions, ${otros.length} altres`);
+            // Classificar chyrons per tipus (delega a Assembly_Logic.classifyChyrons)
+            const { temaTitols, traduccions, otros, hasNom, hasFirma } = getAssemblyLogic().classifyChyrons(block.chyrons);
 
             // Ordenar traduccions per segment (o per timecode com a fallback)
             traduccions.sort((a, b) => {
                 const idxA = extractSegmentIndex(a.name);
                 const idxB = extractSegmentIndex(b.name);
                 if (idxA !== null && idxB !== null) return idxA - idxB;
-                // Fallback: ordenar per timecode
                 if (a.tc && b.tc) return a.tc.localeCompare(b.tc);
-                // Finalment per nom
                 return a.name.localeCompare(b.name);
             });
-
-            // Determinar si el bloc és un INSERT (NomCarrec + Firma)
-            let hasNom = false;
-            let hasFirma = false;
-            for (const c of block.chyrons) {
-                if ((c.rol || '').toUpperCase() === "NOMCARREC") hasNom = true;
-                if (c.name.includes("Firma")) hasFirma = true;
-            }
 
             // Col·locar Tema‑Titol primer (només el primer si n'hi ha més d'un)
             if (temaTitols.length > 0) {
@@ -517,7 +353,7 @@
 
                     // Calcular posició ideal basada en el tc
                     const idealPos = clips[0].start + getUtils().timeToSeconds(tc);
-                    let candidateClip = findCandidateClip(idealPos, tc);
+                    let candidateClip = getAssemblyLogic().findCandidateClip(clips, idealPos);
 
                     const clipStart = candidateClip.start;
                     const clipEnd = candidateClip.end;
@@ -564,7 +400,7 @@
             for (const c of otros) {
                 const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
                 const adjustedTime = idealPos + avgDelta;
-                let candidateClip = findCandidateClip(idealPos, c.tc);
+                let candidateClip = getAssemblyLogic().findCandidateClip(clips, idealPos);
                 // Forzar segundo clip para chyrons de lugar en bloques OFF
                 if ((c.name.includes("Lloc") || c.name.includes("Data")) && isOffBlock && clips.length >= 2) {
                     candidateClip = clips[1];

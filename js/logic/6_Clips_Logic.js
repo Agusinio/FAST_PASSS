@@ -160,6 +160,77 @@
             }
             utils.log(`[getTrackClips] Retornant ${clips.length} clips`);
             return clips;
+        },
+
+        /**
+         * cleanFlashWhites: Detecta i elimina físicament els clips "flash blanc" del timeline.
+         *
+         * Un flash blanc és un clip de durada < minDuration amb un gap < maxGap respecte
+         * al clip anterior. Per cada flash (clipB) s'elimina clipB i clipC (posterior) i
+         * s'estén clipA (anterior) per tapar el forat.
+         *
+         * Usa operacions per temps (endAt / removeAt) per evitar el desfasament d'índexs
+         * que es produïa amb les operacions per posició. Refresca el array des de Premiere
+         * després de cada operació per mantenir sincronització perfecta.
+         *
+         * @param {Array}  clips      - Array de clips (modificat in-place)
+         * @param {number} mainTrack  - Índex de pista V principal (1-based, igual que mainTrack)
+         * @param {Object} [options]  - { maxGap, minDuration, frameDuration }
+         * @returns {Array} clips actualitzat
+         */
+        cleanFlashWhites: async function (clips, mainTrack, options) {
+            const maxGap       = (options && options.maxGap       !== undefined) ? options.maxGap       : 0.2;
+            const minDuration  = (options && options.minDuration  !== undefined) ? options.minDuration  : 0.2;
+            const frameDuration = (options && options.frameDuration !== undefined) ? options.frameDuration : 0.04;
+            const trackIdx     = mainTrack; // JSX _get() converteix 1 → tracks[0] (V1)
+
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (let i = 1; i < clips.length - 1; i++) {
+                    const clipB = clips[i];
+                    const clipA = clips[i - 1];
+                    const clipC = clips[i + 1];
+                    const gapAB     = clipB.start - clipA.end;
+                    const durationB = clipB.end   - clipB.start;
+
+                    if (gapAB < maxGap && durationB < minDuration) {
+                        // Fins on esteneu clipA? Si clipD existeix i toca clipC, restem 1 frame per evitar solapament
+                        const clipD  = (i + 2 < clips.length) ? clips[i + 2] : null;
+                        let newEnd   = clipD ? clipD.start : clipC.end;
+                        if (clipD && Math.abs(clipC.end - clipD.start) < 0.001) {
+                            newEnd -= frameDuration;
+                        }
+
+                        utils.log(`      🔧 Flash blanc detectat: [${clipB.start.toFixed(2)}‑${clipB.end.toFixed(2)}] gap=${gapAB.toFixed(2)}s. Estenent anterior fins a ${newEnd.toFixed(2)}s`);
+
+                        try {
+                            // Operacions per temps → immunitat a renumeració d'índexs
+                            await utils.callJSX(`Clips.endAt(${trackIdx}, ${clipA.start}, ${newEnd})`);
+                            await utils.callJSX(`Clips.removeAt(${trackIdx}, ${clipC.start}, 'video')`);
+                            await utils.callJSX(`Clips.removeAt(${trackIdx}, ${clipB.start}, 'video')`);
+
+                            // Refrescar el array des de Premiere per resincronitzar índexs
+                            const refreshed = await this.getTrackClips(mainTrack, "video");
+                            clips.length = 0;
+                            refreshed.forEach(c => clips.push(c));
+
+                            utils.log(`      ✅ Flash blanc eliminat. Timeline refrescat: ${clips.length} clips`);
+                            changed = true;
+                            break; // reiniciar while
+                        } catch (err) {
+                            utils.log(`      ❌ Error en la fusió física: ${err.message || err}`);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            utils.log(`      📋 Clips després de la neteja de flash whites: ${clips.length} clips`);
+            clips.forEach((clip, idx) => {
+                utils.log(`         Clip ${idx}: start=${clip.start.toFixed(2)}, end=${clip.end.toFixed(2)}, duration=${(clip.end - clip.start).toFixed(2)}`);
+            });
+            return clips;
         }
     };
 

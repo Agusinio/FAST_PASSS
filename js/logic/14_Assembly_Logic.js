@@ -12,7 +12,8 @@
         callJSX: (s) => window.FASTPASS_UI.Utils.callJSX(s),
         log: (m) => window.FASTPASS_UI.Utils.log(m, "DEBUG"),
         delay: (ms) => window.FASTPASS_UI.Utils.delay(ms),
-        escape: (s) => window.FASTPASS_UI.Utils.escape(s)
+        escape: (s) => window.FASTPASS_UI.Utils.escape(s),
+        timeToSeconds: (tc) => window.FASTPASS_UI.Utils.timeToSeconds(tc)
     };
 
     FASTPASS_UI.Logic.Assembly = {
@@ -91,12 +92,120 @@
             const pathRaw = `${cfg.rutas.conductors}${conductorFile}`;
             
             utils.log(`👤 Assembly: Inserint conductor ${conductorFile}`);
-            const payload = JSON.stringify([pathRaw.replace(/\\/g, "\\\\")]);
+            const payload = JSON.stringify([pathRaw.replace(/\\/g, "\\\\\\\\")]);  // corregit doble escape
             // Literal: IO.importFiles
             await utils.callJSX(`IO.importFiles('${payload}', 'root')`);
             await window.Clips.insert(conductorFile, cfg.tracks.video.chyrons, targetTime);
             
             return "OK_CONDUCTOR";
+        },
+
+        /**
+         * calcFootprintDelta: Calcula el decalatge mig entre posició ideal i posició real
+         * dels NomCarrec d'un bloc. Retorna 0 si no hi ha ancoratges disponibles.
+         *
+         * @param {Object} block  - Bloc amb array block.chyrons
+         * @param {Array}  clips  - Array de clips del bloc (blockClips)
+         * @returns {number} Desplaçament mig en segons
+         */
+        calcFootprintDelta: function(block, clips) {
+            const anchors = [];
+            for (const c of block.chyrons) {
+                if ((c.rol || '').toUpperCase() !== "NOMCARREC") continue;
+                const idealPos = clips[0].start + utils.timeToSeconds(c.tc);
+                const candidate = clips.find(clip =>
+                    clip.start <= (idealPos + 2) &&
+                    clip.start >= (idealPos - 2) &&
+                    (clip.end - clip.start) > 2.5
+                );
+                if (candidate) {
+                    anchors.push({ delta: candidate.start - idealPos });
+                }
+            }
+            return anchors.length > 0
+                ? anchors.reduce((s, a) => s + a.delta, 0) / anchors.length
+                : 0;
+        },
+
+        /**
+         * findCandidateClip: Busca el clip més adient per col·locar un chyron a idealPos.
+         * Intenta trobar un clip contenidor amb marges suficients; cau en fallbacks progressius.
+         *
+         * @param {Array}  clips    - Array de clips del bloc
+         * @param {number} idealPos - Temps ideal en segons
+         * @param {Object} [opts]   - { minMarginBefore, minMarginAfter }
+         * @returns {Object} Clip candidat
+         */
+        findCandidateClip: function(clips, idealPos, opts) {
+            const minMarginBefore = (opts && opts.minMarginBefore !== undefined) ? opts.minMarginBefore : 0.5;
+            const minMarginAfter  = (opts && opts.minMarginAfter  !== undefined) ? opts.minMarginAfter  : 3.0;
+
+            // 1. Clips que contenen idealPos amb marges suficients
+            let containerClips = clips.filter(clip =>
+                clip.start <= idealPos + 0.1 &&
+                clip.end   >= idealPos - 0.1 &&
+                (clip.end - clip.start) > 2.5 &&
+                (idealPos - clip.start) >= minMarginBefore &&
+                (clip.end - idealPos)   >= minMarginAfter
+            );
+            if (containerClips.length > 0) {
+                return containerClips.reduce((prev, curr) => prev.end < curr.end ? prev : curr);
+            }
+
+            // 2. Fallback: contenidors sense restricció de marge
+            let containerFallback = clips.filter(clip =>
+                clip.start <= idealPos + 0.1 &&
+                clip.end   >= idealPos - 0.1 &&
+                (clip.end - clip.start) > 2.5
+            );
+            if (containerFallback.length > 0) {
+                return containerFallback.reduce((prev, curr) => prev.end < curr.end ? prev : curr);
+            }
+
+            // 3. Fallback: clip proper (±2s)
+            let nearbyClip = clips.find(clip =>
+                clip.start <= (idealPos + 2) &&
+                clip.start >= (idealPos - 2) &&
+                (clip.end - clip.start) > 2.5
+            );
+            if (nearbyClip) return nearbyClip;
+
+            // 4. Darrer recurs: primer clip del bloc
+            return clips[0];
+        },
+
+        /**
+         * classifyChyrons: Classifica els chyrons d'un bloc per tipus:
+         * temaTitols, traduccions, otros. També detecta si hi ha NomCarrec i Firma.
+         *
+         * Centralitza els 5+ llocs on s'usava c.name.includes("Tema-Titol").
+         *
+         * @param {Array} chyrons - Array de chyrons del bloc
+         * @returns {{ temaTitols, traduccions, otros, hasNom, hasFirma }}
+         */
+        classifyChyrons: function(chyrons) {
+            const temaTitols = [];
+            const traduccions = [];
+            const otros = [];
+            let hasNom = false;
+            let hasFirma = false;
+
+            for (const c of chyrons) {
+                if (c.name.includes("Tema-Titol") || c.name.includes("TITOL")) {
+                    temaTitols.push(c);
+                } else if (
+                    (c.rol || '').toUpperCase().includes("TRADUCCIO") ||
+                    c.name.toUpperCase().includes("TRADUCCIO")
+                ) {
+                    traduccions.push(c);
+                } else {
+                    otros.push(c);
+                }
+                if ((c.rol || '').toUpperCase() === "NOMCARREC") hasNom = true;
+                if (c.name.includes("Firma")) hasFirma = true;
+            }
+
+            return { temaTitols, traduccions, otros, hasNom, hasFirma };
         }
     };
 

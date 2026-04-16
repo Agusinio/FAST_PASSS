@@ -192,6 +192,45 @@ FASTPASS.Clips = {
     },
 
     /**
+     * endAt: Canvia el temps final del clip que inicia a startSec (cerca per temps, no per índex).
+     * Immunitzat contra renumeració de clips.
+     */
+    endAt: function(trackIdx, startSec, newEndSec, type) {
+        try {
+            var track = this._get(trackIdx, type || "video");
+            if (!track) return "ERR_TRACK_NOT_FOUND";
+            var target = parseFloat(startSec);
+            for (var i = 0; i < track.clips.numItems; i++) {
+                if (Math.abs(track.clips[i].start.seconds - target) < 0.05) {
+                    var t = new Time(); t.seconds = parseFloat(newEndSec);
+                    track.clips[i].end = t;
+                    return "OK";
+                }
+            }
+            return "ERR_CLIP_NOT_FOUND_AT_" + startSec;
+        } catch (e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * removeAt: Elimina el clip que inicia a startSec (cerca per temps, no per índex).
+     * Immunitzat contra renumeració de clips.
+     */
+    removeAt: function(trackIdx, startSec, type) {
+        try {
+            var track = this._get(trackIdx, type || "video");
+            if (!track) return "ERR_TRACK_NOT_FOUND";
+            var target = parseFloat(startSec);
+            for (var i = 0; i < track.clips.numItems; i++) {
+                if (Math.abs(track.clips[i].start.seconds - target) < 0.05) {
+                    track.clips[i].remove(true, true);
+                    return "OK";
+                }
+            }
+            return "ERR_CLIP_NOT_FOUND_AT_" + startSec;
+        } catch (e) { return "ERR: " + e.message; }
+    },
+
+    /**
      * inPoint: Canvia el punt d'entrada (inPoint) d'un clip.
      */
     inPoint: function(trackIdx, clipIdx, seconds, type) {

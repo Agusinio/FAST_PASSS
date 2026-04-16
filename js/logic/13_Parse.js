@@ -245,6 +245,41 @@
                 }
                 linea.chyrons.sort((a, b) => a.tc.localeCompare(b.tc));
             }
+        },
+
+        /**
+         * mergeOffBlocks: Fusiona els blocs amb sufix "f" amb el seu bloc base adjacent.
+         *
+         * Quan un bloc té id terminat en "f" (p.ex. "11f") i el bloc següent té el mateix
+         * número base (p.ex. "11"), s'uneixen els seus chyrons en un sol bloc fusionat.
+         * El bloc fusionat manté l'id del bloc "f" i afegeix un camp originalIds.
+         *
+         * @param {Array} structure - Array de blocs tal com el retorna Parse.files()
+         * @returns {Array} Nova llista de blocs amb els parells OFF fusionats
+         */
+        mergeOffBlocks: function(structure) {
+            const merged = [];
+            for (let i = 0; i < structure.length; i++) {
+                const block  = structure[i];
+                const suffix = (block.id.match(/[a-z]+$/) || [''])[0];
+                const baseId = block.id.replace(/[a-z]+$/, '');
+
+                if (suffix === 'f' && i + 1 < structure.length) {
+                    const nextBlock  = structure[i + 1];
+                    const nextBaseId = nextBlock.id.replace(/[a-z]+$/, '');
+                    if (nextBaseId === baseId) {
+                        merged.push({
+                            ...block,
+                            chyrons:     [...block.chyrons, ...nextBlock.chyrons],
+                            originalIds: [block.id, nextBlock.id]
+                        });
+                        i++; // saltar el bloc base (ja fusionat)
+                        continue;
+                    }
+                }
+                merged.push(block);
+            }
+            return merged;
         }
     };
 
