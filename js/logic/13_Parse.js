@@ -212,6 +212,37 @@
             }
             if (hasInsert) return "INSERT";
 
+            // Detectar CONNEXIÓ como tipo CONNEXIO
+            var hasConnexio = false;
+            for(var j=0; j<block.chyrons.length; j++) {
+                if(block.chyrons[j].name && block.chyrons[j].name.toUpperCase().includes("CONNEXIÓ")) {
+                    hasConnexio = true;
+                    break;
+                }
+            }
+            if (hasConnexio) return "CONNEXIO";
+
+            // Detectar DONAPAS como INTRO (también "DONA PAS" y sufijo "dp")
+            var hasDonapas = false;
+            for(var k=0; k<block.chyrons.length; k++) {
+                var nameUpper = block.chyrons[k].name ? block.chyrons[k].name.toUpperCase() : '';
+                if (nameUpper.includes("DONAPAS") || nameUpper.includes("DONA PAS")) {
+                    hasDonapas = true;
+                    break;
+                }
+            }
+            if (hasDonapas || block.suffix === "dp") return "INTRO";
+
+            // Detectar IPD (+++) como VIDEO (no añade tiempo extra)
+            var hasIPD = false;
+            for(var l=0; l<block.chyrons.length; l++) {
+                if(block.chyrons[l].name && block.chyrons[l].name.includes("+++")) {
+                    hasIPD = true;
+                    break;
+                }
+            }
+            if (hasIPD) return "VIDEO";
+
             if (isGraphicIntro) return "GRAPHIC_INTRO";
 
             if (duration > 10) {

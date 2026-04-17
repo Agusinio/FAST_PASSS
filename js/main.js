@@ -115,12 +115,14 @@ var isUserDraggingSlider = false;
         const btnPlaceGrafic = document.getElementById('btnPlaceGrafic');
         const btnGraph169 = document.getElementById('btnPlaceGraph169');
         const btnBg = document.getElementById('btnBg');
+        const btnPlaceStructure = document.getElementById('btnPlaceStructure');
 
         if (btnResetGrafs) btnResetGrafs.addEventListener('click', () => callWorkflow('Retols', 'runResetGraphics'));
         if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Retols', 'runPlaceChyrons'));
         if (btnPlaceGrafic) btnPlaceGrafic.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraphic'));
         if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
         if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
+        if (btnPlaceStructure) btnPlaceStructure.addEventListener('click', () => callWorkflow('Assembly', 'placeStructureMarkers'));
 
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');

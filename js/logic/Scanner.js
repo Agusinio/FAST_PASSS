@@ -90,6 +90,8 @@
                     return name.includes(fProg) && name.includes(fBloc) && name.endsWith(".MOV");
                 });
     
+                utils.log(`🔍 [SCAN] Encontrados ${filtered.length} archivos .MOV después de filtrar por ${fProg} y ${fBloc}`, "DEBUG");
+                filtered.forEach((f, idx) => utils.log(`   ${idx}: ${f.name}`, "DEBUG"));
                 if (filtered.length === 0) return { tema: "PENDENT", list: [] };
                 filtered.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
 
@@ -102,7 +104,7 @@
                 const parts = nameSource.name.split('__');
 
                 // 3. Lista de palabras prohibidas (Realización)
-                const reserved = ["INTR", "DONAPAS", "LÍNIA", "CHYRON", "GF", "PG", "TD", "TE", "P2", "P5", "P7", "LEAD", "BD", "BON DIA", "CHYRONS", "GUIO", "COL.LECCIO", "OFF", "+++", "CURT"];
+                const reserved = ["INTR", "LÍNIA", "CHYRON", "GF", "PG", "TD", "TE", "P2", "P5", "P7", "LEAD", "BD", "BON DIA", "CHYRONS", "GUIO", "COL.LECCIO", "OFF", "CURT"];
 
                 // 4. Recorremos los bloques después del prefijo técnico (empezamos en i=1)
                 for (let i = 1; i < parts.length; i++) {

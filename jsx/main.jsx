@@ -355,8 +355,14 @@ $.global.Clips = {
     start: function(ti, ci, v, type) { 
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.start(ti, ci, v, type || "video") : "ERR"; 
     },
-    end: function(ti, ci, v, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.end(ti, ci, v, type || "video") : "ERR"; 
+    end: function(ti, ci, v, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.end(ti, ci, v, type || "video") : "ERR";
+    },
+    endAt: function(ti, startSec, newEndSec, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.endAt(ti, startSec, newEndSec, type || "video") : "ERR";
+    },
+    removeAt: function(ti, startSec, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.removeAt(ti, startSec, type || "video") : "ERR";
     },
     inPoint: function(ti, ci, v, type) { 
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.inPoint(ti, ci, v, type || "video") : "ERR"; 
@@ -410,6 +416,48 @@ $.global.Render = {
     },
     queue: function(pr, o, n) { 
         return ($.global.FASTPASS.Render) ? FASTPASS.Render.addToAME(pr, o, n) : "ERR"; 
+    }
+};
+
+$.global.Markers = {
+    set: function(time, comment) {
+        var seq = app.project.activeSequence;
+        if (!seq) return "ERR_NO_SEQ";
+        var marker = seq.markers.createMarker(time);
+        marker.name = comment;
+        marker.comment = comment;
+        return "OK";
+    },
+    get: function() {
+        var seq = app.project.activeSequence;
+        if (!seq) return "[]";
+        var markers = seq.markers;
+        var result = [];
+        for (var i = 0; i < markers.numMarkers; i++) {
+            var m = markers[i];
+            result.push({ time: m.start.seconds, comment: m.name || m.comment });
+        }
+        return JSON.stringify(result);
+    },
+    clear: function() {
+        var seq = app.project.activeSequence;
+        if (!seq) return "ERR_NO_SEQ";
+        var markers = seq.markers;
+        if (!markers) return "ERR_NO_MARKERS";
+        // Intentar clear() si está disponible
+        if (typeof markers.clear === "function") {
+            markers.clear();
+            return "OK";
+        }
+        // Fallback: eliminar marcadores uno por uno
+        try {
+            while (markers.numMarkers > 0) {
+                markers[0].delete();
+            }
+            return "OK";
+        } catch (e) {
+            return "ERR:" + e.toString();
+        }
     }
 };
 

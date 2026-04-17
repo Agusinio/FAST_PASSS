@@ -37,9 +37,15 @@
             const state = FASTPASS_UI.State;
             const cfg = FASTPASS_UI.Config.get();
 
-            if (!state.structure || state.structure.length === 0) {
-                log("⚠️ No hi ha estructura carregada. Avortant muntatge.");
-                return;
+            let structure = state.structure;
+            if (!structure || structure.length === 0) {
+                // Intentar cargar estructura desde marcadores
+                structure = await this._getStructureFromMarkers();
+                if (!structure || structure.length === 0) {
+                    log("⚠️ No hi ha estructura carregada ni marcadors. Avortant muntatge.");
+                    return;
+                }
+                log(`📊 Usant estructura derivada de ${structure.length} marcadors.`);
             }
 
             try {
@@ -67,10 +73,17 @@
                 let lastConductorTime = null;
                 let conductorPlaced = false;
 
-                const struct = state.structure;
+                const struct = structure;
                 // Fusionar bloques OFF (delega a Parse.mergeOffBlocks)
                 const mergedStruct = getParse().mergeOffBlocks(struct);
                 log(`📊 Estructura carregada: ${struct.length} blocs → fusionats a ${mergedStruct.length} blocs`);
+                // Obtener marcadores para ajustar tiempos de bloque
+                const markerStruct = await this._getStructureFromMarkers();
+                const markerMap = {};
+                if (markerStruct && markerStruct.length > 0) {
+                    markerStruct.forEach(m => { markerMap[m.id] = m.startTime; });
+                    log(`📊 Marcadors disponibles: ${Object.keys(markerMap).map(id => `${id}=${markerMap[id].toFixed(2)}s`).join(', ')}`);
+                }
                 // Log detallat de cada bloc i els seus chirons
                 for (const blk of mergedStruct) {
                     // log(`   Bloc ${blk.id}: ${blk.chyrons?.length || 0} chirons`);
@@ -78,12 +91,61 @@
                         // blk.chyrons.forEach((c, idx) => log(`      ${idx}: rol="${c.rol}", nom="${c.name}", tc="${c.tc}"`));
                     }
                 }
-                let clipIndex = 0;
-                const clipsPerBlock = Math.max(1, Math.floor(clips.length / mergedStruct.length));
-                // log(`   📐 Clips per bloc (aproximat): ${clipsPerBlock}`);
+                // Función auxiliar para encontrar el índice del clip más cercano a un tiempo
+                const findClipIndexAtTime = (time) => {
+                    let bestIdx = 0;
+                    let bestDiff = Math.abs(clips[0].start - time);
+                    for (let i = 1; i < clips.length; i++) {
+                        const diff = Math.abs(clips[i].start - time);
+                        if (diff < bestDiff) {
+                            bestDiff = diff;
+                            bestIdx = i;
+                        }
+                    }
+                    return bestIdx;
+                };
 
-                for (let bIndex = 0; bIndex < mergedStruct.length; bIndex++) {
-                    const block = mergedStruct[bIndex];
+                // Separar bloques con y sin marcador
+                const blocksWithMarker = [];
+                const blocksWithoutMarker = [];
+                for (const block of mergedStruct) {
+                    if (markerMap[block.id] !== undefined) {
+                        blocksWithMarker.push({
+                            block,
+                            markerTime: markerMap[block.id]
+                        });
+                    } else {
+                        blocksWithoutMarker.push(block);
+                    }
+                }
+                // Ordenar bloques con marcador por tiempo
+                blocksWithMarker.sort((a, b) => a.markerTime - b.markerTime);
+
+                // Procesar bloques con marcador
+                let lastUsedClipIdx = -1;
+                for (let i = 0; i < blocksWithMarker.length; i++) {
+                    const { block, markerTime } = blocksWithMarker[i];
+                    const nextMarkerTime = (i + 1 < blocksWithMarker.length) ? blocksWithMarker[i + 1].markerTime : clips[clips.length - 1].end;
+                    
+                    // Encontrar clip de inicio (el que contiene markerTime o el más cercano)
+                    let startClipIdx = findClipIndexAtTime(markerTime);
+                    // Asegurar que no sea un clip ya usado
+                    if (startClipIdx <= lastUsedClipIdx) {
+                        startClipIdx = lastUsedClipIdx + 1;
+                        if (startClipIdx >= clips.length) break;
+                    }
+                    // Encontrar clip de fin (primer clip cuyo start >= nextMarkerTime)
+                    let endClipIdx = startClipIdx;
+                    while (endClipIdx < clips.length && clips[endClipIdx].start < nextMarkerTime) {
+                        endClipIdx++;
+                    }
+                    // Si no hay clips, al menos uno
+                    if (endClipIdx === startClipIdx) {
+                        endClipIdx = startClipIdx + 1;
+                        if (endClipIdx > clips.length) endClipIdx = clips.length;
+                    }
+                    const blockClips = clips.slice(startClipIdx, endClipIdx);
+                    lastUsedClipIdx = endClipIdx - 1;
 
                     // Detectar sufijo (f, i, etc.)
                     const suffix = block.id.match(/[a-z]+$/)?.[0] || '';
@@ -94,16 +156,11 @@
                     const offFId = baseId + 'f';
                     const hasOffF = mergedStruct.some(b => b.id === offFId);
                     const isOffVideo = hasOffF && block.id === baseId && !block.id.endsWith('f');
-                    // Si el bloque es un OFF_VIDEO, forzaremos su tipo a "OFF_VIDEO" más adelante
 
-                    // Cercar el primer clip d'aquest bloc
-                    let headClip = clips[clipIndex];
-                    if (!headClip) break;
-
+                    const headClip = blockClips[0];
                     const blockStartTime = headClip.start;
                     const blockDuration = headClip.end - headClip.start;
                     let type = getParse().classify(block, blockDuration);
-                    // Sobrescribir tipo si es OFF_VIDEO
                     if (isOffVideo) {
                         type = "OFF_VIDEO";
                         log(`   🔍 Bloc ${block.id} detectat com a OFF_VIDEO (té un bloc ${offFId} a l'estructura)`);
@@ -112,49 +169,10 @@
                     log(`📦 Bloc ${block.id} (${type}) -> Clips iniciant a ${blockStartTime.toFixed(2)}s (TC: ${formatTC(blockStartTime)})`);
 
                     if (type === "INTRO") {
-                        await this._placeIntroGfx(block, headClip, cfg.tracks.video, (bIndex === 0));
-                        // Aplicar REFRAME a la Intro literalment
+                        await this._placeIntroGfx(block, headClip, cfg.tracks.video, (i === 0));
                         log(`   ✨ Aplicant Auto Reframe a la INTRO (V${mainTrack}:${headClip.index})`);
                         await callJSX(`Anim.reframe(${mainTrack}, ${headClip.index})`);
-                        clipIndex++;
                     } else {
-                        // Agrupem tots els clips que pertanyen a aquest bloc (distribució equitativa)
-                        const isLastBlock = bIndex === mergedStruct.length - 1;
-                        let sliceEnd;
-                        if (type === "INSERT" || type === "INTRO" || type === "OFF") {
-                            // Estimación de duración según tipo
-                            const targetDuration = type === "INSERT" ? 11 : type === "INTRO" ? 17 : 31; // segundos
-                            let accumulated = 0;
-                            let i = clipIndex;
-                            while (i < clips.length && accumulated < targetDuration) {
-                                accumulated += clips[i].end - clips[i].start;
-                                i++;
-                            }
-                            sliceEnd = i;
-                            // Asegurar al menos un clip
-                            if (sliceEnd === clipIndex) sliceEnd = clipIndex + 1;
-                            log(`   🕐 Bloc ${block.id} (${type}) durada acumulada: ${accumulated.toFixed(2)}s / target ${targetDuration}s`);
-                        } else {
-                            sliceEnd = isLastBlock ? clips.length : clipIndex + clipsPerBlock;
-                        }
-                        let blockClips = clips.slice(clipIndex, sliceEnd);
-                        // Si no hi ha clips, agafem l'últim clip com a fallback (no hauria de passar)
-                        if (blockClips.length === 0) {
-                            blockClips = [headClip];
-                        }
-                        let nextI = clipIndex + blockClips.length;
-                        log(`   📏 Bloc ${block.id} agrupa ${blockClips.length} clips (inici ${blockClips[0].start.toFixed(2)}s, fi ${blockClips[blockClips.length-1].end.toFixed(2)}s)`);
-
-                        // Recalcular duración total del bloque
-                        const totalStart = blockClips[0].start;
-                        const totalEnd = blockClips[blockClips.length-1].end;
-                        const totalDuration = totalEnd - totalStart;
-                        // Reclasificar con duración total (opcional)
-                        const finalType = getParse().classify(block, totalDuration);
-                        if (finalType !== type) {
-                            log(`   🔄 Tipus revisat: ${type} -> ${finalType}`);
-                        }
-
                         // Col·locació especial per a blocs OFF i OFF_VIDEO
                         let chyronsToPlace = block.chyrons;
                         if (isOffF) {
@@ -163,7 +181,6 @@
                                 lastConductorTime = conductorStart;
                                 conductorPlaced = true;
                             }
-                            // Eliminar conductor i Tema‑Titol dels chyrons per evitar duplicació
                             chyronsToPlace = chyronsToPlace.filter(c =>
                                 !((c.rol || '').toUpperCase() === "CONDUCTOR") &&
                                 !c.name.includes("Tema-Titol") &&
@@ -172,7 +189,6 @@
                         }
                         if (isOffVideo) {
                             await this._placeOffVideoGfx(block, headClip, cfg.tracks.video, lastConductorTime);
-                            // Eliminar Tema‑Titol dels chyrons per evitar duplicació
                             chyronsToPlace = chyronsToPlace.filter(c =>
                                 !c.name.includes("Tema-Titol") &&
                                 !c.name.includes("TITOL")
@@ -187,15 +203,80 @@
                             { firstClipGlobal: clips[0] }
                         );
 
-                        // Si el bloc és un INSERT (té NomCarrec i Firma) -> Reframe a tots els seus clips
                         if (result.isInsert) {
                             log(`   ✨ Aplicant Auto Reframe a INSERTS de ${block.id}`);
                             for (const clip of blockClips) {
                                 await callJSX(`Anim.reframe(${mainTrack}, ${clip.index})`);
                             }
                         }
+                    }
+                }
 
-                        clipIndex = nextI;
+                // Procesar bloques sin marcador (colocarlos al final, en orden)
+                if (blocksWithoutMarker.length > 0) {
+                    log(`📦 ${blocksWithoutMarker.length} blocs sense marcador es col·locaran al final.`);
+                    let startClipIdx = lastUsedClipIdx + 1;
+                    if (startClipIdx >= clips.length) {
+                        log(`⚠️ No queden clips per a blocs sense marcador. S'ometen.`);
+                    } else {
+                        // Asignar clips secuencialmente, repartiendo los clips restantes
+                        const remainingClips = clips.slice(startClipIdx);
+                        const clipsPerBlock = Math.max(1, Math.floor(remainingClips.length / blocksWithoutMarker.length));
+                        let clipCursor = 0;
+                        for (const block of blocksWithoutMarker) {
+                            const sliceEnd = clipCursor + clipsPerBlock;
+                            const blockClips = remainingClips.slice(clipCursor, sliceEnd);
+                            if (blockClips.length === 0) break;
+                            const headClip = blockClips[0];
+                            const blockStartTime = headClip.start;
+                            const blockDuration = headClip.end - headClip.start;
+                            let type = getParse().classify(block, blockDuration);
+                            log(`📦 Bloc ${block.id} (${type}) sense marcador -> Clips iniciant a ${blockStartTime.toFixed(2)}s`);
+
+                            // Detectar sufijo (f, i, etc.)
+                            const suffix = block.id.match(/[a-z]+$/)?.[0] || '';
+                            const isOffF = suffix === 'f';
+                            const baseId = block.id.replace(/[a-z]+$/, '');
+                            const offFId = baseId + 'f';
+                            const hasOffF = mergedStruct.some(b => b.id === offFId);
+                            const isOffVideo = hasOffF && block.id === baseId && !block.id.endsWith('f');
+
+                            let chyronsToPlace = block.chyrons;
+                            if (isOffF) {
+                                const conductorStart = await this._placeOffGfx(block, headClip, cfg.tracks.video, conductorFile);
+                                if (conductorStart !== null) {
+                                    lastConductorTime = conductorStart;
+                                    conductorPlaced = true;
+                                }
+                                chyronsToPlace = chyronsToPlace.filter(c =>
+                                    !((c.rol || '').toUpperCase() === "CONDUCTOR") &&
+                                    !c.name.includes("Tema-Titol") &&
+                                    !c.name.includes("TITOL")
+                                );
+                            }
+                            if (isOffVideo) {
+                                await this._placeOffVideoGfx(block, headClip, cfg.tracks.video, lastConductorTime);
+                                chyronsToPlace = chyronsToPlace.filter(c =>
+                                    !c.name.includes("Tema-Titol") &&
+                                    !c.name.includes("TITOL")
+                                );
+                            }
+
+                            const result = await this._placeMagicChyrons(
+                                { ...block, chyrons: chyronsToPlace },
+                                blockClips,
+                                cfg.tracks.video,
+                                { firstClipGlobal: clips[0] }
+                            );
+
+                            if (result.isInsert) {
+                                log(`   ✨ Aplicant Auto Reframe a INSERTS de ${block.id}`);
+                                for (const clip of blockClips) {
+                                    await callJSX(`Anim.reframe(${mainTrack}, ${clip.index})`);
+                                }
+                            }
+                            clipCursor += blockClips.length;
+                        }
                     }
                 }
 
@@ -359,7 +440,7 @@
                     const clipEnd = candidateClip.end;
                     const clipDuration = clipEnd - clipStart;
                     const numTraduccions = grupo.length;
-                    // log(`      📏 Grup tc=${tc}: idealPos=${idealPos.toFixed(2)}, clip seleccionat [${clipStart.toFixed(2)}-${clipEnd.toFixed(2)}] durada=${clipDuration.toFixed(2)}s, numTraduccions=${numTraduccions}`);
+                    log(`      📏 Grup tc=${tc}: idealPos=${idealPos.toFixed(2)}, clip seleccionat [${clipStart.toFixed(2)}  ${clipEnd.toFixed(2)}] durada=${clipDuration.toFixed(2)}s, numTraduccions=${numTraduccions}`);
 
                     // Distribuir uniformement dins del clip
                     const segmentDurationBase = clipDuration / numTraduccions;
@@ -375,16 +456,17 @@
                         // Garantizar duración positiva
                         if (duration < 0) duration = 0;
                         const safeDuration = Math.max(0.1, duration);
-                        // log(`      🗣️ Traducció ${segmentIdx !== null ? `[${segmentIdx}]` : ''}: ${c.name} -> ${targetTime.toFixed(2)}s (V${targetTrack}) dins clip [${clipStart.toFixed(2)}-${clipEnd.toFixed(2)}] (durada: ${safeDuration.toFixed(2)}s)`);
+                        log(`      🗣️ Traducció ${segmentIdx !== null ? `[${segmentIdx}]` : ''}: ${c.name} -> ${targetTime.toFixed(2)}s (V${targetTrack}) dins clip [${clipStart.toFixed(2)}  ${clipEnd.toFixed(2)}] (durada: ${safeDuration.toFixed(2)}s)`);
                         if (i === 0) {
-                            // log(`      🔍 Diagnóstic primera traducció: file='${c.name}', track=${targetTrack}, start=${targetTime.toFixed(2)}, duration=${safeDuration.toFixed(2)}, clipStart=${clipStart.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}`);
+                            log(`      🔍 Diagnóstic primera traducció: file='${c.name}', track=${targetTrack}, start=${targetTime.toFixed(2)}, duration=${safeDuration.toFixed(2)}, clipStart=${clipStart.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}`);
                         }
                         if (i === grupo.length - 1) {
-                            // log(`      🔍 Diagnóstic última traducció: remaining=${remaining.toFixed(2)}, duration=${duration.toFixed(2)}, safeDuration=${safeDuration.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}, targetTime=${targetTime.toFixed(2)}`);
+                            log(`      🔍 Diagnóstic última traducció: remaining=${remaining.toFixed(2)}, duration=${duration.toFixed(2)}, safeDuration=${safeDuration.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}, targetTime=${targetTime.toFixed(2)}`);
                         }
                         try {
                             const endTime = targetTime + safeDuration;
                             await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${targetTime}, ${endTime}, 'video')`);
+                            log(`      ✅ Traducció inserida: ${c.name}`);
                         } catch (err) {
                             log(`      ❌ Error inserint traducció: ${err.message}`);
                         }
@@ -432,9 +514,10 @@
                     log(`      🏞️ Chyron de lloc: ${c.name} tc=${c.tc} idealPos=${idealPos.toFixed(2)} candidateClip=[${candidateClip.start.toFixed(2)}-${candidateClip.end.toFixed(2)}]`);
                 }
 
-                // Snap només per a NOMCARREC
+                // Snap només per a NOMCARREC i FIRMA
                 let placementTime = adjustedTime;
                 const isNomCarrec = (c.rol || '').toUpperCase() === "NOMCARREC";
+                const isFirma = (c.rol || '').toUpperCase() === "FIRMA" || c.name.includes("Firma");
                 // Colocación especial para Llocdata: al inicio del clip base, con margen de 10 frames si es el primer clip del proyecto
                 if (c.rol === "Llocdata") {
                     const isFirstClip = options.firstClipGlobal && Math.abs(candidateClip.start - options.firstClipGlobal.start) < 0.01;
@@ -445,10 +528,14 @@
                 else if ((c.name.includes("Lloc") || c.name.includes("Data")) && isOffBlock) {
                     placementTime = candidateClip.start + getUtils().timeToSeconds(c.tc);
                     log(`      🎯 Chyron de lloc col·locat a ${placementTime.toFixed(2)}s (clip start ${candidateClip.start.toFixed(2)} + tc ${c.tc})`);
-                } else if ((c.rol || '').toUpperCase() === "NOMCARREC") {
+                } else if (isNomCarrec) {
                     const isFirstClip = options.firstClipGlobal && Math.abs(candidateClip.start - options.firstClipGlobal.start) < 0.01;
                     placementTime = candidateClip.start + (isFirstClip ? 0.4 : 0);
                     log(`      📍 NOMCARREC col·locat a ${placementTime.toFixed(2)}s (${isFirstClip ? 'primer clip +0.4s' : 'inici del clip'})`);
+                } else if (isFirma) {
+                    const isFirstClip = options.firstClipGlobal && Math.abs(candidateClip.start - options.firstClipGlobal.start) < 0.01;
+                    placementTime = candidateClip.start + (isFirstClip ? 0.4 : 0);
+                    log(`      📍 FIRMA col·locat a ${placementTime.toFixed(2)}s (${isFirstClip ? 'primer clip +0.4s' : 'inici del clip'})`);
                 }
 
                 // Ajustar placementTime si queda fuera del clip candidato
@@ -464,6 +551,14 @@
                 // Limitar duración de chyrons de lugar a 5 segundos para evitar estiramiento
                 if ((c.name.includes("Lloc") || c.name.includes("Data")) && duration > 5) {
                     duration = 5;
+                }
+                // Duración mínima para FIRMA (evita clips demasiado cortos)
+                if (isFirma && duration < 2.0) {
+                    duration = 2.0;
+                    // Asegurar que no exceda el final del clip
+                    if (placementTime + duration > candidateClip.end) {
+                        duration = candidateClip.end - placementTime;
+                    }
                 }
                 let durationLog = duration.toFixed(2) + 's';
                 let endTime = placementTime + duration;
@@ -486,10 +581,205 @@
                 if (isNomCarrec) {
                     log(`      📍 NOMCARREC: ${c.name} -> ${placementTime.toFixed(2)}s (V${targetTrack}) (durada ${durationLog})`);
                 }
+                // Log para FIRMA (isFirma ya definida más arriba)
+                if (isFirma) {
+                    log(`      📍 FIRMA: ${c.name} -> ${placementTime.toFixed(2)}s (V${targetTrack}) (durada ${durationLog})`);
+                }
                 await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${placementTime}, ${endTime}, 'video')`);
+                log(`      ✅ ${c.rol || 'Chyron'} inserit: ${c.name}`);
             }
 
             return { isInsert: (hasNom && hasFirma) };
+        },
+
+        /**
+         * Coloca marcadores en el timeline para cada bloque de la estructura carregada.
+         */
+        placeStructureMarkers: async function () {
+            const state = FASTPASS_UI.State;
+            if (!state.structure || state.structure.length === 0) {
+                log("⚠️ No hi ha estructura carregada. No es poden col·locar marcadors.");
+                return;
+            }
+            // Obtener clips de la pista principal (V1) para conocer los tiempos de inicio de cada bloque
+            const clips = await getClipsLogic().getTrackClips(1, "video");
+            if (clips.length === 0) {
+                log("⚠️ No hi ha clips a la pista V1.");
+                return;
+            }
+            // Log detallado de clips
+            log(`📊 Clips en V1 (${clips.length}):`);
+            clips.forEach((c, idx) => {
+                log(`   ${idx}: start=${c.start.toFixed(2)}s, end=${c.end.toFixed(2)}s, dur=${(c.end - c.start).toFixed(2)}s`);
+            });
+            // Limpiar marcadores existentes
+            await callJSX(`Markers.clear()`);
+            // Para cada bloque, determinar su clip de inicio (asumiendo orden secuencial)
+            let clipIndex = 0;
+            const mergedStruct = getParse().mergeOffBlocks(state.structure);
+            // Log detallado de estructura original
+            log(`📊 Estructura cargada (${state.structure.length} bloques):`);
+            state.structure.forEach((b, idx) => {
+                log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
+            });
+            // Log de merged structure
+            log(`📊 Estructura fusionada (${mergedStruct.length} bloques):`);
+            mergedStruct.forEach((b, idx) => {
+                log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
+            });
+            // Función auxiliar para convertir TC (MM.SS) a segundos
+            function tcToSeconds(tc) {
+                if (!tc) return 0;
+                const parts = tc.split('.');
+                if (parts.length !== 2) return 0;
+                const minutes = parseInt(parts[0], 10);
+                const seconds = parseInt(parts[1], 10);
+                return minutes * 60 + seconds;
+            }
+
+            // Algoritmo de asignación de bloques a clips
+            const assignedClips = new Array(mergedStruct.length).fill(-1);
+            let clipCursor = 0;
+
+            for (let i = 0; i < mergedStruct.length; i++) {
+                const block = mergedStruct[i];
+                const type = getParse().classify(block, 0); // la duración no influye en el tipo
+                let clipIndex = -1;
+
+                if (i === 0) {
+                    // Intro: primer clip
+                    clipIndex = 0;
+                } else if (type === "VIDEO" && i === 1) {
+                    // Bloque principal: siguiente clip después del intro
+                    clipIndex = clipCursor;
+                } else if (type === "INTRO" && block.suffix === "dp") {
+                    // Donapas: buscar clip largo después del último chyron del bloque anterior
+                    const prevBlock = mergedStruct[i-1];
+                    let lastTc = 0;
+                    for (const c of prevBlock.chyrons) {
+                        const sec = tcToSeconds(c.tc);
+                        if (sec > lastTc) lastTc = sec;
+                    }
+                    const minStart = lastTc + 4; // 4 segundos después
+                    // encontrar primer clip con duración >8s y start >= minStart
+                    for (let j = clipCursor; j < clips.length; j++) {
+                        const c = clips[j];
+                        if (c.start >= minStart && (c.end - c.start) > 8) {
+                            clipIndex = j;
+                            break;
+                        }
+                    }
+                    if (clipIndex === -1) {
+                        // fallback: siguiente clip largo después del cursor
+                        for (let j = clipCursor; j < clips.length; j++) {
+                            if ((clips[j].end - clips[j].start) > 8) {
+                                clipIndex = j;
+                                break;
+                            }
+                        }
+                    }
+                } else if (type === "CONNEXIO") {
+                    // Conexión: siguiente clip largo después del donapas
+                    // Suponemos que el bloque anterior es donapas
+                    for (let j = clipCursor; j < clips.length; j++) {
+                        if ((clips[j].end - clips[j].start) > 8) {
+                            clipIndex = j;
+                            break;
+                        }
+                    }
+                } else {
+                    // Por defecto: siguiente clip no asignado
+                    clipIndex = clipCursor;
+                }
+
+                if (clipIndex === -1) clipIndex = clipCursor;
+                if (clipIndex >= clips.length) break;
+
+                assignedClips[i] = clipIndex;
+                clipCursor = clipIndex + 1; // mover cursor después de este clip
+            }
+
+            // Colocar marcadores según la asignación
+            for (let i = 0; i < mergedStruct.length; i++) {
+                const clipIndex = assignedClips[i];
+                if (clipIndex === -1) continue;
+                const block = mergedStruct[i];
+                const clip = clips[clipIndex];
+                const startTime = clip.start;
+                const type = getParse().classify(block, clip.end - clip.start);
+                const comment = `${block.id} - ${type}`;
+                log(`📍 Col·locant marcador a ${startTime.toFixed(2)}s: ${comment}`);
+                await callJSX(`Markers.set(${startTime}, '${comment.replace(/'/g, "\\'")}')`);
+
+                // Detectar Donapas y agregar marcador de CONNEXIÓ en el siguiente clip largo
+                if (type === "INTRO" && block.suffix === "dp") {
+                    // Buscar siguiente clip largo después de este
+                    for (let j = clipIndex + 1; j < clips.length; j++) {
+                        if ((clips[j].end - clips[j].start) > 8) {
+                            const conexioComment = `${block.id}c - CONNEXIO`;
+                            log(`📍 Col·locant marcador de CONNEXIÓ a ${clips[j].start.toFixed(2)}s: ${conexioComment}`);
+                            await callJSX(`Markers.set(${clips[j].start}, '${conexioComment.replace(/'/g, "\\'")}')`);
+                            break;
+                        }
+                    }
+                }
+
+                // Detectar chyrons con "CONNEXIÓ" (por si el bloque ya es una conexión)
+                for (const c of block.chyrons) {
+                    if (c.name && c.name.toUpperCase().includes("CONNEXIÓ")) {
+                        const conexioComment = `${block.id} - CONNEXIO`;
+                        log(`📍 Col·locant marcador de CONNEXIÓ (detectat) a ${startTime.toFixed(2)}s: ${conexioComment}`);
+                        await callJSX(`Markers.set(${startTime}, '${conexioComment.replace(/'/g, "\\'")}')`);
+                        break;
+                    }
+                }
+
+                // Detectar chyrons con "+++" (IPD) y colocar marcadores individuales
+                for (const c of block.chyrons) {
+                    if (c.name && c.name.includes("+++")) {
+                        const ipdComment = `${block.id} - IPD ${c.name}`;
+                        log(`📍 Col·locant marcador de IPD a ${startTime.toFixed(2)}s: ${ipdComment}`);
+                        await callJSX(`Markers.set(${startTime}, '${ipdComment.replace(/'/g, "\\'")}')`);
+                    }
+                }
+            }
+            log("✅ Marcadors col·locats.");
+        },
+
+        /**
+         * Obtiene una estructura de bloques a partir de los marcadores presentes en la timeline.
+         * Cada marcador debe tener un comentario con el formato "ID - TIPO" (p.ej. "11 - INTRO").
+         * Retorna un array de bloques simulados con id, tipo y startTime.
+         */
+        _getStructureFromMarkers: async function () {
+            const markersRaw = await callJSX(`Markers.get()`);
+            if (!markersRaw || markersRaw === "[]") return [];
+            let markers;
+            try {
+                markers = JSON.parse(markersRaw);
+            } catch (e) {
+                log(`⚠️ No s'han pogut analitzar els marcadors: ${e.message}`);
+                return [];
+            }
+            // Ordenar por tiempo
+            markers.sort((a, b) => a.time - b.time);
+            const structure = [];
+            for (let i = 0; i < markers.length; i++) {
+                const m = markers[i];
+                const comment = m.comment || '';
+                // Extraer ID y tipo del comentario (formato "ID - TIPO")
+                const parts = comment.split(' - ');
+                const id = parts[0] || `M${i+1}`;
+                const type = parts[1] || 'UNKNOWN';
+                structure.push({
+                    id: id,
+                    type: type,
+                    startTime: m.time,
+                    chyrons: [] // sin chyrons, se inferirán más adelante
+                });
+            }
+            log(`📊 Estructura generada a partir de ${structure.length} marcadors.`);
+            return structure;
         }
     };
 
