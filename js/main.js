@@ -118,7 +118,7 @@ var isUserDraggingSlider = false;
         const btnPlaceStructure = document.getElementById('btnPlaceStructure');
 
         if (btnResetGrafs) btnResetGrafs.addEventListener('click', () => callWorkflow('Retols', 'runResetGraphics'));
-        if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Retols', 'runPlaceChyrons'));
+        if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Assembly', 'runGuidedAssembly'));
         if (btnPlaceGrafic) btnPlaceGrafic.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraphic'));
         if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
         if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));

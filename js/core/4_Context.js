@@ -174,6 +174,68 @@
                 }
             
                 getUtils().log("🔍 Conclusión contexto: " + conclusion + (existingProjectName ? " (projecte: " + existingProjectName + ")" : ""), "DEBUG");
+                
+                // 🚦 [NOU] SEMÀFOR: Recollir estats d'assets
+                let semaforoData = {
+                    esc: { found: false, ready: false },
+                    mp4: false, wot: false, srt: false
+                };
+
+                try {
+                    // 1. Escaleta JSON
+                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                    if (reader) {
+                        semaforoData.esc = await reader.getStatus(ctx.progData.archivo, ctx.bloque);
+                    }
+
+                    // 2. Assets al projecte (només si el projecte està obert o en UPDATE)
+                    if (conclusion === 'UPDATE' || conclusion === 'GO') {
+                        const [hasMp4, chyItemsRaw, hasSrt, mediaFiles] = await Promise.all([
+                            getUtils().callJSX("hasClips(1, 'video')"),
+                            getUtils().callJSX("FASTPASS.Project.items('CHY')"),
+                            getUtils().callJSX("hasClips(1, 'subtitle')"),
+                            getUtils().readFolder(ctx.config.rutas.verticalitzacio) // Per al SRT físic
+                        ]);
+
+                        // MP4
+                        const mp4Present = (hasMp4 === "true");
+                        if (!mp4Present) {
+                            semaforoData.mp4 = 'error';
+                        } else if (semaforoData.esc.mediaStop && semaforoData.esc.blockOut) {
+                            const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                            const stopSecs = reader.tcToSeconds(semaforoData.esc.mediaStop);
+                            const outSecs = reader.tcToSeconds(semaforoData.esc.blockOut);
+                            semaforoData.mp4 = (stopSecs < outSecs) ? 'pending' : 'ready';
+                        } else {
+                            semaforoData.mp4 = 'ready';
+                        }
+
+                        // WOT
+                        let chyItems = [];
+                        try { chyItems = JSON.parse(chyItemsRaw || "[]"); } catch(e) {}
+                        const wottCount = chyItems.length;
+                        const expected = semaforoData.esc.totalExpected || 0;
+                        
+                        if (wottCount === 0) semaforoData.wot = 'error';
+                        else if (expected > 0 && wottCount < expected) semaforoData.wot = 'pending';
+                        else semaforoData.wot = 'ready';
+                        semaforoData.wotDetail = `${wottCount}/${expected}`;
+
+                        // SRT
+                        const srtPresent = (hasSrt === "true");
+                        if (srtPresent) {
+                            semaforoData.srt = 'ready';
+                        } else {
+                            // Mirem si existeix el fitxer SRT al NAS per decidir si Error o Gris
+                            const prefix = `${ctx.progData.archivo}_${ctx.bloque}`.toUpperCase();
+                            const srtOnDisk = (mediaFiles || []).find(f => f.name.toUpperCase().includes(prefix) && f.name.toUpperCase().endsWith('.SRT'));
+                            semaforoData.srt = srtOnDisk ? 'error' : 'off';
+                        }
+                    }
+                } catch (e) {
+                    getUtils().log("⚠️ Error recollint dades del semàfor: " + e.message, "DEBUG");
+                }
+
                 // 4. FEEDBACK UI
                 const finalName = existingProjectName || `Pruebas_${ctx.progData.archivo}_${ctx.bloque}_PENDENT.prproj`;
                 const data = { ...ctx, name: finalName };
@@ -182,6 +244,8 @@
                     data.lockOwner = lockOwner;
                     data.isLockOwned = lockOwner.trim() === ctx.config.autor.trim();
                 }
+                
+                this.updateLights(ctx.programa, ctx.bloque, null, (conclusion === 'UPDATE'), semaforoData);
                 this.updateButton(conclusion, data);
             
             } catch (e) {
@@ -189,15 +253,46 @@
             }
         },
 
-        updateLights(prog, bloc, theme, active) {
-            const set = (id, state) => {
+        updateLights(prog, bloc, theme, active, semaforoData) {
+            const set = (id, state, title) => {
                 const el = document.getElementById(id);
-                if (el) el.className = "light " + (state ? "on" : "off");
+                if (el) {
+                    let className = "light off";
+                    if (state === 'ready') className = "light ready";
+                    else if (state === 'pending') className = "light pending";
+                    else if (state === 'error') className = "light error";
+                    else if (state === true || state === 'on') className = "light ready"; 
+                    
+                    el.className = className;
+                    if (title) el.parentElement.title = title;
+                }
             };
+
+            // Luces clásicas
             set('light-prog', !!prog);
             set('light-bloc', !!bloc && bloc !== "---");
             set('light-tema', !!theme && theme !== "PENDENT");
             set('light-seq', !!active);
+
+            // 🚦 Luces nuevas (Semáforo)
+            if (semaforoData) {
+                // ESC: Escaleta
+                if (!semaforoData.esc.found) set('sem-esc', 'error', 'No se ha trobat JSON al servidor');
+                else if (!semaforoData.esc.ready) set('sem-esc', 'pending', `JSON trobat (${semaforoData.esc.timestamp}) però BLOC NO READY`);
+                else set('sem-esc', 'ready', `Escaleta OK (${semaforoData.esc.timestamp})`);
+
+                // MP4: CleanFeed
+                const mp4Title = semaforoData.mp4 === 'pending' ? 'El stream no ha arribat al final del bloc' : (semaforoData.mp4 === 'error' ? 'Pista V1 buida' : 'CleanFeed OK');
+                set('sem-mp4', semaforoData.mp4, mp4Title);
+
+                // WOT: Rètols
+                const wotTitle = semaforoData.wot === 'pending' ? `Falten rètols: ${semaforoData.wotDetail}` : (semaforoData.wot === 'error' ? 'No hi ha rètols al Bin CHY' : `Tots importats: ${semaforoData.wotDetail}`);
+                set('sem-wot', semaforoData.wot, wotTitle);
+
+                // SRT: Subtítols
+                const srtTitle = semaforoData.srt === 'ready' ? 'SRT ja importat' : (semaforoData.srt === 'error' ? 'SRT trobat al NAS (falta importar)' : 'No hi ha fitxer SRT al NAS');
+                set('sem-srt', semaforoData.srt, srtTitle);
+            }
         },
 
         updateButton(state, data) {

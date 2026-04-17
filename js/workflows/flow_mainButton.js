@@ -53,10 +53,56 @@
                     sanitizedTheme: sanitizedTheme
                 };
 
+                // ─── NOU: Intentar carregar dades de l'escaleta JSON ──────────────────────
+                let cleanFeedData = null;
+                try {
+                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                    if (reader) {
+                        // Sincronitzar handles des de config
+                        reader.HANDLE_SECS = ctx.config.handles || 20;
+
+                        const jsonMeta = await reader.findLatest(ctx.progData.archivo);
+                        if (jsonMeta) {
+                            const jsonData = await reader.load(jsonMeta.path);
+                            if (jsonData) {
+                                const cf = reader.getCleanFeed(jsonData);
+                                const block = reader.getBlock(jsonData, ctx.bloque);
+                                if (cf && block) {
+                                    const bounds = reader.calcClipBounds(
+                                        cf.mediaStart,
+                                        block.in,
+                                        block.out,
+                                        reader.HANDLE_SECS,
+                                        cf.mediaStop
+                                    );
+                                    // Obtenir les línies de l'escaleta per a marcadors
+                                    const lines = reader.getLinesForBlock(jsonData, ctx.bloque);
+                                    cleanFeedData = {
+                                        mediaPath: cf.mediaPath,
+                                        inPoint: bounds.inPoint,
+                                        outPoint: bounds.outPoint,
+                                        duration: bounds.duration,
+                                        blockIn: block.in,
+                                        escaletaLines: lines
+                                    };
+                                    log(`📡 cleanFeed llegit: ${cf.mediaPath} | in=${bounds.inPoint.toFixed(1)}s out=${bounds.outPoint.toFixed(1)}s`);
+                                } else {
+                                    log(`⚠️ Bloc "${ctx.bloque}" no trobat al JSON o cleanFeed buit. Usant mp4 estàndard.`);
+                                }
+                            }
+                        } else {
+                            log(`⚠️ Cap JSON d'escaleta per a ${ctx.progData.archivo}. Usant mp4 estàndard.`);
+                        }
+                    }
+                } catch (eReader) {
+                    log(`⚠️ EscaletaReader: ${eReader.message}. Continuant amb mp4 estàndard.`);
+                }
+                // ─────────────────────────────────────────────────────────────────────────
+
                 log(`🏗️ Generant projecte: ${fileName}`);
 
                 // 1. CREACIÓ FÍSICA (AQUÍ YA SE INGESTAN LOS ARCHIVOS)
-                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg);
+                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg, cleanFeedData);
 
                 // Registrar como último proyecto abierto
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
@@ -64,7 +110,7 @@
                 }
 
                 log("✅ Workflow NOU completat amb èxit.");
-                // Actualizar contexto para que el botón cambie a UPDATE si el proyecto está abierto
+                // Actualizar contexto → sempre quedem en UPDATE per si s'actualitzen arxius
                 if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                     await FASTPASS_UI.Core.Context.checkContext();
                 }
@@ -73,6 +119,7 @@
                 FASTPASS_UI.Utils.log("💥 Error crític a runNew: " + e.message, "ERROR");
             }
         },
+
 
         _runUpdate: async function () {
             log("🚀 [FLOW-UPDATE]");
@@ -285,14 +332,19 @@
             await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
 
             // 2. Auto-Insert MP4 si V1 està buida
+            // NOTA: Si _runNew ja ha col·locat el cleanFeed MP4, V1 no estarà buida
+            // i aquest bloc NO s'executarà → protegit contra doble inserció.
             if (assets.media && assets.media.mp4) {
                 const v1Count = await callJSX("Clips.count(1, 'video')");
                 if (parseInt(v1Count) === 0) {
-                    log("🎞️ V1 buida. Autocol·locant vídeo...");
+                    log("🎞️ V1 buida. Autocol·locant vídeo estàndard...");
                     const escapedMediaName = encodeURIComponent(assets.media.mp4.name);
                     await callJSX(`Clips.insert('${escapedMediaName}', 1, 0)`);
+                } else {
+                    log("✅ V1 ja té contingut. No s'autocol·loca MP4.");
                 }
             }
+
 
             // 3. Focus i Targeting
             await callJSX("Tracks.target(1, true, 'video')");

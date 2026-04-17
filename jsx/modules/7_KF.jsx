@@ -71,6 +71,29 @@ FASTPASS.Anim = {
     },
 
     /**
+     * get: Retorna tots els KFs de posició del clip sota el CTI (sense paràmetres).
+     * Usat per runSmoothKF() per obtenir els punts a suavitzar.
+     */
+    get: function() {
+        try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "[]";
+            var cti = seq.getPlayerPosition();
+            var info = FASTPASS.Clips.at(1, cti.seconds, "video");
+            if (!info || info === "null") return "[]";
+            var clipIdx = JSON.parse(info).index;
+            var p = FASTPASS.Clips.getProp(1, clipIdx, "ADBE Motion", "ADBE Video Position", "video");
+            if (!p || !p.numKeys) return "[]";
+            var data = [];
+            for (var i = 0; i < p.numKeys; i++) {
+                var kTime = p.getKeyTime(i);
+                data.push({ time: kTime.seconds, val: p.getValueAtTime(kTime) });
+            }
+            return JSON.stringify(data);
+        } catch(e) { return "[]"; }
+    },
+
+    /**
      * list: Retorna l'estructura completa de punts d'una propietat.
      */
     list: function(ti, ci, comp, prop) {

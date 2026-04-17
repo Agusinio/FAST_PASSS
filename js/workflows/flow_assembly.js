@@ -780,6 +780,75 @@
             }
             log(`📊 Estructura generada a partir de ${structure.length} marcadors.`);
             return structure;
+        },
+
+        /**
+         * placeStructureMarkers: Col·loca els marcadors d'escaleta al timeline basant-se en el JSON literal.
+         * Útil si el projecte ja existia o si l'usuari ha reajustat el vídeo i vol realinear les marques.
+         */
+        placeStructureMarkers: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            log("📍 Col·locant marcadors d'escaleta (Mode Guiat)...");
+            
+            try {
+                const ctx = FASTPASS_UI.State;
+                const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                
+                const status = await reader.getStatus(ctx.progData.archivo, ctx.bloque);
+                if (!status.found) {
+                    log("⚠️ No es troba la dades de la escaleta.", "ERROR");
+                    return;
+                }
+                
+                const data = await reader.load(status.path);
+                const lines = reader.getLinesForBlock(data, ctx.bloque);
+                const block = reader.getBlock(data, ctx.bloque);
+                
+                if (lines.length === 0) {
+                    log("⚠️ El bloc no té línies d'escaleta definides.", "WARN");
+                    return;
+                }
+
+                // Netejar marcadors previs
+                await callJSX("Markers.clear()");
+
+                const blockInSec = reader.tcToSeconds(block.in);
+                
+                for (const line of lines) {
+                    const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
+                    if (!horaRef || horaRef === "00:00:00") continue;
+
+                    const lineSec = reader.tcToSeconds(horaRef);
+                    // Posició absoluta al timeline (Sense handles per petició de l'usuari)
+                    const tLine = (lineSec - blockInSec);
+                    const safeT = Math.max(0, tLine).toFixed(2);
+
+                    const num = line.num || '';
+                    const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                    const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
+                    
+                    if (comment) {
+                        await callJSX(`Markers.set(${safeT}, '${comment}')`);
+                    }
+                }
+
+                log("✅ Marcadors d'escaleta col·locats correctament.");
+                getUtils().status("Marcadors OK", "exito");
+                
+            } catch (e) { getUtils().handleError(e, "placeStructureMarkers"); }
+        },
+
+        /**
+         * runGuidedAssembly: Dispara la lògica de posicionament de rètols basat en markers.
+         */
+        runGuidedAssembly: async function() {
+            if (!(await getUtils().validateActiveSequence())) return;
+            try {
+                const res = await window.FASTPASS_UI.Logic.Assembly.runGuidedAssembly();
+                if (res.indexOf("OK") !== -1) {
+                    getUtils().status("Rètols col·locats", "exito");
+                }
+            } catch (e) { getUtils().handleError(e, "runGuidedAssembly"); }
         }
     };
 

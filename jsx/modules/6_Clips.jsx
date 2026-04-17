@@ -165,6 +165,70 @@ FASTPASS.Clips = {
     },
 
     /**
+     * insertWithBounds: Insereix un element del Bin amb inPoint i outPoint específics.
+     * Usat per al cleanFeed MP4 del workflow d'escaleta.
+     * Aplica inPoint/outPoint al clip insertat al timeline (no al ProjectItem).
+     *
+     * @param {string} itemName   - Nom (URI-encoded) de l'asset al Bin
+     * @param {number} trackIdx   - Índex de la pista (1-based)
+     * @param {number} startSec   - Posició al timeline (normalment 0)
+     * @param {number} inPtSec    - InPoint dins del MP4 (en segons)
+     * @param {number} outPtSec   - OutPoint dins del MP4 (en segons)
+     * @param {string} [type]     - "video" (per defecte) o "audio"
+     */
+    insertWithBounds: function(itemName, trackIdx, startSec, inPtSec, outPtSec, type) {
+        try {
+            var p = app.project;
+            var seq = p.activeSequence;
+            if (!seq) return "ERR_NO_ACTIVE_SEQUENCE";
+
+            var nameToFind = decodeURIComponent(itemName);
+            var item = FASTPASS.Project.find(nameToFind);
+            if (!item) {
+                var lastDot = nameToFind.lastIndexOf(".");
+                if (lastDot > 0) item = FASTPASS.Project.find(nameToFind.substring(0, lastDot));
+            }
+            if (!item) return "ERR_ITEM_NOT_FOUND:" + nameToFind;
+
+            var isVideo = (type !== "audio");
+            var targetTrack = isVideo
+                ? seq.videoTracks[parseInt(trackIdx) - 1]
+                : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!targetTrack) return "ERR_TRACK_NOT_FOUND";
+
+            // Col·locar el clip al timeline en la posició indicada
+            var tStart = new Time();
+            tStart.seconds = parseFloat(startSec || 0);
+            targetTrack.overwriteClip(item, tStart);
+
+            // Trobar el clip que acabem d'insertar (l'últim, o el que coincideix amb tStart)
+            var clips = targetTrack.clips;
+            var insertedClip = null;
+            for (var i = 0; i < clips.numItems; i++) {
+                if (Math.abs(clips[i].start.seconds - tStart.seconds) < 0.1) {
+                    insertedClip = clips[i];
+                    break;
+                }
+            }
+            if (!insertedClip) insertedClip = clips[clips.numItems - 1];
+            if (!insertedClip) return "ERR_CLIP_NOT_FOUND_AFTER_INSERT";
+
+            // Aplicar inPoint i outPoint al clip insertat
+            var tIn = new Time();
+            tIn.seconds = parseFloat(inPtSec);
+            insertedClip.inPoint = tIn;
+
+            var tOut = new Time();
+            tOut.seconds = parseFloat(outPtSec);
+            insertedClip.outPoint = tOut;
+
+            return "OK";
+        } catch (e) {
+            return "ERR: " + e.message;
+        }
+    },
+
+    /**
      * start: Canvia el temps d'inici (posició) d'un clip.
      */
     start: function(trackIdx, clipIdx, seconds, type) {

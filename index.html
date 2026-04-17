@@ -37,6 +37,24 @@
                             <label for="conductor">COND:</label>
                             <select id="conductor"><option value="">Tria...</option></select>
                         </div>
+                        <div class="semaforo-strip">
+                            <div class="semaforo-item" title="Estat de l'Escaleta JSON (Servidor)">
+                                <div id="sem-esc" class="light off"></div>
+                                <span>ESC</span>
+                            </div>
+                            <div class="semaforo-item" title="MP4 CleanFeed al projecte/timeline">
+                                <div id="sem-mp4" class="light off"></div>
+                                <span>MP4</span>
+                            </div>
+                            <div class="semaforo-item" title="Rètols (Wotts) al Bin CHY">
+                                <div id="sem-wot" class="light off"></div>
+                                <span>WOT</span>
+                            </div>
+                            <div class="semaforo-item" title="Subtítols projectats al timeline">
+                                <div id="sem-srt" class="light off"></div>
+                                <span>SRT</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="setup-button-container">
                         <button id="btnMainAction" class="btn-big-sq">NOU</button>
@@ -132,6 +150,7 @@
     <script src="js/lib/CSInterface.js"></script>
     <script src="js/core/utils.js"></script>
     <script src="js/core/config.js"></script>
+    <script src="js/core/escaleta_reader.js"></script>
     <script src="js/core/state.js"></script>
     <script src="js/inspectors/1_SourceAssets.js"></script>
     <script src="js/logic/Scanner.js"></script>

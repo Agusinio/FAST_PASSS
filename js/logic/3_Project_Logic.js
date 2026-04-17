@@ -43,8 +43,15 @@
 
         /**
         * create: Crea un nou tema a partir d'una plantilla (Lògica verificada v2.6.0)
+        * @param {Object}      ctx
+        * @param {Object}      wottData
+        * @param {Object}      media
+        * @param {Object}      paths
+        * @param {Array}       portadaList
+        * @param {string}      shortProg
+        * @param {Object|null} cleanFeedData  - { mediaPath, inPoint, outPoint, escaletaLines[] } | null
         */
-        create: async function(ctx, wottData, media, paths, portadaList) { // Agregamos portada aquí
+        create: async function(ctx, wottData, media, paths, portadaList, shortProg, cleanFeedData) {
             const { plantillaPath, fullDestPath, folderPath, sanitizedTheme } = paths;
             const config = ctx.config;
 
@@ -55,38 +62,95 @@
             const openResult = await callJSX(jsxCommand);
             utils.log(`📤 Resultado de Project.open: ${openResult}`);
             
-            // 2. INGESTA GENERAL (Wotts, Media y Portada)
+            // 2. INGESTA GENERAL (Wotts, Media i Portada)
             await this.ingestAssets(ctx, wottData, media, portadaList);
 
-            // 3. CLONAR Y RENOMBRAR SEQÜÈNCIA
-            if (media && media.mp4) {
-                const plantillaSeq = "OTT VERTICAL"; 
-                utils.log(`👥 Buscant i clonant: ${plantillaSeq}`);
-                const resClone = await callJSX(`FASTPASS.Project.cloneSeq('${encodeURIComponent(plantillaSeq)}')`);
+            // 3. CLONAR I RENOMBRAR SEQÜÈNCIA
+            const plantillaSeq = "OTT VERTICAL"; 
+            utils.log(`👥 Buscant i clonant: ${plantillaSeq}`);
+            const resClone = await callJSX(`FASTPASS.Project.cloneSeq('${encodeURIComponent(plantillaSeq)}')`);
+            
+            if (resClone && resClone.indexOf("ERR") === -1) {
+                const temaNet = wottData.tema.toUpperCase();
+                const finalSeqName = `${shortProg}_${ctx.bloque}_${temaNet}`;
                 
-                if (resClone && resClone.indexOf("ERR") === -1) {
-                    // 📍 FIX: Recuperem el programa de ctx i el tema del wottData
-                    const shortProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott : "TNV";
-                    const temaNet = wottData.tema.toUpperCase();
-                    
-                    const finalSeqName = `${shortProg}_${ctx.bloque}_${temaNet}`; // <--- INCLUIMOS BLOQUE
-                    
-                    utils.log(`📝 Seqüència clonada [${resClone}]. Renombrant a: ${finalSeqName}`);
-                    const safeResClone = encodeURIComponent(resClone).replace(/'/g, "\\'");
-                    const safeFinalSeqName = encodeURIComponent(finalSeqName).replace(/'/g, "\\'");
-                    const renameScript = `FASTPASS.Project.rename('${safeResClone}', '${safeFinalSeqName}')`;
-                    utils.log(`🔍 JSX rename script: ${renameScript}`);
-                    const renameResult = await callJSX(renameScript);
-                    utils.log(`📊 Resultado rename: ${renameResult}`);
-                
-                    // 4. Insertar MP4
-                    utils.log(`🎬 Estampant vídeo a la V1...`);
+                utils.log(`📝 Seqüència clonada [${resClone}]. Renombrant a: ${finalSeqName}`);
+                const safeResClone = encodeURIComponent(resClone).replace(/'/g, "\\'");
+                const safeFinalSeqName = encodeURIComponent(finalSeqName).replace(/'/g, "\\'");
+                await callJSX(`FASTPASS.Project.rename('${safeResClone}', '${safeFinalSeqName}')`);
+            
+                // 4. INSERTAR VÍDEO AL TIMELINE
+                if (cleanFeedData && cleanFeedData.mediaPath) {
+                    // ─── MODE ESCALETA: importar el cleanFeed MP4 i col·locar-lo amb offset ──
+                    utils.log(`📡 [NOU] Usant cleanFeed MP4: ${cleanFeedData.mediaPath}`);
+
+                    // 4a. Importar el cleanFeed (si no està ja importat)
+                    const cfPathForward = cleanFeedData.mediaPath.replace(/\\/g, "/");
+                    const cfName = cfPathForward.split('/').pop();
+                    const existingItems = await callJSX("FASTPASS.Project.items('')");
+                    let items = [];
+                    try { items = JSON.parse(existingItems || "[]"); } catch(e) { items = []; }
+                    const alreadyImported = items.some(i => i.name === cfName);
+
+                    if (!alreadyImported) {
+                        utils.log(`📥 Important cleanFeed: ${cfName}`);
+                        await utils.importList([cfPathForward], "root");
+                        await utils.delay(500);
+                    } else {
+                        utils.log(`✅ cleanFeed ja importat: ${cfName}`);
+                    }
+
+                    // 4b. Insertar al timeline amb inPoint / outPoint via insertWithBounds
+                    const escapedCfName = encodeURIComponent(cfName);
+                    const inPt  = cleanFeedData.inPoint.toFixed(4);
+                    const outPt = cleanFeedData.outPoint.toFixed(4);
+                    utils.log(`🎬 Col·locant cleanFeed a V1: inPoint=${inPt}s outPoint=${outPt}s`);
+                    const insertRes = await callJSX(
+                        `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${inPt}, ${outPt}, 'video')`
+                    );
+                    if (insertRes && insertRes.indexOf('ERR') !== -1) {
+                        utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}. Intent fallback amb insert estàndard.`);
+                        await callJSX(`FASTPASS.Clips.insert('${escapedCfName}', 1, 0)`);
+                    }
+
+
+                     if (cleanFeedData.escaletaLines && cleanFeedData.escaletaLines.length > 0) {
+                        utils.log(`📍 Col·locant ${cleanFeedData.escaletaLines.length} marcadors d'escaleta...`);
+                        const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                        const tcToSec = reader ? (tc) => reader.tcToSeconds(tc) : (tc) => { const p = tc.split(':'); return parseInt(p[0])*3600+parseInt(p[1])*60+parseInt(p[2]||0); };
+                        const handleSecs = reader ? reader.HANDLE_SECS : 20;
+                        // Hora real d'inici del bloc (per calcular temps relatius)
+                        const blockInSec = tcToSec(cleanFeedData.blockIn);
+
+                        for (const line of cleanFeedData.escaletaLines) {
+                            const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
+                            if (!horaRef || horaRef === "00:00:00") continue;
+
+                            const lineSec = tcToSec(horaRef);
+
+                            // Posició del marcador dins del clip (Sense handles per petició de l'usuari)
+                            const tLine = (lineSec - blockInSec);
+                            const safeT = Math.max(0, tLine).toFixed(2);
+
+                            const num   = line.num  || '';
+                            const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                            const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
+                            if (comment) {
+                                await callJSX(`Markers.set(${safeT}, '${comment}')`);
+                            }
+                        }
+                        utils.log(`✅ Marcadors d'escaleta col·locats.`);
+                    }
+
+                } else if (media && media.mp4) {
+                    // ─── MODE ESTÀNDARD (fallback sense escaleta) ─────────────────────────
+                    utils.log(`🎬 [FALLBACK] Col·locant MP4 estàndard a V1...`);
                     const escapedMediaName = encodeURIComponent(media.mp4.name);
                     await callJSX(`FASTPASS.Clips.insert('${escapedMediaName}', 1, 0)`);
                 }
             }
 
-            // 5. ASEGURAR CARPETAS Y GUARDADO FINAL (SAVE AS)
+            // 5. ASEGURAR CARPETES I GUARDAR (SAVE AS)
             await utils.ensureFolders(folderPath);
             const escapedPath = fullDestPath.replace(/\\/g, "/").replace(/'/g, "\\'");
 
@@ -105,6 +169,7 @@
             
             return { success: true, path: fullDestPath };
         },
+
 
         /**
          * ingestAssets: Centralitza l'escaneig i ingesta de materials (Wotts, MP4, SRT, Portada).

@@ -96,5 +96,15 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* RENDER */
 .render-strip { display: flex; gap: 10px; }
-.light { width: 6px; height: 6px; border-radius: 50%; background: #333; }
-.light.on { background: var(--color-accent); box-shadow: 0 0 5px var(--color-accent); }
+.light { width: 6px; height: 6px; border-radius: 50%; background: #333; transition: all 0.3s; }
+.light.on, .light.ready { background: #28a745; box-shadow: 0 0 5px #28a745; }
+.light.pending { background: #ffc107; box-shadow: 0 0 5px #ffc107; }
+.light.error { background: #dc3545; box-shadow: 0 0 5px #dc3545; }
+.light.off { background: #333; box-shadow: none; }
+
+.semaforo-strip { 
+    display: flex; gap: 12px; margin-top: 8px; padding: 4px 8px; 
+    background: rgba(0,0,0,0.2); border-radius: 4px; border: 1px solid #333;
+}
+.semaforo-item { display: flex; align-items: center; gap: 6px; }
+.semaforo-item span { font-size: 8px; font-weight: 800; color: #777; letter-spacing: 0.5px; }

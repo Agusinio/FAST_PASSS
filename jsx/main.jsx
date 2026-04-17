@@ -36,6 +36,7 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         load("5_Tracks.jsx");
         load("6_Clips.jsx");
         load("7_KF.jsx");
+        load("8_Markers.jsx");
         load("9_Render.jsx");
         load("11_Context.jsx");
         load("12_Diagnostic.jsx");
@@ -54,7 +55,8 @@ $.global.System = {
     version: function() { return (FASTPASS.System) ? FASTPASS.System.version() : "0.0"; },
     os: function() { return (FASTPASS.System) ? FASTPASS.System.os() : "win"; },
     ready: function() { return "READY"; },
-    clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; }
+    clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; },
+    tool: function(name) { return (FASTPASS.System) ? FASTPASS.System.tool(name) : "ERR_NO_MODULE"; }
 };
 
 $.global.Context = {
@@ -122,6 +124,10 @@ $.global.IO = {
     },
     getUser: function() { 
         return ($.global.FASTPASS.IO) ? FASTPASS.IO.getUser() : "UnknownUser"; 
+    },
+    // Alias per a EscaletaReader: llista una carpeta i retorna [{name,path,modified,size}]
+    listFolder: function(p) {
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.scanDirectory(p) : "[]";
     }
 };
 // ============================================================================
@@ -375,6 +381,40 @@ $.global.Clips = {
     },
     scenes: function(ti) { 
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.scenes(ti) : "[]"; 
+    },
+    clearTrack: function(ti, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.clearTrack(ti, type || "video") : "ERR";
+    },
+    insertWithBounds: function(n, ti, s, inPt, outPt, t) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insertWithBounds(n, ti, s, inPt, outPt, t) : "ERR_NO_CLIPS_MODULE";
+    },
+    hasClips: function(ti, type) {
+        if (!$.global.FASTPASS.Clips) return "false";
+        var count = FASTPASS.Clips.count(ti, type || "video");
+        return (parseInt(count) > 0) ? "true" : "false";
+    }
+};
+
+$.global.Markers = {
+    get: function() {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.get() : "[]";
+    },
+    set: function(t, c, n) {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.set(t, c, n) : "ERR";
+    },
+    clear: function() {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.clear() : "ERR";
+    }
+};
+
+$.global.Project = {
+    hasItems: function(binName) {
+        if (!$.global.FASTPASS.Project) return "false";
+        var itemsRaw = FASTPASS.Project.items(binName || "");
+        try {
+            var items = JSON.parse(itemsRaw);
+            return (items.length > 0) ? "true" : "false";
+        } catch(e) { return "false"; }
     }
 };
 
@@ -395,6 +435,9 @@ $.global.Anim = {
     interp: function(ti, ci, cp, pr, t, i) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.interp(ti, ci, cp, pr, t, i) : "ERR"; 
     },
+    get: function() {
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.get() : "[]";
+    },
     list: function(ti, ci, cp, pr) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.list(ti, ci, cp, pr) : "[]"; 
     },
@@ -404,6 +447,13 @@ $.global.Anim = {
     },
     reframe: function(ti, ci) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
+    }
+};
+
+// Alias: Sequences.refresh() -> Timeline.refresh()
+$.global.Sequences = {
+    refresh: function() {
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.refresh() : "OK";
     }
 };
 

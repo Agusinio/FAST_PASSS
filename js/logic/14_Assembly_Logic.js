@@ -206,6 +206,79 @@
             }
 
             return { temaTitols, traduccions, otros, hasNom, hasFirma };
+        },
+
+        /**
+         * runGuidedAssembly: Automatitza el muntatge de rètols basat en marcadors i noms de fitxer.
+         * Lògica: Cerca rètols al bin 'CHY' que coincideixin amb el 'num' dels marcadors de la seqüència.
+         * El nom del fitxer dicta el desplaçament respecte al marcador.
+         */
+        runGuidedAssembly: async function() {
+            utils.log("🤖 Iniciant Assembly Guiat per Marcadors...");
+            const cfg = window.FASTPASS_UI.Config.get();
+            const T_CHY = cfg.tracks.video.chyrons;
+
+            // 1. Recollir Marcadors del Timeline
+            const markersRaw = await utils.callJSX("Markers.get()");
+            let markers = [];
+            try { markers = JSON.parse(markersRaw || "[]"); } catch(e) { }
+            
+            if (markers.length === 0) {
+                utils.log("⚠️ No s'han trobat marcadors a la seqüència activa.", "WARN");
+                return "ERR_NO_MARKERS";
+            }
+
+            // 2. Recollir Wotts del Bin CHY
+            const wottsRaw = await utils.callJSX("FASTPASS.Project.items('CHY')");
+            let wotts = [];
+            try { wotts = JSON.parse(wottsRaw || "[]"); } catch(e) { }
+
+            if (wotts.length === 0) {
+                utils.log("⚠️ El bin CHY està buit.", "WARN");
+                return "ERR_NO_WOTTS";
+            }
+
+            utils.log(`📊 Processant ${wotts.length} rètols contra ${markers.length} marcadors...`);
+
+            let count = 0;
+            for (const wott of wotts) {
+                // Regex per treure el codi de línia (ex: S1, 01, S11) i el TC d'offset (ex: 00-02-15)
+                // Esperem format: ..._IDLINE_HH-MM-SS_...
+                const name = wott.name;
+                
+                // Busquem el codi de línia (normalment envoltat de guions baixos o al principi)
+                // Intent 1: Codi de línia seguit de TC d'offset
+                const match = name.match(/_([A-Z0-9]+)_(\d{2})-(\d{2})-(\d{2})/i);
+                
+                if (match) {
+                    const lineID = match[1].toUpperCase();
+                    const hh = parseInt(match[2], 10);
+                    const mm = parseInt(match[3], 10);
+                    const ss = parseInt(match[4], 10);
+                    const offset = (hh * 3600) + (mm * 60) + ss;
+
+                    // Cercar marcador que coincideixi amb lineID
+                    const marker = markers.find(m => {
+                        const label = (m.comments || m.name || "").toUpperCase();
+                        return label.startsWith(lineID + " ") || label === lineID;
+                    });
+
+                    if (marker) {
+                        const targetTime = marker.time + offset;
+                        utils.log(`🎯 Match! Línia ${lineID}: Inserint '${name}' a ${targetTime.toFixed(2)}s (base=${marker.time}s + off=${offset}s)`);
+                        
+                        await window.Clips.insert(name, T_CHY, targetTime);
+                        count++;
+                    } else {
+                        utils.log(`❓ No s'ha trobat marcador per a la línia ${lineID} (fitxer: ${name})`, "DEBUG");
+                    }
+                } else {
+                    utils.log(`📦 Fitxer '${name}' no té format reconegut per a matching atomàtic.`, "DEBUG");
+                }
+            }
+
+            utils.log(`✅ Assembly Guiat finalitzat. S'han col·locat ${count} rètols.`);
+            return "OK_GUIDED_" + count;
         }
     };
 

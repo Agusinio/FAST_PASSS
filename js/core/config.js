@@ -9,7 +9,7 @@
 
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     let _activeConfig = {
-        general: { autor: "USER", guarda: 22, debug: false },
+        general: { autor: "USER", guarda: 22, debug: false, handles: 20 },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
@@ -58,9 +58,11 @@
                         mp4: cfg.estructuras["TNs"].tracks.v_mp4,
                         fondos: cfg.estructuras["TNs"].tracks.v_fondos,
                         graf: cfg.estructuras["TNs"].tracks.v_graf,
+                        graficos: cfg.estructuras["TNs"].tracks.v_graf,   // alias
                         tema: cfg.estructuras["TNs"].tracks.v_tema,
-                        tematitol: cfg.estructuras["TNs"].tracks.v_tema, // alias
+                        tematitol: cfg.estructuras["TNs"].tracks.v_tema,  // alias
                         chyrons: cfg.estructuras["TNs"].tracks.v_chyrons,
+                        llocdata: cfg.estructuras["TNs"].tracks.v_lloc,   // alias
                         lloc: cfg.estructuras["TNs"].tracks.v_lloc
                     },
                     subtitle: { s1: cfg.estructuras["TNs"].tracks.s_s1, s2: cfg.estructuras["TNs"].tracks.s_s2 }
@@ -96,7 +98,8 @@
                         return `${ctx.progData.wott}_${ctx.bloque}_${sanitizedTema}`;
                     }
                 },
-                debug: cfg.general.debug
+                debug: cfg.general.debug,
+                handles: cfg.general.handles || 20
             };
         },
 
