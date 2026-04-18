@@ -248,6 +248,14 @@ $.global.Project = {
         var m = this.getLogic(); return m ? m.rename(oldName, newName) : "ERR:MODULE_NOT_FOUND"; 
     },
 
+    close: function() {
+        var m = this.getLogic();
+        if (!m) return "ERR:MODULE_NOT_FOUND";
+        if (typeof m.close !== "function") return "ERR:CLOSE_NOT_FUNCTION";
+        return m.close();
+    }
+};
+
     cloneSeq: function(name) {
         var m = this.getLogic();
         if (!m) {
@@ -395,17 +403,6 @@ $.global.Clips = {
     }
 };
 
-$.global.Markers = {
-    get: function() {
-        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.get() : "[]";
-    },
-    set: function(t, c, n) {
-        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.set(t, c, n) : "ERR";
-    },
-    clear: function() {
-        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.clear() : "ERR";
-    }
-};
 
 $.global.Project = {
     hasItems: function(binName) {
@@ -470,44 +467,14 @@ $.global.Render = {
 };
 
 $.global.Markers = {
-    set: function(time, comment) {
-        var seq = app.project.activeSequence;
-        if (!seq) return "ERR_NO_SEQ";
-        var marker = seq.markers.createMarker(time);
-        marker.name = comment;
-        marker.comment = comment;
-        return "OK";
-    },
     get: function() {
-        var seq = app.project.activeSequence;
-        if (!seq) return "[]";
-        var markers = seq.markers;
-        var result = [];
-        for (var i = 0; i < markers.numMarkers; i++) {
-            var m = markers[i];
-            result.push({ time: m.start.seconds, comment: m.name || m.comment });
-        }
-        return JSON.stringify(result);
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.get() : "[]";
+    },
+    set: function(time, comment, name) {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.set(time, comment, name) : "ERR";
     },
     clear: function() {
-        var seq = app.project.activeSequence;
-        if (!seq) return "ERR_NO_SEQ";
-        var markers = seq.markers;
-        if (!markers) return "ERR_NO_MARKERS";
-        // Intentar clear() si está disponible
-        if (typeof markers.clear === "function") {
-            markers.clear();
-            return "OK";
-        }
-        // Fallback: eliminar marcadores uno por uno
-        try {
-            while (markers.numMarkers > 0) {
-                markers[0].delete();
-            }
-            return "OK";
-        } catch (e) {
-            return "ERR:" + e.toString();
-        }
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.clear() : "ERR";
     }
 };
 

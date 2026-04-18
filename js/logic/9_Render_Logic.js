@@ -20,7 +20,7 @@
          */
         capture: async function(destPath, timeSec = "-1") {
             const tempBase = "fast_snap_" + Date.now();
-            const tempFileNoExt = "C:\\temp\\" + tempBase; // TODO: Millorar ruta temp segons OS
+            const tempFileNoExt = "C:\\temp\\" + tempBase;
             const tempFileFull = tempFileNoExt + ".png";
 
             // 1. Exportació física via bridge literal

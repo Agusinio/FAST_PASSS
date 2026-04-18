@@ -71,12 +71,10 @@
             try {
                 const config = FASTPASS_UI.Config.get();
                 const state = FASTPASS_UI.State;
-                const T_MP4 = config.tracks.video.mp4 || 1;
-                const T_PORTADA = 10; // Pista de seguretat V10 per la cara
-
                 // 1. BUSCAR LA PORTADA RECENT (Logic.Scan)
                 const ctx = { config, progData: state.progData, bloque: state.bloque };
-                const portada = await getScanner().portada(ctx);
+                const portadas = await getScanner().portadas(ctx);
+                const portada = (portadas && portadas.length > 0) ? portadas[0] : null;
                 
                 if (!portada) {
                     throw new Error("No s'ha trobat cap PNG de portada que coincideixi amb el Programa i el Bloc.");
