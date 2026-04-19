@@ -177,7 +177,7 @@
     <div id="User Defined" class="tab-content"></div>
 
     <footer>
-        <button class="secondary" onclick="window.close()">TANCAR SENSE DESAR</button>
+        <button class="secondary" onclick="window.parent.FASTPASS_UI.Workflows.Config.toggleSetup(false)">TANCAR SENSE DESAR</button>
         <button class="primary" onclick="salvarTodo()">GUARDAR CONFIG [Profile.json]</button>
     </footer>
 
@@ -300,7 +300,7 @@
                 if(res && res.indexOf("OK") !== -1) {
                     alert("Configuració física desada al Profile.json");
                     csInterface.dispatchEvent(new CSXSEvent('FASTPASS_CONFIG_UPDATED', 'APPLICATION'));
-                    window.close();
+                    window.parent.FASTPASS_UI.Workflows.Config.toggleSetup(false);
                 } else {
                     alert("Error gravant configuración: " + res);
                 }

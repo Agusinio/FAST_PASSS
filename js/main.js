@@ -151,10 +151,7 @@ var isUserDraggingSlider = false;
         const selectPrograma = document.getElementById('programa');
         const selectBloc = document.getElementById('bloc');
 
-        if (btnSetup) btnSetup.addEventListener('click', () => {
-            utils.log("⚙️ Obrint Dashboard de Configuració...");
-            window.location.href = "setup.html";
-        });
+        if (btnSetup) btnSetup.addEventListener('click', () => callWorkflow('Config', 'toggleSetup', true));
         if (selectPrograma) selectPrograma.addEventListener('change', handleSelectionChange);
         if (selectBloc) selectBloc.addEventListener('change', handleSelectionChange);
 

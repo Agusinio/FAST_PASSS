@@ -108,3 +108,28 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .semaforo-item { display: flex; align-items: center; gap: 6px; }
 .semaforo-item span { font-size: 8px; font-weight: 800; color: #777; letter-spacing: 0.5px; }
+
+/* SETUP OVERLAY */
+#setup-overlay {
+    position: fixed;
+    top: -100%;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--color-fons);
+    z-index: 9999;
+    transition: top 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+}
+
+#setup-overlay.active {
+    top: 0;
+}
+
+#setup-iframe {
+    flex-grow: 1;
+    border: none;
+    width: 100%;
+    height: 100%;
+}
