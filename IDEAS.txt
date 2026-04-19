@@ -1,3 +1,0 @@
-Afegir IA que asisteix per a posar els subtitols
-https://github.com/buxuku/SmartSub
-
