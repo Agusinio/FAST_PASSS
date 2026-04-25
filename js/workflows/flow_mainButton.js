@@ -53,6 +53,15 @@
                     sanitizedTheme: sanitizedTheme
                 };
 
+                // ─── NOU: Inicialitzar Manifest de Sessió ──────────────────────────
+                // Registrem l'inici del procés per tenir una font de veritat persistent
+                const manifest = await FASTPASS_UI.SessionManifest.save(ctx, {
+                    program: {
+                        projectFile: fileName,
+                        projectFolder: folderPath
+                    }
+                });
+
                 // ─── NOU: Intentar carregar dades de l'escaleta JSON ──────────────────────
                 let cleanFeedData = null;
                 try {
@@ -65,29 +74,44 @@
                         if (jsonMeta) {
                             const jsonData = await reader.load(jsonMeta.path);
                             if (jsonData) {
-                                const cf = reader.getCleanFeed(jsonData);
-                                const block = reader.getBlock(jsonData, ctx.bloque);
-                                if (cf && block) {
-                                    const bounds = reader.calcClipBounds(
-                                        cf.mediaStart,
-                                        block.in,
-                                        block.out,
-                                        reader.HANDLE_SECS,
-                                        cf.mediaStop
-                                    );
-                                    // Obtenir les línies de l'escaleta per a marcadors
+                                // Capa 1+2: Càlcul de bounds precisos basats en OnAir i veïns
+                                const bounds = reader.calcOnAirBounds(
+                                    jsonData, 
+                                    ctx.bloque, 
+                                    jsonData.cleanFeed.mediaStart, 
+                                    jsonData.cleanFeed.mediaStop, 
+                                    ctx.config
+                                );
+
+                                if (bounds) {
                                     const lines = reader.getLinesForBlock(jsonData, ctx.bloque);
                                     cleanFeedData = {
-                                        mediaPath: cf.mediaPath,
+                                        mediaPath: jsonData.cleanFeed.mediaPath,
                                         inPoint: bounds.inPoint,
                                         outPoint: bounds.outPoint,
                                         duration: bounds.duration,
-                                        blockIn: block.in,
                                         escaletaLines: lines
                                     };
-                                    log(`📡 cleanFeed llegit: ${cf.mediaPath} | in=${bounds.inPoint.toFixed(1)}s out=${bounds.outPoint.toFixed(1)}s`);
-                                } else {
-                                    log(`⚠️ Bloc "${ctx.bloque}" no trobat al JSON o cleanFeed buit. Usant mp4 estàndard.`);
+
+                                    // Desar tota la info base al manifest
+                                    await FASTPASS_UI.SessionManifest.save(ctx, {
+                                        program: { escaletaFile: jsonMeta.filename },
+                                        cleanFeed: jsonData.cleanFeed,
+                                        blockBounds: bounds,  // inclou inPoint, outPoint, handles used...
+                                        tcRef: bounds.tcRef,  // { mediaStart, inPoint, clipStart:null, offset:null }
+                                        escaletaItems: lines.map(l => ({
+                                            sequencia: l.sequencia,
+                                            num: l.num,
+                                            titol: l.titol,
+                                            teVideo: l.teVideo,
+                                            horaEntradaOnAir: l.horaEntradaOnAir,
+                                            duradaOnAir: l.duradaOnAir,
+                                            durada: l.durada
+                                        })),
+                                        phases: { boundsCalculated: true }
+                                    });
+
+                                    log(`📡 [OnAir] cleanFeed: in=${bounds.inPoint.toFixed(1)}s out=${bounds.outPoint.toFixed(1)}s`);
                                 }
                             }
                         } else {
@@ -95,14 +119,41 @@
                         }
                     }
                 } catch (eReader) {
-                    log(`⚠️ EscaletaReader: ${eReader.message}. Continuant amb mp4 estàndard.`);
+                    log(`⚠️ EscaletaReader: ${eReader.message}. Continuant sense dades OnAir.`);
                 }
                 // ─────────────────────────────────────────────────────────────────────────
 
                 log(`🏗️ Generant projecte: ${fileName}`);
 
-                // 1. CREACIÓ FÍSICA (AQUÍ YA SE INGESTAN LOS ARCHIVOS)
+                // 1. CREACIÓ FÍSICA (Crea seqüencia i inserta MP4 amb els bounds calculats)
                 await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg, cleanFeedData);
+
+                // 2. FINALITZAR tcRef (Obtenir clipStart real post-inserció)
+                if (cleanFeedData) {
+                    log("📐 Finalitzant tcRef post-inserció...");
+                    const clipStartRaw = await callJSX(`Clips.getInPoint(1, 0)`); // track V1 (1-based), índex 0
+                    const clipStart = parseFloat(clipStartRaw);
+                    
+                    if (!isNaN(clipStart)) {
+                        const inPoint = cleanFeedData.inPoint;
+                        const offset = clipStart - inPoint;
+                        
+                        // Actualitzar manifest amb la posició real
+                        await FASTPASS_UI.SessionManifest.save(ctx, {
+                            tcRef: {
+                                clipStart: clipStart,
+                                offset: offset
+                            },
+                            phases: { 
+                                mp4Imported: true, 
+                                tcRefEstablished: true 
+                            }
+                        });
+                        log(`📐 tcRef establert: offset=${offset.toFixed(3)}s (clipStart=${clipStart.toFixed(3)}s)`);
+                    } else {
+                        log("⚠️ No es pot llegir clipStart de V1. tcRef quedarà incomplet.");
+                    }
+                }
 
                 // Registrar como último proyecto abierto
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
@@ -110,7 +161,7 @@
                 }
 
                 log("✅ Workflow NOU completat amb èxit.");
-                // Actualizar contexto → sempre quedem en UPDATE per si s'actualitzen arxius
+                // Actualizar contexto
                 if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                     await FASTPASS_UI.Core.Context.checkContext();
                 }

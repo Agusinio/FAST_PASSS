@@ -233,10 +233,6 @@
             return data?.parallelAntena?.nom ?? '';
         },
 
-        // ----------------------------------------------------------------
-        // 4. CÀLCUL DE BOUNDS (inPoint / outPoint AMB HANDLES)
-        // ----------------------------------------------------------------
-
         /**
          * calcClipBounds: Calcula l'inPoint i outPoint dins del MP4 del cleanFeed,
          * aplicant els handles de seguretat indicats.
@@ -272,6 +268,154 @@
 
             log(`📐 [EscaletaReader] Bounds: mediaStart=${mediaStart} → in=${inPoint.toFixed(2)}s, out=${outPoint.toFixed(2)}s, dur=${duration.toFixed(2)}s (handles=${handles}s)`);
             return { inPoint, outPoint, duration };
+        },
+
+        /**
+         * parseDurada: Converteix "M:SS" o "H:MM:SS" (formats de playout) a segons.
+         * Diferent del TC estàndard perquè pot no tenir hores o frames.
+         */
+        parseDurada: function (str) {
+            if (!str || str === "0:00") return 0;
+            const parts = str.toString().split(':');
+            if (parts.length === 2) {
+                // M:SS
+                return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+            } else if (parts.length === 3) {
+                // H:MM:SS
+                return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseInt(parts[2], 10);
+            }
+            return 0;
+        },
+
+        /**
+         * getOnAirVideoItems: Retorna els ítems del bloc que tenen vídeo i hora d'emissió real.
+         */
+        getOnAirVideoItems: function (data, blockId) {
+            const lines = this.getLinesForBlock(data, blockId);
+            return lines.filter(l => l.teVideo && l.horaEntradaOnAir);
+        },
+
+        /**
+         * getNeighbourOnAirTimes: Busca els timestamps d'emissió dels blocs adjacents.
+         * Útil per tancar fronteres quan el bloc actual comença o acaba sense vídeo.
+         */
+        getNeighbourOnAirTimes: function (data, blockId) {
+            const clips = data?.cleanFeed?.clips || [];
+            const idx = clips.findIndex(c => c.id === blockId);
+            if (idx === -1) return { prevEnd: null, nextStart: null };
+
+            const prevBlock = idx > 0 ? clips[idx - 1] : null;
+            const nextBlock = idx < clips.length - 1 ? clips[idx + 1] : null;
+
+            let prevEnd = null;
+            if (prevBlock) {
+                const prevLines = this.getOnAirVideoItems(data, prevBlock.id);
+                if (prevLines.length > 0) {
+                    const lastVid = prevLines[prevLines.length - 1];
+                    prevEnd = this.tcToSeconds(lastVid.horaEntradaOnAir) + 
+                              this.parseDurada(lastVid.duradaOnAir || lastVid.durada);
+                }
+            }
+
+            let nextStart = null;
+            if (nextBlock) {
+                const nextLines = this.getOnAirVideoItems(data, nextBlock.id);
+                if (nextLines.length > 0) {
+                    nextStart = this.tcToSeconds(nextLines[0].horaEntradaOnAir);
+                }
+            }
+
+            return { prevEnd, nextStart };
+        },
+
+        /**
+         * hasNonVideoItemsBefore: Detecta si el bloc té ítems sense vídeo al principi o al final.
+         */
+        hasNonVideoItemsBefore: function (data, blockId) {
+            const lines = this.getLinesForBlock(data, blockId);
+            if (lines.length === 0) return { before: false, after: false };
+
+            // Ordenar per sequencia
+            lines.sort((a, b) => (a.sequencia || 0) - (b.sequencia || 0));
+
+            const firstVideoIdx = lines.findIndex(l => l.teVideo);
+            const lastVideoIdx = [...lines].reverse().findIndex(l => l.teVideo);
+            const absoluteLastVideoIdx = lastVideoIdx === -1 ? -1 : lines.length - 1 - lastVideoIdx;
+
+            return {
+                before: firstVideoIdx > 0,
+                after: absoluteLastVideoIdx !== -1 && absoluteLastVideoIdx < lines.length - 1
+            };
+        },
+
+        /**
+         * calcOnAirBounds: Calcula in/out basats en dades reals de playout (Capa 1+2).
+         * Si no hi ha dades OnAir, fa fallback a calcClipBounds.
+         */
+        calcOnAirBounds: function (data, blockId, mediaStart, mediaStop, cfg) {
+            const log = (m) => window.FASTPASS_UI.Utils.log(m, 'DEBUG');
+            const videoItems = this.getOnAirVideoItems(data, blockId);
+            const msStart = this.tcToSeconds(mediaStart);
+            const handles = cfg?.handles || this.HANDLE_SECS;
+
+            if (videoItems.length === 0) {
+                log(`⚠️ [calcOnAirBounds] No hi ha ítems amb 'horaEntradaOnAir' al bloc ${blockId}. Usant fallback calcClipBounds.`);
+                const block = this.getBlock(data, blockId);
+                if (!block) return null;
+                const b = this.calcClipBounds(mediaStart, block.in, block.out, handles, mediaStop);
+                return { ...b, tcRef: { mediaStart: msStart, inPoint: b.inPoint, clipStart: null, offset: null } };
+            }
+
+            const lastVid = videoItems[videoItems.length - 1];
+            const firstVideoOnAir = this.tcToSeconds(videoItems[0].horaEntradaOnAir);
+            const lastVideoOnAirEnd = this.tcToSeconds(lastVid.horaEntradaOnAir) + 
+                                      this.parseDurada(lastVid.duradaOnAir || lastVid.durada);
+
+            const { prevEnd, nextStart } = this.getNeighbourOnAirTimes(data, blockId);
+            const { before: hasNonVideoBefore, after: hasNonVideoAfter } = this.hasNonVideoItemsBefore(data, blockId);
+
+            // Capa 1+2 integrada: Detecció de fronteres amb ítems no-video (intro, donapas...)
+            let blockOnAirStart;
+            if (hasNonVideoBefore && prevEnd != null) {
+                blockOnAirStart = prevEnd;
+                log(`📐 [calcOnAirBounds] Bloc ${blockId}: items no-video al principi → blockOnAirStart = prevEnd (${prevEnd.toFixed(2)}s)`);
+            } else {
+                blockOnAirStart = firstVideoOnAir;
+            }
+
+            let blockOnAirEnd;
+            if (hasNonVideoAfter && nextStart != null) {
+                blockOnAirEnd = nextStart;
+                log(`📐 [calcOnAirBounds] Bloc ${blockId}: items no-video al final → blockOnAirEnd = nextStart (${nextStart.toFixed(2)}s)`);
+            } else {
+                blockOnAirEnd = lastVideoOnAirEnd;
+            }
+
+            let inPoint  = Math.max(0, (blockOnAirStart - msStart) - handles);
+            let outPoint = (blockOnAirEnd - msStart) + handles;
+
+            // Hard limits addicionals per seguretat (mai envair el bloc veí)
+            const hardIn  = prevEnd   != null ? (prevEnd   - msStart) - 0.04 : null;
+            const hardOut = nextStart != null ? (nextStart - msStart) + 0.04 : null;
+            if (hardIn  != null && inPoint  < hardIn)  inPoint  = hardIn;
+            if (hardOut != null && outPoint > hardOut) outPoint = hardOut;
+
+            if (mediaStop) {
+                const msStop  = this.tcToSeconds(mediaStop);
+                const maxDur  = msStop - msStart;
+                if (outPoint > maxDur) outPoint = maxDur;
+            }
+
+            const duration = outPoint - inPoint;
+            const tcRef = {
+                mediaStart: msStart,
+                inPoint,
+                clipStart:  null,
+                offset:     null
+            };
+
+            log(`📐 [calcOnAirBounds] ${blockId}: inPoint=${inPoint.toFixed(2)}s, outPoint=${outPoint.toFixed(2)}s, dur=${duration.toFixed(2)}s`);
+            return { inPoint, outPoint, duration, tcRef };
         },
 
         // ----------------------------------------------------------------

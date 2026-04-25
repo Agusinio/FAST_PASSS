@@ -59,6 +59,18 @@ FASTPASS.Clips = {
     },
 
     /**
+     * getInPoint: Obté el start.seconds d'un clip (posició a la seqüència).
+     * Útil per establir tcRef.clipStart post-inserció.
+     */
+    getInPoint: function(trackIdx, clipIdx, type) {
+        try {
+            var track = this._get(trackIdx, type || "video");
+            if (!track || !track.clips || track.clips.numItems <= clipIdx) return "null";
+            return track.clips[clipIdx].start.seconds.toString();
+        } catch(e) { return "null"; }
+    },
+
+    /**
      * at: Troba i retorna dades d'un clip en un temps determinat.
      */
     at: function(trackIdx, timeSec, type) {

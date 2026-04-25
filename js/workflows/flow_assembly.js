@@ -395,13 +395,39 @@
 
         /**
          * Match de footprint i snap magnètic a talls.
+         * Refactoritzat per usar tcRef si el manifest està disponible.
          */
         _placeMagicChyrons: async function (block, clips, tracks, options = {}) {
-            log(`   🔮 Aplicant Footprint Matching a ${block.id}...`);
+            log(`   🔮 Aplicant Precision Placement a ${block.id}...`);
 
-            // Calcular decalatge mig (Footprint Matching) — delega a Assembly_Logic
-            const avgDelta = getAssemblyLogic().calcFootprintDelta(block, clips);
-            log(`      📐 Decalatge mig detectat per al bloc: ${avgDelta.toFixed(2)}s`);
+            // 1. Carregar manifest per obtenir tcRef i item d'escaleta
+            const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+            const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
+            const tcRef = manifest.tcRef;
+            const reader = window.EscaletaReader;
+
+            let blockStartManual = clips[0].start;
+            let avgDelta = 0;
+            let usePrecision = false;
+            let precisionBlockStart = 0;
+
+            if (tcRef && tcRef.offset !== null && reader) {
+                // Intentar buscar l'ítem d'escaleta que correspon a aquest bloc de rètols
+                // block.id pot ser "11", "11f", etc. block.numBase és "11".
+                const item = manifest.escaletaItems.find(i => i.num === block.id || i.num === block.numBase);
+                if (item && item.horaEntradaOnAir) {
+                    const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+                    precisionBlockStart = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                    usePrecision = true;
+                    log(`      📐 Usant Precision Timing (OnAir): blockStart=${precisionBlockStart.toFixed(2)}s`);
+                }
+            }
+
+            if (!usePrecision) {
+                // Fallback a Footprint Matching tradicional basat en talls de V1
+                avgDelta = getAssemblyLogic().calcFootprintDelta(block, clips);
+                log(`      📐 Fallback: Decalatge mig detectat (Footprint): ${avgDelta.toFixed(2)}s`);
+            }
 
             // Extraer índice de segmento para traduccions
             function extractSegmentIndex(name) {
@@ -409,32 +435,23 @@
                 return match ? parseInt(match[1]) : null;
             }
 
-            // Classificar chyrons per tipus (delega a Assembly_Logic.classifyChyrons)
+            // Classificar chyrons per tipus
             const { temaTitols, traduccions, otros, hasNom, hasFirma } = getAssemblyLogic().classifyChyrons(block.chyrons);
 
-            // Ordenar traduccions per segment (o per timecode com a fallback)
-            traduccions.sort((a, b) => {
-                const idxA = extractSegmentIndex(a.name);
-                const idxB = extractSegmentIndex(b.name);
-                if (idxA !== null && idxB !== null) return idxA - idxB;
-                if (a.tc && b.tc) return a.tc.localeCompare(b.tc);
-                return a.name.localeCompare(b.name);
-            });
-
-            // Col·locar Tema‑Titol primer (només el primer si n'hi ha més d'un)
+            // Col·locar Tema‑Titol primer
             if (temaTitols.length > 0) {
                 const c = temaTitols[0];
-                const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
-                const adjustedTime = idealPos + avgDelta;
+                const relTc = getUtils().timeToSeconds(c.tc);
+                const adjustedTime = usePrecision ? (precisionBlockStart + relTc) : (blockStartManual + relTc + avgDelta);
+                
                 let targetTrack = tracks.tematitol || tracks.chyrons;
                 log(`      🎬 Tema‑Titol: ${c.name} -> ${adjustedTime.toFixed(2)}s (V${targetTrack})`);
                 await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${adjustedTime}, null, 'video')`);
             }
 
-            // Col·locar traduccions dins del clip de video corresponent (distribució uniforme)
+            // Col·locar traduccions dins del clip de video corresponent
             if (traduccions.length > 0) {
                 log(`      🗣️ Es col·locaran ${traduccions.length} traduccions`);
-                // Usar la función findCandidateClip definida a nivel superior
 
                 // Agrupar per timecode (tc)
                 const grupos = {};
@@ -446,18 +463,17 @@
                 // Processar cada grup
                 for (const tc of Object.keys(grupos).sort((a, b) => a.localeCompare(b))) {
                     const grupo = grupos[tc];
-                    // Ordenar dins del grup per segment index
                     grupo.sort((a, b) => {
                         const idxA = extractSegmentIndex(a.name);
                         const idxB = extractSegmentIndex(b.name);
-                        if (idxA !== null && idxB !== null) return idxA - idxB;
-                        return 0;
+                        return (idxA !== null && idxB !== null) ? idxA - idxB : 0;
                     });
 
-                    // Calcular posició ideal basada en el tc
-                    const idealPos = clips[0].start + getUtils().timeToSeconds(tc);
+                    // Càlcul de posició ideal (Precision vs Footprint)
+                    const relTc = getUtils().timeToSeconds(tc);
+                    const idealPos = usePrecision ? (precisionBlockStart + relTc) : (blockStartManual + relTc + avgDelta);
+                    
                     let candidateClip = getAssemblyLogic().findCandidateClip(clips, idealPos);
-
                     const clipStart = candidateClip.start;
                     const clipEnd = candidateClip.end;
                     const clipDuration = clipEnd - clipStart;
@@ -503,8 +519,9 @@
             const usedLlocClips = new Set();
             // Col·locar la resta de chirons (inclosos NOMCARREC, FIRMA, etc.)
             for (const c of otros) {
-                const idealPos = clips[0].start + getUtils().timeToSeconds(c.tc);
-                const adjustedTime = idealPos + avgDelta;
+                const relTc = getUtils().timeToSeconds(c.tc);
+                const idealPos = usePrecision ? (precisionBlockStart + relTc) : (blockStartManual + relTc + avgDelta);
+                
                 let candidateClip = getAssemblyLogic().findCandidateClip(clips, idealPos);
                 // Forzar segundo clip para chyrons de lugar en bloques OFF
                 if ((c.name.includes("Lloc") || c.name.includes("Data")) && isOffBlock && clips.length >= 2) {
@@ -539,7 +556,7 @@
                 // }
 
                 // Snap només per a NOMCARREC i FIRMA
-                let placementTime = adjustedTime;
+                let placementTime = idealPos; // idealPos ja inclou el delta o és precision
                 const isNomCarrec = (c.rol || '').toUpperCase() === "NOMCARREC";
                 const isFirma = (c.rol || '').toUpperCase() === "FIRMA" || c.name.includes("Firma");
                 // Colocación especial para Llocdata: al inicio del clip base, con margen de 10 frames si es el primer clip del proyecto
@@ -615,153 +632,130 @@
 
             return { isInsert: (hasNom && hasFirma) };
         },
+         * verifyTcRefFootprint: Compara els talls reals (V1) amb la previsió OnAir.
+         * Si la vericidat és alta (>=75%), calcula el drift i permet corregir l'offset.
+         */
+        verifyTcRefFootprint: async function (videoItems, clips, tcRef, reader) {
+            log("🦶 [Footprint] Verificant sincronia amb talls de V1...");
+            if (!tcRef || !tcRef.mediaStart || tcRef.offset === null) {
+                log("⚠️ [Footprint] tcRef incomplet. No es pot verificar.");
+                return { confidence: 0, correction: 0 };
+            }
+
+            let matches = 0;
+            let drifts = [];
+            const threshold = 0.5; // ±500ms de marge per considerar match
+
+            // Ignorem el primer ítem si és el que defineix l'inici del bloc (sempre quadra per definició)
+            const testItems = videoItems.slice(1); 
+            if (testItems.length === 0) return { confidence: 1, correction: 0 };
+
+            for (const item of testItems) {
+                const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+                const idealSeqPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                
+                // Busquem el tall més proper a V1
+                let bestMatch = null;
+                let minDiff = 999;
+                
+                for (const clip of clips) {
+                    const diff = Math.abs(clip.start - idealSeqPos);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        bestMatch = clip;
+                    }
+                }
+
+                if (minDiff <= threshold) {
+                    matches++;
+                    drifts.push(bestMatch.start - idealSeqPos);
+                }
+            }
+
+            const confidence = testItems.length > 0 ? matches / testItems.length : 1;
+            let avgCorrection = 0;
+            if (drifts.length > 0) {
+                avgCorrection = drifts.reduce((a, b) => a + b, 0) / drifts.length;
+            }
+
+            log(`📊 [Footprint] Veracitat: ${(confidence * 100).toFixed(0)}% | Correcció mitjana: ${avgCorrection.toFixed(3)}s`);
+            
+            return { 
+                confidence, 
+                correction: avgCorrection, 
+                autoCorrected: (confidence >= 0.75 && Math.abs(avgCorrection) > 0.001) 
+            };
+        },
 
         /**
-         * Coloca marcadores en el timeline para cada bloque de la estructura carregada.
+         * placeStructureMarkers: Col·loca marcadors al timeline amb precisió OnAir.
+         * Utilitza el Manifest de Sessió com a font de veritat.
          */
         placeStructureMarkers: async function () {
-            const state = FASTPASS_UI.State;
-            if (!state.structure || state.structure.length === 0) {
-                log("⚠️ No hi ha estructura carregada. No es poden col·locar marcadors.");
+            log("📍 [MARKERS] Iniciant col·locació de marcadors d'estructura...");
+            const reader = window.EscaletaReader;
+            
+            // 1. Carregar context i manifest
+            const mainButton = FASTPASS_UI.Workflows.MainButton;
+            const ctx = await mainButton._setupContext();
+            const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
+            
+            if (!manifest.phases.boundsCalculated || !manifest.tcRef.mediaStart) {
+                log("⚠️ [MARKERS] Manifest sense dades OnAir. No es pot procedir amb precisió.");
                 return;
             }
-            // Obtener clips de la pista principal (V1) para conocer los tiempos de inicio de cada bloque
+
+            const tcRef = manifest.tcRef;
+            const videoItems = manifest.escaletaItems.filter(l => l.teVideo && l.horaEntradaOnAir);
             const clips = await getClipsLogic().getTrackClips(1, "video");
+            
             if (clips.length === 0) {
-                log("⚠️ No hi ha clips a la pista V1.");
+                log("❌ [MARKERS] No hi ha clips a V1. Avortant.");
                 return;
             }
-            // Log detallado de clips (comentat per reduir ruido)
-            // log(`📊 Clips en V1 (${clips.length}):`);
-            // clips.forEach((c, idx) => {
-            //     log(`   ${idx}: start=${c.start.toFixed(2)}s, end=${c.end.toFixed(2)}s, dur=${(c.end - c.start).toFixed(2)}s`);
-            // });
-            // Limpiar marcadores existentes
+
+            // 2. Verificació de Footprint (Auto-ajust de tcRef.offset si hi ha un trossejat real)
+            const footprint = await this.verifyTcRefFootprint(videoItems, clips, tcRef, reader);
+            if (footprint.autoCorrected) {
+                log(`✨ [Footprint] Aplicant auto-correcció d'offset: ${footprint.correction.toFixed(3)}s`);
+                tcRef.offset += footprint.correction;
+                await FASTPASS_UI.SessionManifest.save(ctx, { 
+                    tcRef: tcRef,
+                    footprintVerification: footprint 
+                });
+            }
+
+            // 3. Netejar marcadors i col·locar els nous basats en OnAir
             await callJSX(`Markers.clear()`);
-            // Para cada bloque, determinar su clip de inicio (asumiendo orden secuencial)
-            let clipIndex = 0;
-            const mergedStruct = getParse().mergeOffBlocks(state.structure);
-            // Log detallado de estructura (comentat per reduir ruido)
-            // log(`📊 Estructura cargada (${state.structure.length} bloques):`);
-            // state.structure.forEach((b, idx) => {
-            //     log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
-            // });
-            // log(`📊 Estructura fusionada (${mergedStruct.length} bloques):`);
-            // mergedStruct.forEach((b, idx) => {
-            //     log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
-            // });
-            // Función auxiliar para convertir TC (MM.SS) a segundos
-            function tcToSeconds(tc) {
-                if (!tc) return 0;
-                const parts = tc.split('.');
-                if (parts.length !== 2) return 0;
-                const minutes = parseInt(parts[0], 10);
-                const seconds = parseInt(parts[1], 10);
-                return minutes * 60 + seconds;
+            
+            let count = 0;
+            for (const item of manifest.escaletaItems) {
+                if (!item.horaEntradaOnAir) continue;
+                
+                const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+                const markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                
+                if (markerPos < -0.1) continue; // Fora de seqüència (handles)
+                
+                const label = `${item.num ? item.num + ' - ' : ''}${item.titol}`;
+                await callJSX(`Markers.set(${markerPos}, '${getUtils().escape(label)}')`);
+                count++;
             }
 
-            // Algoritmo de asignación de bloques a clips
-            const assignedClips = new Array(mergedStruct.length).fill(-1);
-            let clipCursor = 0;
-
-            for (let i = 0; i < mergedStruct.length; i++) {
-                const block = mergedStruct[i];
-                const type = getParse().classify(block, 0); // la duración no influye en el tipo
-                let clipIndex = -1;
-
-                if (i === 0) {
-                    // Intro: primer clip
-                    clipIndex = 0;
-                } else if (type === "VIDEO" && i === 1) {
-                    // Bloque principal: siguiente clip después del intro
-                    clipIndex = clipCursor;
-                } else if (type === "INTRO" && block.suffix === "dp") {
-                    // Donapas: buscar clip largo después del último chyron del bloque anterior
-                    const prevBlock = mergedStruct[i - 1];
-                    let lastTc = 0;
-                    for (const c of prevBlock.chyrons) {
-                        const sec = tcToSeconds(c.tc);
-                        if (sec > lastTc) lastTc = sec;
-                    }
-                    const minStart = lastTc + 4; // 4 segundos después
-                    // encontrar primer clip con duración >8s y start >= minStart
-                    for (let j = clipCursor; j < clips.length; j++) {
-                        const c = clips[j];
-                        if (c.start >= minStart && (c.end - c.start) > 8) {
-                            clipIndex = j;
-                            break;
-                        }
-                    }
-                    if (clipIndex === -1) {
-                        // fallback: siguiente clip largo después del cursor
-                        for (let j = clipCursor; j < clips.length; j++) {
-                            if ((clips[j].end - clips[j].start) > 8) {
-                                clipIndex = j;
-                                break;
-                            }
-                        }
-                    }
-                } else if (type === "CONNEXIO") {
-                    // Conexión: siguiente clip largo después del donapas
-                    // Suponemos que el bloque anterior es donapas
-                    for (let j = clipCursor; j < clips.length; j++) {
-                        if ((clips[j].end - clips[j].start) > 8) {
-                            clipIndex = j;
-                            break;
-                        }
-                    }
-                } else {
-                    // Por defecto: siguiente clip no asignado
-                    clipIndex = clipCursor;
+            // 4. Marcadors estructurals especials (IPD, tag +++)
+            for (const item of manifest.escaletaItems) {
+                if (item.titol && item.titol.includes("+++")) {
+                    const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+                    const markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                    if (markerPos < 0) continue;
+                    await callJSX(`Markers.set(${markerPos}, 'IPD - ${getUtils().escape(item.titol)}')`);
                 }
-
-                if (clipIndex === -1) clipIndex = clipCursor;
-                if (clipIndex >= clips.length) break;
-
-                assignedClips[i] = clipIndex;
-                clipCursor = clipIndex + 1; // mover cursor después de este clip
             }
 
-            // Colocar marcadores según la asignación
-            for (let i = 0; i < mergedStruct.length; i++) {
-                const clipIndex = assignedClips[i];
-                if (clipIndex === -1) continue;
-                const block = mergedStruct[i];
-                const clip = clips[clipIndex];
-                const startTime = clip.start;
-                const type = getParse().classify(block, clip.end - clip.start);
-                const comment = `${block.id} - ${type}`;
-                log(`📍 Col·locant marcador a ${startTime.toFixed(2)}s: ${comment}`);
-                await callJSX(`Markers.set(${startTime}, '${comment.replace(/'/g, "\\'")}')`);
-
-                // Detectar Donapas y agregar marcador de CONNEXIÓ en el siguiente clip largo
-                if (type === "INTRO" && block.suffix === "dp") {
-                    // Buscar siguiente clip largo después de este
-                    for (let j = clipIndex + 1; j < clips.length; j++) {
-                        if ((clips[j].end - clips[j].start) > 8) {
-                            const conexioComment = `${block.id}c - CONNEXIO`;
-                            log(`📍 Col·locant marcador de CONNEXIÓ a ${clips[j].start.toFixed(2)}s: ${conexioComment}`);
-                            await callJSX(`Markers.set(${clips[j].start}, '${conexioComment.replace(/'/g, "\\'")}')`);
-                            break;
-                        }
-                    }
-                }
-
-                // Detectar chyrons con "CONNEXIÓ" (por si el bloque ya es una conexión)
-                for (const c of block.chyrons) {
-                    if (c.name && c.name.toUpperCase().includes("CONNEXIÓ")) {
-                        const conexioComment = `${block.id} - CONNEXIO`;
-                        log(`📍 Col·locant marcador de CONNEXIÓ (detectat) a ${startTime.toFixed(2)}s: ${conexioComment}`);
-                        await callJSX(`Markers.set(${startTime}, '${conexioComment.replace(/'/g, "\\'")}')`);
-                        break;
-                    }
-                }
-
-                // Detectar chyrons con "+++" (IPD) y colocar marcadores individuales
-                for (const c of block.chyrons) {
-                    if (c.name && c.name.includes("+++")) {
-                        const ipdComment = `${block.id} - IPD ${c.name}`;
-                        log(`📍 Col·locant marcador de IPD a ${startTime.toFixed(2)}s: ${ipdComment}`);
+            await FASTPASS_UI.SessionManifest.save(ctx, { phases: { markersPlaced: true } });
+            log(`✅ [MARKERS] ${count} marcadors col·locats amb precisió OnAir.`);
+        },
+og(`📍 Col·locant marcador de IPD a ${startTime.toFixed(2)}s: ${ipdComment}`);
                         await callJSX(`Markers.set(${startTime}, '${ipdComment.replace(/'/g, "\\'")}')`);
                     }
                 }
