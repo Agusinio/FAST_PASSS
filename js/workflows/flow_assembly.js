@@ -17,7 +17,7 @@
     const callJSX = (s) => getUtils().callJSX(s);
 
     // Función para formatear segundos a timecode (HH:MM:SS:FF) asumiendo 25 fps
-    const formatTC = (seconds) => {
+    /*const formatTC = (seconds) => {
         const fps = 25;
         const totalFrames = Math.round(seconds * fps);
         const hh = Math.floor(totalFrames / (fps * 3600));
@@ -25,6 +25,28 @@
         const ss = Math.floor((totalFrames % (fps * 60)) / fps);
         const ff = totalFrames % fps;
         return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}:${ff.toString().padStart(2, '0')}`;
+    };*/
+
+    const formatTC = (seconds) => {
+        const fps = 25;
+        // Una sola operación de punto flotante al inicio
+        let totalFrames = Math.round(seconds * fps);
+
+        // Extraemos unidades de derecha a izquierda (más eficiente)
+        const ff = totalFrames % fps;
+        const totalSeconds = (totalFrames / fps) | 0; // Bitwise OR para truncar (más rápido que Math.floor)
+
+        const ss = totalSeconds % 60;
+        const totalMinutes = (totalSeconds / 60) | 0;
+
+        const mm = totalMinutes % 60;
+        const hh = (totalMinutes / 60) | 0;
+
+        // Retorno directo evitando funciones auxiliares para el padding
+        return (hh < 10 ? '0' + hh : hh) + ":" +
+            (mm < 10 ? '0' + mm : mm) + ":" +
+            (ss < 10 ? '0' + ss : ss) + ":" +
+            (ff < 10 ? '0' + ff : ff);
     };
 
     FASTPASS_UI.Workflows.Assembly = {
@@ -54,8 +76,8 @@
                 // Netejar flash whites del timeline abans del processament de blocs
                 await getClipsLogic().cleanFlashWhites(clips, mainTrack);
                 log(`📊 Clips obtinguts: ${clips.length}`);
-                // Log detallat dels clips
-                clips.forEach((clip, idx) => log(`   Clip ${idx}: start=${clip.start.toFixed(2)}, end=${clip.end.toFixed(2)}, duration=${(clip.end - clip.start).toFixed(2)}`));
+                // Log detallat dels clips (comentat per reduir ruido)
+                // clips.forEach((clip, idx) => log(`   Clip ${idx}: start=${clip.start.toFixed(2)}, end=${clip.end.toFixed(2)}, duration=${(clip.end - clip.start).toFixed(2)}`));
                 if (clips.length === 0) return;
 
                 // Obtenir conductor seleccionat a la UI (si existeix)
@@ -82,7 +104,7 @@
                 const markerMap = {};
                 if (markerStruct && markerStruct.length > 0) {
                     markerStruct.forEach(m => { markerMap[m.id] = m.startTime; });
-                    log(`📊 Marcadors disponibles: ${Object.keys(markerMap).map(id => `${id}=${markerMap[id].toFixed(2)}s`).join(', ')}`);
+                    log(`📊 Marcadors disponibles: ${Object.keys(markerMap).length} marcadors`);
                 }
                 // Log detallat de cada bloc i els seus chirons
                 for (const blk of mergedStruct) {
@@ -126,7 +148,7 @@
                 for (let i = 0; i < blocksWithMarker.length; i++) {
                     const { block, markerTime } = blocksWithMarker[i];
                     const nextMarkerTime = (i + 1 < blocksWithMarker.length) ? blocksWithMarker[i + 1].markerTime : clips[clips.length - 1].end;
-                    
+
                     // Encontrar clip de inicio (el que contiene markerTime o el más cercano)
                     let startClipIdx = findClipIndexAtTime(markerTime);
                     // Asegurar que no sea un clip ya usado
@@ -456,13 +478,14 @@
                         // Garantizar duración positiva
                         if (duration < 0) duration = 0;
                         const safeDuration = Math.max(0.1, duration);
-                        log(`      🗣️ Traducció ${segmentIdx !== null ? `[${segmentIdx}]` : ''}: ${c.name} -> ${targetTime.toFixed(2)}s (V${targetTrack}) dins clip [${clipStart.toFixed(2)}  ${clipEnd.toFixed(2)}] (durada: ${safeDuration.toFixed(2)}s)`);
-                        if (i === 0) {
-                            log(`      🔍 Diagnóstic primera traducció: file='${c.name}', track=${targetTrack}, start=${targetTime.toFixed(2)}, duration=${safeDuration.toFixed(2)}, clipStart=${clipStart.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}`);
-                        }
-                        if (i === grupo.length - 1) {
-                            log(`      🔍 Diagnóstic última traducció: remaining=${remaining.toFixed(2)}, duration=${duration.toFixed(2)}, safeDuration=${safeDuration.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}, targetTime=${targetTime.toFixed(2)}`);
-                        }
+                        log(`      🗣️ Traducció ${segmentIdx !== null ? `[${segmentIdx}]` : ''}: ${c.name} -> ${targetTime.toFixed(2)}s (V${targetTrack}) (durada: ${safeDuration.toFixed(2)}s)`);
+                        // Diagnòstics detallats comentats per reduir ruido
+                        // if (i === 0) {
+                        //     log(`      🔍 Diagnóstic primera traducció: file='${c.name}', track=${targetTrack}, start=${targetTime.toFixed(2)}, duration=${safeDuration.toFixed(2)}, clipStart=${clipStart.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}`);
+                        // }
+                        // if (i === grupo.length - 1) {
+                        //     log(`      🔍 Diagnóstic última traducció: remaining=${remaining.toFixed(2)}, duration=${duration.toFixed(2)}, safeDuration=${safeDuration.toFixed(2)}, clipEnd=${clipEnd.toFixed(2)}, targetTime=${targetTime.toFixed(2)}`);
+                        // }
                         try {
                             const endTime = targetTime + safeDuration;
                             await callJSX(`Clips.insert('${getUtils().escape(c.name)}', ${targetTrack}, ${targetTime}, ${endTime}, 'video')`);
@@ -492,7 +515,8 @@
                 // Evitar múltiples chyrons de lloc en el mateix clip (només rol Llocdata)
                 if (c.rol === "Llocdata") {
                     const clipIdx = clips.indexOf(candidateClip);
-                    log(`      📍 Llocdata clipIdx=${clipIdx}, used=${Array.from(usedLlocClips).join(',')}`);
+                    // Debug comentat per reduir ruido
+                    // log(`      📍 Llocdata clipIdx=${clipIdx}, used=${Array.from(usedLlocClips).join(',')}`);
                     if (usedLlocClips.has(clipIdx)) {
                         // Cercar següent clip lliure
                         let nextIdx = clipIdx + 1;
@@ -509,10 +533,10 @@
                     usedLlocClips.add(clips.indexOf(candidateClip));
                 }
 
-                // Diagnóstico para chyrons de lugar
-                if (c.name.includes("Lloc") || c.name.includes("Data")) {
-                    log(`      🏞️ Chyron de lloc: ${c.name} tc=${c.tc} idealPos=${idealPos.toFixed(2)} candidateClip=[${candidateClip.start.toFixed(2)}-${candidateClip.end.toFixed(2)}]`);
-                }
+                // Diagnóstico para chyrons de lugar (comentat per reduir ruido, ja cobert per logs posteriors)
+                // if (c.name.includes("Lloc") || c.name.includes("Data")) {
+                //     log(`      🏞️ Chyron de lloc: ${c.name} tc=${c.tc} idealPos=${idealPos.toFixed(2)} candidateClip=[${candidateClip.start.toFixed(2)}-${candidateClip.end.toFixed(2)}]`);
+                // }
 
                 // Snap només per a NOMCARREC i FIRMA
                 let placementTime = adjustedTime;
@@ -607,26 +631,25 @@
                 log("⚠️ No hi ha clips a la pista V1.");
                 return;
             }
-            // Log detallado de clips
-            log(`📊 Clips en V1 (${clips.length}):`);
-            clips.forEach((c, idx) => {
-                log(`   ${idx}: start=${c.start.toFixed(2)}s, end=${c.end.toFixed(2)}s, dur=${(c.end - c.start).toFixed(2)}s`);
-            });
+            // Log detallado de clips (comentat per reduir ruido)
+            // log(`📊 Clips en V1 (${clips.length}):`);
+            // clips.forEach((c, idx) => {
+            //     log(`   ${idx}: start=${c.start.toFixed(2)}s, end=${c.end.toFixed(2)}s, dur=${(c.end - c.start).toFixed(2)}s`);
+            // });
             // Limpiar marcadores existentes
             await callJSX(`Markers.clear()`);
             // Para cada bloque, determinar su clip de inicio (asumiendo orden secuencial)
             let clipIndex = 0;
             const mergedStruct = getParse().mergeOffBlocks(state.structure);
-            // Log detallado de estructura original
-            log(`📊 Estructura cargada (${state.structure.length} bloques):`);
-            state.structure.forEach((b, idx) => {
-                log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
-            });
-            // Log de merged structure
-            log(`📊 Estructura fusionada (${mergedStruct.length} bloques):`);
-            mergedStruct.forEach((b, idx) => {
-                log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
-            });
+            // Log detallado de estructura (comentat per reduir ruido)
+            // log(`📊 Estructura cargada (${state.structure.length} bloques):`);
+            // state.structure.forEach((b, idx) => {
+            //     log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
+            // });
+            // log(`📊 Estructura fusionada (${mergedStruct.length} bloques):`);
+            // mergedStruct.forEach((b, idx) => {
+            //     log(`   ${idx}: id=${b.id}, suffix=${b.suffix}, theme=${b.theme}, chyrons=${b.chyrons.length}`);
+            // });
             // Función auxiliar para convertir TC (MM.SS) a segundos
             function tcToSeconds(tc) {
                 if (!tc) return 0;
@@ -654,7 +677,7 @@
                     clipIndex = clipCursor;
                 } else if (type === "INTRO" && block.suffix === "dp") {
                     // Donapas: buscar clip largo después del último chyron del bloque anterior
-                    const prevBlock = mergedStruct[i-1];
+                    const prevBlock = mergedStruct[i - 1];
                     let lastTc = 0;
                     for (const c of prevBlock.chyrons) {
                         const sec = tcToSeconds(c.tc);
@@ -769,7 +792,7 @@
                 const comment = m.comment || '';
                 // Extraer ID y tipo del comentario (formato "ID - TIPO")
                 const parts = comment.split(' - ');
-                const id = parts[0] || `M${i+1}`;
+                const id = parts[0] || `M${i + 1}`;
                 const type = parts[1] || 'UNKNOWN';
                 structure.push({
                     id: id,
@@ -789,21 +812,108 @@
         placeStructureMarkers: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             log("📍 Col·locant marcadors d'escaleta (Mode Guiat)...");
-            
+
             try {
                 const ctx = FASTPASS_UI.State;
+                // Si ctx.progData no existe, intentar obtenerlo de los selects
+                if (!ctx.progData) {
+                    const config = FASTPASS_UI.Config.get();
+                    const progSelect = document.getElementById('programa');
+                    const blocSelect = document.getElementById('bloc');
+                    if (progSelect && progSelect.value && config.mapeoProgramas) {
+                        ctx.progData = config.mapeoProgramas[progSelect.value];
+                        ctx.bloque = blocSelect ? blocSelect.value : 'V1';
+                        log("⚠️ [RECUPERAT] progData recuperat des del select.");
+                    } else {
+                        log("⚠️ No es pot determinar el programa. Abortant.");
+                        return;
+                    }
+                }
+
                 const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-                
-                const status = await reader.getStatus(ctx.progData.archivo, ctx.bloque);
-                if (!status.found) {
+
+                // Buscar el JSON más reciente para el programa
+                const latest = await reader.findLatest(ctx.progData.archivo);
+                if (!latest) {
                     log("⚠️ No es troba la dades de la escaleta.", "ERROR");
                     return;
                 }
-                
-                const data = await reader.load(status.path);
-                const lines = reader.getLinesForBlock(data, ctx.bloque);
+
+                const data = await reader.load(latest.path);
+                if (!data) {
+                    log("⚠️ No s'ha pogut carregar l'escaleta.", "ERROR");
+                    return;
+                }
+                // Log de estructura JSON extraída
+                log(`📋 Estructura JSON: cleanFeed=${data.cleanFeed ? '✓' : '✗'}, linies=${data.escaleta?.liniesEscaleta?.length || 0}, bloc=${ctx.bloque}`);
+
+                let lines = reader.getLinesForBlock(data, ctx.bloque);
                 const block = reader.getBlock(data, ctx.bloque);
-                
+
+                // Determinar el rango temporal basado en las líneas V1 (agrupacio coincidente)
+                if (lines.length > 0) {
+                    const allLines = data.escaleta?.liniesEscaleta || [];
+                    // Ordenar líneas V1 por hora
+                    const sortedV1 = lines.slice().sort((a, b) => {
+                        const horaA = a.horaEntradaOnAir || a.horaEntradaPrevista;
+                        const horaB = b.horaEntradaOnAir || b.horaEntradaPrevista;
+                        return reader.tcToSeconds(horaA) - reader.tcToSeconds(horaB);
+                    });
+                    const firstStartSec = reader.tcToSeconds(sortedV1[0].horaEntradaPrevista);
+                    const lastEndSec = reader.tcToSeconds(sortedV1[sortedV1.length - 1].horaSortidaPrevista);
+
+                    // Filtrar todas las líneas que estén dentro de ese rango, excluyendo líneas de otros bloques y las que empiezan justo en el límite superior
+                    const blockLines = allLines.filter(line => {
+                        const horaEntrada = line.horaEntradaOnAir || line.horaEntradaPrevista;
+                        if (!horaEntrada || horaEntrada === "00:00:00") return false;
+                        const entrySec = reader.tcToSeconds(horaEntrada);
+                        // Excluir líneas que empiezan justo en el límite superior (pertenecen al siguiente bloque)
+                        if (entrySec >= lastEndSec) {
+
+                            return false;
+                        }
+                        // Si la línea tiene agrupacio definido y no coincide con el bloque, excluir (es de otro bloque)
+                        const ag = line.agrupacio;
+                        if (ag !== null && ag !== undefined && ag.toString().trim() !== '') {
+                            // Comparar case-insensitive con el bloque
+                            if (ag.toString().toLowerCase() !== ctx.bloque.toLowerCase()) {
+
+                                return false;
+                            }
+                        }
+                        // Incluir solo líneas que estén dentro del rango (firstStartSec <= entrySec < lastEndSec)
+                        if (entrySec >= firstStartSec) {
+
+                            return true;
+                        } else {
+
+                            return false;
+                        }
+                    });
+
+                    // Reemplazar lines con el bloque completo (ya incluye las líneas V1)
+                    lines = blockLines;
+                }
+
+                // Ordenar línies per hora d'entrada
+                lines.sort((a, b) => {
+                    const horaA = a.horaEntradaOnAir || a.horaEntradaPrevista;
+                    const horaB = b.horaEntradaOnAir || b.horaEntradaPrevista;
+                    return reader.tcToSeconds(horaA) - reader.tcToSeconds(horaB);
+                });
+                // Log de línies extretes (comentat per reduir ruido)
+                // log(`🔍 [DEBUG] Línies d'escaleta extretes (${lines.length}):`);
+                // lines.slice(0, 5).forEach((line, idx) => {
+                //     log(`   ${idx}: num=${line.num || ''} titol=${line.titol || ''} hora=${line.horaEntradaOnAir || line.horaEntradaPrevista || ''}`);
+                // });
+                // if (lines.length > 5) {
+                //     log(`   ... i ${lines.length - 5} més`);
+                // }
+                if (!block) {
+                    log("⚠️ El bloc no es troba al JSON.", "ERROR");
+                    return;
+                }
+
                 if (lines.length === 0) {
                     log("⚠️ El bloc no té línies d'escaleta definides.", "WARN");
                     return;
@@ -812,36 +922,537 @@
                 // Netejar marcadors previs
                 await callJSX("Markers.clear()");
 
+                // Obtenir dades del cleanFeed per calcular l'offset real del clip al timeline
+                const cleanFeed = reader.getCleanFeed(data);
+                const handles = ctx.config.handles || reader.HANDLE_SECS || 20;
+                const bounds = reader.calcClipBounds(cleanFeed.mediaStart, block.in, block.out, handles, cleanFeed.mediaStop);
+                const inPoint = bounds.inPoint;
+                const mediaStartSec = reader.tcToSeconds(cleanFeed.mediaStart);
                 const blockInSec = reader.tcToSeconds(block.in);
-                
+
+                // Logs de càlcul temporal (comentats per reduir ruido)
+                // log(`🔍 [DEBUG] cleanFeed.mediaStart = ${cleanFeed.mediaStart} (${mediaStartSec}s)`);
+                // log(`🔍 [DEBUG] block.in = ${block.in} (${blockInSec}s)`);
+                // log(`🔍 [DEBUG] handles = ${handles}s`);
+                // log(`🔍 [DEBUG] inPoint calculat = ${inPoint}s`);
+                // log(`🔍 [DEBUG] Offset total al timeline: mediaStart + inPoint = ${mediaStartSec + inPoint}s`);
+                log(`📋 Línies d'escaleta trobades: ${lines.length}`);
+
+                // Encontrar el clip que coincide con el bloque (usando inPoint, outPoint, duración)
+                const clips = await getClipsLogic().getTrackClips(1, "video");
+                // Log de primers clips (comentat per reduir ruido)
+                // log(`🔍 [DEBUG] Se encontraron ${clips.length} clips en pista 1. Primeros 5:`);
+                // clips.slice(0, 5).forEach((clip, idx) => {
+                //     log(`   Clip ${idx}: start=${clip.start.toFixed(2)}s, inPoint=${clip.inPoint.toFixed(2)}s, outPoint=${clip.outPoint.toFixed(2)}s, duration=${(clip.outPoint - clip.inPoint).toFixed(2)}s`);
+                // });
+
+                let matchedClip = null;
+                if (clips.length > 0) {
+                    // 1. Búsqueda por inPoint (tolerancia 5 segundos)
+                    let minDiff = Infinity;
+                    for (const clip of clips) {
+                        const diff = Math.abs(clip.inPoint - bounds.inPoint);
+                        if (diff < minDiff && diff < 5) {
+                            minDiff = diff;
+                            matchedClip = clip;
+                        }
+                    }
+                    // 2. Si no, búsqueda por outPoint
+                    if (!matchedClip) {
+                        minDiff = Infinity;
+                        for (const clip of clips) {
+                            const diff = Math.abs(clip.outPoint - bounds.outPoint);
+                            if (diff < minDiff && diff < 5) {
+                                minDiff = diff;
+                                matchedClip = clip;
+                            }
+                        }
+                    }
+                    // 3. Si no, búsqueda por duración (tolerancia 10 segundos)
+                    if (!matchedClip) {
+                        minDiff = Infinity;
+                        for (const clip of clips) {
+                            const clipDuration = clip.outPoint - clip.inPoint;
+                            const diff = Math.abs(clipDuration - bounds.duration);
+                            if (diff < minDiff && diff < 10) {
+                                minDiff = diff;
+                                matchedClip = clip;
+                            }
+                        }
+                    }
+                    // 4. Si aún no, tomar el clip con start más grande (supuestamente el último insertado)
+                    if (!matchedClip) {
+                        matchedClip = clips.reduce((latest, clip) => (clip.start > latest.start ? clip : latest), clips[0]);
+                        log(`⚠️ No se encontró clip por coincidencia exacta, se usará el clip con start más grande (${matchedClip.start.toFixed(2)}s).`);
+                    } else {
+                        log(`📋 Clip del bloque encontrado: start=${matchedClip.start.toFixed(2)}s`);
+                    }
+                }
+                // Función auxiliar para convertir durada (formato "0:34" o "1:00" o "0:34:00") a segundos
+                const parseDurada = (str) => {
+                    if (!str || str === "0:00") return 0;
+                    const parts = str.split(':').map(Number);
+                    if (parts.length === 2) { // minutos:segundos
+                        return parts[0] * 60 + parts[1];
+                    } else if (parts.length === 3) { // minutos:segundos:frames (asumir 25 fps)
+                        return parts[0] * 60 + parts[1] + parts[2] / 25;
+                    } else if (parts.length === 4) { // HH:MM:SS:FF
+                        return parts[0] * 3600 + parts[1] * 60 + parts[2] + parts[3] / 25;
+                    }
+                    return 0;
+                };
+
+                // ============================================================
+                // Función auxiliar: obtener duración efectiva en segundos
+                // Prioriza duradaOnAir cuando durada es "0:00" o está vacío
+                // (porque algunos items tienen durada=0 pero duradaOnAir>0,
+                // como el item "01" que tiene durada "0:00" y duradaOnAir "0:33")
+                // ============================================================
+                const getEffectiveDuradaSec = (line) => {
+                    const dStr = line.durada || '';
+                    if (dStr === '' || dStr === '0:00') {
+                        const onAir = line.duradaOnAir || '0:00';
+                        return parseDurada(onAir);
+                    }
+                    return parseDurada(dStr);
+                };
+
+                // --- ALGORITMO DE SNAP A CORTES ---
+                // Clasificación de ítem según duración y agrupacio.
+                // Usa getEffectiveDuradaSec para consistencia con la separación
+                // en dos fases (estructurales vs gráficos).
+                const clasificarItem = (line) => {
+                    const dSec = getEffectiveDuradaSec(line);
+                    const num = (line.num || '').toLowerCase();
+                    // Grafismo: agrupacio=null y duración 0
+                    if (!line.agrupacio && dSec === 0) return 'GRAFISMO';
+                    // No verticalizable: agrupacio=null y duración > 0 (ROJO)
+                    if (!line.agrupacio && dSec > 0) return 'NO_VERTICALIZABLE';
+                    // LEAD: puede ser de cualquier duración, clasificar como CORTO (minDur=0)
+                    // para que snapToCut no exija una duración mínima de clip.
+                    if (num.indexOf('lead') !== -1) return 'CORTO';
+                    // Verticalizable: determinar categoría por duración
+                    if (dSec >= 30) return 'LARGO';       // ≥30s: INTRO, DIFERIT
+                    if (dSec >= 5) return 'MEDIO';        // ≥5s y <30s: INSERT, CONNEXIO, DONAPAS
+                    return 'CORTO';                       // <5s: VIDEO, IPD
+                };
+
+                // Snap a corte según categoría
+                const snapToCut = (idealPos, categoria, cortes, clips, ultimoCorteUsado) => {
+                    const tolerancias = { LARGO: 2.0, MEDIO: 2.0, CORTO: 1.0, GRAFISMO: 1.0, NO_VERTICALIZABLE: 2.0 };
+                    const minDurs = { LARGO: 15, MEDIO: 5, CORTO: 0, GRAFISMO: 0, NO_VERTICALIZABLE: 0 };
+                    const tolerancia = tolerancias[categoria] || 2.0;
+                    const minDur = minDurs[categoria] || 0;
+
+                    for (let i = ultimoCorteUsado + 1; i < cortes.length; i++) {
+                        const corte = cortes[i];
+                        if (corte >= idealPos - tolerancia) {
+                            const dur = clips[i].end - clips[i].start;
+                            // Si es clip muy corto (<1s) y no es GRAFISMO/CORTO, saltarlo
+                            if (dur < 1.0 && categoria !== 'GRAFISMO' && categoria !== 'CORTO') continue;
+                            if (dur >= minDur) {
+                                return { corte, idx: i };
+                            }
+                        }
+                    }
+                    // Fallback: buscar el corte más cercano a idealPos que cumpla minDur
+                    let mejorCorte = idealPos;
+                    let mejorIdx = -1;
+                    let menorDistancia = Infinity;
+                    for (let i = ultimoCorteUsado + 1; i < cortes.length; i++) {
+                        const dur = clips[i].end - clips[i].start;
+                        // Saltar clips muy cortos (<1s) si no son GRAFISMO/CORTO
+                        if (dur < 1.0 && categoria !== 'GRAFISMO' && categoria !== 'CORTO') continue;
+                        if (dur < minDur) continue;
+                        const dist = Math.abs(cortes[i] - idealPos);
+                        if (dist < menorDistancia && dist <= 10.0) {
+                            menorDistancia = dist;
+                            mejorCorte = cortes[i];
+                            mejorIdx = i;
+                        }
+                    }
+                    if (mejorIdx >= 0) {
+                        return { corte: mejorCorte, idx: mejorIdx };
+                    }
+                    // No hay ningún corte válido cercano: respetar la posición ideal
+                    return { corte: idealPos, idx: -1 };
+                };
+
+                // Preparar cortes (inicios de clip)
+                const cortes = clips.map(c => c.start);
+                let ultimoCorteUsado = -1;
+
+                const extractBlockId = (num) => {
+                    if (!num) return '';
+                    const match = num.match(/^(\d+)/);
+                    return match ? match[1] : '';
+                };
+
+                // Acumular posiciones de marcadores colocados
+                const placedMarkers = [];
+                // Arrays separados para tracking de cada tipo de marcador
+                const placedGraphicMarkers = [];
+                const placedIpdMarkers = [];
+
+                // ============================================================
+                // Clasificar items en 3 grupos:
+                // - ESTRUCTURALES: durada > 0 (usando durada literal, NO duradaOnAir)
+                // - IPD: durada = 0 Y agrupacio != null (imágenes dentro de conexiones)
+                // - GRAFISMOS: durada = 0 Y agrupacio = null (elementos superpuestos)
+                // ============================================================
+                const getRawDuradaSec = (line) => parseDurada(line.durada || '0:00');
+
+                const structuralItems = [];
+                const ipdItems = [];
+                const graphicItems = [];
                 for (const line of lines) {
                     const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
                     if (!horaRef || horaRef === "00:00:00") continue;
+                    const dSec = getRawDuradaSec(line);
+                    if (dSec > 0) {
+                        structuralItems.push(line);
+                    } else if (line.agrupacio && line.duradaOnAir) {
+                        ipdItems.push(line);
+                    } else {
+                        graphicItems.push(line);
+                    }
+                }
+                log(`📋 Items: ${structuralItems.length} estructurals, ${ipdItems.length} IPDs, ${graphicItems.length} gràfics`);
 
-                    const lineSec = reader.tcToSeconds(horaRef);
-                    // Posició absoluta al timeline (Sense handles per petició de l'usuari)
-                    const tLine = (lineSec - blockInSec);
-                    const safeT = Math.max(0, tLine).toFixed(2);
+                // ============================================================
+                // FASE 1: Marcadores Estructurales (duración > 0)
+                // ============================================================
+                // Primer marcador forzado a 00:00 sin aplicar ninguna lógica.
+                // Siguientes: posición = posición_marker_anterior + duración_item_anterior
+                // A cada posición se le aplica snapToCut para encontrar el frame
+                // exacto de transición entre clips del timeline.
+                // ============================================================
+                let currentStructuralPos = 0; // acumulador aditivo para estructurales
+                const structuralItemPositions = []; // paralelo a structuralItems
 
+                for (const line of structuralItems) {
+                    const dSec = getEffectiveDuradaSec(line);
+                    const categoria = clasificarItem(line);
+
+                    // Primer marcador: forzar 00:00
+                    const posIdeal = (placedMarkers.length === 0) ? 0 : currentStructuralPos;
+
+                    // Aplicar snap a cortes (SOLO para estructurales)
+                    const resultado = snapToCut(posIdeal, categoria, cortes, clips, ultimoCorteUsado);
+                    const posicionFinal = resultado.corte;
+                    ultimoCorteUsado = resultado.idx;
+
+                    const safeT = posicionFinal.toFixed(2);
                     const num = line.num || '';
                     const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
                     const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
-                    
+
+                    log(`📍 [ESTRUCTURAL] ${num}: → timeline ${safeT}s (${categoria}, ideal ${posIdeal.toFixed(2)}s)`);
+
                     if (comment) {
-                        await callJSX(`Markers.set(${safeT}, '${comment}')`);
+                        // Color: AZUL (6) si tiene agrupacio, ROJO (1) si no tiene
+                        const colorIdx = line.agrupacio ? 6 : 1;
+                        const script = `Markers.set(${safeT}, '${comment}', 'color=${colorIdx}')`;
+                        await callJSX(script);
+                        placedMarkers.push(parseFloat(safeT));
+                    }
+
+                    // Guardar posición para que los gráficos puedan referenciarla
+                    structuralItemPositions.push(posicionFinal);
+
+                    // Avanzar posición acumulada para el siguiente estructural
+                    // Usar la posición REAL (posicionFinal) como base, no la ideal acumulada
+                    currentStructuralPos = posicionFinal + dSec;
+                }
+
+                // ============================================================
+                // RONDA 2: IPDs (items con duración 0 pero con agrupacio)
+                // Se colocan dentro del rango de su padre estructural (conexión).
+                // CON snapToCut porque producen cortes detectables en el timeline.
+                // NO alteran la posición aditiva de los estructurales.
+                // Color: TURQUESA (7)
+                // ============================================================
+
+                const findParentStructural = (line, allLines, structuralItems, structuralItemPositions) => {
+                    const lineIdx = allLines.indexOf(line);
+                    for (let i = lineIdx - 1; i >= 0; i--) {
+                        const prevLine = allLines[i];
+                        const prevIdx = structuralItems.indexOf(prevLine);
+                        if (prevIdx >= 0) {
+                            const parentPos = structuralItemPositions[prevIdx];
+                            let limit;
+                            if (prevIdx + 1 < structuralItemPositions.length) {
+                                limit = structuralItemPositions[prevIdx + 1];
+                            } else {
+                                const parentDur = getEffectiveDuradaSec(structuralItems[prevIdx]);
+                                limit = parentPos + Math.max(parentDur, 4);
+                            }
+                            return { parentPos, limit, parentIdx: prevIdx };
+                        }
+                    }
+                    return null;
+                };
+
+                for (const line of ipdItems) {
+                    const parentInfo = findParentStructural(line, lines, structuralItems, structuralItemPositions);
+                    if (!parentInfo) continue;
+
+                    const { parentPos, limit } = parentInfo;
+
+                    // Encontrar el índice del clip del padre para buscar el SIGUIENTE corte
+                    // No usar ultimoCorteUsado global porque apunta al último estructural
+                    // (que puede estar muy lejos), no al clip donde está el padre.
+                    let parentCorteIdx = -1;
+                    for (let i = 0; i < cortes.length; i++) {
+                        if (cortes[i] >= parentPos) {
+                            parentCorteIdx = i;
+                            break;
+                        }
+                    }
+                    if (parentCorteIdx < 0) parentCorteIdx = ultimoCorteUsado;
+
+                    // Aplicar snapToCut desde el clip del padre
+                    // snapToCut busca desde parentCorteIdx + 1, que es el SIGUIENTE clip
+                    const resultado = snapToCut(parentPos, 'CORTO', cortes, clips, parentCorteIdx);
+                    let posicionFinal = resultado.corte;
+                    ultimoCorteUsado = resultado.idx;
+
+                    // Limitar al rango del padre
+                    posicionFinal = Math.min(posicionFinal, limit - 0.04);
+                    posicionFinal = Math.max(posicionFinal, parentPos);
+
+                    const safeT = posicionFinal.toFixed(2);
+                    const num = line.num || '';
+                    const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                    const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
+
+                    log(`📍 [IPD] ${num}: → timeline ${safeT}s (dins de item ${structuralItems[parentInfo.parentIdx].num})`);
+
+                    if (comment) {
+                        const script = `Markers.set(${safeT}, '${comment}', 'color=7')`; // TURQUESA
+                        await callJSX(script);
+                        placedMarkers.push(parseFloat(safeT));
+                        placedIpdMarkers.push(parseFloat(safeT));
+                    }
+                }
+
+
+                // ============================================================
+                // RONDA 3: GRAFISMOS (duración === 0)
+                // ============================================================
+                // Se colocan DENTRO de su item padre estructural, posicionados
+                // hacia el FINAL del rango del padre:
+                //   - Último grafismo a 4s del límite (inicio del siguiente estructural)
+                //   - Separados 4s entre sí (si el espacio lo permite)
+                //   - Margen de 1/3 al inicio del padre (sin grafismos en el primer tercio)
+                //   - Si no hay espacio suficiente, se comprime el spacing
+                // NO se aplica snapToCut.
+                // Color: AMARILLO (4)
+                // ============================================================
+
+                // 1. Agrupar grafismos por padre estructural
+                const grafismosByParent = new Map(); // parentStructuralIdx → [{line, comment}]
+
+                for (const line of graphicItems) {
+                    const num = line.num || '';
+                    const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                    const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
+                    if (!comment) continue;
+
+                    // Encontrar el item padre estructural
+                    const lineIdx = lines.indexOf(line);
+                    let parentStructuralIdx = -1;
+                    for (let i = lineIdx - 1; i >= 0; i--) {
+                        const prevLine = lines[i];
+                        const prevIdx = structuralItems.indexOf(prevLine);
+                        if (prevIdx >= 0) {
+                            parentStructuralIdx = prevIdx;
+                            break;
+                        }
+                    }
+
+                    // Si no hay padre, usar el primer estructural como fallback
+                    if (parentStructuralIdx < 0 && structuralItemPositions.length > 0) {
+                        parentStructuralIdx = 0;
+                    }
+
+                    if (parentStructuralIdx < 0) continue;
+
+                    if (!grafismosByParent.has(parentStructuralIdx)) {
+                        grafismosByParent.set(parentStructuralIdx, []);
+                    }
+                    grafismosByParent.get(parentStructuralIdx).push({ line, comment });
+                }
+
+                // 2. Para cada grupo de grafismos, calcular posiciones desde el final del rango
+                for (const [parentIdx, grafismos] of grafismosByParent) {
+                    const parentPos = structuralItemPositions[parentIdx];
+                    const count = grafismos.length;
+
+                    // Calcular límite del rango
+                    let limit;
+                    if (parentIdx + 1 < structuralItemPositions.length) {
+                        limit = structuralItemPositions[parentIdx + 1];
+                    } else {
+                        const parentDur = getEffectiveDuradaSec(structuralItems[parentIdx]);
+                        limit = parentPos + Math.max(parentDur, 4);
+                    }
+
+                    const rangeTotal = limit - parentPos;
+
+                    // Margen de 1/3 al inicio del padre (sin grafismos en este margen)
+                    const marginStart = parentPos + rangeTotal / 3;
+
+                    // Último grafismo a 4s del límite
+                    const lastPos = limit - 4.0;
+
+                    // Calcular spacing entre grafismos
+                    const spanNeeded = 4.0 * Math.max(count - 1, 0);
+                    const spanAvailable = lastPos - marginStart;
+
+                    let spacing;
+                    if (count <= 1) {
+                        spacing = 0;
+                    } else if (spanAvailable >= spanNeeded) {
+                        spacing = 4.0; // Hay espacio suficiente
+                    } else {
+                        // No hay suficiente espacio: comprimir spacing
+                        spacing = Math.max(spanAvailable / (count - 1), 0.04);
+                    }
+
+                    // Colocar cada grafismo respetando el orden original de la escaleta
+                    // (k=0 → primer item de la escaleta → posición más cercana a marginStart)
+                    // (k=count-1 → último item → posición más cercana a limit)
+                    for (let k = 0; k < count; k++) {
+                        const posDesdeFinal = lastPos - spacing * (count - 1 - k);
+                        const posicionFinal = Math.max(marginStart + 0.04, posDesdeFinal);
+
+                        const { line, comment } = grafismos[k];
+                        const num = line.num || '';
+                        const safeT = posicionFinal.toFixed(2);
+
+                        log(`📍 [GRÀFIC] ${num}: → timeline ${safeT}s (dins de item ${structuralItems[parentIdx].num})`);
+
+                        const script = `Markers.set(${safeT}, '${comment}', 'color=4')`;
+                        await callJSX(script);
+                        placedMarkers.push(parseFloat(safeT));
+                        placedGraphicMarkers.push(parseFloat(safeT));
+                    }
+                }
+
+                // Resumen de aplicación en timeline
+                if (placedMarkers.length > 0) {
+                    placedMarkers.sort((a, b) => a - b);
+                    const firstPos = placedMarkers[0];
+                    const lastPos = placedMarkers[placedMarkers.length - 1];
+                    log(`📍 Marcadors colocats: ${placedMarkers.length} (${formatTC(firstPos)} → ${formatTC(lastPos)})`);
+                    const expectedFirst = 0;
+                    const diff = Math.abs(firstPos - expectedFirst);
+                    if (diff > 1.0) {
+                        log(`   ⚠️ Desviación del primer marcador: ${diff.toFixed(2)}s (puede indicar offset incorrecto)`);
                     }
                 }
 
                 log("✅ Marcadors d'escaleta col·locats correctament.");
+
+                // --- LISTADO DETALLADO DE MARCADORES ---
+                const markersRaw = await callJSX(`Markers.get()`);
+                if (markersRaw && markersRaw !== "[]") {
+                    try {
+                        const markersList = JSON.parse(markersRaw);
+                        if (markersList.length > 0) {
+                            markersList.sort((a, b) => a.time - b.time);
+                            log(`📋 MARCADORS A TIMELINE (${markersList.length}):`);
+                            markersList.forEach((m, idx) => {
+                                const tc = formatTC(m.time);
+                                const name = m.name || '';
+                                const comment = m.comments || '';
+                                log(`   Marcador ${idx}: ${tc} | "${comment}" | nom="${name}"`);
+                            });
+                        }
+                    } catch (e) {
+                        log(`   ⚠️ Error al parsear marcadors: ${e.message}`);
+                    }
+                }
+
+                // Dump de tots els clips en V1 després de col·locar els marcadors
+                log(`📋 CLIPS EN V1 (${clips.length}):`);
+                clips.forEach((clip, idx) => {
+                    log(`   Clip ${idx}: start=${clip.start.toFixed(2)}s | end=${clip.end.toFixed(2)}s | dur=${(clip.end - clip.start).toFixed(2)}s | inPoint=${clip.inPoint.toFixed(2)}s | outPoint=${clip.outPoint.toFixed(2)}s`);
+                });
+
                 getUtils().status("Marcadors OK", "exito");
-                
+
             } catch (e) { getUtils().handleError(e, "placeStructureMarkers"); }
+        },
+
+        /**
+         * debugBlockItems: Imprime informació dels clips del timeline d'un bloc i dels items d'escaleta,
+         * i col·loca marcadors al timeline.
+         * @param {string} blockId - Identificador del bloc (per defecte "V1")
+         */
+        debugBlockItems: async function (blockId = "V1") {
+            log(`🔍 [DEBUG] Iniciant debug per al bloc ${blockId}`);
+            const reader = window.EscaletaReader;
+            const cfg = FASTPASS_UI.Config.get();
+            const trackIdx = cfg.tracks.video.mp4; // pista on està el clip del bloc
+
+            // 1. Obtenir dades de l'escaleta actual (carregar JSON més recent)
+            const programArchivo = "TN_VESPRE"; // TODO: obtenir del context
+            const latest = await reader.findLatest(programArchivo);
+            if (!latest) {
+                log(`⚠️ No s'ha trobat JSON d'escaleta per a ${programArchivo}`);
+                return;
+            }
+            const data = await reader.load(latest.path);
+            if (!data) {
+                log(`⚠️ No s'ha pogut carregar JSON`);
+                return;
+            }
+
+            // 2. Obtenir bloc
+            const block = reader.getBlock(data, blockId);
+            if (!block) {
+                log(`⚠️ Bloc ${blockId} no trobat`);
+                return;
+            }
+            log(`📋 Bloc ${blockId}: in=${block.in}, out=${block.out}, ready=${block.ready}`);
+
+            // 3. Obtenir items del bloc (taula en memòria)
+            const items = reader.getBlockItems(data, blockId);
+            log(`📋 Total items del bloc: ${items.length}`);
+            items.forEach((item, idx) => {
+                log(`   ${idx + 1}. Seq ${item.sequencia} | Num ${item.num} | "${item.titol}" | Durada ${item.durada} | Entrada ${item.horaEntradaPrevista} | Offset ${item.offset.toFixed(2)}s`);
+            });
+
+            // 4. Obtenir clips del timeline a la pista mp4
+            const clips = await getClipsLogic().getTrackClips(trackIdx, "video");
+            log(`🎬 Clips al timeline (pista ${trackIdx}): ${clips.length}`);
+            clips.forEach((clip, idx) => {
+                log(`   Clip ${idx}: start=${clip.start.toFixed(2)}s, end=${clip.end.toFixed(2)}s, duration=${(clip.end - clip.start).toFixed(2)}s, inPoint=${clip.inPoint.toFixed(2)}s, outPoint=${clip.outPoint.toFixed(2)}s`);
+            });
+
+            // 5. Si hi ha clip, assumim que el primer clip correspon al bloc (simplificat)
+            const targetClip = clips.length > 0 ? clips[0] : null;
+            if (targetClip) {
+                log(`🎬 Clip seleccionat per a marcadors: start=${targetClip.start.toFixed(2)}s`);
+                // 6. Col·locar marcadors per a cada item
+                for (const item of items) {
+                    const markerTime = targetClip.start + item.offset;
+                    const comment = `${item.num ? item.num + ' - ' : ''}${item.titol}`.trim();
+                    log(`   📍 Marcador a ${markerTime.toFixed(2)}s: ${comment}`);
+                    await callJSX(`Markers.set(${markerTime}, '${comment.replace(/'/g, "\\'")}', 'Línia Escaleta')`);
+                }
+                log(`✅ ${items.length} marcadors col·locats.`);
+            } else {
+                log(`⚠️ No hi ha clip al timeline per col·locar marcadors.`);
+            }
         },
 
         /**
          * runGuidedAssembly: Dispara la lògica de posicionament de rètols basat en markers.
          */
-        runGuidedAssembly: async function() {
+        runGuidedAssembly: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             try {
                 const res = await window.FASTPASS_UI.Logic.Assembly.runGuidedAssembly();
@@ -854,3 +1465,4 @@
 
     window.FASTPASS_UI.Workflows.Assembly = FASTPASS_UI.Workflows.Assembly;
 })();
+

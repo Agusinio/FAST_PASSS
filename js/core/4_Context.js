@@ -22,22 +22,19 @@
             if (!getUtils().isJsxReady) return;
         
             // 📍 Capturamos los elementos del DOM al inicio
-            const elProg = document.getElementById('programa'); // <--- Faltaba esto
-            const elBloc = document.getElementById('bloc');     // <--- Faltaba esto
+            const elProg = document.getElementById('programa');
+            const elBloc = document.getElementById('bloc');
         
             // 📍 DEBOUNCE
             const now = Date.now();
             if (now - _lastCheckAt < 1000) return;
             _lastCheckAt = now;
         
-            console.group("🔍 [DEBUG CONTEXT]"); 
-        
             try {
                 // Ahora ya puedes validar si existen
                 if (!elProg || !elBloc || !elProg.value || elBloc.value === "---") {
                     console.log("⚠️ Selectores incompletos o no encontrados.");
                     this.updateButton('DISABLED');
-                    console.groupEnd();
                     return;
                 }
         
@@ -49,13 +46,16 @@
                     // Usamos la fecha de la utilidad
                     dateDir: getUtils().getFormattedDate().replace(/"/g, "").trim()
                 };
-                getUtils().log("🔍 [CONTEXT DEBUG] progData: " + JSON.stringify(ctx.progData), "DEBUG");
+                // Actualizar estado global
+                if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                    Object.assign(window.FASTPASS_UI.State, ctx);
+                }
             
                 // 1. RUTA DE RECERCA
                 const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
                 
                 // 2. ESCANEIG GENÈRIC (Usant Utils.readFolder a través de Scanner)
-                const projectFiles = await getUtils().readFolder(folderPath); // Atòmic
+                const projectFiles = await getUtils().readFolder(folderPath);
 
                 if (!projectFiles || projectFiles.length === 0) {
                     getUtils().log("ℹ️ Carpeta buida o inexistent. Conclusió: NEW", "DEBUG");
@@ -63,14 +63,11 @@
             
                 // 3. LÒGICA DE NEGOCI (Usant el teu Scanner.js)
                 const progKey = ctx.progData.archivo_wott || ctx.progData.archivo;
-                getUtils().log("🔍 [CONTEXT DEBUG] progKey: " + progKey + ", bloque: " + ctx.bloque, "DEBUG");
                 const existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
                     projectFiles,
                     progKey,
                     ctx.bloque
                 );
-                getUtils().log("🔍 [CONTEXT DEBUG] projectFiles: " + projectFiles.length + " items", "DEBUG");
-                getUtils().log("🔍 [CONTEXT DEBUG] existingProjectName: " + (existingProjectName || "null"), "DEBUG");
             
                 let conclusion = 'NEW';
                 let lockOwner = null;
@@ -83,9 +80,8 @@
                     try {
                         const openProjectsRaw = await getUtils().callJSX("Context.list()");
                         openProjects = JSON.parse(openProjectsRaw || "[]");
-                        getUtils().log("🔍 [CONTEXT DEBUG] openProjects raw: " + JSON.stringify(openProjects), "DEBUG");
                     } catch (e) {
-                        getUtils().log("⚠️ No se pudo obtener lista de proyectos abiertos: " + e.message, "DEBUG");
+                        // Ignorar error
                     }
                     let isProjectOpen = false;
                     let isProjectActive = false;
@@ -108,7 +104,6 @@
                             // Ignorar
                         }
                     }
-                    getUtils().log("🔍 [CONTEXT DEBUG] activeProjectName: " + activeProjectName, "DEBUG");
                     
                     if (openProjects.length > 0) {
                         // openProjects es array de strings (nombres de proyecto con extensión)
@@ -123,16 +118,13 @@
                         // Fallback a Project.path() para determinar si el proyecto está abierto y activo
                         if (activeProjectName) {
                             isProjectOpen = activeProjectName === existingProjectName;
-                            isProjectActive = isProjectOpen; // Si está abierto, asumimos que es activo (no hay lista)
+                            isProjectActive = isProjectOpen;
                         }
                     }
-                    getUtils().log("🔍 [CONTEXT DEBUG] openProjects: " + openProjects.length + ", isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
 
                     // Fallback: si el proyecto no aparece en openProjects pero fue el último abierto por nosotros, asumir que está abierto
                     if (!isProjectOpen && window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.lastOpenedProjectName === existingProjectName) {
-                        getUtils().log("🔍 [CONTEXT DEBUG] Proyecto detectado via lastOpenedProjectName fallback", "DEBUG");
                         isProjectOpen = true;
-                        // No asumimos que esté activo (isProjectActive permanece como estaba)
                     }
 
                     // Mirem si hi ha lock (Lògica JS pura sobre la llista ja descarregada)
@@ -143,27 +135,17 @@
                         // Hi ha bloqueig: llegim el contingut (qui és l'amo)
                         const lockPath = folderPath + lockFile.name;
                         const safeLockPath = lockPath.replace(/\\/g, '/').replace(/'/g, "\\'");
-                        getUtils().log("🔍 [LOCK DEBUG] Leyendo lock: " + safeLockPath, "DEBUG");
                         lockOwner = await getUtils().callJSX(`IO.readTxt('${safeLockPath}')`);
                         // Si el lock está vacío, asumir que es nuestro (puede ser un lock recién creado)
                         if (lockOwner.trim() === "") {
-                            getUtils().log("⚠️ Lock file vacío, asumiendo pertenece al usuario actual", "DEBUG");
                             lockOwner = currentUser;
                         }
-                        getUtils().log("🔍 [CONTEXT DEBUG] lockOwner: " + lockOwner + ", currentUser: " + currentUser, "DEBUG");
                     }
                     
                     // Determinar si el lock es nuestro (si no hay lock, se considera nuestro)
                     isLockOwned = lockFile ? lockOwner.trim() === currentUser.trim() : true;
                     
-                    // Si hay lock de otro usuario, lo registramos pero no cambiamos la conclusión
-                    if (lockFile && !isLockOwned) {
-                        getUtils().log("🔍 [CONTEXT DEBUG] lockOwner diferente: " + lockOwner + " vs " + currentUser, "DEBUG");
-                        // No establecemos conclusion = 'LOCKED', seguimos con la lógica normal
-                    }
-                    
                     // Usamos isProjectOpen e isProjectActive ya calculadas
-                    getUtils().log("🔍 [CONTEXT DEBUG] isProjectOpen: " + isProjectOpen + ", isProjectActive: " + isProjectActive, "DEBUG");
                     if (isProjectActive) {
                         conclusion = 'UPDATE';
                     } else if (isProjectOpen && !isProjectActive) {
@@ -387,7 +369,7 @@
         
             // 1. Rellenar programas
             if (config.mapeoProgramas) {
-                p.innerHTML = ""; 
+                p.innerHTML = "";
                 for (let id in config.mapeoProgramas) {
                     const opt = document.createElement('option');
                     opt.value = id;
@@ -395,6 +377,11 @@
                     p.appendChild(opt);
                 }
                 console.log("✅ [CONTEXT] Programas cargados en el select");
+                // Seleccionar el primer programa si no hay valor
+                if (p.options.length > 0 && !p.value) {
+                    p.selectedIndex = 0;
+                    console.log("✅ [CONTEXT] Seleccionado primer programa por defecto:", p.value);
+                }
             }
         
             // 2. IMPORTANTE: Rellenar bloques si están vacíos (V1...V5)
@@ -408,6 +395,11 @@
                     b.appendChild(opt);
                 });
                 console.log("✅ [CONTEXT] Bloques V1-V5 inyectados");
+                // Seleccionar el primer bloque si no hay valor
+                if (b.options.length > 0 && !b.value) {
+                    b.selectedIndex = 0;
+                    console.log("✅ [CONTEXT] Seleccionado primer bloque por defecto:", b.value);
+                }
             }
         
             // 3. Cargar lo que había guardado el usuario

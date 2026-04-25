@@ -20,7 +20,7 @@
             utils.log(`📁 Activant tema: ${projectPath}`);
             
             // 1. Obertura física literal
-            const res = await callJSX(`$.global.Project.open('${projectPath.replace(/\\/g, '/')}')`);
+            const res = await callJSX(`$.global.Project.open('${projectPath.replace(/\\/g, '/').replace(/'/g, "\\'")}')`);
             if (res !== "OK") return { success: false, error: res };
             
             await utils.delay(1200);
@@ -57,13 +57,19 @@
 
             // 1. ABRIR PLANTILLA
             utils.log(`📂 Obrint plantilla: ${plantillaPath}`);
-            const jsxCommand = `FASTPASS.Project.open('${plantillaPath.replace(/\\/g, "/")}')`;
+            const jsxCommand = `FASTPASS.Project.open('${plantillaPath.replace(/\\/g, "/").replace(/'/g, "\\'")}')`;
             utils.log(`🔍 JSX command: ${jsxCommand}`);
             const openResult = await callJSX(jsxCommand);
             utils.log(`📤 Resultado de Project.open: ${openResult}`);
             
             // 2. INGESTA GENERAL (Wotts, Media i Portada)
-            await this.ingestAssets(ctx, wottData, media, portadaList);
+            // Si tenemos cleanFeed, no ingerir el MP4 estándar
+            let mediaToIngest = media;
+            if (cleanFeedData && cleanFeedData.mediaPath && media && media.mp4) {
+                mediaToIngest = JSON.parse(JSON.stringify(media));
+                delete mediaToIngest.mp4;
+            }
+            await this.ingestAssets(ctx, wottData, mediaToIngest, portadaList);
 
             // 3. CLONAR I RENOMBRAR SEQÜÈNCIA
             const plantillaSeq = "OTT VERTICAL"; 
@@ -114,35 +120,9 @@
                     }
 
 
-                     if (cleanFeedData.escaletaLines && cleanFeedData.escaletaLines.length > 0) {
-                        utils.log(`📍 Col·locant ${cleanFeedData.escaletaLines.length} marcadors d'escaleta...`);
-                        const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-                        const tcToSec = reader ? (tc) => reader.tcToSeconds(tc) : (tc) => { const p = tc.split(':'); return parseInt(p[0])*3600+parseInt(p[1])*60+parseInt(p[2]||0); };
-                        const handleSecs = reader ? reader.HANDLE_SECS : 20;
-                        // Hora real d'inici del bloc (per calcular temps relatius)
-                        const blockInSec = tcToSec(cleanFeedData.blockIn);
+                     // Marcadores d'escaleta: eliminada la colocación automàtica (sols es farà al clicar el botó Estructura)
 
-                        for (const line of cleanFeedData.escaletaLines) {
-                            const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
-                            if (!horaRef || horaRef === "00:00:00") continue;
-
-                            const lineSec = tcToSec(horaRef);
-
-                            // Posició del marcador dins del clip (Sense handles per petició de l'usuari)
-                            const tLine = (lineSec - blockInSec);
-                            const safeT = Math.max(0, tLine).toFixed(2);
-
-                            const num   = line.num  || '';
-                            const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
-                            const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
-                            if (comment) {
-                                await callJSX(`Markers.set(${safeT}, '${comment}')`);
-                            }
-                        }
-                        utils.log(`✅ Marcadors d'escaleta col·locats.`);
-                    }
-
-                } else if (media && media.mp4) {
+                } else if (media && media.mp4 && !cleanFeedData) {
                     // ─── MODE ESTÀNDARD (fallback sense escaleta) ─────────────────────────
                     utils.log(`🎬 [FALLBACK] Col·locant MP4 estàndard a V1...`);
                     const escapedMediaName = encodeURIComponent(media.mp4.name);
@@ -308,6 +288,18 @@
             } catch (e) {
                 utils.log("Error creant .lock: " + e.message, "WARN");
             }
+        },
+
+        /**
+         * getDuration: Obté la durada en segons d'un element del projecte via JSX.
+         * @param {string} itemName - Nom de l'element (amb extensió)
+         * @returns {Promise<number>} Durada en segons, 0 si no es troba l'element
+         */
+        getDuration: async function(itemName) {
+            const safeName = encodeURIComponent(itemName).replace(/'/g, "\\'");
+            const raw = await callJSX(`FASTPASS.Project.itemDuration('${safeName}')`);
+            const secs = parseFloat(raw);
+            return isNaN(secs) ? 0 : secs;
         },
 
         close: async function () {

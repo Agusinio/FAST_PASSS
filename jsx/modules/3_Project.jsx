@@ -221,14 +221,59 @@ FASTPASS.Project = (function() {
                 var results = [];
                 for (var i = 0; i < container.children.numItems; i++) {
                     var it = container.children[i];
+                    var dur = 0;
+                    if (it.type === 1) { // Footage
+                        if (it.duration && it.duration.seconds) {
+                            dur = it.duration.seconds;
+                        } else if (it.duration) {
+                            // Ticks a segundos: 254016000000 ticks = 1 hora a 30fps
+                            dur = it.duration / 254016000000.0 * 3600.0;
+                        }
+                    }
                     results.push({
                         name: it.name,
                         type: it.type,
-                        mediaPath: (it.type === 1) ? it.getMediaPath() : ""
+                        mediaPath: (it.type === 1) ? it.getMediaPath() : "",
+                        duration: dur
                     });
                 }
                 return JSON.stringify(results);
             } catch(e) { return "[]"; }
+        },
+
+        /**
+         * itemDuration: Retorna la durada en segons d'un element de projecte (footage).
+         * @param {string} itemName - Nom de l'element (amb o sense extensió)
+         * @returns {number} Durada en segons, o 0 si no es troba.
+         */
+        itemDuration: function(itemName) {
+            try {
+                var p = _focus();
+                if (!p) return 0;
+                var name = decodeURIComponent(itemName).replace(/^\s+|\s+$/g, '');
+                var item = _search(p.rootItem, name);
+                if (!item) {
+                    // Intentar sense extensió
+                    var lastDot = name.lastIndexOf(".");
+                    if (lastDot > 0) {
+                        item = _search(p.rootItem, name.substring(0, lastDot));
+                    }
+                }
+                if (!item) return 0;
+                // projectItem.duration està en ticks (254016000000 ticks = 1 hora a 30fps)
+                // Fórmula: segons = ticks / 254016000000 * 3600
+                if (item.duration && item.duration.seconds) {
+                    return item.duration.seconds;
+                }
+                // Fallback: convertir des de ticks si seconds no està disponible
+                if (item.duration) {
+                    return item.duration / 254016000000.0 * 3600.0;
+                }
+                return 0;
+            } catch(e) {
+                $.writeln("[3_Project.itemDuration] Error: " + e.message);
+                return 0;
+            }
         },
 
         find: function(nameEncoded) {

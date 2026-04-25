@@ -29,18 +29,21 @@
             
             // El patrón de identidad: Pruebas_TNV_V1 (o el ID que uses)
             const pattern = `Pruebas_${progKey}_${blocKey}`.toLowerCase();
-            utils.log("🔍 [SCAN DEBUG] pattern: " + pattern, "DEBUG");
-            utils.log("🔍 [SCAN DEBUG] fileList: " + fileList.map(f => f.name).join(", "), "DEBUG");
+            // SCAN DEBUG comentado para reducir ruido
+            // utils.log("🔍 [SCAN DEBUG] pattern: " + pattern, "DEBUG");
+            // utils.log("🔍 [SCAN DEBUG] fileList: " + fileList.map(f => f.name).join(", "), "DEBUG");
             
             const match = fileList.find(f => {
                 const name = f.name.toLowerCase();
                 // Verifiquem que comenci per la cadena i sigui un projecte de Premiere
                 const matches = name.indexOf(pattern) === 0 && name.endsWith(".prproj");
-                if (matches) utils.log("🔍 [SCAN DEBUG] found match: " + name, "DEBUG");
+                // SCAN DEBUG comentado para reducir ruido
+                // if (matches) utils.log("🔍 [SCAN DEBUG] found match: " + name, "DEBUG");
                 return matches;
             });
             
-            utils.log("🔍 [SCAN DEBUG] match: " + (match ? match.name : "null"), "DEBUG");
+            // SCAN DEBUG comentado para reducir ruido
+            // utils.log("🔍 [SCAN DEBUG] match: " + (match ? match.name : "null"), "DEBUG");
             return match ? match.name : null;
         },
 
@@ -90,8 +93,9 @@
                     return name.includes(fProg) && name.includes(fBloc) && name.endsWith(".MOV");
                 });
     
-                utils.log(`🔍 [SCAN] Encontrados ${filtered.length} archivos .MOV después de filtrar por ${fProg} y ${fBloc}`, "DEBUG");
-                filtered.forEach((f, idx) => utils.log(`   ${idx}: ${f.name}`, "DEBUG"));
+                // SCAN comentado para reducir ruido
+                // utils.log(`🔍 [SCAN] Encontrados ${filtered.length} archivos .MOV después de filtrar por ${fProg} y ${fBloc}`, "DEBUG");
+                // filtered.forEach((f, idx) => utils.log(`   ${idx}: ${f.name}`, "DEBUG"));
                 if (filtered.length === 0) return { tema: "PENDENT", list: [] };
                 filtered.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
 

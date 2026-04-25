@@ -173,39 +173,26 @@
 
         _runGo: async function (data) {
             const projName = data.name;
-            log(`🚀 [FLOW-GO] Canviant focus a: ${projName}...`);
+            log(`🚀 Canviant focus a: ${projName}...`);
             // Intentar cambiar el foco via Context.set
             let setResult = await callJSX(`Context.set('${getUtils().escape(projName)}')`);
-            log(`🔍 [FLOW-GO] Resultado de Context.set: ${setResult}`);
             
             // Construir ruta completa del proyecto
             const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
             const fullPath = (folderPath + "/" + projName).replace(/\\/g, "/");
-            log(`🔍 [FLOW-GO] Ruta del proyecto: ${fullPath}`);
             
             // Si Context.set falla, intentar con Project.open
             if (setResult !== "OK") {
-                log(`⚠️ [FLOW-GO] Context.set falló, intentando Project.open...`);
+                log(`⚠️ Context.set falló, intentando Project.open...`);
                 const openResult = await callJSX(`FASTPASS.Project.open('${getUtils().escape(fullPath)}')`);
-                log(`🔍 [FLOW-GO] Resultado de Project.open: ${openResult}`);
                 if (openResult !== "OK") {
-                    log(`❌ [FLOW-GO] No se pudo cambiar el foco al proyecto.`);
+                    log(`❌ No se pudo cambiar el foco al proyecto.`);
                     return;
                 }
             } else {
                 // Aunque Context.set tuvo éxito, forzar apertura para asegurar foco visual
                 const openResult = await callJSX(`FASTPASS.Project.open('${getUtils().escape(fullPath)}')`);
-                log(`🔍 [FLOW-GO] Project.open adicional: ${openResult}`);
             }
-            
-            // Verificar el proyecto activo después del cambio
-            let activeName = '';
-            try {
-                activeName = await callJSX("Context.activeProj()");
-            } catch (e) {
-                // Ignorar error
-            }
-            log(`🔍 [FLOW-GO] Proyecto activo después del cambio: ${activeName}`);
             
             // Sincronizar assets (igual que antes)
             const ctx = await this._setupContext();
@@ -223,36 +210,39 @@
             const projName = data.name; // Nombre completo del archivo .prproj
             const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
             const destPath = (folderPath + "/" + projName).replace(/\\/g, "/");
-            log(`🔍 [FLOW-LOAD] Abriendo proyecto existente: ${destPath}`);
+            log(`📂 Abriendo proyecto existente: ${destPath}`);
 
             const forceOverride = data.forceOverride || false;
             
             // Verificar lock solo si no estamos forzando
             if (!forceOverride) {
                 const lockPath = destPath + ".lock";
-                log(`🔍 [FLOW-LOAD] Verificando lock: ${lockPath}`);
+                // Lock debug comentado para reducir ruido
+                // log(`🔍 [FLOW-LOAD] Verificando lock: ${lockPath}`);
                 const lockExists = await callJSX(`IO.exists('${getUtils().escape(lockPath)}')`);
-                log(`🔍 [FLOW-LOAD] lockExists = ${lockExists}`);
+                // log(`🔍 [FLOW-LOAD] lockExists = ${lockExists}`);
                 let lockOwner = null;
                 if (lockExists === "true") {
                     lockOwner = await callJSX(`IO.readTxt('${getUtils().escape(lockPath)}')`);
                     lockOwner = lockOwner.trim();
-                    log(`🔍 [FLOW-LOAD] lockOwner = "${lockOwner}"`);
+                    // log(`🔍 [FLOW-LOAD] lockOwner = "${lockOwner}"`);
                 }
                 const currentUser = data.config.autor;
-                log(`🔍 [FLOW-LOAD] currentUser = "${currentUser}"`);
+                // log(`🔍 [FLOW-LOAD] currentUser = "${currentUser}"`);
                 if (lockOwner && lockOwner !== currentUser) {
                     log(`⚠️ [FLOW-LOAD] Lock pertenece a otro usuario. Mostrando alerta.`);
                     // Mostrar alerta
                     alert(`${lockOwner} ya está editando ${data.progData.archivo} ${data.bloque}.`);
                     // Cambiar botón a LOCKED
                     if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
-                        log(`🔍 [FLOW-LOAD] Actualizando botón a LOCKED.`);
+                        // Lock debug comentado para reducir ruido
+                        // log(`🔍 [FLOW-LOAD] Actualizando botón a LOCKED.`);
                         FASTPASS_UI.Core.Context.updateButton('LOCKED', { ...data, lockOwner });
                     }
                     return;
                 } else {
-                    log(`🔍 [FLOW-LOAD] Lock propio o inexistente, continuando.`);
+                    // Lock debug comentado para reducir ruido
+                    // log(`🔍 [FLOW-LOAD] Lock propio o inexistente, continuando.`);
                 }
             }
             

@@ -253,8 +253,7 @@ $.global.Project = {
         if (!m) return "ERR:MODULE_NOT_FOUND";
         if (typeof m.close !== "function") return "ERR:CLOSE_NOT_FUNCTION";
         return m.close();
-    }
-};
+    },
 
     cloneSeq: function(name) {
         var m = this.getLogic();
@@ -486,3 +485,11 @@ $.global.Diagnostic = {
 
 // Exponer FASTPASS globalmente para acceso directo en evalScript
 FASTPASS = $.global.FASTPASS;
+
+// Alias global para hasClips (llamado desde JS)
+function hasClips(trackIdx, type) {
+    if ($.global.Clips && $.global.Clips.hasClips) {
+        return $.global.Clips.hasClips(trackIdx, type);
+    }
+    return "false";
+}

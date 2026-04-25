@@ -41,13 +41,37 @@ FASTPASS.Markers = (function() {
         /**
          * set: Afegeix un marcador a la seqüència.
          */
-        set: function(time, comment, name) {
+        set: function(time, comment, name, color) {
             try {
+                $.writeln("[FASTPASS] Marker.set arguments length=" + arguments.length);
+                for (var i = 0; i < arguments.length; i++) {
+                    $.writeln("  arg[" + i + "] = " + arguments[i]);
+                }
+                $.writeln("[FASTPASS] Marker.set time=" + time + " color=" + color);
                 var s = _seq();
                 if (!s) return "ERR:NO_SEQ";
                 var m = s.markers.createMarker(time);
+                
+                // Extraer índice numérico de color del parámetro name "color=N"
+                var colorIdx = null;
+                if (typeof name === 'string' && name.indexOf('color=') === 0) {
+                    colorIdx = parseInt(name.substring(6), 10);
+                    name = "Línia Escaleta";
+                }
                 m.name = name || "Línia Escaleta";
                 m.comments = comment || "";
+                
+                // Asignar color vía setColorByIndex
+                if (colorIdx !== null && !isNaN(colorIdx)) {
+                    colorIdx = Math.max(0, Math.min(7, colorIdx));
+                    if (typeof m.setColorByIndex === "function") {
+                        m.setColorByIndex(colorIdx);
+                    } else {
+                        m.color = colorIdx;
+                    }
+                    $.writeln("[FASTPASS] Marker color setColorByIndex=" + colorIdx);
+                }
+                
                 return "OK";
             } catch(e) { return "ERR:" + e.message; }
         },

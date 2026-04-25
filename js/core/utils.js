@@ -22,14 +22,16 @@
         callJSX: function(script) {
             return new Promise(function(resolve) {
                 var isAnimX = script.indexOf("Anim.x") !== -1;
-                if (!isAnimX) {
-                    //window.FASTPASS_UI.Utils.log("🔍 [JSX CALL]: " + script, "INFO");
-                }
+                // JSX CALL log comentado para reducir ruido
+                // if (!isAnimX) {
+                //     window.FASTPASS_UI.Utils.log("🔍 [JSX CALL]: " + script, "INFO");
+                // }
                 var safeScript = "try{" + script + "}catch(e){'ERR:'+e.message}";
                 csInterface.evalScript(safeScript, function(res) {
-                    if (!isAnimX) {
-                        //window.FASTPASS_UI.Utils.log("🔍 [JSX RESULT]: " + res, "INFO");
-                    }
+                    // JSX RESULT log comentado para reducir ruido
+                    // if (!isAnimX) {
+                    //     window.FASTPASS_UI.Utils.log("🔍 [JSX RESULT]: " + res, "INFO");
+                    // }
                     if (!res || res === "undefined") {
                         resolve("");
                     } else if (res.indexOf("ERR:") === 0) {
@@ -178,9 +180,9 @@
 
         escape: function(str) {
             if (!str) return "";
-            // 📍 Eliminem l'escapat de comilles simples (\') 
-            // Només escapem barres invertides per a que el string de JS no trenqui
-            return str.replace(/\\/g, "\\\\"); 
+            // Escapem barres invertides i comilles simples per a JSX
+            // Necessari per a rutes amb apòstrofs (ex: D'HABITATGE)
+            return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
         },
 
         delay: function(ms) { 

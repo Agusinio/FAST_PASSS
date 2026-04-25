@@ -111,18 +111,17 @@
         },
 
         /**
-         * GRAFIC (Auto‑placement): Col·loca automàticament tots els rètols, traduccions i llocdata
-         * sense fer scene‑detection ni guardar el projecte.
+         * GRAFIC (Marker‑guided placement): Col·loca rètols (wotts) del bin CHY usant els
+         * marcadors de timeline com a anclas + offset TC extret del nom del fitxer.
+         * Substituït el magic‑flow per markers‑based assembly (runGuidedAssembly).
          */
         runPlaceGraphic: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            const cfg = FASTPASS_UI.Config.get();
-            const T_MP4 = cfg.tracks.video.mp4;
-            log("🎬 Executant auto‑placement de gràfics (sense guardar)...");
+            log("🎬 Executant placement guiat per marcadors (wotts CHY → markers)...");
 
             try {
-                await FASTPASS_UI.Workflows.Assembly.runAutoPlacement(T_MP4);
-                getUtils().status("Auto‑placement completat", "exito");
+                await FASTPASS_UI.Logic.Assembly.runGuidedAssembly();
+                getUtils().status("Placement guiat completat", "exito");
             } catch (e) { getUtils().handleError(e, "PlaceGraphic"); }
         },
 

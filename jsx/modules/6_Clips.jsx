@@ -153,14 +153,65 @@ FASTPASS.Clips = {
             if (endSec && parseFloat(endSec) > 0) {
                 var clips = targetTrack.clips;
                 var lastClip = clips[clips.numItems - 1];
-                var tEnd = new Time(); 
+                var tEnd = new Time();
                 tEnd.seconds = parseFloat(endSec);
                 lastClip.end = tEnd;
             }
+
+            // 🎯 VERIFICACIÓ AUDIO I SINCRONIA (per a inserció estàndard)
+            // Trobar el clip inserit
+            var clips = targetTrack.clips;
+            var insertedClip = null;
+            for (var i = 0; i < clips.numItems; i++) {
+                if (Math.abs(clips[i].start.seconds - tStart.seconds) < 0.1) {
+                    insertedClip = clips[i];
+                    break;
+                }
+            }
+            if (insertedClip) {
+                try {
+                    var audioComp = null;
+                    for (var c = 0; c < insertedClip.components.numItems; c++) {
+                        if (insertedClip.components[c].matchName === "AE.ADBE Audio") {
+                            audioComp = insertedClip.components[c];
+                            break;
+                        }
+                    }
+                    if (audioComp) {
+                        $.writeln("✅ [JSX] Clip estàndard: component d'audio trobat");
+                    } else {
+                        $.writeln("ℹ️ [JSX] Clip estàndard sense audio.");
+                    }
+                } catch (e) {
+                    $.writeln("⚠️ [JSX] No s'ha pogut verificar l'audio: " + e.message);
+                }
+            }
     
+            // Eliminar el clip d'audio que Premiere afegeix AUTOMÀTICAMENT a A1
+            // quan s'insereix un clip de vídeo que conté àudio (ex: wotts .mov).
+            // IMPORTANT: Només s'elimina el clip d'audio que coincideix EXACTAMENT
+            // amb el start del vídeo inserit. NO es toquen altres clips d'A1.
+            if (audioComp) {
+                var audioTrackA1 = seq.audioTracks[0];
+                if (audioTrackA1) {
+                    for (var i = audioTrackA1.clips.numItems - 1; i >= 0; i--) {
+                        var aClip = audioTrackA1.clips[i];
+                        if (Math.abs(aClip.start.seconds - insertedClip.start.seconds) < 0.1) {
+                            try {
+                                aClip.remove(true, true);
+                                $.writeln("✅ [JSX] Àudio fantasma eliminat de A1 (wott sense so).");
+                            } catch (e2) {
+                                $.writeln("⚠️ [JSX] Error en eliminar àudio fantasma: " + e2.message);
+                            }
+                            break; // només n'hi ha un
+                        }
+                    }
+                }
+            }
+
             return "OK";
-        } catch (e) { 
-            return "ERR: " + e.message; 
+        } catch (e) {
+            return "ERR: " + e.message;
         }
     },
 
@@ -221,6 +272,147 @@ FASTPASS.Clips = {
             var tOut = new Time();
             tOut.seconds = parseFloat(outPtSec);
             insertedClip.outPoint = tOut;
+
+            // PASO 2: Eliminar clip de A2 (si existe)
+            var audioTrack2 = seq.audioTracks[1]; // A2
+            if (audioTrack2 && audioTrack2.clips.numItems > 0) {
+                $.writeln("🔍 [JSX] Eliminant clips de A2 (" + audioTrack2.clips.numItems + " clips).");
+                for (var i = audioTrack2.clips.numItems - 1; i >= 0; i--) {
+                    var clip = audioTrack2.clips[i];
+                    try {
+                        clip.remove(true, true);
+                        $.writeln("✅ [JSX] Clip eliminat de A2.");
+                    } catch (e) {
+                        $.writeln("❌ [JSX] Error eliminant clip de A2: " + e.message);
+                    }
+                }
+            } else {
+                $.writeln("ℹ️ [JSX] No hi ha clips a A2.");
+            }
+
+            // PASO 3: Aplicar Offset en V1 y A1
+            // Detecció de component d'audio embegut
+            var audioComp = null;
+            var components = insertedClip.components;
+            if (components && components.numItems > 0) {
+                $.writeln("🔍 [JSX] Components del clip: " + components.numItems);
+                for (var cIdx = 0; cIdx < components.numItems; cIdx++) {
+                    var comp = components[cIdx];
+                    $.writeln("🔍 [JSX] Component " + cIdx + ": matchName=" + comp.matchName + ", type=" + comp.type);
+                    if (comp.matchName === "AE.ADBE Audio" || comp.matchName === "ADBE Audio" || (comp.type && comp.type.toString().toLowerCase().indexOf("audio") !== -1)) {
+                        audioComp = comp;
+                        $.writeln("✅ [JSX] Component d'audio identificat.");
+                        break;
+                    }
+                }
+            } else {
+                $.writeln("ℹ️ [JSX] El clip no té components.");
+            }
+
+            if (audioComp) {
+                $.writeln("✅ [JSX] Component d'audio trobat. Pista actual: " + (audioComp.track ? audioComp.track.name : "N/A"));
+                // Verificar si el audio està a la pista A1 (índex 0)
+                var audioTrack = audioComp.track;
+                var desiredAudioTrack = seq.audioTracks[0]; // A1
+                if (audioTrack && desiredAudioTrack && audioTrack !== desiredAudioTrack) {
+                    $.writeln("⚠️ [JSX] Audio no està a A1. Intentant moure...");
+                    // Moure el component d'audio a la pista A1 (suposant que insertant el clip a V1 ja hi ha audio)
+                    // Aquesta implementació depèn de l'API de Premiere; per ara només log.
+                }
+                // Aplicar mateixos inPoint/outPoint a l'audio (si la propietat existeix)
+                try {
+                    audioComp.inPoint = tIn;
+                    audioComp.outPoint = tOut;
+                    $.writeln("✅ [JSX] Offset aplicat també al component d'audio.");
+                } catch (e) {
+                    $.writeln("ℹ️ [JSX] No s'ha pogut aplicar offset a l'audio (potser no té la propietat).");
+                }
+                // Log de diagnóstico de sincronía
+                $.writeln("🔍 [JSX] Clip start: " + insertedClip.start.seconds + "s, inPoint: " + insertedClip.inPoint.seconds + "s, outPoint: " + insertedClip.outPoint.seconds + "s");
+                $.writeln("🔍 [JSX] Audio start: " + audioComp.start.seconds + "s, inPoint: " + audioComp.inPoint.seconds + "s, outPoint: " + audioComp.outPoint.seconds + "s");
+                var diffStart = audioComp.start.seconds - insertedClip.start.seconds;
+                if (Math.abs(diffStart) > 0.01) {
+                    $.writeln("⚠️ [JSX] Desfase en start detectado: " + diffStart + "s. Intentant corregir...");
+                    try {
+                        audioComp.start.seconds = insertedClip.start.seconds;
+                        $.writeln("✅ [JSX] Start d'audio ajustat.");
+                    } catch (e) {
+                        $.writeln("❌ [JSX] No s'ha pogut ajustar start d'audio: " + e.message);
+                    }
+                }
+                var diffIn = audioComp.inPoint.seconds - insertedClip.inPoint.seconds;
+                if (Math.abs(diffIn) > 0.01) {
+                    $.writeln("⚠️ [JSX] Desfase en inPoint detectado: " + diffIn + "s. Intentant corregir...");
+                    try {
+                        audioComp.inPoint = tIn;
+                        $.writeln("✅ [JSX] inPoint d'audio ajustat.");
+                    } catch (e) {
+                        $.writeln("❌ [JSX] No s'ha pogut ajustar inPoint d'audio: " + e.message);
+                    }
+                }
+                // Log per a verificació
+                $.writeln("✅ [JSX] Offset aplicat: inPoint=" + inPtSec + "s, outPoint=" + outPtSec + "s");
+            } else {
+                $.writeln("ℹ️ [JSX] Clip sense component d'audio.");
+                // Aplicar offset als clips d'audio a la pista A1 (si existeixen)
+                var audioTrack1 = seq.audioTracks[0]; // A1
+                if (audioTrack1 && audioTrack1.clips.numItems > 0) {
+                    $.writeln("🔍 [JSX] S'ha trobat pista A1 amb " + audioTrack1.clips.numItems + " clips. Aplicant offset...");
+                    for (var i = 0; i < audioTrack1.clips.numItems; i++) {
+                        var aClip = audioTrack1.clips[i];
+                        $.writeln("🔍 [JSX] Clip a A1: start=" + aClip.start.seconds + "s, inPoint=" + (aClip.inPoint ? aClip.inPoint.seconds : "N/A") + "s");
+                        // Aplicar el mateix offset que al vídeo (inPoint/outPoint)
+                        try {
+                            aClip.start.seconds = insertedClip.start.seconds;
+                            $.writeln("✅ [JSX] Start del clip d'audio a A1 ajustat.");
+                        } catch (e) {
+                            $.writeln("❌ [JSX] No s'ha pogut ajustar start: " + e.message);
+                        }
+                        try {
+                            aClip.inPoint = tIn;
+                            aClip.outPoint = tOut;
+                            $.writeln("✅ [JSX] Offset aplicat al clip d'audio a A1.");
+                        } catch (e) {
+                            $.writeln("ℹ️ [JSX] No s'ha pogut aplicar offset al clip d'audio (potser no té la propietat).");
+                        }
+                    }
+                }
+            }
+
+            // Neteja de clips d'audio duplicats a A1 (assegurar només un clip)
+            var audioTrack1 = seq.audioTracks[0];
+            if (audioTrack1 && audioTrack1.clips.numItems > 1) {
+                $.writeln("⚠️ [JSX] Hi ha " + audioTrack1.clips.numItems + " clips a A1. Eliminant duplicats...");
+                // Mantenir el primer clip (el que està més a l'esquerda) i eliminar la resta
+                var clipsToKeep = 1;
+                for (var i = audioTrack1.clips.numItems - 1; i >= clipsToKeep; i--) {
+                    var clip = audioTrack1.clips[i];
+                    try {
+                        clip.remove(true, true);
+                        $.writeln("✅ [JSX] Clip duplicat eliminat de A1.");
+                    } catch (e) {
+                        $.writeln("❌ [JSX] Error eliminant clip duplicat: " + e.message);
+                    }
+                }
+            }
+
+            // Eliminar TODO el contenido de V2 (si existe)
+            var videoTrack2 = seq.videoTracks[1]; // V2
+            if (videoTrack2) {
+                $.writeln("🔍 [JSX] Inspeccionant V2: " + videoTrack2.clips.numItems + " clips.");
+                for (var i = videoTrack2.clips.numItems - 1; i >= 0; i--) {
+                    var clip = videoTrack2.clips[i];
+                    $.writeln("🔍 [JSX] Clip a V2: start=" + clip.start.seconds + "s, components=" + clip.components.numItems);
+                    try {
+                        clip.remove(true, true);
+                        $.writeln("✅ [JSX] Clip eliminat de V2.");
+                    } catch (e) {
+                        $.writeln("❌ [JSX] Error eliminant clip de V2: " + e.message);
+                    }
+                }
+            } else {
+                $.writeln("ℹ️ [JSX] No hi ha pista V2.");
+            }
 
             return "OK";
         } catch (e) {

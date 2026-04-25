@@ -231,6 +231,22 @@
                 utils.log(`         Clip ${idx}: start=${clip.start.toFixed(2)}, end=${clip.end.toFixed(2)}, duration=${(clip.end - clip.start).toFixed(2)}`);
             });
             return clips;
+        },
+
+        /**
+         * insert: Bridge per inserir un clip al timeline via overwriteClip (JSX).
+         * @param {string} itemName - Nom del project item a inserir
+         * @param {number} trackIdx - Índex de pista (1-based)
+         * @param {number} startSec - Temps d'inici en segons
+         * @param {number|null} [endSec] - Temps final opcional (per retallar durada)
+         * @param {string} [type] - Tipus de pista ('video' | 'audio', default 'video')
+         * @returns {Promise<string>} Resposta del JSX
+         */
+        insert: async function (itemName, trackIdx, startSec, endSec, type) {
+            const safeName = (itemName || '').replace(/'/g, "\\'");
+            const endParam = (endSec !== null && endSec !== undefined) ? `, ${endSec}` : ', null';
+            const typeParam = type || 'video';
+            return await utils.callJSX(`Clips.insert('${safeName}', ${trackIdx}, ${startSec}${endParam}, '${typeParam}')`);
         }
     };
 

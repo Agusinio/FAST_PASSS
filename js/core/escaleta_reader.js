@@ -16,7 +16,7 @@
     FASTPASS_UI.EscaletaReader = {
 
         /**
-         * Ruta base on es troben els JSONs d'escaleta al servidor.
+         * Ruta d'escaletes al servidor.
          */
         ESCALETES_PATH: "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\ESCALETES",
 
@@ -173,7 +173,7 @@
 
         /**
          * getLinesForBlock: Retorna les línies d'escaleta que pertanyen a un bloc.
-         * Una línia pertany al bloc si agrupacio === blockId.
+         * Una línia pertany al bloc si agrupacio coincideix (case-insensitive).
          * @param {Object} data - JSON parsejat
          * @param {string} blockId - e.g. "V1"
          * @returns {Array}
@@ -181,7 +181,47 @@
         getLinesForBlock: function (data, blockId) {
             const lines = data?.escaleta?.liniesEscaleta;
             if (!lines) return [];
-            return lines.filter(l => l.agrupacio === blockId);
+            const target = blockId.toLowerCase();
+            log(`🔍 [EscaletaReader] getLinesForBlock: target="${target}", total lines=${lines.length}`);
+            const filtered = lines.filter(l => {
+                const ag = l.agrupacio;
+                return ag && ag.toString().toLowerCase() === target;
+            });
+            log(`🔍 [EscaletaReader] Filtered count per bloc ${blockId}: ${filtered.length}`);
+            return filtered;
+        },
+
+        /**
+         * getBlockItems: Retorna una taula amb la informació dels items d'un bloc,
+         * incloent número de línia, títol, durada, TC i offset relatiu al bloc.
+         * @param {Object} data - JSON parsejat
+         * @param {string} blockId - e.g. "V1"
+         * @returns {Array<{sequencia: number, num: string, titol: string, durada: string, horaEntradaPrevista: string, horaSortidaPrevista: string, offset: number}>}
+         */
+        getBlockItems: function (data, blockId) {
+            const block = this.getBlock(data, blockId);
+            if (!block) {
+                log(`⚠️ [EscaletaReader] Bloc "${blockId}" no trobat`);
+                return [];
+            }
+            const lines = this.getLinesForBlock(data, blockId);
+            const blockStartSec = this.tcToSeconds(block.in);
+            const items = lines.map(line => {
+                const entrySec = this.tcToSeconds(line.horaEntradaPrevista);
+                const offset = entrySec - blockStartSec;
+                return {
+                    sequencia: line.sequencia,
+                    num: line.num || '',
+                    titol: line.titol || '',
+                    durada: line.durada || '',
+                    horaEntradaPrevista: line.horaEntradaPrevista || '',
+                    horaSortidaPrevista: line.horaSortidaPrevista || '',
+                    offset: offset >= 0 ? offset : 0
+                };
+            });
+            // Ordenar per offset (cronològic)
+            items.sort((a, b) => a.offset - b.offset);
+            return items;
         },
 
         /**
