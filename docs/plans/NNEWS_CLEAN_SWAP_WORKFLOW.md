@@ -1,4 +1,5 @@
 # Plan: NNews "Clean-Swap" Workflow (Round-trip) - Opción A (Final)
+> Estado: **INVESTIGACIÓN DE FORMATO NATIVO (.nnp) EN CURSO**
 
 ## 1. Objetivo
 Implementar un proceso automatizado de un solo clic para sustituir clips con gráficos quemados en Premiere por versiones limpias renderizadas en tiempo real desde el motor de Natural News (NNews), garantizando fidelidad visual absoluta (color/filtros) sin intervención manual.
@@ -8,16 +9,18 @@ Implementar un proceso automatizado de un solo clic para sustituir clips con gr�
 ### Fase 1: Identificación y Mapeo
 1.  **Extracción de Selección**: Mediante `app.project.activeSequence.getSelection()`, obtenemos un array de `trackItem`.
 2.  **Búsqueda de ID**:
-    *   Prioridad 1: Buscar en el `metadata` del clip (campo personalizado o descripción) el `assetId` de NNews.
-    *   Prioridad 2: Regex sobre el nombre del clip en el Bin buscando patrones `50[0-9]{6}`.
-3.  **Validación**: Si un clip seleccionado no tiene ID vinculado, se descarta del proceso con un aviso al usuario.
+    *   Prioridad 1: Buscar en el `metadata` del clip el `assetId` de NNews.
+    *   Prioridad 2: Regex sobre el nombre del clip en el Bin (`50[0-9]{6}`).
+3.  **Localización del Proyecto**: Buscar el archivo `.nnp` (nativo) en las rutas de red. 
 
-### Fase 2: Análisis de Estructura (Headless)
-1.  **Extracción `data.xml`**: Usar `JSZip` para leer el archivo `data.xml` dentro del `.nzp` en red (Acceso Read-Only).
-2.  **Mapeo de Timeline**:
-    *   Localizar los nodos `<clip>` en el track de vídeo principal del XML.
-    *   Calcular el offset entre el TC de inicio del clip en Premiere y el TC de inicio de la secuencia de NNews.
-    *   Determinar los puntos de corte (In/Out) relativos a los archivos de media originales.
+### Fase 2: Análisis del Proyecto (Nativo vs. Respaldo)
+Para eliminar el "factor humano" de exportar manualmente un `.nzp`:
+1.  **Parsing Directo de `.nnp`**: Investigar la estructura binaria del archivo maestro. 
+    *   *Hallazgo preliminar*: El cabecero contiene metadatos en texto claro (`PROJECTNAME`, `SAVEFOLDERID`) y rutas UNC. Los tiempos (In/Out/Duración) se almacenan en bloques binarios (ej: `07 8f` para una duración de 1935 frames).
+2.  **Cotejo de Datos (Piedra Rosetta)**: Usar archivos `.xml` existentes para mapear la estructura binaria del `.nnp` y crear un parser robusto que extraiga:
+    *   Listado de brutos utilizados.
+    *   Puntos de entrada/salida de cada clip en la secuencia original.
+3.  **Fallback**: Si el parseo del `.nnp` falla, solicitar al usuario el archivo `.nzp` de respaldo.
 
 ### Fase 3: Renderizado Limpio con FFmpeg
 Para garantizar que el clip limpio sea idéntico al original de NNews pero sin gráficos:
@@ -41,6 +44,13 @@ Para garantizar que el clip limpio sea idéntico al original de NNews pero sin g
     selectedClip.replaceWith(newMasterItem, true); // true = mantiene efectos/transiciones
     ```
 3.  **Verificación**: Cambiar el color de etiqueta del clip en el timeline (ej: a "Mango" o "Cian") para indicar visualmente que ya es una versión limpia.
+
+### Fase 4: El "Gold Standard" (Procesamiento por Bloques)
+Para maximizar la eficiencia en el verticalizado:
+1.  **Copia de Seguridad Local**: Antes de procesar, la extensión copiará el archivo `.nnp` original de la red al directorio local del proyecto Premiere (`NNews_Cache/`). Esto asegura velocidad y evita bloqueos en red.
+2.  **Verificación de "Footprints"**: Durante el parseo, se comparará la duración y la posición de los talls (cortes) entre la selección de Premiere y el proyecto de NNews. Si no coinciden, se avisará al usuario de una posible discrepancia de montaje.
+3.  **FFmpeg Batch**: Generación de una lista de concatenación única para todos los clips contiguos.
+4.  **Colocación en V3 (Verificación)**: En lugar de sustituir directamente, los clips renderizados se colocarán inicialmente en la pista **V3** (sobre los originales) para que el usuario pueda validar visualmente que el render es correcto antes de consolidar el montaje.
 
 ---
 

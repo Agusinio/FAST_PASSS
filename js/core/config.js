@@ -18,7 +18,9 @@
             destino_base: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PROVES\\",
             portadas: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PORTADES\\",
             render1: "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\EXPORTS PROVISIONALS",
-            render2: "\\\\svftpccma\\videos\\MP4_3CATINFO_VERTICAL\\CONVERTITS_1080-1920\\608-1080"
+            render2: "\\\\svftpccma\\videos\\MP4_3CATINFO_VERTICAL\\CONVERTITS_1080-1920\\608-1080",
+            nnews_root_1: "", // RUTA NNP 1 (Pendent configurar)
+            nnews_root_2: ""  // RUTA NNP 2 (Pendent configurar)
         },
         estructuras: {
             "TNs": {
@@ -101,6 +103,17 @@
                 debug: cfg.general.debug,
                 handles: cfg.general.handles || 20
             };
+        },
+
+        /**
+         * Retorna l'array de rutes on cercar projectes NNews.
+         */
+        getNNewsPaths: function() {
+            const cfg = _activeConfig.rutas;
+            const paths = [];
+            if (cfg.nnews_root_1) paths.push(cfg.nnews_root_1);
+            if (cfg.nnews_root_2) paths.push(cfg.nnews_root_2);
+            return paths;
         },
 
         _getLegacyMapping: function(cfg) {
