@@ -123,6 +123,11 @@ var isUserDraggingSlider = false;
         if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
         if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
         if (btnPlaceStructure) btnPlaceStructure.addEventListener('click', () => callWorkflow('Assembly', 'placeStructureMarkers'));
+        
+        const btnSetBlocIn = document.getElementById('btnSetBlocIn');
+        const btnSetBlocOut = document.getElementById('btnSetBlocOut');
+        if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocInFromCTI'));
+        if (btnSetBlocOut) btnSetBlocOut.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocOutFromCTI'));
 
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');

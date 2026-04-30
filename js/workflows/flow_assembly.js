@@ -1013,6 +1013,12 @@ placeStructureMarkers: async function () {
 
         // Encontrar el clip que coincide con el bloque (usando inPoint, outPoint, duración)
         const clips = await getClipsLogic().getTrackClips(1, "video");
+        
+        // ─── ANÀLISI DE DENSITAT DE CORTES (CLIP-ESCALETA) ───
+        const windowSec = ctx.config.analysis?.windowSec || 30;
+        const threshold = ctx.config.analysis?.densityThreshold || 4;
+        const densityData = FASTPASS_UI.Logic.Assembly.calcDensityFootprint(clips, windowSec, threshold);
+        // ──────────────────────────────────────────────────────
 
         let matchedClip = null;
         if (clips.length > 0) {
@@ -1128,11 +1134,21 @@ placeStructureMarkers: async function () {
         };
 
         // Snap a corte según categoría
-        const snapToCut = (idealPos, categoria, cortes, clips, ultimoCorteUsado) => {
+        const snapToCut = (idealPos, categoria, cortes, clips, ultimoCorteUsado, densityData) => {
             const tolerancias = { LARGO: 2.0, MEDIO: 2.0, CORTO: 1.0, GRAFISMO: 1.0, NO_VERTICALIZABLE: 2.0 };
             const minDurs = { LARGO: 15, MEDIO: 5, CORTO: 0, GRAFISMO: 0, NO_VERTICALIZABLE: 0 };
             const tolerancia = tolerancias[categoria] || 2.0;
             const minDur = minDurs[categoria] || 0;
+
+            // Prioritat: Ruptures de patró detectades per anàlisi de densitat (F3B)
+            if (densityData && densityData.breaks) {
+                for (const brk of densityData.breaks) {
+                    if (Math.abs(brk.time - idealPos) <= tolerancia) {
+                        log(`   🎯 [SNAP-DENSITY] Ruptura detectada a ${brk.time.toFixed(2)}s (tolerància ${tolerancia}s)`);
+                        return { corte: brk.time, idx: brk.clipIdx };
+                    }
+                }
+            }
 
             for (let i = ultimoCorteUsado + 1; i < cortes.length; i++) {
                 const corte = cortes[i];
@@ -1228,7 +1244,7 @@ placeStructureMarkers: async function () {
             const posIdeal = (placedMarkers.length === 0) ? 0 : currentStructuralPos;
 
             // Aplicar snap a cortes (SOLO para estructurales)
-            const resultado = snapToCut(posIdeal, categoria, cortes, clips, ultimoCorteUsado);
+            const resultado = snapToCut(posIdeal, categoria, cortes, clips, ultimoCorteUsado, densityData);
             const posicionFinal = resultado.corte;
             ultimoCorteUsado = resultado.idx;
 
@@ -1303,7 +1319,7 @@ placeStructureMarkers: async function () {
 
             // Aplicar snapToCut desde el clip del padre
             // snapToCut busca desde parentCorteIdx + 1, que es el SIGUIENTE clip
-            const resultado = snapToCut(parentPos, 'CORTO', cortes, clips, parentCorteIdx);
+            const resultado = snapToCut(parentPos, 'CORTO', cortes, clips, parentCorteIdx, densityData);
             let posicionFinal = resultado.corte;
             ultimoCorteUsado = resultado.idx;
 
@@ -1443,7 +1459,35 @@ placeStructureMarkers: async function () {
             }
         }
 
-        log("✅ Marcadors d'escaleta col·locats correctament.");
+        // ─── DELIMITADORS DE BLOC (Solució A + C Simplificada) ───
+        // Ja no usem marcadors taronja. Els punts In/Out de la seqüència són la veritat absoluta.
+        
+        // Si els punts de la seqüència estan a 0 o al final, la IA proposa els ideals
+        let blocIn = parseFloat(await callJSX("Timeline.getIn()"));
+        let blocOut = parseFloat(await callJSX("Timeline.getOut()"));
+        
+        if (blocIn === 0 && refInPoint !== undefined) blocIn = refInPoint;
+        if (blocOut === 0 && refOutPoint !== undefined) blocOut = refOutPoint;
+
+        // 1. Aplicar punts a la seqüència
+        await callJSX(`Timeline.range(${blocIn}, ${blocOut})`);
+
+        // 2. TRIM EFECTIU (F5): ESTRUCTURA ara talla els clips realment
+        const T_MP4 = ctx.config.tracks.video.mp4;
+        log(`✂️ [TRIM-ESTRUCTURA] Aplicant trim efectiu a IN:${blocIn.toFixed(2)}s, OUT:${blocOut.toFixed(2)}s`);
+        
+        const clipAtIn = await window.FASTPASS_UI.Logic.Clips.at(T_MP4, blocIn, "video");
+        if (clipAtIn) {
+            await window.FASTPASS_UI.Logic.Clips.rippleIn(T_MP4, clipAtIn.index, blocIn, clipAtIn);
+        }
+        await window.FASTPASS_UI.Logic.Clips.rippleOut(T_MP4, blocOut, 'video', false);
+
+        // 3. Dataset Builder: Registrem si hi ha hagut correcció respecte a la proposta IA (refInPoint)
+        if (refInPoint !== undefined && Math.abs(blocIn - refInPoint) > 0.05) {
+            this._logLearning(ctx, refInPoint, blocIn, refOutPoint, blocOut);
+        }
+
+        log("✅ Clips tallats i estructura a punt.");
 
         // --- LISTADO DETALLADO DE MARCADORES ---
         const markersRaw = await callJSX(`Markers.get()`);
@@ -1545,11 +1589,81 @@ debugBlockItems: async function (blockId = "V1") {
 runGuidedAssembly: async function () {
     if (!(await getUtils().validateActiveSequence())) return;
     try {
+        const ctx = FASTPASS_UI.State;
+        
+        // Actualitzar manifest: marquem que l'anàlisi de clip està fet (ja que ESTRUCTURA ha tallat)
+        await FASTPASS_UI.SessionManifest.save(ctx, { phases: { clipAnalysisDone: true } });
+
+        // Executar ensamblatge de rètols original
         const res = await window.FASTPASS_UI.Logic.Assembly.runGuidedAssembly();
-        if (res.indexOf("OK") !== -1) {
-            getUtils().status("Rètols col·locats", "exito");
+        if (res && res.indexOf("OK") !== -1) {
+            getUtils().status("Rètols col·locats OK", "exito");
         }
     } catch (e) { getUtils().handleError(e, "runGuidedAssembly"); }
+},
+
+/**
+ * _logLearning: Helper per guardar el log d'aprenentatge
+ */
+_logLearning: async function(ctx, aiIn, humanIn, aiOut, humanOut) {
+    try {
+        const config = FASTPASS_UI.Config.get();
+        const logData = {
+            timestamp: new Date().toISOString(),
+            program: ctx.progData?.wott || "TNV",
+            blockId: ctx.bloque || "V1",
+            ai: { in: aiIn, out: aiOut },
+            human: { in: humanIn, out: humanOut },
+            delta: { in: humanIn - aiIn, out: humanOut - aiOut }
+        };
+        const extPath = await callJSX("System.getExtPath()");
+        const logPath = extPath + "/FASTPASS_LEARNING_LOG.json";
+        
+        await callJSX(`
+            var f = new File('${getUtils().escape(logPath)}');
+            var list = [];
+            if (f.exists) {
+                f.open('r');
+                var txt = f.read();
+                f.close();
+                try { list = JSON.parse(txt); } catch(e) {}
+            }
+            list.push(${JSON.stringify(logData)});
+            f.open('w');
+            f.encoding = 'UTF-8';
+            f.write(JSON.stringify(list, null, 2));
+            f.close();
+        `);
+    } catch(e) { console.log("Learning log error", e); }
+},
+
+/**
+ * Solució C: Actualitza el punt d'entrada del bloc al cabezal actual (CTI).
+ */
+updateBlocInFromCTI: async function() {
+    try {
+        const cti = parseFloat(await callJSX("Timeline.get()"));
+        log(`📍 In Seqüència → ${cti.toFixed(2)}s`);
+        await callJSX(`Timeline.inPoint(${cti})`);
+        getUtils().status("In fixat", "exito");
+    } catch (e) { getUtils().handleError(e, "updateBlocIn"); }
+},
+
+/**
+ * Solució C: Actualitza el punt de sortida del bloc al cabezal actual (CTI).
+ */
+updateBlocOutFromCTI: async function() {
+    try {
+        const cti = parseFloat(await callJSX("Timeline.get()"));
+        log(`📍 Fixant BLOC_OUT a ${cti.toFixed(2)}s`);
+        
+        // 1. Actualitzar Out Point de seqüència
+        await callJSX(`Timeline.outPoint(${cti})`);
+        
+        // 2. Actualitzar marcador BLOC_OUT
+        await callJSX(`Markers.set(${cti}, 'BLOC_OUT', 'color=3')`);
+        getUtils().status("Out Bloc fixat", "exito");
+    } catch (e) { getUtils().handleError(e, "updateBlocOut"); }
 }
     };
 

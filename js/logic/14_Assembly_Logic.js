@@ -209,6 +209,104 @@
         },
 
         /**
+         * calcDensityFootprint: Analitza la freqüència de talls de V1 per zones
+         * temporals i detecta les "ruptures de patró" (HIGH→LOW o LOW→HIGH)
+         * que solen indicar l'inici d'un nou ítem d'escaleta.
+         *
+         * Algoritme:
+         *   1. Divideix el clip en finestres temporals de `windowSec` segons.
+         *   2. Compta els talls (inicis de clip) dins de cada finestra → talls/min.
+         *   3. Classifica cada finestra com HIGH (ràpid, VTR/pieza editada)
+         *      o LOW (lent, directe/plató) usant `thresholdCutsPerMin`.
+         *   4. Identifica els punts on el tipus canvia (HIGH↔LOW) → rupturas de patró.
+         *      Cada ruptura es el tall real del V1 més proper al límit de finestra.
+         *
+         * @param {Array}  clips              - Array de clips de V1 {start, end}
+         * @param {number} [windowSec=30]     - Mida de la finestra deslizant en segons
+         * @param {number} [thresholdCutsPerMin=4] - Umbral per classificar HIGH vs LOW
+         * @returns {{ zones: Array, breaks: Array, totalDuration: number }}
+         *   zones:  [{start, end, cutsPerMin, type:'HIGH'|'LOW'}]
+         *   breaks: [{time, fromType, toType, clipIdx}]  ← candidats a inici d'ítem
+         */
+        calcDensityFootprint: function(clips, windowSec, thresholdCutsPerMin) {
+            windowSec = windowSec !== undefined ? windowSec : 30;
+            thresholdCutsPerMin = thresholdCutsPerMin !== undefined ? thresholdCutsPerMin : 4;
+
+            if (!clips || clips.length === 0) {
+                return { zones: [], breaks: [], totalDuration: 0 };
+            }
+
+            const totalDuration = clips[clips.length - 1].end - clips[0].start;
+            const timelineStart = clips[0].start;
+
+            // 1. Construir finestres
+            const zones = [];
+            let windowStart = timelineStart;
+            while (windowStart < timelineStart + totalDuration) {
+                const windowEnd = windowStart + windowSec;
+
+                // Comptar inicis de clip dins d'aquesta finestra
+                // (el primer inici de clip és simplement el primer tall visible)
+                let cutsInWindow = 0;
+                for (const clip of clips) {
+                    // Un tall és l'inici d'un clip (excepte el primer clip de la finestra)
+                    if (clip.start > windowStart && clip.start < windowEnd) {
+                        cutsInWindow++;
+                    }
+                }
+
+                const cutsPerMin = (cutsInWindow / windowSec) * 60;
+                const type = cutsPerMin >= thresholdCutsPerMin ? 'HIGH' : 'LOW';
+
+                zones.push({
+                    start: windowStart,
+                    end: Math.min(windowEnd, timelineStart + totalDuration),
+                    cutsPerMin: parseFloat(cutsPerMin.toFixed(2)),
+                    type
+                });
+
+                windowStart = windowEnd;
+            }
+
+            // 2. Detectar rupturas de patró (canvis HIGH↔LOW entre finestres consecutives)
+            const breaks = [];
+            for (let i = 1; i < zones.length; i++) {
+                const prev = zones[i - 1];
+                const curr = zones[i];
+                if (prev.type !== curr.type) {
+                    // Trobar el tall real de V1 més proper al límit de finestra
+                    const boundary = prev.end;
+                    let closestCut = boundary;
+                    let closestIdx = -1;
+                    let minDist = Infinity;
+
+                    for (let j = 0; j < clips.length; j++) {
+                        const dist = Math.abs(clips[j].start - boundary);
+                        if (dist < minDist && dist <= windowSec * 0.5) {
+                            minDist = dist;
+                            closestCut = clips[j].start;
+                            closestIdx = j;
+                        }
+                    }
+
+                    breaks.push({
+                        time: closestCut,
+                        fromType: prev.type,
+                        toType: curr.type,
+                        clipIdx: closestIdx
+                    });
+                }
+            }
+
+            utils.log(`📊 [DensityFootprint] ${zones.length} zones (window=${windowSec}s, llindar=${thresholdCutsPerMin} talls/min), ${breaks.length} ruptures detectades`);
+            breaks.forEach(b => {
+                utils.log(`   🔀 Ruptura ${b.fromType}→${b.toType} a ${b.time.toFixed(2)}s (clip #${b.clipIdx})`);
+            });
+
+            return { zones, breaks, totalDuration };
+        },
+
+        /**
          * _resolveTrackForWott: Determina la pista de video destí segons el rol del wott.
          *
          * Regles de routing (valors reals del Profile.json):

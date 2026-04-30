@@ -40,18 +40,24 @@ FASTPASS.Markers = (function() {
 
         /**
          * set: Afegeix un marcador a la seqüència.
+         * @param {number} time - Temps d'inici en segons
+         * @param {string} comment - Comentari
+         * @param {string} name - Nom (o "color=N")
+         * @param {number} duration - Durada en segons (opcional)
          */
-        set: function(time, comment, name, color) {
+        set: function(time, comment, name, duration) {
             try {
-                $.writeln("[FASTPASS] Marker.set arguments length=" + arguments.length);
-                for (var i = 0; i < arguments.length; i++) {
-                    $.writeln("  arg[" + i + "] = " + arguments[i]);
-                }
-                $.writeln("[FASTPASS] Marker.set time=" + time + " color=" + color);
                 var s = _seq();
                 if (!s) return "ERR:NO_SEQ";
                 var m = s.markers.createMarker(time);
                 
+                // Durada (Fase B: Marcadors de barra)
+                if (duration && !isNaN(duration)) {
+                    var tDur = new Time();
+                    tDur.seconds = parseFloat(duration);
+                    m.duration = tDur.ticks;
+                }
+
                 // Extraer índice numérico de color del parámetro name "color=N"
                 var colorIdx = null;
                 if (typeof name === 'string' && name.indexOf('color=') === 0) {
@@ -69,7 +75,6 @@ FASTPASS.Markers = (function() {
                     } else {
                         m.color = colorIdx;
                     }
-                    $.writeln("[FASTPASS] Marker color setColorByIndex=" + colorIdx);
                 }
                 
                 return "OK";

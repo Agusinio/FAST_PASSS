@@ -93,6 +93,7 @@
                     trossejaDone:       false,
                     clipsLogged:        false,
                     footprintVerified:  false,
+                    clipAnalysisDone:   false,
                     markersPlaced:      false,
                     chyronsPlaced:      false
                 }

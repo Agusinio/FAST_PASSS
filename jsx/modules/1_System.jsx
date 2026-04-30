@@ -100,6 +100,11 @@ FASTPASS.System = {
      * @returns {string} - "mac" o "win"
      */
     os: function() { return (File.fs === "Macintosh") ? "mac" : "win"; },
+    
+    /**
+     * getExtPath: Retorna la ruta de l'extensió (guardada al bootstrap).
+     */
+    getExtPath: function() { return this.rootPath || ""; },
 
     /**
      * tool: Estableix l'eina activa (Selection=0, Razor=3, etc).

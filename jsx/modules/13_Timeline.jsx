@@ -89,6 +89,22 @@ FASTPASS.Timeline = {
         return "ERR";
     },
 
+    /**
+     * getIn: Obté el punt d'entrada actual en segons.
+     */
+    getIn: function() {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        return seq ? seq.inPoint.seconds : 0;
+    },
+
+    /**
+     * getOut: Obté el punt de sortida actual en segons.
+     */
+    getOut: function() {
+        var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        return seq ? seq.outPoint.seconds : 0;
+    },
+
     // --- HELPER INTERNO (BAJO NIVEL) ---
     _sec: function(s) {
         var t = new Time(); 

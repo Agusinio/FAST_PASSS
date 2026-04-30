@@ -29,6 +29,7 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         };
 
         load("1_System.jsx");
+        if (FASTPASS.System) FASTPASS.System.rootPath = root;
         load("2_IO.jsx");
         load("3_Project.jsx");
         $.writeln("   -> FASTPASS.Project definido? " + ($.global.FASTPASS && $.global.FASTPASS.Project ? "SÍ" : "NO"));
@@ -56,7 +57,8 @@ $.global.System = {
     os: function() { return (FASTPASS.System) ? FASTPASS.System.os() : "win"; },
     ready: function() { return "READY"; },
     clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; },
-    tool: function(name) { return (FASTPASS.System) ? FASTPASS.System.tool(name) : "ERR_NO_MODULE"; }
+    tool: function(name) { return (FASTPASS.System) ? FASTPASS.System.tool(name) : "ERR_NO_MODULE"; },
+    getExtPath: function() { return (FASTPASS.System) ? FASTPASS.System.getExtPath() : ""; }
 };
 
 $.global.Context = {
@@ -326,7 +328,13 @@ $.global.Timeline = {
         return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.inPoint(v) : "ERR"; 
     },
     "out": function(v) { 
-        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.outpoint(v) : "ERR"; 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.outPoint(v) : "ERR"; 
+    },
+    "getIn": function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.getIn() : 0; 
+    },
+    "getOut": function() { 
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.getOut() : 0; 
     }
 };
 
