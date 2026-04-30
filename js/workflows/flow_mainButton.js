@@ -63,6 +63,8 @@
                 });
 
                 // ─── NOU: Intentar carregar dades de l'escaleta JSON ──────────────────────
+                // Usa el sistema de 3 tiers (calcPrecisionTrimBounds) per obtenir
+                // els TCs reals basats en items emesos, no en blocs amb handles.
                 let cleanFeedData = null;
                 try {
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
@@ -74,12 +76,12 @@
                         if (jsonMeta) {
                             const jsonData = await reader.load(jsonMeta.path);
                             if (jsonData) {
-                                // Capa 1+2: Càlcul de bounds precisos basats en OnAir i veïns
-                                const bounds = reader.calcOnAirBounds(
-                                    jsonData, 
-                                    ctx.bloque, 
-                                    jsonData.cleanFeed.mediaStart, 
-                                    jsonData.cleanFeed.mediaStop, 
+                                // ─── SISTEMA DE 3 TIERS: Precisió de trim ─────────────────
+                                const bounds = reader.calcPrecisionTrimBounds(
+                                    jsonData,
+                                    ctx.bloque,
+                                    jsonData.cleanFeed.mediaStart,
+                                    jsonData.cleanFeed.mediaStop,
                                     ctx.config
                                 );
 
@@ -90,15 +92,19 @@
                                         inPoint: bounds.inPoint,
                                         outPoint: bounds.outPoint,
                                         duration: bounds.duration,
-                                        escaletaLines: lines
+                                        escaletaLines: lines,
+                                        precisionTiers: {
+                                            in: bounds.tierIn,
+                                            out: bounds.tierOut
+                                        }
                                     };
 
                                     // Desar tota la info base al manifest
                                     await FASTPASS_UI.SessionManifest.save(ctx, {
                                         program: { escaletaFile: jsonMeta.filename },
                                         cleanFeed: jsonData.cleanFeed,
-                                        blockBounds: bounds,  // inclou inPoint, outPoint, handles used...
-                                        tcRef: bounds.tcRef,  // { mediaStart, inPoint, clipStart:null, offset:null }
+                                        blockBounds: bounds,  // inclou inPoint, outPoint, tiers...
+                                        tcRef: bounds.tcRef,  // { mediaStart, inPoint, realStart, realEnd, tierIn, tierOut, clipStart:null, offset:null }
                                         escaletaItems: lines.map(l => ({
                                             sequencia: l.sequencia,
                                             num: l.num,
@@ -111,7 +117,44 @@
                                         phases: { boundsCalculated: true }
                                     });
 
-                                    log(`📡 [OnAir] cleanFeed: in=${bounds.inPoint.toFixed(1)}s out=${bounds.outPoint.toFixed(1)}s`);
+                                    log(`📡 [PrecisionTrim] cleanFeed: in=${bounds.inPoint.toFixed(1)}s out=${bounds.outPoint.toFixed(1)}s (tierIn=${bounds.tierIn}, tierOut=${bounds.tierOut})`);
+                                } else {
+                                    // Fallback al sistema anterior si el nou no funciona
+                                    log(`⚠️ calcPrecisionTrimBounds ha retornat null. Usant calcOnAirBounds com a fallback.`);
+                                    const fallbackBounds = reader.calcOnAirBounds(
+                                        jsonData,
+                                        ctx.bloque,
+                                        jsonData.cleanFeed.mediaStart,
+                                        jsonData.cleanFeed.mediaStop,
+                                        ctx.config
+                                    );
+                                    if (fallbackBounds) {
+                                        const lines = reader.getLinesForBlock(jsonData, ctx.bloque);
+                                        cleanFeedData = {
+                                            mediaPath: jsonData.cleanFeed.mediaPath,
+                                            inPoint: fallbackBounds.inPoint,
+                                            outPoint: fallbackBounds.outPoint,
+                                            duration: fallbackBounds.duration,
+                                            escaletaLines: lines
+                                        };
+                                        await FASTPASS_UI.SessionManifest.save(ctx, {
+                                            program: { escaletaFile: jsonMeta.filename },
+                                            cleanFeed: jsonData.cleanFeed,
+                                            blockBounds: fallbackBounds,
+                                            tcRef: fallbackBounds.tcRef,
+                                            escaletaItems: lines.map(l => ({
+                                                sequencia: l.sequencia,
+                                                num: l.num,
+                                                titol: l.titol,
+                                                teVideo: l.teVideo,
+                                                horaEntradaOnAir: l.horaEntradaOnAir,
+                                                duradaOnAir: l.duradaOnAir,
+                                                durada: l.durada
+                                            })),
+                                            phases: { boundsCalculated: true }
+                                        });
+                                        log(`📡 [Fallback] cleanFeed: in=${fallbackBounds.inPoint.toFixed(1)}s out=${fallbackBounds.outPoint.toFixed(1)}s`);
+                                    }
                                 }
                             }
                         } else {

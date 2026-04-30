@@ -9,7 +9,7 @@
 
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     let _activeConfig = {
-        general: { autor: "USER", guarda: 22, debug: false, handles: 20 },
+        general: { autor: "USER", guarda: 22, debug: false, handles: 0 },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
@@ -101,7 +101,7 @@
                     }
                 },
                 debug: cfg.general.debug,
-                handles: cfg.general.handles || 20
+                handles: cfg.general.handles || 0
             };
         },
 

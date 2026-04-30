@@ -209,7 +209,7 @@
                             semaforoData.srt = 'ready';
                         } else {
                             // Mirem si existeix el fitxer SRT al NAS per decidir si Error o Gris
-                            const prefix = `${ctx.progData.archivo}_${ctx.bloque}`.toUpperCase();
+                            const prefix = `${ctx.progData.archivo}_${ctx.bloque}_`.toUpperCase();
                             const srtOnDisk = (mediaFiles || []).find(f => f.name.toUpperCase().includes(prefix) && f.name.toUpperCase().endsWith('.SRT'));
                             semaforoData.srt = srtOnDisk ? 'error' : 'off';
                         }

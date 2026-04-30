@@ -1,0 +1,591 @@
+{
+  "communities": {
+    "0": [
+      "docs_samples_code_sdk_official_ppropanel_lib_jquery_1_9_1_js",
+      "lib_jquery_1_9_1_actualdisplay",
+      "lib_jquery_1_9_1_addcombinator",
+      "lib_jquery_1_9_1_addtoprefiltersortransports",
+      "lib_jquery_1_9_1_ajaxconvert",
+      "lib_jquery_1_9_1_ajaxextend",
+      "lib_jquery_1_9_1_ajaxhandleresponses",
+      "lib_jquery_1_9_1_animation",
+      "lib_jquery_1_9_1_assert",
+      "lib_jquery_1_9_1_augmentwidthorheight",
+      "lib_jquery_1_9_1_buildparams",
+      "lib_jquery_1_9_1_clonecopyevent",
+      "lib_jquery_1_9_1_condense",
+      "lib_jquery_1_9_1_createactivexhr",
+      "lib_jquery_1_9_1_createbuttonpseudo",
+      "lib_jquery_1_9_1_createcache",
+      "lib_jquery_1_9_1_createfxnow",
+      "lib_jquery_1_9_1_createinputpseudo",
+      "lib_jquery_1_9_1_createoptions",
+      "lib_jquery_1_9_1_createpositionalpseudo",
+      "lib_jquery_1_9_1_createsafefragment",
+      "lib_jquery_1_9_1_createstandardxhr",
+      "lib_jquery_1_9_1_createtweens",
+      "lib_jquery_1_9_1_css_defaultdisplay",
+      "lib_jquery_1_9_1_dataattr",
+      "lib_jquery_1_9_1_defaultprefilter",
+      "lib_jquery_1_9_1_disablescript",
+      "lib_jquery_1_9_1_done",
+      "lib_jquery_1_9_1_elementmatcher",
+      "lib_jquery_1_9_1_findorappend",
+      "lib_jquery_1_9_1_fixclonenodeissues",
+      "lib_jquery_1_9_1_fixdefaultchecked",
+      "lib_jquery_1_9_1_genfx",
+      "lib_jquery_1_9_1_getall",
+      "lib_jquery_1_9_1_getwidthorheight",
+      "lib_jquery_1_9_1_getwindow",
+      "lib_jquery_1_9_1_inspectprefiltersortransports",
+      "lib_jquery_1_9_1_internaldata",
+      "lib_jquery_1_9_1_internalremovedata",
+      "lib_jquery_1_9_1_isarraylike",
+      "lib_jquery_1_9_1_isemptydataobject",
+      "lib_jquery_1_9_1_ishidden",
+      "lib_jquery_1_9_1_isnative",
+      "lib_jquery_1_9_1_markfunction",
+      "lib_jquery_1_9_1_matcherfromgroupmatchers",
+      "lib_jquery_1_9_1_matcherfromtokens",
+      "lib_jquery_1_9_1_multiplecontexts",
+      "lib_jquery_1_9_1_propfilter",
+      "lib_jquery_1_9_1_restorescript",
+      "lib_jquery_1_9_1_returnfalse",
+      "lib_jquery_1_9_1_returntrue",
+      "lib_jquery_1_9_1_select",
+      "lib_jquery_1_9_1_setfilters",
+      "lib_jquery_1_9_1_setglobaleval",
+      "lib_jquery_1_9_1_setmatcher",
+      "lib_jquery_1_9_1_setpositivenumber",
+      "lib_jquery_1_9_1_showhide",
+      "lib_jquery_1_9_1_sibling",
+      "lib_jquery_1_9_1_siblingcheck",
+      "lib_jquery_1_9_1_sizzle",
+      "lib_jquery_1_9_1_tokenize",
+      "lib_jquery_1_9_1_toselector",
+      "lib_jquery_1_9_1_tween",
+      "lib_jquery_1_9_1_vendorpropname",
+      "lib_jquery_1_9_1_winnow"
+    ],
+    "1": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_premierepro_23_0_d_ts",
+      "jsx_premierepro_23_0_d_anywhere",
+      "jsx_premierepro_23_0_d_application",
+      "jsx_premierepro_23_0_d_audiochannelmapping",
+      "jsx_premierepro_23_0_d_colorspace",
+      "jsx_premierepro_23_0_d_csxs",
+      "jsx_premierepro_23_0_d_csxsresourcecentral",
+      "jsx_premierepro_23_0_d_document",
+      "jsx_premierepro_23_0_d_encoder",
+      "jsx_premierepro_23_0_d_marker",
+      "jsx_premierepro_23_0_d_markercollection",
+      "jsx_premierepro_23_0_d_metadata",
+      "jsx_premierepro_23_0_d_project",
+      "jsx_premierepro_23_0_d_projectcollection",
+      "jsx_premierepro_23_0_d_projectitem",
+      "jsx_premierepro_23_0_d_projectitemcollection",
+      "jsx_premierepro_23_0_d_projectitemtype",
+      "jsx_premierepro_23_0_d_projectmanager",
+      "jsx_premierepro_23_0_d_projectmanageroptions",
+      "jsx_premierepro_23_0_d_properties",
+      "jsx_premierepro_23_0_d_prproduction",
+      "jsx_premierepro_23_0_d_remoteproduction",
+      "jsx_premierepro_23_0_d_remoteproductioncollection",
+      "jsx_premierepro_23_0_d_scratchdisktype",
+      "jsx_premierepro_23_0_d_sequence",
+      "jsx_premierepro_23_0_d_sequencecollection",
+      "jsx_premierepro_23_0_d_sequencesettings",
+      "jsx_premierepro_23_0_d_sourcemonitor",
+      "jsx_premierepro_23_0_d_time",
+      "jsx_premierepro_23_0_d_track",
+      "jsx_premierepro_23_0_d_trackcollection",
+      "jsx_premierepro_23_0_d_trackitem",
+      "jsx_premierepro_23_0_d_trackitemcollection"
+    ],
+    "2": [
+      "docs_samples_code_sdk_official_ppropanel_lib_csinterface_js",
+      "js_lib_csinterface_js",
+      "lib_csinterface_apiversion",
+      "lib_csinterface_appskininfo",
+      "lib_csinterface_colortype",
+      "lib_csinterface_contextmenuitemstatus",
+      "lib_csinterface_csevent",
+      "lib_csinterface_csinterface",
+      "lib_csinterface_csxswindowtype",
+      "lib_csinterface_direction",
+      "lib_csinterface_extension",
+      "lib_csinterface_gradientcolor",
+      "lib_csinterface_gradientstop",
+      "lib_csinterface_hostcapabilities",
+      "lib_csinterface_hostenvironment",
+      "lib_csinterface_menuitemstatus",
+      "lib_csinterface_rgbcolor",
+      "lib_csinterface_runtime",
+      "lib_csinterface_systempath",
+      "lib_csinterface_uicolor",
+      "lib_csinterface_version",
+      "lib_csinterface_versionbound",
+      "lib_csinterface_versionrange"
+    ],
+    "3": [
+      "js_workflows_flow_assembly_js",
+      "workflows_flow_assembly_calljsx",
+      "workflows_flow_assembly_clasificaritem",
+      "workflows_flow_assembly_extractblockid",
+      "workflows_flow_assembly_extractsegmentindex",
+      "workflows_flow_assembly_findclipindexattime",
+      "workflows_flow_assembly_findparentstructural",
+      "workflows_flow_assembly_formattc",
+      "workflows_flow_assembly_getassemblylogic",
+      "workflows_flow_assembly_getclipslogic",
+      "workflows_flow_assembly_geteffectiveduradasec",
+      "workflows_flow_assembly_getparse",
+      "workflows_flow_assembly_getrawduradasec",
+      "workflows_flow_assembly_getutils",
+      "workflows_flow_assembly_log",
+      "workflows_flow_assembly_parsedurada",
+      "workflows_flow_assembly_snaponair",
+      "workflows_flow_assembly_snaptocut"
+    ],
+    "4": [
+      "docs_samples_code_sdk_official_ppropanel_ext_js",
+      "ppropanel_ext_addrule",
+      "ppropanel_ext_computevalue",
+      "ppropanel_ext_draghandler",
+      "ppropanel_ext_evalscript",
+      "ppropanel_ext_loadjsx",
+      "ppropanel_ext_mycallbackfunction",
+      "ppropanel_ext_mygetproxyfunction",
+      "ppropanel_ext_mysetproxyfunction",
+      "ppropanel_ext_myusernamefunction",
+      "ppropanel_ext_myversioninfofunction",
+      "ppropanel_ext_onappthemecolorchanged",
+      "ppropanel_ext_onclickbutton",
+      "ppropanel_ext_onloaded",
+      "ppropanel_ext_reversecolor",
+      "ppropanel_ext_tohex",
+      "ppropanel_ext_updatethemewithappskininfo"
+    ],
+    "5": [
+      "clean_escaleta_ps1",
+      "fast_passs_clean_escaleta_buildjsonoutput",
+      "fast_passs_clean_escaleta_cloneitem",
+      "fast_passs_clean_escaleta_findanchorbackward",
+      "fast_passs_clean_escaleta_findanchorforward",
+      "fast_passs_clean_escaleta_format_json",
+      "fast_passs_clean_escaleta_getblockindices",
+      "fast_passs_clean_escaleta_istemporalanchor",
+      "fast_passs_clean_escaleta_serializeitem",
+      "fast_passs_clean_escaleta_serializevalue"
+    ],
+    "6": [
+      "core_4_context_checkcontext",
+      "core_4_context_extractthemefromfiles",
+      "core_4_context_getutils",
+      "core_4_context_init",
+      "core_4_context_log",
+      "core_4_context_renderstructure",
+      "core_4_context_syncconductorui",
+      "core_4_context_updatebutton",
+      "core_4_context_updatelights",
+      "js_core_4_context_js"
+    ],
+    "7": [
+      "docs_samples_code_sdk_official_ppropanel_lib_vulcan_js",
+      "lib_vulcan_getvaluebykey",
+      "lib_vulcan_requiredparamsvalid",
+      "lib_vulcan_strstartswith",
+      "lib_vulcan_vulcan",
+      "lib_vulcan_vulcanmessage"
+    ],
+    "8": [
+      "js_main_callcontextaudit",
+      "js_main_callworkflow",
+      "js_main_handleselectionchange",
+      "js_main_initpanel",
+      "js_main_js",
+      "js_main_warmupnetwork"
+    ],
+    "9": [
+      "js_workflows_flow_render_js",
+      "workflows_flow_render_calljsx",
+      "workflows_flow_render_getrenderlogic",
+      "workflows_flow_render_getscanner",
+      "workflows_flow_render_getutils",
+      "workflows_flow_render_log"
+    ],
+    "10": [
+      "js_workflows_flow_srt_js",
+      "workflows_flow_srt_calljsx",
+      "workflows_flow_srt_getsrtlogic",
+      "workflows_flow_srt_gettrackslogic",
+      "workflows_flow_srt_getutils",
+      "workflows_flow_srt_log"
+    ],
+    "11": [
+      "docs_samples_code_snippets_scene_detection_script_jsx",
+      "snippets_scene_detection_script_main",
+      "snippets_scene_detection_script_readrgbfile",
+      "snippets_scene_detection_script_splitscene",
+      "snippets_scene_detection_script_writetorgbfile"
+    ],
+    "12": [
+      "inspectors_3_session_getactivesequencename",
+      "inspectors_3_session_getbincontent",
+      "inspectors_3_session_getclipatcti",
+      "inspectors_3_session_getsequences",
+      "js_inspectors_3_session_js"
+    ],
+    "13": [
+      "js_workflows_flow_cut_js",
+      "workflows_flow_cut_calljsx",
+      "workflows_flow_cut_getclipslogic",
+      "workflows_flow_cut_getutils",
+      "workflows_flow_cut_log"
+    ],
+    "14": [
+      "js_workflows_flow_retols_js",
+      "workflows_flow_retols_calljsx",
+      "workflows_flow_retols_getclipslogic",
+      "workflows_flow_retols_getutils",
+      "workflows_flow_retols_log"
+    ],
+    "15": [
+      "core_escaleta_reader_calljsx",
+      "core_escaleta_reader_log",
+      "core_escaleta_reader_utils",
+      "js_core_escaleta_reader_js"
+    ],
+    "16": [
+      "inspectors_1_sourceassets_getlatestdaymap",
+      "inspectors_1_sourceassets_preparepathsforimport",
+      "inspectors_1_sourceassets_scan",
+      "js_inspectors_1_sourceassets_js"
+    ],
+    "17": [
+      "inspectors_2_app_checkprojectavailability",
+      "inspectors_2_app_getactiveprojectname",
+      "inspectors_2_app_getopenprojects",
+      "js_inspectors_2_app_js"
+    ],
+    "18": [
+      "js_workflows_flow_kf_js",
+      "workflows_flow_kf_calljsx",
+      "workflows_flow_kf_getutils",
+      "workflows_flow_kf_log"
+    ],
+    "19": [
+      "js_workflows_flow_mainbutton_js",
+      "workflows_flow_mainbutton_calljsx",
+      "workflows_flow_mainbutton_getutils",
+      "workflows_flow_mainbutton_log"
+    ],
+    "20": [
+      "jsx_modules_1_system_jsx",
+      "modules_1_system_f",
+      "modules_1_system_quote",
+      "modules_1_system_str"
+    ],
+    "21": [
+      "jsx_modules_3_project_jsx",
+      "modules_3_project_focus",
+      "modules_3_project_item",
+      "modules_3_project_search"
+    ],
+    "22": [
+      "docs_samples_code_sdk_official_ppropanel_lib_cepengine_extensions_js",
+      "lib_cepengine_extensions_geterrorresult",
+      "lib_cepengine_extensions_getlasterror"
+    ],
+    "23": [
+      "jsx_main_hasclips",
+      "jsx_main_jsx",
+      "jsx_main_jsx_bootstrap"
+    ],
+    "24": [
+      "fast_passs_format_json_format_json",
+      "format_json_ps1"
+    ],
+    "25": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_plugplugexternalobject_d_ts",
+      "jsx_plugplugexternalobject_d_csxsevent"
+    ],
+    "26": [
+      "js_logic_3_project_logic_js",
+      "logic_3_project_logic_calljsx"
+    ],
+    "27": [
+      "js_logic_scanner_js",
+      "logic_scanner_getasset"
+    ],
+    "28": [
+      "jsx_modules_8_markers_jsx",
+      "modules_8_markers_seq"
+    ],
+    "29": [
+      "analyze_escaleta_ps1"
+    ],
+    "30": [
+      "format_json_js"
+    ],
+    "31": [
+      "docs_samples_code_sdk_official_ppropanel_ppropanel_jsx"
+    ],
+    "32": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_extendscript_d_ts"
+    ],
+    "33": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_general_jsx"
+    ],
+    "34": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_global_d_ts"
+    ],
+    "35": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_javascript_d_ts"
+    ],
+    "36": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_xmpscript_d_ts"
+    ],
+    "37": [
+      "docs_samples_code_sdk_official_ppropanel_jsx_ppro_premiere_jsx"
+    ],
+    "38": [
+      "docs_samples_code_snippets_identify_files_and_folders_jsx"
+    ],
+    "39": [
+      "docs_samples_code_snippets_import_footage_and_manage_bins_jsx"
+    ],
+    "40": [
+      "docs_samples_code_snippets_normal_and_qe_clip_looping_jsx"
+    ],
+    "41": [
+      "docs_samples_code_snippets_pr_qe_guide_jsx"
+    ],
+    "42": [
+      "docs_samples_code_snippets_qe_project_items_sequences_tracks_jsx"
+    ],
+    "43": [
+      "docs_samples_code_snippets_razor_jsx"
+    ],
+    "44": [
+      "docs_samples_code_snippets_render_premiere_sequence_jsx"
+    ],
+    "45": [
+      "docs_samples_code_snippets_rendering_pr_jsx"
+    ],
+    "46": [
+      "js_core_config_js"
+    ],
+    "47": [
+      "js_core_logger_js"
+    ],
+    "48": [
+      "js_core_nnews_parser_js"
+    ],
+    "49": [
+      "js_core_project_registry_js"
+    ],
+    "50": [
+      "js_core_session_manifest_js"
+    ],
+    "51": [
+      "js_core_state_js"
+    ],
+    "52": [
+      "js_core_utils_js"
+    ],
+    "53": [
+      "js_logic_10_srt_logic_js"
+    ],
+    "54": [
+      "js_logic_11_nnews_logic_js"
+    ],
+    "55": [
+      "js_logic_13_parse_js"
+    ],
+    "56": [
+      "js_logic_14_assembly_logic_js"
+    ],
+    "57": [
+      "js_logic_5_tracks_logic_js"
+    ],
+    "58": [
+      "js_logic_6_clips_logic_js"
+    ],
+    "59": [
+      "js_logic_7_kf_logic_js"
+    ],
+    "60": [
+      "js_logic_9_render_logic_js"
+    ],
+    "61": [
+      "js_workflows_flow_config_js"
+    ],
+    "62": [
+      "jsx_modules_11_context_jsx"
+    ],
+    "63": [
+      "jsx_modules_12_diagnostic_jsx"
+    ],
+    "64": [
+      "jsx_modules_13_timeline_jsx"
+    ],
+    "65": [
+      "jsx_modules_2_io_jsx"
+    ],
+    "66": [
+      "jsx_modules_5_tracks_jsx"
+    ],
+    "67": [
+      "jsx_modules_6_clips_jsx"
+    ],
+    "68": [
+      "jsx_modules_7_kf_jsx"
+    ],
+    "69": [
+      "jsx_modules_9_render_jsx"
+    ]
+  },
+  "cohesion": {
+    "0": 0.05,
+    "1": 0.06,
+    "2": 0.17,
+    "3": 0.15,
+    "4": 0.2,
+    "5": 0.29,
+    "6": 0.36,
+    "7": 0.4,
+    "8": 0.53,
+    "9": 0.47,
+    "10": 0.47,
+    "11": 0.7,
+    "12": 0.4,
+    "13": 0.6,
+    "14": 0.6,
+    "15": 0.5,
+    "16": 0.5,
+    "17": 0.5,
+    "18": 0.83,
+    "19": 0.83,
+    "20": 0.67,
+    "21": 0.5,
+    "22": 1.0,
+    "23": 0.67,
+    "24": 1.0,
+    "25": 1.0,
+    "26": 1.0,
+    "27": 1.0,
+    "28": 1.0,
+    "29": 1.0,
+    "30": 1.0,
+    "31": 1.0,
+    "32": 1.0,
+    "33": 1.0,
+    "34": 1.0,
+    "35": 1.0,
+    "36": 1.0,
+    "37": 1.0,
+    "38": 1.0,
+    "39": 1.0,
+    "40": 1.0,
+    "41": 1.0,
+    "42": 1.0,
+    "43": 1.0,
+    "44": 1.0,
+    "45": 1.0,
+    "46": 1.0,
+    "47": 1.0,
+    "48": 1.0,
+    "49": 1.0,
+    "50": 1.0,
+    "51": 1.0,
+    "52": 1.0,
+    "53": 1.0,
+    "54": 1.0,
+    "55": 1.0,
+    "56": 1.0,
+    "57": 1.0,
+    "58": 1.0,
+    "59": 1.0,
+    "60": 1.0,
+    "61": 1.0,
+    "62": 1.0,
+    "63": 1.0,
+    "64": 1.0,
+    "65": 1.0,
+    "66": 1.0,
+    "67": 1.0,
+    "68": 1.0,
+    "69": 1.0
+  },
+  "gods": [
+    {
+      "id": "lib_jquery_1_9_1_animation",
+      "label": "Animation()",
+      "degree": 6
+    },
+    {
+      "id": "core_4_context_checkcontext",
+      "label": "checkContext()",
+      "degree": 6
+    },
+    {
+      "id": "ppropanel_ext_updatethemewithappskininfo",
+      "label": "updateThemeWithAppSkinInfo()",
+      "degree": 5
+    },
+    {
+      "id": "ppropanel_ext_evalscript",
+      "label": "evalScript()",
+      "degree": 5
+    },
+    {
+      "id": "lib_jquery_1_9_1_sizzle",
+      "label": "Sizzle()",
+      "degree": 5
+    },
+    {
+      "id": "lib_jquery_1_9_1_setmatcher",
+      "label": "setMatcher()",
+      "degree": 5
+    },
+    {
+      "id": "lib_jquery_1_9_1_matcherfromtokens",
+      "label": "matcherFromTokens()",
+      "degree": 5
+    },
+    {
+      "id": "lib_jquery_1_9_1_done",
+      "label": "done()",
+      "degree": 5
+    },
+    {
+      "id": "ppropanel_ext_onloaded",
+      "label": "onLoaded()",
+      "degree": 4
+    },
+    {
+      "id": "ppropanel_ext_tohex",
+      "label": "toHex()",
+      "degree": 4
+    }
+  ],
+  "surprises": [],
+  "questions": [
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `CSXSEvent`, `ProjectItemType`, `SequenceSettings` to the rest of the system?",
+      "why": "33 weakly-connected nodes found - possible documentation gaps or missing edges."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `Community 0` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.05 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `Community 1` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.06 - nodes in this community are weakly interconnected."
+    }
+  ]
+}

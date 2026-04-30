@@ -285,6 +285,42 @@ FASTPASS.Clips = {
             tOut.seconds = parseFloat(outPtSec);
             insertedClip.outPoint = tOut;
 
+            // 🎯 FIX OUT TRIM: Forçar explícitament el timeline end
+            // Premiere de vegades ignora clip.outPoint després de clip.inPoint,
+            // deixant el clip estirat fins al final del source.
+            // Calcular durada esperada i forçar clip.end per garantir el tall.
+            var expectedDur = tOut.seconds - tIn.seconds;
+            if (expectedDur > 0) {
+                var tEnd = new Time();
+                tEnd.seconds = insertedClip.start.seconds + expectedDur;
+                insertedClip.end = tEnd;
+                $.writeln("✅ [JSX] OUT trim forçat via clip.end: start=" + insertedClip.start.seconds.toFixed(3) + "s + dur=" + expectedDur.toFixed(3) + "s → end=" + tEnd.seconds.toFixed(3) + "s");
+
+                // 🎯 FIX AUDIO A1: Aplicar el mateix OUT trim al clip d'audio associat a A1
+                // Quan s'insereix un MP4 amb àudio, Premiere crea automàticament un clip
+                // d'audio enllaçat a A1. Cal retallar-lo al mateix temps final que el vídeo.
+                try {
+                    var audioTrackA1 = seq.audioTracks[0]; // A1
+                    if (audioTrackA1 && audioTrackA1.clips && audioTrackA1.clips.numItems > 0) {
+                        for (var aIdx = 0; aIdx < audioTrackA1.clips.numItems; aIdx++) {
+                            var aClip = audioTrackA1.clips[aIdx];
+                            // Cercar el clip d'audio que comença al mateix temps que el vídeo inserit
+                            if (Math.abs(aClip.start.seconds - insertedClip.start.seconds) < 0.1) {
+                                var aEnd = new Time();
+                                aEnd.seconds = tEnd.seconds;
+                                aClip.end = aEnd;
+                                $.writeln("✅ [JSX] OUT trim forçat també a A1: start=" + aClip.start.seconds.toFixed(3) + "s → end=" + aEnd.seconds.toFixed(3) + "s");
+                                break;
+                            }
+                        }
+                    }
+                } catch (eAudio) {
+                    $.writeln("⚠️ [JSX] No s'ha pogut retallar l'audio a A1: " + eAudio.message);
+                }
+            } else {
+                $.writeln("⚠️ [JSX] expectedDur=" + expectedDur + " (no es pot forçar end)");
+            }
+
             // PASO 2: Eliminar clip de A2 (si existe)
             var audioTrack2 = seq.audioTracks[1]; // A2
             if (audioTrack2 && audioTrack2.clips.numItems > 0) {

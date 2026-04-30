@@ -110,13 +110,40 @@
                     const escapedCfName = encodeURIComponent(cfName);
                     const inPt  = cleanFeedData.inPoint.toFixed(4);
                     const outPt = cleanFeedData.outPoint.toFixed(4);
-                    utils.log(`🎬 Col·locant cleanFeed a V1: inPoint=${inPt}s outPoint=${outPt}s`);
+                    const duration = (cleanFeedData.outPoint - cleanFeedData.inPoint);
+                    utils.log(`🎬 Col·locant cleanFeed a V1: inPoint=${inPt}s outPoint=${outPt}s (dur=${duration.toFixed(2)}s)`);
                     const insertRes = await callJSX(
                         `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${inPt}, ${outPt}, 'video')`
                     );
                     if (insertRes && insertRes.indexOf('ERR') !== -1) {
                         utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}. Intent fallback amb insert estàndard.`);
                         await callJSX(`FASTPASS.Clips.insert('${escapedCfName}', 1, 0)`);
+                    } else {
+                        // 🎯 POST-TRIM: Forçar el OUT trim explícitament via Clips.end
+                        // insertWithBounds té molta lógica d'àudio que pot interferir amb el outPoint.
+                        // Clips.end és una funció ultra-atòmica que només setteja clip.end.
+                        // El clip està a V1 (track 1), índex 0, i volem que acabi a start + duration.
+                        // Com que start=0 (insertat a posició 0), el end ha de ser = duration.
+                        const endPos = duration.toFixed(4);
+                        const trimRes = await callJSX(`Clips.end(1, 0, ${endPos}, 'video')`);
+                        utils.log(`🎬 Post-trim OUT: clip.end=${endPos}s → ${trimRes}`);
+
+                        // 🎯 POST-TRIM AUDIO A1: Retallar el clip d'audio associat a A1
+                        // El clip d'audio es crea automàticament per Premiere al inserir el MP4.
+                        // Cerquem per start=0 (mateixa posició que el vídeo) i retallem al mateix endPos.
+                        const audioTrimRes = await callJSX(`Clips.endAt(1, 0, ${endPos}, 'audio')`);
+                        utils.log(`🎬 Post-trim AUDIO A1: endAt(1, 0, ${endPos}, 'audio') → ${audioTrimRes}`);
+
+                        if (trimRes && trimRes.indexOf('ERR') === -1) {
+                            // Verificar el resultat
+                            const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
+                            try {
+                                const clipData = JSON.parse(clipDataRaw);
+                                utils.log(`📐 Post-trim verificat: start=${clipData.start.toFixed(2)}s end=${clipData.end.toFixed(2)}s inPoint=${clipData.inPoint.toFixed(2)}s outPoint=${clipData.outPoint.toFixed(2)}s`);
+                            } catch(e) {
+                                utils.log(`📐 Post-trim: clipData=${clipDataRaw}`);
+                            }
+                        }
                     }
 
 

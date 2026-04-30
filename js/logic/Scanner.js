@@ -27,23 +27,17 @@
         selectedProject: function(fileList, progKey, blocKey) {
             if (!fileList || fileList.length === 0) return null;
             
-            // El patrón de identidad: Pruebas_TNV_V1 (o el ID que uses)
-            const pattern = `Pruebas_${progKey}_${blocKey}`.toLowerCase();
-            // SCAN DEBUG comentado para reducir ruido
-            // utils.log("🔍 [SCAN DEBUG] pattern: " + pattern, "DEBUG");
-            // utils.log("🔍 [SCAN DEBUG] fileList: " + fileList.map(f => f.name).join(", "), "DEBUG");
+            // El patrón de identidad: Pruebas_TNV_V1_ (con guión bajo final)
+            // para evitar falsos positivos como V10 cuando buscamos V1
+            const pattern = `Pruebas_${progKey}_${blocKey}_`.toLowerCase();
             
             const match = fileList.find(f => {
                 const name = f.name.toLowerCase();
                 // Verifiquem que comenci per la cadena i sigui un projecte de Premiere
                 const matches = name.indexOf(pattern) === 0 && name.endsWith(".prproj");
-                // SCAN DEBUG comentado para reducir ruido
-                // if (matches) utils.log("🔍 [SCAN DEBUG] found match: " + name, "DEBUG");
                 return matches;
             });
             
-            // SCAN DEBUG comentado para reducir ruido
-            // utils.log("🔍 [SCAN DEBUG] match: " + (match ? match.name : "null"), "DEBUG");
             return match ? match.name : null;
         },
 
@@ -56,7 +50,7 @@
                 // 🕒 FILTRO ÚNICO: Solo lo que esté dentro de las X horas (ej: 22h)
                 const freshFiles = this._discardOld(allFiles, ctx.config.guarda || 22);
                 
-                const prefix = `${ctx.progData.archivo}_${ctx.bloque}`.toUpperCase();
+                const prefix = `${ctx.progData.archivo}_${ctx.bloque}_`.toUpperCase();
     
                 const validFiles = freshFiles.filter(f => {
                     const name = f.name.toUpperCase();

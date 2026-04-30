@@ -728,27 +728,92 @@
             // 3. Netejar marcadors i col·locar els nous basats en OnAir
             await callJSX(`Markers.clear()`);
 
+            // Preparar cortes (inicios de clip) per a snapToCut
+            const cortes = clips.map(c => c.start);
+            let ultimoCorteUsado = -1;
+
+            // Funció local de snap adaptada per a placePrecisionMarkers
+            // Té tolerància més ajustada per a OnAir (0.5s = 12 frames a 25fps)
+            // i més ampla per a Prevista (2s)
+            const snapOnAir = (idealPos, esOnAir) => {
+                const tolerancia = esOnAir ? 0.5 : 2.0;
+                let millorCorte = idealPos;
+                let menorDistancia = Infinity;
+                for (let i = 0; i < cortes.length; i++) {
+                    const dist = Math.abs(cortes[i] - idealPos);
+                    if (dist < menorDistancia && dist <= tolerancia) {
+                        menorDistancia = dist;
+                        millorCorte = cortes[i];
+                    }
+                }
+                return millorCorte;
+            };
+
             let count = 0;
             for (const item of manifest.escaletaItems) {
-                if (!item.horaEntradaOnAir) continue;
+                let markerPos;
+                let esOnAir = false;
 
-                const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-                const markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                if (item.horaEntradaOnAir) {
+                    // Mode precís: TC OnAir real
+                    const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+                    markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                    esOnAir = true;
+                } else if (item.horaEntradaPrevista && tcRef.realStart !== undefined && tcRef.realStart !== null && tcRef.clipStart !== undefined && tcRef.clipStart !== null) {
+                    // Mode fallback: hora prevista, relativa a realStart
+                    // Quan un item NO té horaEntradaOnAir (ex: bloc V4 sense emissió real),
+                    // usem la hora prevista i calculem la posició relativa al timeline:
+                    //   markerPos = (previstSec - realStartSec) + clipStart
+                    // On:
+                    //   previstSec = segons absoluts de la hora prevista
+                    //   realStartSec = segons absoluts de l'inici real del bloc (tcRef.realStart)
+                    //   clipStart = posició del clip al timeline (post-inserció)
+                    const previstSec = reader.tcToSeconds(item.horaEntradaPrevista);
+                    markerPos = (previstSec - tcRef.realStart) + tcRef.clipStart;
+                    esOnAir = false;
+                } else {
+                    continue; // Sense cap referència temporal, saltem
+                }
 
                 if (markerPos < -0.1) continue; // Fora de seqüència (handles)
 
+                // ── Snap al frame de tall real ──
+                // El TC OnAir és precís en segons, però el timeline treballa en frames.
+                // snapOnAir busca el corte (inici de clip) més proper dins la tolerància
+                // i ajusta el marcador al frame exacte. Per OnAir la tolerància és mínima
+                // (0.5s = 12 frames) per no desviar-se del TC real. Per Prevista és més
+                // ampla (2s) perquè la dada és menys fiable.
+                const posFinal = snapOnAir(markerPos, esOnAir);
+                if (Math.abs(posFinal - markerPos) > 0.04) {
+                    log(`   📐 Snap frame: "${item.num}" ${posFinal.toFixed(2)}s (ideal ${markerPos.toFixed(2)}s, dif=${(posFinal - markerPos).toFixed(3)}s)`);
+                }
+
                 const label = `${item.num ? item.num + ' - ' : ''}${item.titol}`;
-                await callJSX(`Markers.set(${markerPos}, '${getUtils().escape(label)}')`);
+                await callJSX(`Markers.set(${posFinal}, '${getUtils().escape(label)}')`);
                 count++;
+                if (!esOnAir) {
+                    log(`   📍 [FALLBACK] "${item.num}" sense OnAir → markerPos=${posFinal.toFixed(2)}s (previst=${item.horaEntradaPrevista}, realStart=${reader.secondsToTC(tcRef.realStart)})`);
+                }
             }
 
             // 4. Marcadors estructurals especials (IPD, tag +++)
             for (const item of manifest.escaletaItems) {
                 if (item.titol && item.titol.includes("+++")) {
-                    const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-                    const markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                    let markerPos;
+                    let esOnAir = false;
+                    if (item.horaEntradaOnAir) {
+                        const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+                        markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                        esOnAir = true;
+                    } else if (item.horaEntradaPrevista && tcRef.realStart !== undefined && tcRef.realStart !== null && tcRef.clipStart !== undefined && tcRef.clipStart !== null) {
+                        const previstSec = reader.tcToSeconds(item.horaEntradaPrevista);
+                        markerPos = (previstSec - tcRef.realStart) + tcRef.clipStart;
+                    } else {
+                        continue;
+                    }
                     if (markerPos < 0) continue;
-                    await callJSX(`Markers.set(${markerPos}, 'IPD - ${getUtils().escape(item.titol)}')`);
+                    const posFinal = snapOnAir(markerPos, esOnAir);
+                    await callJSX(`Markers.set(${posFinal}, 'IPD - ${getUtils().escape(item.titol)}')`);
                 }
             }
 
@@ -910,46 +975,61 @@ placeStructureMarkers: async function () {
         // Netejar marcadors previs
         await callJSX("Markers.clear()");
 
-        // Obtenir dades del cleanFeed per calcular l'offset real del clip al timeline
+        // ── Carregar tcRef del manifest per a càlculs precisos ──
+        // En lloc d'usar calcClipBounds (mètode antic basat en block.in/block.out),
+        // carreguem el tcRef del manifest que conté els càlculs precisos de
+        // calcPrecisionTrimBounds (sistema de Tiers). Si no hi ha manifest,
+        // fem fallback a calcClipBounds.
         const cleanFeed = reader.getCleanFeed(data);
-        const handles = ctx.config.handles || reader.HANDLE_SECS || 20;
-        const bounds = reader.calcClipBounds(cleanFeed.mediaStart, block.in, block.out, handles, cleanFeed.mediaStop);
-        const inPoint = bounds.inPoint;
-        const mediaStartSec = reader.tcToSeconds(cleanFeed.mediaStart);
-        const blockInSec = reader.tcToSeconds(block.in);
+        const handles = ctx.config.handles || reader.HANDLE_SECS || 1;
+        let refInPoint, refOutPoint, refDuration;
+        let tcRefFromManifest = null;
 
-        // Logs de càlcul temporal (comentats per reduir ruido)
-        // log(`🔍 [DEBUG] cleanFeed.mediaStart = ${cleanFeed.mediaStart} (${mediaStartSec}s)`);
-        // log(`🔍 [DEBUG] block.in = ${block.in} (${blockInSec}s)`);
-        // log(`🔍 [DEBUG] handles = ${handles}s`);
-        // log(`🔍 [DEBUG] inPoint calculat = ${inPoint}s`);
-        // log(`🔍 [DEBUG] Offset total al timeline: mediaStart + inPoint = ${mediaStartSec + inPoint}s`);
+        try {
+            const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
+            if (manifest && manifest.tcRef && manifest.tcRef.inPoint !== undefined && manifest.tcRef.inPoint !== null) {
+                tcRefFromManifest = manifest.tcRef;
+                refInPoint = tcRefFromManifest.inPoint;
+                refOutPoint = tcRefFromManifest.realEnd
+                    ? (tcRefFromManifest.realEnd - reader.tcToSeconds(cleanFeed.mediaStart)) + handles
+                    : null;
+                refDuration = refOutPoint ? (refOutPoint - refInPoint) : null;
+                log(`📐 Usant tcRef del manifest: inPoint=${refInPoint.toFixed(2)}s (tier=${tcRefFromManifest.tierIn})`);
+            }
+        } catch (e) {
+            log(`⚠️ No s'ha pogut carregar manifest: ${e.message}. Usant calcClipBounds.`);
+        }
+
+        // Fallback si no tenim tcRef del manifest
+        if (refInPoint === undefined) {
+            const bounds = reader.calcClipBounds(cleanFeed.mediaStart, block.in, block.out, handles, cleanFeed.mediaStop);
+            refInPoint = bounds.inPoint;
+            refOutPoint = bounds.outPoint;
+            refDuration = bounds.duration;
+            log(`📐 Usant calcClipBounds (fallback): inPoint=${refInPoint.toFixed(2)}s`);
+        }
+
         log(`📋 Línies d'escaleta trobades: ${lines.length}`);
 
         // Encontrar el clip que coincide con el bloque (usando inPoint, outPoint, duración)
         const clips = await getClipsLogic().getTrackClips(1, "video");
-        // Log de primers clips (comentat per reduir ruido)
-        // log(`🔍 [DEBUG] Se encontraron ${clips.length} clips en pista 1. Primeros 5:`);
-        // clips.slice(0, 5).forEach((clip, idx) => {
-        //     log(`   Clip ${idx}: start=${clip.start.toFixed(2)}s, inPoint=${clip.inPoint.toFixed(2)}s, outPoint=${clip.outPoint.toFixed(2)}s, duration=${(clip.outPoint - clip.inPoint).toFixed(2)}s`);
-        // });
 
         let matchedClip = null;
         if (clips.length > 0) {
             // 1. Búsqueda por inPoint (tolerancia 5 segundos)
             let minDiff = Infinity;
             for (const clip of clips) {
-                const diff = Math.abs(clip.inPoint - bounds.inPoint);
+                const diff = Math.abs(clip.inPoint - refInPoint);
                 if (diff < minDiff && diff < 5) {
                     minDiff = diff;
                     matchedClip = clip;
                 }
             }
             // 2. Si no, búsqueda por outPoint
-            if (!matchedClip) {
+            if (!matchedClip && refOutPoint !== null) {
                 minDiff = Infinity;
                 for (const clip of clips) {
-                    const diff = Math.abs(clip.outPoint - bounds.outPoint);
+                    const diff = Math.abs(clip.outPoint - refOutPoint);
                     if (diff < minDiff && diff < 5) {
                         minDiff = diff;
                         matchedClip = clip;
@@ -957,11 +1037,11 @@ placeStructureMarkers: async function () {
                 }
             }
             // 3. Si no, búsqueda por duración (tolerancia 10 segundos)
-            if (!matchedClip) {
+            if (!matchedClip && refDuration !== null) {
                 minDiff = Infinity;
                 for (const clip of clips) {
                     const clipDuration = clip.outPoint - clip.inPoint;
-                    const diff = Math.abs(clipDuration - bounds.duration);
+                    const diff = Math.abs(clipDuration - refDuration);
                     if (diff < minDiff && diff < 10) {
                         minDiff = diff;
                         matchedClip = clip;
@@ -976,6 +1056,22 @@ placeStructureMarkers: async function () {
                 log(`📋 Clip del bloque encontrado: start=${matchedClip.start.toFixed(2)}s`);
             }
         }
+
+        // ── Recalcular offset si l'usuari ha trimat el clip ──
+        // Quan l'usuari trima el clip manualment abans de prémer "Estructura",
+        // el clipStart real canvia però l'offset original (calculat a la creació)
+        // queda desfasat. Aquí llegim la posició actual del clip i recalculem.
+        if (matchedClip && tcRefFromManifest) {
+            const currentClipStart = matchedClip.start;
+            const newOffset = currentClipStart - tcRefFromManifest.inPoint;
+            if (tcRefFromManifest.offset !== null && Math.abs(newOffset - tcRefFromManifest.offset) > 0.1) {
+                log(`📐 Offset recalculat per trim detectat: ${tcRefFromManifest.offset.toFixed(3)}s → ${newOffset.toFixed(3)}s (clipStart: ${tcRefFromManifest.clipStart?.toFixed(3) || '?'}s → ${currentClipStart.toFixed(3)}s)`);
+                tcRefFromManifest.offset = newOffset;
+                tcRefFromManifest.clipStart = currentClipStart;
+                await FASTPASS_UI.SessionManifest.save(ctx, { tcRef: tcRefFromManifest });
+            }
+        }
+
         // Función auxiliar para convertir durada (formato "0:34" o "1:00" o "0:34:00") a segundos
         const parseDurada = (str) => {
             if (!str || str === "0:00") return 0;
@@ -1019,6 +1115,12 @@ placeStructureMarkers: async function () {
             // LEAD: puede ser de cualquier duración, clasificar como CORTO (minDur=0)
             // para que snapToCut no exija una duración mínima de clip.
             if (num.indexOf('lead') !== -1) return 'CORTO';
+            // CONNEX DIRECTE: clasificar como MEDIO aunque tenga duración larga en
+            // escaleta, porque en el timeline el clip de conexión es muy corto
+            // (se solapa con imágenes de recurso que lo tapan parcialmente)
+            if (num.indexOf('dir') !== -1) return 'MEDIO';
+            // DONAPAS: mismo tratamiento que CONNEX DIRECTE
+            if (num.indexOf('dp') !== -1) return 'MEDIO';
             // Verticalizable: determinar categoría por duración
             if (dSec >= 30) return 'LARGO';       // ≥30s: INTRO, DIFERIT
             if (dSec >= 5) return 'MEDIO';        // ≥5s y <30s: INSERT, CONNEXIO, DONAPAS

@@ -350,23 +350,26 @@ $.global.Tracks = {
 };
 
 $.global.Clips = {
-    count: function(ti, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.count(ti, type || "video") : 0; 
+    count: function(ti, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.count(ti, type || "video") : 0;
     },
-    get: function(ti, ci, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.get(ti, ci, type || "video") : null; 
+    get: function(ti, ci, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.get(ti, ci, type || "video") : null;
     },
-    at: function(ti, t, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.at(ti, t, type || "video") : null; 
+    at: function(ti, t, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.at(ti, t, type || "video") : null;
     },
-    remove: function(ti, ci, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.remove(ti, ci, type || "video") : "ERR"; 
+    remove: function(ti, ci, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.remove(ti, ci, type || "video") : "ERR";
     },
-    insert: function(n, ti, s, e, t) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE"; 
+    insert: function(n, ti, s, e, t) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE";
     },
-    start: function(ti, ci, v, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.start(ti, ci, v, type || "video") : "ERR"; 
+    getInPoint: function(ti, ci, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.getInPoint(ti, ci, type || "video") : "null";
+    },
+    start: function(ti, ci, v, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.start(ti, ci, v, type || "video") : "ERR";
     },
     end: function(ti, ci, v, type) {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.end(ti, ci, v, type || "video") : "ERR";
@@ -377,8 +380,8 @@ $.global.Clips = {
     removeAt: function(ti, startSec, type) {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.removeAt(ti, startSec, type || "video") : "ERR";
     },
-    inPoint: function(ti, ci, v, type) { 
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.inPoint(ti, ci, v, type || "video") : "ERR"; 
+    inPoint: function(ti, ci, v, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.inPoint(ti, ci, v, type || "video") : "ERR";
     },
     setProp: function(ti, ci, cp, pr, v, t) { 
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.setProp(ti, ci, cp, pr, v, t || "video") : "ERR"; 
