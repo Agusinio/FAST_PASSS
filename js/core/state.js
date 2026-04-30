@@ -12,6 +12,7 @@ FASTPASS_UI.State = {
     
     masterTheme: null,
     srt: null,
+    hierarchy: {}, // Mapa de lineID -> data (Fase 4 Mejora Eficiencia)
 
     reset: function() {
         this.themeClipName = "PENDENT";
@@ -19,6 +20,7 @@ FASTPASS_UI.State = {
         this.pieceIndex = 0;
         this.masterTheme = null;
         this.srt = null;
+        this.hierarchy = {};
         this.lastOpenedProjectName = "";
     }
 };

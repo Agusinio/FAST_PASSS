@@ -58,6 +58,9 @@
             if (updated.tcRef) {
                 window.FASTPASS_UI.State.tcRef = updated.tcRef;
             }
+            if (updated.hierarchy) {
+                window.FASTPASS_UI.State.hierarchy = updated.hierarchy;
+            }
             
             return updated;
         },
@@ -83,6 +86,7 @@
                     clipStart:  null,
                     offset:     null
                 },
+                hierarchy: {}, // Fase 4: Mapa de lineID -> data
                 clips: [],
                 escaletaItems: [],
                 footprintVerification: null,
@@ -95,7 +99,8 @@
                     footprintVerified:  false,
                     clipAnalysisDone:   false,
                     markersPlaced:      false,
-                    chyronsPlaced:      false
+                    chyronsPlaced:      false,
+                    hierarchyResolved:  false
                 }
             };
         },

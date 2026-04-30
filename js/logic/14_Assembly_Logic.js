@@ -129,7 +129,7 @@
 
         /**
          * findCandidateClip: Busca el clip més adient per col·locar un chyron a idealPos.
-         * Intenta trobar un clip contenidor amb marges suficients; cau en fallbacks progressius.
+         * Optimitat amb cerca binària (Fase 2).
          *
          * @param {Array}  clips    - Array de clips del bloc
          * @param {number} idealPos - Temps ideal en segons
@@ -140,35 +140,28 @@
             const minMarginBefore = (opts && opts.minMarginBefore !== undefined) ? opts.minMarginBefore : 0.5;
             const minMarginAfter  = (opts && opts.minMarginAfter  !== undefined) ? opts.minMarginAfter  : 3.0;
 
-            // 1. Clips que contenen idealPos amb marges suficients
-            let containerClips = clips.filter(clip =>
-                clip.start <= idealPos + 0.1 &&
-                clip.end   >= idealPos - 0.1 &&
-                (clip.end - clip.start) > 2.5 &&
-                (idealPos - clip.start) >= minMarginBefore &&
-                (clip.end - idealPos)   >= minMarginAfter
-            );
-            if (containerClips.length > 0) {
-                return containerClips.reduce((prev, curr) => prev.end < curr.end ? prev : curr);
+            // 1. Cerca binària per trobar el clip que comença just abans o a idealPos
+            const idx = window.FASTPASS_UI.Utils.binarySearchForTime(clips, idealPos, 'start');
+            const candidate = clips[idx];
+
+            // 2. Validació de marges del candidat trobat
+            if (candidate && 
+                candidate.start <= idealPos + 0.1 && 
+                candidate.end >= idealPos - 0.1 &&
+                (candidate.end - candidate.start) > 2.5 &&
+                (idealPos - candidate.start) >= minMarginBefore &&
+                (candidate.end - idealPos) >= minMarginAfter) {
+                return candidate;
             }
 
-            // 2. Fallback: contenidors sense restricció de marge
-            let containerFallback = clips.filter(clip =>
-                clip.start <= idealPos + 0.1 &&
-                clip.end   >= idealPos - 0.1 &&
-                (clip.end - clip.start) > 2.5
-            );
-            if (containerFallback.length > 0) {
-                return containerFallback.reduce((prev, curr) => prev.end < curr.end ? prev : curr);
+            // 3. Fallback: Si el candidat binari no és perfecte, fem un escaneig proper (±2 clips)
+            // en lloc de filtrar tot l'array de clips.
+            for (let i = Math.max(0, idx - 1); i <= Math.min(clips.length - 1, idx + 1); i++) {
+                const c = clips[i];
+                if (c.start <= idealPos + 0.1 && c.end >= idealPos - 0.1 && (c.end - c.start) > 2.5) {
+                    return c;
+                }
             }
-
-            // 3. Fallback: clip proper (±2s)
-            let nearbyClip = clips.find(clip =>
-                clip.start <= (idealPos + 2) &&
-                clip.start >= (idealPos - 2) &&
-                (clip.end - clip.start) > 2.5
-            );
-            if (nearbyClip) return nearbyClip;
 
             // 4. Darrer recurs: primer clip del bloc
             return clips[0];
@@ -357,71 +350,77 @@
          *       Per tant NO es pot usar "label no comença per dígit" per identificar
          *       markers estructurals. En lloc d'això, es busca per contingut "CONEXIÓ"
          *       al comments del marker.
+        /**
+         * resolveHierarchy: Construeix el mapa de jerarquia (Fase 4).
+         * Analitza les línies d'escaleta i els marcadors per crear relacions
+         * instantànies entre lineIDs, seccions i connexions.
          *
-         * @param {string} lineID   - ID de línia extret del wott (ex: "01LEAD", "02", "01DP")
-         * @param {Array}  markers  - Llista de marcadors del timeline
-         * @param {string} wottName - Nom complet del wott (per avaluar condicions de rol)
-         * @returns {Object|null}   - El marcador trobat, o null
+         * @param {Array} escaletaItems - Llista d'items d'escaleta (des del Manifest)
+         * @returns {Object} El mapa de jerarquia
+         */
+        resolveHierarchy: function(escaletaItems) {
+            const hierarchy = {};
+            if (!escaletaItems) return hierarchy;
+
+            for (const item of escaletaItems) {
+                if (!item.num) continue;
+                const lineID = item.num.toUpperCase();
+                
+                // Determinar bloc (els primers 2 dígits)
+                const blockNum = lineID.substring(0, 2);
+                
+                hierarchy[lineID] = {
+                    id: lineID,
+                    block: blockNum,
+                    title: item.titol,
+                    isSection: !!item.teVideo,
+                    isConnexion: (item.font === 'CONN' || item.font === 'OFT')
+                };
+            }
+            
+            window.FASTPASS_UI.State.hierarchy = hierarchy;
+            utils.log(`🏗️ Jerarquia resolta: ${Object.keys(hierarchy).length} ítems mapejats.`);
+            return hierarchy;
+        },
+
+        /**
+         * _findMarkerForLineID: Troba el marcador del timeline que correspon a un lineID de wott.
+         * Optimitat amb consulta a Jerarquia (Fase 4).
          */
         _findMarkerForLineID: function(lineID, markers, wottName) {
             const upperLine = lineID.toUpperCase();
+            const hierarchy = window.FASTPASS_UI.State.hierarchy || {};
+            const hData = hierarchy[upperLine];
 
-            // --- CAS ESPECIAL: DP (Donapas) + ENVIAT/PRESENCIAL → anclar al marker de CONNEXIÓ ---
-            // Només els wotts de Donapas que són enviats/presencials van a "conexió".
-            // La resta de wotts de Donapas (Tema-Titol, Nomcarrec, etc.) es queden al seu marker de secció.
+            // --- CAS ESPECIAL: DP (Donapas) + ENVIAT/PRESENCIAL ---
             const upperName = (wottName || "").toUpperCase();
             const isDpEnviatPresencial = /DP/i.test(upperLine) && (upperName.includes("ENVIAT") || upperName.includes("PRESENCIAL"));
             
             if (isDpEnviatPresencial) {
-                // 1. Trobar marker de secció del DP per conèixer la posició del bloc
-                const dpMarker = markers.find(m => {
-                    const label = (m.comments || m.name || "").toUpperCase().trim();
-                    return label === upperLine || label.startsWith(upperLine + " ") || label.startsWith(upperLine + "\t");
-                });
-
+                const dpMarker = markers.find(m => (m.comments || m.name || "").toUpperCase().startsWith(upperLine));
                 if (dpMarker) {
-                    // 2. Buscar TOTS els markers que continguin "CONEXIÓ"/"CONNEXIO",
-                    //    i seleccionar el MÉS PROPER (en valor absolut) al marker del DP.
-                    //    NOTA: No es filtra per "després del DP" perquè el marker de
-                    //    CONEXIÓ pot estar abans (ex: a 0s, com a primer estructural del bloc).
                     const dpTime = dpMarker.time;
                     const conexioMarkers = markers
                         .filter(m => {
                             const label = (m.comments || m.name || "").toUpperCase();
                             return label.includes("CONEXIÓ") || label.includes("CONNEXIO");
                         })
-                        .sort((a, b) => {
-                            const distA = Math.abs(a.time - dpTime);
-                            const distB = Math.abs(b.time - dpTime);
-                            return distA - distB;
-                        });
+                        .sort((a, b) => Math.abs(a.time - dpTime) - Math.abs(b.time - dpTime));
 
-                    if (conexioMarkers.length > 0) {
-                        const best = conexioMarkers[0]; // el més proper en valor absolut
-                        utils.log(`   📌 DP+Enviat/PRESENCIAL → marker CONNEXIÓ: "${best.comments || best.name}" (a ${best.time.toFixed(2)}s, distància ${Math.abs(best.time - dpTime).toFixed(2)}s del DP)`);
-                        return best;
-                    }
-
-                    // Fallback: no hi ha cap marker CONNEXIÓ al timeline — usar el DP mateix
-                    utils.log(`   ⚠️ DP+Enviat/PRESENCIAL: cap marker CONNEXIÓ al timeline, usant el de secció`, "WARN");
+                    if (conexioMarkers.length > 0) return conexioMarkers[0];
                     return dpMarker;
                 }
-                // Si no es troba ni el DP, cau al cas general
             }
 
-            // --- CAS GENERAL: buscar marker de SECCIÓ per lineID complet ---
-            // Ex: lineID="01LEAD" → marker "01lead - LEAD BONIQUISME..."
+            // --- CAS GENERAL: Consulta directa ---
             const sectionMarker = markers.find(m => {
                 const label = (m.comments || m.name || "").toUpperCase().trim();
                 return label === upperLine || label.startsWith(upperLine + " ") || label.startsWith(upperLine + "\t");
             });
 
-            if (sectionMarker) {
-                utils.log(`   📌 Marker de secció: "${sectionMarker.comments || sectionMarker.name}" (lineID=${upperLine})`);
-                return sectionMarker;
-            }
+            if (sectionMarker) return sectionMarker;
 
-            // --- FALLBACK: buscar per prefix numèric sol (per a lineIDs com "02" sense secció) ---
+            // Fallback numèric
             const numMatch = upperLine.match(/(\d+)/);
             if (numMatch) {
                 const numericLabel = markers.find(m => {
@@ -429,13 +428,9 @@
                     const numPrefix = numMatch[1];
                     return label === numPrefix || label.startsWith(numPrefix + " ") || label.startsWith(numPrefix + "\t");
                 });
-                if (numericLabel) {
-                    utils.log(`   📌 Fallback numèric: "${numericLabel.comments || numericLabel.name}" (bloc ${numMatch[1]})`);
-                    return numericLabel;
-                }
+                if (numericLabel) return numericLabel;
             }
 
-            utils.log(`   ❌ No s'ha trobat marcador per a lineID=${upperLine}`, "WARN");
             return null;
         },
 
@@ -456,7 +451,7 @@
          *   Ex: `Wott_TNV_v1_01lead_00.15_LEAD BONIQUISME...` → lineID=01LEAD, offset=15s
          */
         runGuidedAssembly: async function() {
-            utils.log("🤖 Iniciant Assembly Guiat per Marcadors...");
+            utils.log("🤖 Iniciant Assembly Guiat per Marcadors (Optimitzat)...");
             const cfg = window.FASTPASS_UI.Config.get();
 
             // 1. Recollir Marcadors del Timeline
@@ -481,16 +476,25 @@
 
             utils.log(`📊 Processant ${wotts.length} rètols contra ${markers.length} marcadors...`);
 
+            // --- FASE 3: Pre-compilació de RegExp ---
+            const reFormat = /_([A-Z0-9]+)_(\d{2})[.-](\d{2})(?:[.-](\d{2}))?/i;
+            const reTema = /TEMA-TITOL|_TITOL/i;
+            const reDp = /DP/i;
+            const reEnviat = /ENVIAT|PRESENCIAL/i;
+
             let count = 0;
             let skippedCount = 0;
+
+            // --- FASE 1: Batching de Comandos ---
+            window.FASTPASS_UI.Utils.Batch.begin();
+
             for (const wott of wotts) {
                 const name = wott.name;
                 
                 // Regex flexible: lineID alfanumèric + TC amb separador . o -
-                const match = name.match(/_([A-Z0-9]+)_(\d{2})[.-](\d{2})(?:[.-](\d{2}))?/i);
+                const match = name.match(reFormat);
                 
                 if (!match) {
-                    utils.log(`📦 Fitxer '${name}' no té format reconegut per a matching atomàtic.`, "DEBUG");
                     continue;
                 }
 
@@ -499,24 +503,16 @@
 
                 if (match[4] !== undefined) {
                     // 3 parells: HH-MM-SS o HH.MM.SS (format antic)
-                    const hh = parseInt(match[2], 10);
-                    const mm = parseInt(match[3], 10);
-                    const ss = parseInt(match[4], 10);
-                    offset = (hh * 3600) + (mm * 60) + ss;
+                    offset = (parseInt(match[2], 10) * 3600) + (parseInt(match[3], 10) * 60) + parseInt(match[4], 10);
                 } else {
                     // 2 parells: MM.SS o MM-SS (format actual amb punts)
-                    const mm = parseInt(match[2], 10);
-                    const ss = parseInt(match[3], 10);
-                    offset = (mm * 60) + ss;
+                    offset = (parseInt(match[2], 10) * 60) + parseInt(match[3], 10);
                 }
 
-                // === FILTRE: Tema-Titol de curta durada (< 1s / ~25 frames) → descartar ===
-                const upperName = name.toUpperCase();
-                const isTemaTitol = upperName.includes("TEMA-TITOL") || upperName.includes("_TITOL");
-                if (isTemaTitol) {
+                // === FILTRE: Tema-Titol de curta durada (< 1s) ===
+                if (reTema.test(name)) {
                     const duration = (typeof wott.duration === 'number') ? wott.duration : 0;
                     if (duration > 0 && duration < 1.0) {
-                        utils.log(`⏭️ Descartant Tema-Titol curt (${duration.toFixed(2)}s): '${name}'`);
                         skippedCount++;
                         continue;
                     }
@@ -526,18 +522,19 @@
                 const marker = FASTPASS_UI.Logic.Assembly._findMarkerForLineID(lineID, markers, name);
                 
                 if (!marker) {
-                    utils.log(`❓ No s'ha trobat marcador per a la línia ${lineID} (fitxer: ${name})`, "DEBUG");
                     continue;
                 }
 
                 const targetTrack = FASTPASS_UI.Logic.Assembly._resolveTrackForWott(name, cfg);
                 const targetTime = marker.time + offset;
-                const logLabel = marker.comments || marker.name;
-                utils.log(`🎯 Match! Línia ${lineID}: Inserint '${name}' a ${targetTime.toFixed(2)}s (base=${marker.time}s [${logLabel}] + off=${offset}s) → pista V${targetTrack}`);
                 
+                // Aquest 'insert' s'encolarà automàticament al batch
                 await window.Clips.insert(name, targetTrack, targetTime);
                 count++;
             }
+
+            // Executar tots els inserts de cop
+            await window.FASTPASS_UI.Utils.Batch.flush();
 
             const skipMsg = skippedCount > 0 ? ` (${skippedCount} Tema-Titol curts descartats)` : '';
             utils.log(`✅ Assembly Guiat finalitzat. S'han col·locat ${count} rètols${skipMsg}.`);

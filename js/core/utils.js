@@ -20,29 +20,68 @@
          * Pont asíncron cap al motor ExtendScript (JSX).
          */
         callJSX: function(script) {
+            // Si estem en mode batching i NO és una crida de consulta crítica (com Anim.x), encolar
+            if (this.Batch._isBatching && !script.includes("Anim.x") && !script.includes(".get") && !script.includes(".active")) {
+                this.Batch._queue.push(script);
+                return Promise.resolve("QUEUED");
+            }
+
             return new Promise(function(resolve) {
                 var isAnimX = script.indexOf("Anim.x") !== -1;
-                // JSX CALL log comentado para reducir ruido
-                // if (!isAnimX) {
-                //     window.FASTPASS_UI.Utils.log("🔍 [JSX CALL]: " + script, "INFO");
-                // }
                 var safeScript = "try{" + script + "}catch(e){'ERR:'+e.message}";
                 csInterface.evalScript(safeScript, function(res) {
-                    // JSX RESULT log comentado para reducir ruido
-                    // if (!isAnimX) {
-                    //     window.FASTPASS_UI.Utils.log("🔍 [JSX RESULT]: " + res, "INFO");
-                    // }
                     if (!res || res === "undefined") {
                         resolve("");
                     } else if (res.indexOf("ERR:") === 0) {
-                        // 📍 Si hay un error, lo logueamos pero NO intentamos parsearlo como JSON
                         window.FASTPASS_UI.Utils.log("💥 [JSX ERROR]: " + res, "ERROR");
-                        resolve("[]"); // Devolvemos un array vacío para que el resto no explote
+                        resolve("[]");
                     } else {
                         resolve(res);
                     }
                 });
             });
+        },
+
+        /**
+         * Sistema de Batching per a comandes JSX (Fase 1 Mejora Eficiencia)
+         */
+        Batch: {
+            _queue: [],
+            _isBatching: false,
+            begin: function() { 
+                this._isBatching = true; 
+                this._queue = [];
+                window.FASTPASS_UI.Utils.log("📥 Batching JSX iniciat...", "DEBUG");
+            },
+            flush: async function() {
+                if (this._queue.length === 0) {
+                    this._isBatching = false;
+                    return "EMPTY";
+                }
+                const fullScript = this._queue.join(";\n");
+                const count = this._queue.length;
+                this._queue = [];
+                this._isBatching = false;
+                
+                window.FASTPASS_UI.Utils.log(`📤 Enviant batch de ${count} comandes...`, "DEBUG");
+                return await window.FASTPASS_UI.Utils.callJSX(fullScript);
+            }
+        },
+
+        /**
+         * Algoritme de cerca binària per a llistes ordenades per temps (Fase 2)
+         */
+        binarySearchForTime: function(list, time, timeKey = 'start') {
+            let low = 0;
+            let high = list.length - 1;
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                const midTime = list[mid][timeKey];
+                if (midTime === time) return mid;
+                if (midTime < time) low = mid + 1;
+                else high = mid - 1;
+            }
+            return high; // Retorna l'índex immediatament anterior o coincident
         },
 
         readFolder: async function(path) {

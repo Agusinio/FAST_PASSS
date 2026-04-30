@@ -130,6 +130,9 @@ $.global.IO = {
     // Alias per a EscaletaReader: llista una carpeta i retorna [{name,path,modified,size}]
     listFolder: function(p) {
         return ($.global.FASTPASS.IO) ? FASTPASS.IO.scanDirectory(p) : "[]";
+    },
+    executeShell: function(c) {
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.executeShell(c) : "ERR_NO_IO";
     }
 };
 // ============================================================================

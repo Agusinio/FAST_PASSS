@@ -47,10 +47,10 @@ En lugar de recalcular las relaciones entre ítems (quién es padre de quién, q
 
 | Tarea | Prioridad | Estado |
 | :--- | :--- | :--- |
-| Batching de Marcadores (JSX) | CRÍTICA | Pendiente |
-| Generación de Estructura Jerárquica | ALTA | Pendiente |
-| Implementación de Búsqueda Binaria | MEDIA | Pendiente |
-| Optimización de RegExp y Memoria | BAJA | Pendiente |
+| Batching de Marcadores (JSX) | CRÍTICA | COMPLETADO |
+| Generación de Estructura Jerárquica | ALTA | COMPLETADO |
+| Implementación de Búsqueda Binaria | MEDIA | COMPLETADO |
+| Optimización de RegExp y Memoria | BAJA | COMPLETADO |
 
 > [!NOTE]
 > La implementación de la **Estructura Jerárquica** en el Manifest es la pieza clave para que el sistema pase de ser un "asistente de montaje" a un "orquestador de datos" robusto.

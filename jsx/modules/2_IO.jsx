@@ -140,6 +140,31 @@ FASTPASS.IO = (function () {
          */
         getUser: function() {
             return $.global.userName || $.getenv("USERNAME") || $.getenv("USER") || "UnknownUser";
+        },
+
+        /**
+         * executeShell: Executa una comanda de sistema mitjançant un .bat temporal.
+         * Dissenyat per a entorns Windows on Node.js està restringit.
+         */
+        executeShell: function (command) {
+            try {
+                // 1. Crear el fitxer .bat a la carpeta temporal del sistema
+                var tempFile = new File(Folder.temp + "/fp_exec_" + new Date().getTime() + ".bat");
+                
+                tempFile.open('w');
+                tempFile.writeln("@echo off");
+                tempFile.writeln("echo [FASTPASS] Executant tasca de sistema...");
+                tempFile.writeln(command);
+                tempFile.writeln("exit");
+                tempFile.close();
+                
+                // 2. Executar (obre una finestra de CMD)
+                var success = tempFile.execute();
+                
+                return success ? "OK_EXECUTING" : "ERR_EXECUTE_FAILED";
+            } catch (e) {
+                return "ERR: " + e.message;
+            }
         }
     };
 })();
