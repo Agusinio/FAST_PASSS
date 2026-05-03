@@ -39,11 +39,9 @@ FASTPASS.Timeline = {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
         if (!seq) return "ERR:NO_SEQ";
         
-        var tIn = new Time(); tIn.seconds = parseFloat(inSec);
-        var tOut = new Time(); tOut.seconds = parseFloat(outSec);
+        seq.setInPoint(this._sec(inSec).ticks);
+        seq.setOutPoint(this._sec(outSec).ticks);
         
-        seq.setInPoint(tIn.ticks);
-        seq.setOutPoint(tOut.ticks);
         return "OK";
     },
 
@@ -105,9 +103,48 @@ FASTPASS.Timeline = {
         return seq ? seq.outPoint.seconds : 0;
     },
 
+    /**
+     * zoomToSelection: Mou el CTI a l'inici del rang IN/OUT i ajusta
+     * l'àrea de treball (Work Area) per a que coincideixi amb els
+     * punts IN/OUT actuals de la seqüència.
+     * Utilitza setPlayerPosition + setWorkAreaInPoint/setWorkAreaOutPoint.
+     */
+    zoomToSelection: function() {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR:NO_SEQ";
+            var inTicks = seq.inPoint;
+            var outTicks = seq.outPoint;
+            // ── Fallback resilient: si IN/OUT no estan definits (ex: després de trim tails),
+            //     usar l'inici (0) i el final de la seqüència ──
+            if (typeof inTicks === "undefined" || typeof outTicks === "undefined") {
+                // Fallback: usar inici (0) i final de la seqüència
+                var seqStart = new Time();
+                seqStart.seconds = 0;
+                inTicks = seqStart.ticks;
+                // seq.outPoint és un objecte Time, .seconds és la propietat numèrica
+                var seqEnd = new Time();
+                seqEnd.seconds = seq.outPoint.seconds;
+                outTicks = seqEnd.ticks;
+            }
+            // 1. Moure el CTI a l'inici del rang
+            seq.setPlayerPosition(inTicks);
+            // 2. Establir l'àrea de treball al rang IN-OUT
+            var tIn = new Time();
+            tIn.ticks = inTicks;
+            var tOut = new Time();
+            tOut.ticks = outTicks;
+            seq.setWorkAreaInPoint(tIn);
+            seq.setWorkAreaOutPoint(tOut);
+            return "OK:cti+" + tIn.seconds.toFixed(2) + "s workArea=" + tIn.seconds.toFixed(2) + "-" + tOut.seconds.toFixed(2);
+        } catch(e) {
+            return "ERR:" + e.message;
+        }
+    },
+
     // --- HELPER INTERNO (BAJO NIVEL) ---
     _sec: function(s) {
-        var t = new Time(); 
+        var t = new Time();
         t.seconds = parseFloat(s);
         return t;
     }

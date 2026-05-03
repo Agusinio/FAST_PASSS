@@ -336,8 +336,11 @@ $.global.Timeline = {
     "getIn": function() { 
         return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.getIn() : 0; 
     },
-    "getOut": function() { 
-        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.getOut() : 0; 
+    "getOut": function() {
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.getOut() : 0;
+    },
+    "zoomToSelection": function() {
+        return ($.global.FASTPASS.Timeline) ? FASTPASS.Timeline.zoomToSelection() : "ERR_MODULE_NOT_LOADED";
     }
 };
 

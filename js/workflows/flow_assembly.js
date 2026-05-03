@@ -1638,6 +1638,79 @@ _logLearning: async function(ctx, aiIn, humanIn, aiOut, humanOut) {
 },
 
 /**
+ * placeOnAirMarkers: Col·loca marcadors al timeline per a cada item d'escaleta
+ * que tingui un temps OnAir real (horaEntradaOnAir). Utilitza el Manifest de Sessió
+ * per obtenir el tcRef (offset, mediaStart) i convertir els TCs OnAir a posicions
+ * de timeline. Serveix per a verificar visualment que els TCs OnAir coincideixen
+ * amb els talls reals del vídeo.
+ */
+placeOnAirMarkers: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [ONAIR] Iniciant col·locació de marcadors OnAir...");
+
+    try {
+        // 1. Carregar context i manifest
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
+
+        if (!manifest.tcRef || manifest.tcRef.offset === null || !manifest.tcRef.mediaStart) {
+            log("⚠️ [ONAIR] Manifest sense tcRef complet. No es poden col·locar marcadors.");
+            getUtils().status("Sense dades OnAir", "error");
+            return;
+        }
+
+        const tcRef = manifest.tcRef;
+        const reader = window.EscaletaReader;
+        if (!reader) {
+            log("⚠️ [ONAIR] EscaletaReader no disponible.");
+            return;
+        }
+
+        // 2. Filtrar items que tinguin horaEntradaOnAir
+        const onAirItems = (manifest.escaletaItems || []).filter(function(item) {
+            return item.horaEntradaOnAir && item.horaEntradaOnAir !== "00:00:00";
+        });
+
+        if (onAirItems.length === 0) {
+            log("⚠️ [ONAIR] No hi ha items amb horaEntradaOnAir al manifest.");
+            getUtils().status("Sense items OnAir", "error");
+            return;
+        }
+
+        log(`📍 [ONAIR] ${onAirItems.length} items amb temps OnAir detectats.`);
+
+        // 3. Netejar marcadors previs i col·locar els nous
+        await callJSX("Markers.clear()");
+
+        var count = 0;
+        for (var i = 0; i < onAirItems.length; i++) {
+            var item = onAirItems[i];
+            // Calcular posició al timeline: (onAirSec - mediaStart) + offset
+            var onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
+            var markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+
+            if (markerPos < -0.1) continue; // Fora de rang
+
+            var safeT = markerPos.toFixed(4);
+            var num = item.num || '';
+            var titol = (item.titol || '').replace(/'/g, "\\'").substring(0, 60);
+            var comment = (num ? num + ' - ' : '') + titol;
+
+            log(`📍 [ONAIR] "${comment}" → timeline ${safeT}s (OnAir: ${item.horaEntradaOnAir})`);
+
+            if (comment) {
+                await callJSX("Markers.set(" + safeT + ", '" + comment + "', 'color=6')");
+                count++;
+            }
+        }
+
+        log(`✅ [ONAIR] ${count} marcadors col·locats al timeline.`);
+        getUtils().status(count + " marcadors OnAir", "exito");
+
+    } catch (e) { getUtils().handleError(e, "placeOnAirMarkers"); }
+},
+
+/**
  * Solució C: Actualitza el punt d'entrada del bloc al cabezal actual (CTI).
  */
 updateBlocInFromCTI: async function() {

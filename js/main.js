@@ -126,7 +126,7 @@ var isUserDraggingSlider = false;
         
         const btnSetBlocIn = document.getElementById('btnSetBlocIn');
         const btnSetBlocOut = document.getElementById('btnSetBlocOut');
-        if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocInFromCTI'));
+        if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'placeOnAirMarkers'));
         if (btnSetBlocOut) btnSetBlocOut.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocOutFromCTI'));
 
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---

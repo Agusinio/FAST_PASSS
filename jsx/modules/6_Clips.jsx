@@ -66,7 +66,7 @@ FASTPASS.Clips = {
         try {
             var track = this._get(trackIdx, type || "video");
             if (!track || !track.clips || track.clips.numItems <= clipIdx) return "null";
-            return track.clips[clipIdx].start.seconds.toString();
+            return track.clips[clipIdx].inPoint.seconds.toString();
         } catch(e) { return "null"; }
     },
 

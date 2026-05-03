@@ -87,10 +87,19 @@
 
                                 if (bounds) {
                                     const lines = reader.getLinesForBlock(jsonData, ctx.bloque);
+                                    // Calcular el "punt dulce" (sense handles): temps OnAir real relatiu al MP4
+                                    // bounds.inPoint/outPoint inclouen handles (inHandles=1s, outHandles=3s).
+                                    // bounds.tcRef.realStart/realEnd són els temps OnAir absoluts.
+                                    // Restem msStart per obtindre valors relatius al MP4.
+                                    const msStartSec = bounds.tcRef.mediaStart;
+                                    const sweetIn  = (bounds.tcRef.realStart != null) ? bounds.tcRef.realStart - msStartSec : bounds.inPoint;
+                                    const sweetOut = (bounds.tcRef.realEnd   != null) ? bounds.tcRef.realEnd   - msStartSec : bounds.outPoint;
                                     cleanFeedData = {
                                         mediaPath: jsonData.cleanFeed.mediaPath,
                                         inPoint: bounds.inPoint,
                                         outPoint: bounds.outPoint,
+                                        sweetInPoint: sweetIn,
+                                        sweetOutPoint: sweetOut,
                                         duration: bounds.duration,
                                         escaletaLines: lines,
                                         precisionTiers: {
@@ -174,12 +183,24 @@
                 // 2. FINALITZAR tcRef (Obtenir clipStart real post-inserció)
                 if (cleanFeedData) {
                     log("📐 Finalitzant tcRef post-inserció...");
-                    const clipStartRaw = await callJSX(`Clips.getInPoint(1, 0)`); // track V1 (1-based), índex 0
-                    const clipStart = parseFloat(clipStartRaw);
+                    
+                    // Llegir la posició real del clip al timeline via Clips.get()
+                    // Usem start.seconds (posició al timeline), NO inPoint.seconds (relatiu al source)
+                    const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
+                    let clipStart = NaN;
+                    try {
+                        const clipData = JSON.parse(clipDataRaw);
+                        clipStart = clipData.start;
+                        log(`🔍 [LOG] Clips.get(1,0): start=${clipData.start}, inPoint=${clipData.inPoint}, end=${clipData.end}`);
+                    } catch(e) {
+                        log(`⚠️ Error parsejant clipData: ${clipDataRaw}`);
+                    }
                     
                     if (!isNaN(clipStart)) {
                         const inPoint = cleanFeedData.inPoint;
                         const offset = clipStart - inPoint;
+                        
+                        log(`🔍 [LOG] CÀLCUL tcRef: clipStart(start al timeline)=${clipStart.toFixed(4)}s - inPoint(source MP4)=${inPoint.toFixed(4)}s = offset=${offset.toFixed(4)}s`);
                         
                         // Actualitzar manifest amb la posició real
                         await FASTPASS_UI.SessionManifest.save(ctx, {
@@ -187,9 +208,9 @@
                                 clipStart: clipStart,
                                 offset: offset
                             },
-                            phases: { 
-                                mp4Imported: true, 
-                                tcRefEstablished: true 
+                            phases: {
+                                mp4Imported: true,
+                                tcRefEstablished: true
                             }
                         });
                         log(`📐 tcRef establert: offset=${offset.toFixed(3)}s (clipStart=${clipStart.toFixed(3)}s)`);

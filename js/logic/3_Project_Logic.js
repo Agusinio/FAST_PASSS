@@ -87,8 +87,12 @@
             
                 // 4. INSERTAR VÍDEO AL TIMELINE
                 if (cleanFeedData && cleanFeedData.mediaPath) {
-                    // ─── MODE ESCALETA: importar el cleanFeed MP4 i col·locar-lo amb offset ──
-                    utils.log(`📡 [NOU] Usant cleanFeed MP4: ${cleanFeedData.mediaPath}`);
+                    // ─── MODE ESCALETA: importar el cleanFeed MP4 AMB MÀRGENS ──
+                    // El clip s'insereix amb insertWithBounds (inPoint/outPoint amb handles)
+                    // exactament com abans. A més, es col·loquen marcadors d'IN i OUT
+                    // a la seqüència per indicar visualment els punts detectats per
+                    // l'algoritme calcPrecisionTrimBounds (sistema de 4 tiers IN / 3 tiers OUT).
+                    utils.log(`📡 Usant cleanFeed MP4 (amb marges): ${cleanFeedData.mediaPath}`);
 
                     // 4a. Importar el cleanFeed (si no està ja importat)
                     const cfPathForward = cleanFeedData.mediaPath.replace(/\\/g, "/");
@@ -106,52 +110,102 @@
                         utils.log(`✅ cleanFeed ja importat: ${cfName}`);
                     }
 
-                    // 4b. Insertar al timeline amb inPoint / outPoint via insertWithBounds
+                    // 4b. Moure el CTI a 00:00 abans d'inserir el clip (per a que el cabezal
+                    //     no interfereixi amb la col·locació i el zoom posterior)
+                    await callJSX("Timeline.set(0)");
+                    utils.log(`🎯 CTI mogut a 00:00 abans d'inserir el clip`);
+
+                    // 4c. Insertar el MP4 a V1 amb insertWithBounds (recortat amb marges)
                     const escapedCfName = encodeURIComponent(cfName);
-                    const inPt  = cleanFeedData.inPoint.toFixed(4);
-                    const outPt = cleanFeedData.outPoint.toFixed(4);
-                    const duration = (cleanFeedData.outPoint - cleanFeedData.inPoint);
-                    utils.log(`🎬 Col·locant cleanFeed a V1: inPoint=${inPt}s outPoint=${outPt}s (dur=${duration.toFixed(2)}s)`);
+                    const inPt  = cleanFeedData.inPoint;
+                    const outPt = cleanFeedData.outPoint;
+                    const clipDuration = outPt - inPt;
+                    utils.log(`🎬 Col·locant cleanFeed a V1 amb bounds: IN=${inPt.toFixed(2)}s OUT=${outPt.toFixed(2)}s (start=0) | duradaEsperada=${clipDuration.toFixed(2)}s`);
+                    utils.log(`🔍 [LOG] cleanFeedData.inPoint (relatiu MP4)=${inPt.toFixed(4)}s, cleanFeedData.outPoint=${outPt.toFixed(4)}s, msStart (mediaStart)=${(cleanFeedData.tcRef?.mediaStart ?? 'N/A')}`);
                     const insertRes = await callJSX(
-                        `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${inPt}, ${outPt}, 'video')`
+                        `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${inPt.toFixed(4)}, ${outPt.toFixed(4)}, 'video')`
                     );
                     if (insertRes && insertRes.indexOf('ERR') !== -1) {
-                        utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}. Intent fallback amb insert estàndard.`);
-                        await callJSX(`FASTPASS.Clips.insert('${escapedCfName}', 1, 0)`);
-                    } else {
-                        // 🎯 POST-TRIM: Forçar el OUT trim explícitament via Clips.end
-                        // insertWithBounds té molta lógica d'àudio que pot interferir amb el outPoint.
-                        // Clips.end és una funció ultra-atòmica que només setteja clip.end.
-                        // El clip està a V1 (track 1), índex 0, i volem que acabi a start + duration.
-                        // Com que start=0 (insertat a posició 0), el end ha de ser = duration.
-                        const endPos = duration.toFixed(4);
-                        const trimRes = await callJSX(`Clips.end(1, 0, ${endPos}, 'video')`);
-                        utils.log(`🎬 Post-trim OUT: clip.end=${endPos}s → ${trimRes}`);
-
-                        // 🎯 POST-TRIM AUDIO A1: Retallar el clip d'audio associat a A1
-                        // El clip d'audio es crea automàticament per Premiere al inserir el MP4.
-                        // Cerquem per start=0 (mateixa posició que el vídeo) i retallem al mateix endPos.
-                        const audioTrimRes = await callJSX(`Clips.endAt(1, 0, ${endPos}, 'audio')`);
-                        utils.log(`🎬 Post-trim AUDIO A1: endAt(1, 0, ${endPos}, 'audio') → ${audioTrimRes}`);
-
-                        if (trimRes && trimRes.indexOf('ERR') === -1) {
-                            // Verificar el resultat
-                            const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
-                            try {
-                                const clipData = JSON.parse(clipDataRaw);
-                                utils.log(`📐 Post-trim verificat: start=${clipData.start.toFixed(2)}s end=${clipData.end.toFixed(2)}s inPoint=${clipData.inPoint.toFixed(2)}s outPoint=${clipData.outPoint.toFixed(2)}s`);
-                            } catch(e) {
-                                utils.log(`📐 Post-trim: clipData=${clipDataRaw}`);
-                            }
-                        }
+                        utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}`);
                     }
 
+                    // 4d. Establir punts IN/OUT de la SEQÜÈNCIA (guia visual per debug)
+                    // NOTA: inPt/outPt (cleanFeedData.inPoint/outPoint) són els límits
+                    // calculats per calcPrecisionTrimBounds INCLOENT els handles (marges).
+                    // Aquests valors amb handles són els que es passen a insertWithBounds
+                    // per a insertar el clip amb marge.
+                    //
+                    // Per als delimitadors IN/OUT de la seqüència necessitem els valors
+                    // del "punt dulce" (sense handles), que representen l'inici i final
+                    // precisos del bloc dins del senyal net. Aquests valors estan a
+                    // cleanFeedData.sweetInPoint / sweetOutPoint.
+                    //
+                    // IMPORTANT: sweetInPoint/sweetOutPoint estan en temps source (relatius al MP4).
+                    // Com que el clip s'inserta a start=0 amb insertWithBounds(sourceIn=inPt, sourceOut=outPt),
+                    // cal convertir a temps de seqüència: sweetSeq = sweetSource - inPt + clipStart.
+                    // Com que clipStart=0: sweetSeq = sweetSource - inPt.
+                    // D'aquesta manera els delimitadors cauen dins de la durada de la seqüència.
+                    const sweetSourceIn  = (cleanFeedData.sweetInPoint !== undefined)  ? cleanFeedData.sweetInPoint  : inPt;
+                    const sweetSourceOut = (cleanFeedData.sweetOutPoint !== undefined) ? cleanFeedData.sweetOutPoint : outPt;
+                    const sweetSeqIn  = sweetSourceIn  - inPt;  // conversió source→seq (clip start=0)
+                    const sweetSeqOut = sweetSourceOut - inPt;
+                    utils.log(`📍 [DEBUG] IN/OUT de seqüència (punt dulce, sense handles): sourceIN=${sweetSourceIn.toFixed(2)}s sourceOUT=${sweetSourceOut.toFixed(2)}s → seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s`);
+                    utils.log(`📍 [DEBUG] (Valors amb handles usats per insertWithBounds: IN=${inPt.toFixed(2)}s OUT=${outPt.toFixed(2)}s)`);
+                    const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);
+                    utils.log(`🔍 Timeline.range resultat=${rangeRes}`);
 
-                     // Marcadores d'escaleta: eliminada la colocación automàtica (sols es farà al clicar el botó Estructura)
+                    // 4e. Fer zoom a la selecció IN/OUT per a que ocupi l'ample de la finestra
+                    const zoomRes = await callJSX("Timeline.zoomToSelection()");
+                    utils.log(`🔍 Zoom a selecció IN/OUT: resultat=${zoomRes}`);
+
+                    // 4f. Col·locar marcadors d'IN i OUT a la seqüència
+                    // NOTA: Estos marcadores se eliminan porque placePrecisionMarkers() ya hace Markers.clear() antes de crear los suyos.
+                    // Si se mantienen aquí, generan marcadores fantasma cuando no se ejecuta placePrecisionMarkers().
+                    // await callJSX(`Markers.set(${inPt.toFixed(4)}, 'IN - Inici bloc (detectat)', 'color=3')`);
+                    // await callJSX(`Markers.set(${outPt.toFixed(4)}, 'OUT - Fi bloc (detectat)', 'color=3')`);
+                    utils.log(`📍 Marcadors IN/OUT col·locats a la seqüència (DESACTIVAT: es delega a placePrecisionMarkers)`);
+
+                    // Verificar el resultat
+                    const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
+                    let clipEnd = 0;
+                    try {
+                        const clipData = JSON.parse(clipDataRaw);
+                        const clipActualDur = clipData.end - clipData.start;
+                        clipEnd = clipData.end;
+                        utils.log(`📐 Clip inserit: start=${clipData.start.toFixed(2)}s end=${clipData.end.toFixed(2)}s inPoint=${clipData.inPoint.toFixed(2)}s outPoint=${clipData.outPoint.toFixed(2)}s durActual=${clipActualDur.toFixed(2)}s (AMB MÀRGENS)`);
+                        utils.log(`🔍 [LOG] Comparació: duradaEsperada=${clipDuration.toFixed(4)}s vs duradaReal=${clipActualDur.toFixed(4)}s | startClip=${clipData.start.toFixed(4)}s | INseq hauria de ser ~${clipData.start.toFixed(4)}s OUTseq hauria de ser ~${clipData.end.toFixed(4)}s`);
+                    } catch(e) {
+                        utils.log(`📐 Clip inserit: ${clipDataRaw}`);
+                    }
+
+                    // 4g. Retallar coles sobrants de TOTS els tracks al final físic del clip MP4
+                    // Això farà que l'àrea de treball s'ajusti automàticament al final del clip,
+                    // i donarà més opcions per a que el zoom funcioni correctament.
+                    if (clipEnd > 0) {
+                        utils.log(`✂️ [TRIM-TAILS] Retallant tots els tracks a end=${clipEnd.toFixed(2)}s (final físic del MP4)`);
+                        const numVideoTracks = parseInt(await callJSX("Tracks.count('video')") || "0");
+                        const numAudioTracks = parseInt(await callJSX("Tracks.count('audio')") || "0");
+                        const videoTracks = [];
+                        for (let vt = 1; vt <= numVideoTracks; vt++) videoTracks.push(vt);
+                        const audioTracks = [];
+                        for (let at = 1; at <= numAudioTracks; at++) audioTracks.push(at);
+                        utils.log(`✂️ [TRIM-TAILS] Tracks a processar: video=${JSON.stringify(videoTracks)}, audio=${JSON.stringify(audioTracks)}`);
+                        const trimResult = await FASTPASS_UI.Logic.Clips.rippleAllOut(clipEnd, videoTracks, audioTracks, false);
+                        utils.log(`✂️ [TRIM-TAILS] Resultat: ${trimResult} clips retallats/eliminats`);
+
+                        // 4h. Reintentar zoom després de retallar les coles
+                        const zoomRes2 = await callJSX("Timeline.zoomToSelection()");
+                        utils.log(`🔍 Zoom després de trim tails: resultat=${zoomRes2}`);
+                    } else {
+                        utils.log(`⚠️ [TRIM-TAILS] No s'ha pogut determinar el clipEnd, es salta el trim`);
+                    }
 
                 } else if (media && media.mp4 && !cleanFeedData) {
                     // ─── MODE ESTÀNDARD (fallback sense escaleta) ─────────────────────────
                     utils.log(`🎬 [FALLBACK] Col·locant MP4 estàndard a V1...`);
+                    // Moure el CTI a 00:00 abans d'inserir el clip
+                    await callJSX("Timeline.set(0)");
+                    utils.log(`🎯 CTI mogut a 00:00 abans d'inserir el clip (fallback)`);
                     const escapedMediaName = encodeURIComponent(media.mp4.name);
                     await callJSX(`FASTPASS.Clips.insert('${escapedMediaName}', 1, 0)`);
                 }
