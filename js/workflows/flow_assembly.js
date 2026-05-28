@@ -55,6 +55,33 @@
         _clipsLogged: false,
 
         // ═══════════════════════════════════════════════════════════════
+        // SUFFIXOS GRÀFICS (compartits per _classifyItems i UNGROUPED)
+        // BUG #12: Evita que ítems gràfics amb agrupacio:null (ex: 18TE)
+        // es col·loquin com a marcadors estructurals a F1/F2/F3.
+        // Aquests ítems pertanyen exclusivament a F6·Gràfics.
+        // ═══════════════════════════════════════════════════════════════
+        _GRAPHIC_SUFFIXES: new Set([
+            'chy', 'chy1', 'chy2',
+            'gf', 'gf1', 'gf2', 'gf_01', 'gf_02', 'gf_011',
+            'te', 'te1', 'te2', 'te3',
+            'p2', 'p21', 'p22', 'p23', 'p24', 'p3', 'p4', 'p5', 'p51', 'p52',
+            'p5_01', 'p5_02', 'p7', 'p7_01', 'p7_02', 'p7_03', 'p7_0',
+            'p71', 'p72', 'p73', 'p',
+            'td1', 'td2', 'td3', 'td4', 'td_01', 'td_02', 'td_at1',
+            'qr', 'rq',
+            'at1', 'at2', 'at3', '_at1', '_at2', '_at3', 'ae', 't', 'teloc',
+            '**********'
+        ]),
+
+        _isGraphicByNum: function (num) {
+            if (!num) return false;
+            var clean = num.toString().toLowerCase().trim();
+            var match = clean.match(/^\d+(.*)$/);
+            if (!match || match[1] === '') return false;
+            return this._GRAPHIC_SUFFIXES.has(match[1]);
+        },
+
+        // ═══════════════════════════════════════════════════════════════
         // HELPER: UPSERT atòmic de marcadors amb protecció d'errors
         // BUG #8: Evita que un JSON.parse falli si callJSX retorna
         // un valor no-JSON (ex: "ERR:..." o buit).
@@ -308,28 +335,12 @@
 
             const getRawDuradaSec = (line) => parseDurada(line.durada || '0:00');
 
-            // ─── GRAPHIC SUFFIXES ───
-            const GRAPHIC_SUFFIXES = new Set([
-                'chy', 'chy1', 'chy2',
-                'gf', 'gf1', 'gf2', 'gf_01', 'gf_02', 'gf_011',
-                'te', 'te1', 'te2', 'te3',
-                'p2', 'p21', 'p22', 'p23', 'p24', 'p3', 'p4', 'p5', 'p51', 'p52',
-                'p5_01', 'p5_02', 'p7', 'p7_01', 'p7_02', 'p7_03', 'p7_0',
-                'p71', 'p72', 'p73', 'p',
-                'td1', 'td2', 'td3', 'td4', 'td_01', 'td_02', 'td_at1',
-                'qr', 'rq',
-                'at1', 'at2', 'at3', '_at1', '_at2', '_at3', 'ae', 't', 'teloc',
-                '**********'
-            ]);
+            // ─── SUFFIXES (compartits via this._GRAPHIC_SUFFIXES / this._isGraphicByNum) ───
+            // BUG #12: S'usa la font única de veritat per evitar duplicació
             const FORCED_STRUCTURAL_SUFFIXES = new Set(['lead', 'i', 'dp', 'dir', 'f']);
 
-            const isGraphicByNum = (num) => {
-                if (!num) return false;
-                const clean = num.toString().toLowerCase().trim();
-                const match = clean.match(/^\d+(.*)$/);
-                if (!match || match[1] === '') return false;
-                return GRAPHIC_SUFFIXES.has(match[1]);
-            };
+            var self = this;
+            const isGraphicByNum = function (num) { return self._isGraphicByNum(num); };
 
             const isForcedStructuralByNum = (num) => {
                 if (!num) return false;
@@ -770,8 +781,9 @@
                 itemPositions.set(line.num, idealPosSec);
             }
 
-            // ── BUG #4: Marcador vermell per a ítem no agrupat (agrupacio:null) ──
-            if (firstUngroupedItem) {
+            // ── BUG #4: Marcador per a ítem no agrupat (agrupacio:null) ──
+            // BUG #12: Saltar ítems gràfics (ex: 18TE) — pertanyen a F6·Gràfics
+            if (firstUngroupedItem && !this._isGraphicByNum(firstUngroupedItem.num)) {
                 var ugOnAir = firstUngroupedItem.horaEntradaOnAir;
                 var ugHasOnAir = ugOnAir && ugOnAir !== '00:00:00' && ugOnAir.trim() !== '';
                 if (ugHasOnAir) {
@@ -789,6 +801,8 @@
                         itemPositions.set(firstUngroupedItem.num, ugIdealPos);
                     }
                 }
+            } else if (firstUngroupedItem && this._isGraphicByNum(firstUngroupedItem.num)) {
+                log('🟢 [F1·OnAir] UNGROUPED ' + (firstUngroupedItem.num || '?') + ': ítem gràfic → F6·Gràfics (saltat)');
             }
 
             if (placements.length === 0) {
@@ -854,8 +868,9 @@
                 itemPositions.set(line.num, idealPosSec);
             }
 
-            // ── BUG #4: Marcador vermell per a ítem no agrupat (agrupacio:null) ──
-            if (firstUngroupedItem) {
+            // ── BUG #4: Marcador per a ítem no agrupat (agrupacio:null) ──
+            // BUG #12: Saltar ítems gràfics (ex: 18TE) — pertanyen a F6·Gràfics
+            if (firstUngroupedItem && !this._isGraphicByNum(firstUngroupedItem.num)) {
                 var ugOnAir = firstUngroupedItem.horaEntradaOnAir;
                 var ugHasOnAir = ugOnAir && ugOnAir !== '00:00:00' && ugOnAir.trim() !== '';
                 if (!ugHasOnAir) {
@@ -873,6 +888,8 @@
                         itemPositions.set(firstUngroupedItem.num, ugIdealPos);
                     }
                 }
+            } else if (firstUngroupedItem && this._isGraphicByNum(firstUngroupedItem.num)) {
+                log('🟢 [F2·Deducido] UNGROUPED ' + (firstUngroupedItem.num || '?') + ': ítem gràfic → F6·Gràfics (saltat)');
             }
 
             if (placements.length === 0) {
@@ -944,8 +961,9 @@
                 itemPositions.set(line.num, idealPosSec);
             }
 
-            // ── BUG #4: Marcador vermell per a ítem no agrupat (agrupacio:null) ──
-            if (firstUngroupedItem) {
+            // ── BUG #4: Marcador per a ítem no agrupat (agrupacio:null) ──
+            // BUG #12: Saltar ítems gràfics (ex: 18TE) — pertanyen a F6·Gràfics
+            if (firstUngroupedItem && !this._isGraphicByNum(firstUngroupedItem.num)) {
                 var ugAlreadyPlaced = itemPositions.has(firstUngroupedItem.num);
                 if (!ugAlreadyPlaced) {
                     var ugPrevista = firstUngroupedItem.horaEntradaPrevista;
@@ -966,6 +984,8 @@
                         }
                     }
                 }
+            } else if (firstUngroupedItem && this._isGraphicByNum(firstUngroupedItem.num)) {
+                log('🟢 [F3·Prevista] UNGROUPED ' + (firstUngroupedItem.num || '?') + ': ítem gràfic → F6·Gràfics (saltat)');
             }
 
             if (placements.length === 0) {

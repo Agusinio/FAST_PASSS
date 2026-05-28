@@ -71,5 +71,34 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "
 *   **🛑 No new JSX code**: The JSX layer is feature-complete. Before writing any new JSX method, exhaust all possibilities of composing existing atomic JSX calls from JavaScript. Shifting markers after a ripple? Use `Markers.get()` → calculate offsets in JS → `Markers.clear()` → `Markers.set()` in a loop. Deleting clips in a range? Use `Clips.get()` to find indices → `Clips.delete()` in reverse order. The toolkit is sufficient.
 *   **Logging**: Use `getUtils().log(msg, level)` for consistent console feedback.
 
+### 🐙 Git Portable
+
+El proyecto usa Git portable ubicado en `E:\PortableGit`. Para **commits acumulativos**, usar siempre la ruta completa al binario:
+
+```
+"E:\PortableGit\bin\git.exe" <comando>
+```
+
+**Credenciales (ya configuradas en el repo local)**:
+- `user.name`: `Agusinio`
+- `user.email`: `agonzalez.x@gmail.com`
+
+**Flujo típico de commit**:
+```cmd
+"E:\PortableGit\bin\git.exe" add -A
+"E:\PortableGit\bin\git.exe" commit -m "BUGs #X-#Y: descripcion del cambio"
+```
+
+**Repo remoto** (cuando se configure):
+```cmd
+"E:\PortableGit\bin\git.exe" remote add origin https://github.com/Agusinio/FAST_PASSS.git
+"E:\PortableGit\bin\git.exe" push -u origin main
+```
+
+**Precaución**: `.gitignore` ya excluye `._*` (resource forks de macOS), `OLD_CODE/` y `graphify-out/`. No commitear archivos `._*` — si aparecen en `git status`, limpiarlos con:
+```powershell
+Remove-Item -Path '.\.git\objects\pack\._*' -Force
+```
+
 ---
-© 2026 FAST >>> PASS | Assistant Skill v2.10.0
+© 2026 FAST >>> PASS | Assistant Skill v2.11.0
