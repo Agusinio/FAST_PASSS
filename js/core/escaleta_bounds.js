@@ -538,11 +538,18 @@
         var tier2Candidate = null;
         var tier2Label = '';
 
-        // Estratègia A: Item següent amb video i OnAir a allLines
+        // Estratègia A: Item següent amb video i OnAir a allLines.
+        // BUG #13: si el bloc té agrupacio, només considerar items del MATEIX
+        // agrupacio. null !== "v1", per tant els items sense agrupacio (totems)
+        // també es filtren quan el bloc pertany a un agrupacio concret.
+        var blockAgrupacio = blockLines.length > 0 ? blockLines[0].agrupacio : null;
+
         if (blockEndIdx >= 0 && blockEndIdx < allLines.length - 1) {
             for (var ai = blockEndIdx + 1; ai < allLines.length; ai++) {
                 var next = allLines[ai];
                 if (next.flotant === true) continue;
+                // BUG #13 fix: null !== "v1", filtrar també els totems
+                if (blockAgrupacio && next.agrupacio !== blockAgrupacio) continue;
                 if (next.teVideo === true && next.horaEntradaOnAir) {
                     tier2Candidate = this.tcToSeconds(next.horaEntradaOnAir);
                     tier2Label = 'item següent "' + next.num + '" comença a ' + tier2Candidate.toFixed(2) + 's (OnAir=' + next.horaEntradaOnAir + ')';
@@ -550,8 +557,10 @@
                 }
             }
         }
-        // Estratègia B: Primer video del bloc següent (per agrupacio)
-        if (tier2Candidate === null) {
+        // Estratègia B: Primer video del bloc següent (per agrupacio).
+        // BUG #13: només per blocs sense agrupacio (totems). Els blocs amb
+        // agrupacio tenen fronteres internes definides per Tier 1 OUT.
+        if (tier2Candidate === null && !blockAgrupacio) {
             var clips = data && data.cleanFeed && data.cleanFeed.clips ? data.cleanFeed.clips : [];
             var idx = -1;
             for (var ci2 = 0; ci2 < clips.length; ci2++) {

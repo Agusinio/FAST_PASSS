@@ -140,6 +140,12 @@
             var nextItem = allLines[i];
             if (!nextItem) continue;
             if (nextItem.flotant === true) continue;
+            // BUG #13: no competir amb el següent OnAir si pertany a un altre agrupacio.
+            // Si l'item té agrupacio, només competeix amb items del MATEIX agrupacio.
+            // null !== "v1", per tant els items null (totems) també es filtren
+            // quan l'item actual pertany a un bloc. Els totems només competeixen
+            // entre ells (quan item.agrupacio també és null).
+            if (item.agrupacio && nextItem.agrupacio !== item.agrupacio) continue;
 
             var nextOnAir = nextItem.horaEntradaOnAir;
             if (nextOnAir && nextOnAir !== "00:00:00") {
