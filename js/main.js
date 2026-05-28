@@ -1,4 +1,4 @@
-/*
+﻿/*
  * =================================================================================
  * PROJECTE: FAST >>> PASS
  * ARXIU: main.js (ENTRY POINT & UI CONTROLLER - v2.6.0 literal)
@@ -35,8 +35,6 @@ var isUserDraggingSlider = false;
             window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
             utils.log("✅ Motor JSX montado con éxito.");
             //utils.isJsxReady = true;
-
-            await FASTPASS_UI.Config.init();
             
             if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                 await FASTPASS_UI.Core.Context.init();
@@ -109,25 +107,53 @@ var isUserDraggingSlider = false;
             };
         }
 
-        // --- WORKFLOW: GRÀFICS ---
-        const btnResetGrafs = document.getElementById('btnResetGrafs');
-        const btnChyrons = document.getElementById('btnPlaceChyrons');
-        const btnPlaceGrafic = document.getElementById('btnPlaceGrafic');
-        const btnGraph169 = document.getElementById('btnPlaceGraph169');
-        const btnBg = document.getElementById('btnBg');
-        const btnPlaceStructure = document.getElementById('btnPlaceStructure');
+        // --- WORKFLOW: MARCADORS (Fases independents) ---
+        const btnMarksF1 = document.getElementById('btnMarksF1');
+        const btnMarksF2 = document.getElementById('btnMarksF2');
+        const btnMarksF3 = document.getElementById('btnMarksF3');
+        const btnMarksF35 = document.getElementById('btnMarksF35');
+        const btnMarksF4 = document.getElementById('btnMarksF4');
+        const btnMarksF5 = document.getElementById('btnMarksF5');
+        const btnMarksF6 = document.getElementById('btnMarksF6');
 
-        if (btnResetGrafs) btnResetGrafs.addEventListener('click', () => callWorkflow('Retols', 'runResetGraphics'));
-        if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Assembly', 'runGuidedAssembly'));
-        if (btnPlaceGrafic) btnPlaceGrafic.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraphic'));
-        if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
-        if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
-        if (btnPlaceStructure) btnPlaceStructure.addEventListener('click', () => callWorkflow('Assembly', 'placeStructureMarkers'));
-        
-        const btnSetBlocIn = document.getElementById('btnSetBlocIn');
-        const btnSetBlocOut = document.getElementById('btnSetBlocOut');
-        if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'placeOnAirMarkers'));
-        if (btnSetBlocOut) btnSetBlocOut.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocOutFromCTI'));
+        if (btnMarksF1) btnMarksF1.addEventListener('click', () => callWorkflow('Assembly', 'placeOnAirMarkers'));
+        if (btnMarksF2) btnMarksF2.addEventListener('click', () => callWorkflow('Assembly', 'placeDeducedOnAirMarkers'));
+        if (btnMarksF3) btnMarksF3.addEventListener('click', () => callWorkflow('Assembly', 'placeScheduledMarkers'));
+        if (btnMarksF35) btnMarksF35.addEventListener('click', () => callWorkflow('Assembly', 'correlationSnapMarkers'));
+        if (btnMarksF4) btnMarksF4.addEventListener('click', () => callWorkflow('Assembly', 'snapFaroMarkers'));
+        if (btnMarksF5) btnMarksF5.addEventListener('click', () => callWorkflow('Assembly', 'snapOrphanMarkers'));
+        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Assembly', 'placeGraphicMarkers'));
+
+        // Botons ocults de moment (preservats per a ús futur):
+        // const btnResetGrafs = document.getElementById('btnResetGrafs');
+        // const btnPlaceGrafic = document.getElementById('btnPlaceGrafic');
+        // const btnGraph169 = document.getElementById('btnPlaceGraph169');
+        // const btnBg = document.getElementById('btnBg');
+        // const btnPlaceStructure = document.getElementById('btnPlaceStructure');
+        // const btnSetBlocIn = document.getElementById('btnSetBlocIn');
+        // const btnSetBlocOut = document.getElementById('btnSetBlocOut');
+        // if (btnResetGrafs) btnResetGrafs.addEventListener('click', () => callWorkflow('Retols', 'runResetGraphics'));
+        // if (btnPlaceGrafic) btnPlaceGrafic.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraphic'));
+        // if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
+        // if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
+        // if (btnPlaceStructure) btnPlaceStructure.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'estructura'));
+        // if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'runInOutCrudo'));
+        // if (btnSetBlocOut) btnSetBlocOut.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocOutFromCTI'));
+        // // --- BOTONES DE ANÁLISIS (DEBUG MARCADORES) ---
+        // const btnMarksCrudo = document.getElementById('btnMarksCrudo');
+        // const btnInoutCocinado = document.getElementById('btnInoutCocinado');
+        // const btnMarksCocinado = document.getElementById('btnMarksCocinado');
+        // const btnCapturaUsuarioInOut = document.getElementById('btnCapturaUsuarioInOut');
+        // const btnCapturaUsuarioMarks = document.getElementById('btnCapturaUsuarioMarks');
+        // if (btnMarksCrudo) btnMarksCrudo.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'crudo'));
+        // if (btnInoutCocinado) btnInoutCocinado.addEventListener('click', () => callWorkflow('Assembly', 'runInOutCocinado'));
+        // if (btnMarksCocinado) btnMarksCocinado.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'cocinado'));
+        // if (btnCapturaUsuarioInOut) btnCapturaUsuarioInOut.addEventListener('click', () => callWorkflow('Assembly', 'capturaUsuarioInOut'));
+        // if (btnCapturaUsuarioMarks) btnCapturaUsuarioMarks.addEventListener('click', () => callWorkflow('Assembly', 'capturaUsuarioMarks'));
+
+        // --- BOTÓ CHYRONS (Tema-Titol via marcadors) ---
+        const btnChyrons = document.getElementById('btnPlaceChyrons');
+        if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Retols', 'runPlaceChyrons'));
 
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');
@@ -157,8 +183,9 @@ var isUserDraggingSlider = false;
         const selectBloc = document.getElementById('bloc');
 
         if (btnSetup) btnSetup.addEventListener('click', () => callWorkflow('Config', 'toggleSetup', true));
-        if (selectPrograma) selectPrograma.addEventListener('change', handleSelectionChange);
-        if (selectBloc) selectBloc.addEventListener('change', handleSelectionChange);
+        // FIX A4: Els handlers 'change' de programa/bloc ja estan definits a
+        // Context.init() (p.onchange / b.onchange). Eliminem els addEventListener
+        // duplicats per evitar doble disparament i possibles race conditions.
 
         // --- INICIALIZACIÓN DE VALORES ---
         if (FASTPASS_UI.Config && FASTPASS_UI.Config.loadSelection) FASTPASS_UI.Config.loadSelection();
@@ -172,11 +199,11 @@ var isUserDraggingSlider = false;
         FASTPASS_UI.Utils.log("✅ TODOS LOS BOTONES VINCULADOS");
     }
 
-    async function callWorkflow(module, method) {
+    async function callWorkflow(module, method, ...args) {
         console.log(`🔘 callWorkflow: ${module}.${method}`);
         if (FASTPASS_UI.Workflows[module] && FASTPASS_UI.Workflows[module][method]) {
             try {
-                await FASTPASS_UI.Workflows[module][method]();
+                await FASTPASS_UI.Workflows[module][method](...args);
             } catch (e) {
                 console.error("💥 Error en Workflow " + module + "." + method + ":", e);
                 if (FASTPASS_UI.Utils && FASTPASS_UI.Utils.handleError) {

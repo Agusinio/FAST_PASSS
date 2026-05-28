@@ -491,6 +491,15 @@ $.global.Markers = {
     },
     clear: function() {
         return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.clear() : "ERR";
+    },
+    moveByPrefixes: function(movesJson) {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.moveByPrefixes(movesJson) : JSON.stringify({ moved: 0, prefixes: [], error: "NO_MODULE" });
+    },
+    placeByPrefixes: function(placementsJson) {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.placeByPrefixes(placementsJson) : JSON.stringify({ placed: 0, moved: 0, created: 0, error: "NO_MODULE" });
+    },
+    deleteByPrefixes: function(prefixesJson) {
+        return ($.global.FASTPASS.Markers) ? FASTPASS.Markers.deleteByPrefixes(prefixesJson) : "ERR:NO_MODULE";
     }
 };
 

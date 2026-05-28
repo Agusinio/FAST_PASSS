@@ -49,7 +49,7 @@
         * @param {Object}      paths
         * @param {Array}       portadaList
         * @param {string}      shortProg
-        * @param {Object|null} cleanFeedData  - { mediaPath, inPoint, outPoint, escaletaLines[] } | null
+        * @param {Object|null} cleanFeedData  - { mediaPath, mp4ProgramInPoint, mp4ExpandedOutPoint, mp4SweetInPoint, mp4SweetOutPoint, mp4Duration, escaletaLines[] } | null
         */
         create: async function(ctx, wottData, media, paths, portadaList, shortProg, cleanFeedData) {
             const { plantillaPath, fullDestPath, folderPath, sanitizedTheme } = paths;
@@ -92,7 +92,8 @@
                     // exactament com abans. A més, es col·loquen marcadors d'IN i OUT
                     // a la seqüència per indicar visualment els punts detectats per
                     // l'algoritme calcPrecisionTrimBounds (sistema de 4 tiers IN / 3 tiers OUT).
-                    utils.log(`📡 Usant cleanFeed MP4 (amb marges): ${cleanFeedData.mediaPath}`);
+                    const isFallbackBlockMedia = cleanFeedData._isFallbackBlockMedia === true;
+                    utils.log(`📡 Usant ${isFallbackBlockMedia ? 'MP4 del bloc (FALLBACK)' : 'cleanFeed MP4 (amb marges)'}: ${cleanFeedData.mediaPath}`);
 
                     // 4a. Importar el cleanFeed (si no està ja importat)
                     const cfPathForward = cleanFeedData.mediaPath.replace(/\\/g, "/");
@@ -103,11 +104,11 @@
                     const alreadyImported = items.some(i => i.name === cfName);
 
                     if (!alreadyImported) {
-                        utils.log(`📥 Important cleanFeed: ${cfName}`);
+                        utils.log(`📥 Important ${isFallbackBlockMedia ? 'MP4 del bloc' : 'cleanFeed'}: ${cfName}`);
                         await utils.importList([cfPathForward], "root");
                         await utils.delay(500);
                     } else {
-                        utils.log(`✅ cleanFeed ja importat: ${cfName}`);
+                        utils.log(`✅ ${isFallbackBlockMedia ? 'MP4 del bloc' : 'cleanFeed'} ja importat: ${cfName}`);
                     }
 
                     // 4b. Moure el CTI a 00:00 abans d'inserir el clip (per a que el cabezal
@@ -115,42 +116,65 @@
                     await callJSX("Timeline.set(0)");
                     utils.log(`🎯 CTI mogut a 00:00 abans d'inserir el clip`);
 
-                    // 4c. Insertar el MP4 a V1 amb insertWithBounds (recortat amb marges)
+                    let clipDuration;
                     const escapedCfName = encodeURIComponent(cfName);
-                    const inPt  = cleanFeedData.inPoint;
-                    const outPt = cleanFeedData.outPoint;
-                    const clipDuration = outPt - inPt;
-                    utils.log(`🎬 Col·locant cleanFeed a V1 amb bounds: IN=${inPt.toFixed(2)}s OUT=${outPt.toFixed(2)}s (start=0) | duradaEsperada=${clipDuration.toFixed(2)}s`);
-                    utils.log(`🔍 [LOG] cleanFeedData.inPoint (relatiu MP4)=${inPt.toFixed(4)}s, cleanFeedData.outPoint=${outPt.toFixed(4)}s, msStart (mediaStart)=${(cleanFeedData.tcRef?.mediaStart ?? 'N/A')}`);
-                    const insertRes = await callJSX(
-                        `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${inPt.toFixed(4)}, ${outPt.toFixed(4)}, 'video')`
-                    );
-                    if (insertRes && insertRes.indexOf('ERR') !== -1) {
-                        utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}`);
+
+                    if (isFallbackBlockMedia) {
+                        // ─── MODE FALLBACK: MP4 individual del bloc ───────────────────
+                        // S'insereix el clip complet sense trim perquè no coneixem
+                        // la duració exacta del fitxer. La duració del clip es llegeix
+                        // després de la inserció. Els sweet points es calculen amb
+                        // la duració real.
+                        utils.log(`🎬 [FALLBACK] Col·locant MP4 del bloc complet a V1 (sense trim)`);
+                        const insertRes = await callJSX(
+                            `Clips.insert('${escapedCfName}', 1, 0, 'video')`
+                        );
+                        if (insertRes && insertRes.indexOf('ERR') !== -1) {
+                            utils.log(`⚠️ Error insertant MP4 del bloc: ${insertRes}`);
+                        }
+
+                        // Llegir la duració real del clip inserit
+                        const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
+                        let clipEnd = 0;
+                        try {
+                            const clipData = JSON.parse(clipDataRaw);
+                            clipEnd = clipData.end;
+                            clipDuration = clipData.end - clipData.start;
+                            utils.log(`📐 [FALLBACK] Clip inserit: start=0s end=${clipEnd.toFixed(2)}s durActual=${clipDuration.toFixed(2)}s`);
+                        } catch(e) {
+                            clipDuration = cleanFeedData.mp4Duration || 60;
+                            utils.log(`⚠️ [FALLBACK] No s'ha pogut llegir duració real del clip. Usant estimació: ${clipDuration.toFixed(2)}s`);
+                        }
+                    } else {
+                        // ─── MODE NORMAL: cleanFeed amb bounds calculats ──────────────
+                        // 4c. Insertar el MP4 a V1 amb insertWithBounds (recortat amb marges + handles)
+                        // Amb handles=3s, el source IN del clip és mp4ExpandedInPoint (sweet - 3s handle)
+                        // + globalOffset. L'offset global (tcOffset) s'aplica al clip origen per corregir
+                        // deriva d'ingesta, desplaçant el rang source del MP4 (on es llegeix el contingut
+                        // dins del fitxer). El clip es col·loca sempre a start=0 al timeline.
+                        const globalOffset = config.tcOffset || 0;
+                        const mp4InPt  = (cleanFeedData.mp4ExpandedInPoint || 0) + globalOffset;  // expanded (amb handle), AMB offset
+                        const mp4OutPt = (cleanFeedData.mp4ExpandedOutPoint || 0) + globalOffset;  // expanded (amb handle), AMB offset
+                        clipDuration = mp4OutPt - mp4InPt;
+                        utils.log(`🎬 Col·locant cleanFeed a V1 amb bounds: IN=${mp4InPt.toFixed(2)}s OUT=${mp4OutPt.toFixed(2)}s (start=0) | duradaEsperada=${clipDuration.toFixed(2)}s`);
+                        utils.log(`🔍 [LOG] cleanFeedData.mp4ExpandedInPoint (BASE, amb handle)=${(cleanFeedData.mp4ExpandedInPoint||0).toFixed(4)}s + globalOffset=${globalOffset}s = ${mp4InPt.toFixed(4)}s, mp4ExpandedOutPoint (BASE)=${(cleanFeedData.mp4ExpandedOutPoint||0).toFixed(4)}s + globalOffset=${globalOffset}s = ${mp4OutPt.toFixed(4)}s`);
+                        const insertRes = await callJSX(
+                            `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${mp4InPt.toFixed(4)}, ${mp4OutPt.toFixed(4)}, 'video')`
+                        );
+                        if (insertRes && insertRes.indexOf('ERR') !== -1) {
+                            utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}`);
+                        }
                     }
 
-                    // 4d. Establir punts IN/OUT de la SEQÜÈNCIA (guia visual per debug)
-                    // NOTA: inPt/outPt (cleanFeedData.inPoint/outPoint) són els límits
-                    // calculats per calcPrecisionTrimBounds INCLOENT els handles (marges).
-                    // Aquests valors amb handles són els que es passen a insertWithBounds
-                    // per a insertar el clip amb marge.
-                    //
-                    // Per als delimitadors IN/OUT de la seqüència necessitem els valors
-                    // del "punt dulce" (sense handles), que representen l'inici i final
-                    // precisos del bloc dins del senyal net. Aquests valors estan a
-                    // cleanFeedData.sweetInPoint / sweetOutPoint.
-                    //
-                    // IMPORTANT: sweetInPoint/sweetOutPoint estan en temps source (relatius al MP4).
-                    // Com que el clip s'inserta a start=0 amb insertWithBounds(sourceIn=inPt, sourceOut=outPt),
-                    // cal convertir a temps de seqüència: sweetSeq = sweetSource - inPt + clipStart.
-                    // Com que clipStart=0: sweetSeq = sweetSource - inPt.
-                    // D'aquesta manera els delimitadors cauen dins de la durada de la seqüència.
-                    const sweetSourceIn  = (cleanFeedData.sweetInPoint !== undefined)  ? cleanFeedData.sweetInPoint  : inPt;
-                    const sweetSourceOut = (cleanFeedData.sweetOutPoint !== undefined) ? cleanFeedData.sweetOutPoint : outPt;
-                    const sweetSeqIn  = sweetSourceIn  - inPt;  // conversió source→seq (clip start=0)
-                    const sweetSeqOut = sweetSourceOut - inPt;
-                    utils.log(`📍 [DEBUG] IN/OUT de seqüència (punt dulce, sense handles): sourceIN=${sweetSourceIn.toFixed(2)}s sourceOUT=${sweetSourceOut.toFixed(2)}s → seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s`);
-                    utils.log(`📍 [DEBUG] (Valors amb handles usats per insertWithBounds: IN=${inPt.toFixed(2)}s OUT=${outPt.toFixed(2)}s)`);
+                    // 4d. Establir punts IN/OUT de la SEQÜÈNCIA als "sweet points"
+                    // El clip té handleSecs de marge a cada extrem (3s per defecte).
+                    // Els delimitadors de seqüència (Work Area IN/OUT) es posicionen
+                    // on comença i acaba el contingut REAL del bloc, ignorant els handles.
+                    // Font única de veritat: Config.get().handles → cleanFeedData.handleSecs.
+                    const h = cleanFeedData.handleSecs || 0;
+                    const sweetSeqIn  = h;
+                    const sweetSeqOut = clipDuration - h;
+                    utils.log(`📍 [DEBUG] IN/OUT de seqüència (sweet points): seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s (durada=${clipDuration.toFixed(2)}s, handleSecs=${h}s${isFallbackBlockMedia ? ', mode=fallback' : ''})`);
                     const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);
                     utils.log(`🔍 Timeline.range resultat=${rangeRes}`);
 
@@ -159,11 +183,11 @@
                     utils.log(`🔍 Zoom a selecció IN/OUT: resultat=${zoomRes}`);
 
                     // 4f. Col·locar marcadors d'IN i OUT a la seqüència
-                    // NOTA: Estos marcadores se eliminan porque placePrecisionMarkers() ya hace Markers.clear() antes de crear los suyos.
-                    // Si se mantienen aquí, generan marcadores fantasma cuando no se ejecuta placePrecisionMarkers().
-                    // await callJSX(`Markers.set(${inPt.toFixed(4)}, 'IN - Inici bloc (detectat)', 'color=3')`);
-                    // await callJSX(`Markers.set(${outPt.toFixed(4)}, 'OUT - Fi bloc (detectat)', 'color=3')`);
-                    utils.log(`📍 Marcadors IN/OUT col·locats a la seqüència (DESACTIVAT: es delega a placePrecisionMarkers)`);
+                    // NOTA: Estos marcadores se eliminan porque placeMarkers('estructura') ya hace Markers.clear() antes de crear los suyos.
+                    // Si se mantienen aquí, generan marcadores fantasma cuando no se ejecuta placeMarkers('estructura').
+                    // await callJSX(`Markers.set(${mp4InPt.toFixed(4)}, 'IN - Inici bloc (detectat)', 'color=3')`);
+                    // await callJSX(`Markers.set(${mp4OutPt.toFixed(4)}, 'OUT - Fi bloc (detectat)', 'color=3')`);
+                    utils.log(`📍 Marcadors IN/OUT col·locats a la seqüència (DESACTIVAT: es delega a placeMarkers('estructura'))`);
 
                     // Verificar el resultat
                     const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);

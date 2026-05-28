@@ -219,9 +219,16 @@
 
         escape: function(str) {
             if (!str) return "";
-            // Escapem barres invertides i comilles simples per a JSX
-            // Necessari per a rutes amb apòstrofs (ex: D'HABITATGE)
-            return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+            // Escapem caràcters perillosos per a injecció en literals ExtendScript (ES3).
+            // Els caràcters de control (\n \r \t) es converteixen a seqüències d'escapada
+            // per evitar que trenquin el literal de string dins d'evalScript().
+            // Les barres invertides i comilles simples també s'escapen.
+            return str
+                .replace(/\\/g, "\\\\")
+                .replace(/'/g, "\\'")
+                .replace(/\n/g, "\\n")
+                .replace(/\r/g, "\\r")
+                .replace(/\t/g, "\\t");
         },
 
         delay: function(ms) { 
@@ -234,6 +241,64 @@
             var month = ("0" + (d.getMonth() + 1)).slice(-2);
             var year = d.getFullYear();
             return day + "_" + month + "_" + year;
+        },
+
+        /**
+         * FIX B1: Valida que un dateDir (DD_MM_YYYY) estigui dins de la finestra
+         * temporal permesa per a la cerca de projectes en directoris germans.
+         *
+         * Regles:
+         *   - Sempre s'accepta el dia d'avui.
+         *   - Si l'hora actual és < 4 AM, també s'accepta ahir (marge de madrugada).
+         *   - Qualsevol altra data es rebutja.
+         *
+         * @param {string} dateDirStr - Data en format DD_MM_YYYY, ex: "26_05_2026"
+         * @returns {boolean} true si la data està dins de la finestra permesa
+         */
+        isDateDirInTemporalWindow: function(dateDirStr) {
+            if (!dateDirStr) return false;
+            var parts = dateDirStr.split('_');
+            if (parts.length !== 3) return false;
+            var d = parseInt(parts[0], 10);
+            var m = parseInt(parts[1], 10);
+            var y = parseInt(parts[2], 10);
+            if (isNaN(d) || isNaN(m) || isNaN(y)) return false;
+
+            var dirDate = new Date(y, m - 1, d);
+            var now = new Date();
+            var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            var yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            var dirTime = dirDate.getTime();
+            if (dirTime === today.getTime()) return true;
+            if (now.getHours() < 4 && dirTime === yesterday.getTime()) return true;
+            return false;
+        },
+
+        /**
+         * D7.5: Extreu la data d'emissió en format DD_MM_YYYY des del nom
+         * d'un fitxer d'escaleta. És la FONT ÚNICA de dateDir.
+         *
+         * Format esperat del filename: TN_VESPRE_20260517_215504.json
+         * Extrau el penúltim segment (YYYYMMDD) i el converteix a DD_MM_YYYY.
+         *
+         * @param {string} filename - Nom del fitxer (sense ruta), ex: "TN_VESPRE_20260517_215504.json"
+         * @returns {string|null} Data en format DD_MM_YYYY, o null si no es pot extreure
+         */
+        extractDateFromEscaletaFilename: function(filename) {
+            if (!filename) return null;
+            var parts = filename.replace('.json', '').split('_');
+            if (parts.length >= 2) {
+                var yyyymmdd = parts[parts.length - 2];
+                if (yyyymmdd && yyyymmdd.length === 8 && /^\d{8}$/.test(yyyymmdd)) {
+                    var dd = yyyymmdd.substring(6, 8);
+                    var mm = yyyymmdd.substring(4, 6);
+                    var yyyy = yyyymmdd.substring(0, 4);
+                    return dd + '_' + mm + '_' + yyyy;
+                }
+            }
+            return null;
         },
 
         /**
@@ -328,6 +393,22 @@
                 state.activeSequenceName = "";
                 return "";
             }
+        },
+
+        /**
+         * applyGlobalOffsetSec: Aplica el desplaçament global de TC (tcOffset) a un valor en segons.
+         * La deriva sistemàtica d'ingesta (ex: 12 frames ~0.48s) es corregeix centralitzadament
+         * des de Profile.json > general.tcOffset.
+         * @param {number} seconds - Valor en segons a corregir
+         * @returns {number} - Valor corregit amb l'offset configurat
+         */
+        applyGlobalOffsetSec: function(seconds) {
+            const cfg = window.FASTPASS_UI.Config.get();
+            const offset = cfg.tcOffset || 0;
+            if (offset !== 0) {
+                this.log(`📐 [GLOBAL_OFFSET] Aplicant offset de ${offset}s a ${seconds.toFixed(3)}s → ${(seconds + offset).toFixed(3)}s`, "DEBUG");
+            }
+            return seconds + offset;
         },
 
         deleteFile: function(path) {

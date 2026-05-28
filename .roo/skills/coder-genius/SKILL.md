@@ -24,6 +24,7 @@ You must strictly adhere to the project's layered architecture:
 
 *   **JavaScript (Brain)**: Utilizes the modern Chromium/Node.js environment of CEP. Use it for file system operations (`window.cep.fs`), complex string processing, and network path (UNC) validation.
 *   **ExtendScript (Muscle)**: Use it only for direct interaction with the Premiere Pro DOM. Keep functions atomic (e.g., `saveAs`, `clearTrack`, `moveCTI`).
+*   **🧬 JSX is CLOSED for new code**: The existing JSX atomic toolkit (`Markers.get()`, `Markers.set()`, `Markers.clear()`, `Timeline.range()`, `Timeline.getIn()`, `Clips.get()`, etc.) is complete. Do NOT create new JSX methods, functions, or modules. Compose any new functionality in the JavaScript (Brain) layer by orchestrating existing JSX calls. The ONLY exception: a genuinely new type of Premiere Pro DOM interaction that absolutely no existing JSX method covers — and even then, justify it first.
 
 ## 🏷️ NAMING & PATH PROTOCOLS
 
@@ -37,11 +38,38 @@ You must strictly adhere to the project's layered architecture:
 *   **Sanitization**: Always sanitize dynamic strings (themes, paths) using `getUtils().sanitizeName()` before passing them across the bridge to JSX.
 *   **Atomicity in JSX**: If a JSX function does more than one thing (e.g., "import and place"), it should be broken into two atomic calls managed by the JS Logic layer.
 
-## 📝 CODING STYLE
+## 🛠️ HERRAMIENTAS DE DESARROLLO
+
+### Formateo de JSON (`bin/fmt-json.ps1`)
+
+Cuando se necesite formatear archivos JSON de escaletas (e.g., `P:\VERTICALITZACIO_INFORMATIUS\ESCALETES\TN_*.json`) para inspección visual, usar el script PowerShell:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File "bin\fmt-json.ps1" -FilePath "ruta\al\archivo.json"
+```
+
+**Características:**
+- Indentación limpia de **4 espacios** por nivel (sin espacios extra tras `{`, `[` o alrededor de `:`)
+- Sin BOM al inicio
+- Soporta archivos de gran tamaño (+500 KB, +7000 líneas)
+- No requiere Node.js — funciona con Windows PowerShell 5.1 nativo
+
+**Precaución:** El script reescribe el archivo in-place. Si se necesita preservar el original, hacer copia previa.
+
+Para formatear múltiples archivos a la vez:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "
+ & 'bin\fmt-json.ps1' 'P:\...\archivo1.json'
+ & 'bin\fmt-json.ps1' 'P:\...\archivo2.json'
+"
+```
+
+## � CODING STYLE
 
 *   **JS**: Modern ES6+ (classes/modules where appropriate).
 *   **JSX**: Strict ES3 (ExtendScript). Use `try/catch` wrappers that return `ERR: [message]` strings for JS to handle.
+*   **🛑 No new JSX code**: The JSX layer is feature-complete. Before writing any new JSX method, exhaust all possibilities of composing existing atomic JSX calls from JavaScript. Shifting markers after a ripple? Use `Markers.get()` → calculate offsets in JS → `Markers.clear()` → `Markers.set()` in a loop. Deleting clips in a range? Use `Clips.get()` to find indices → `Clips.delete()` in reverse order. The toolkit is sufficient.
 *   **Logging**: Use `getUtils().log(msg, level)` for consistent console feedback.
 
 ---
-© 2026 FAST >>> PASS | Assistant Skill v2.9.5
+© 2026 FAST >>> PASS | Assistant Skill v2.10.0

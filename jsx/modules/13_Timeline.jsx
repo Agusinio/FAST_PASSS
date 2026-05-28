@@ -66,7 +66,8 @@ FASTPASS.Timeline = {
      */
     duration: function() {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-        return seq ? seq.outPoint.seconds : 0;
+        if (!seq) return 0;
+        return (typeof seq.outPoint !== "undefined") ? seq.outPoint.seconds : 0;
     },
 
     /**
@@ -92,7 +93,9 @@ FASTPASS.Timeline = {
      */
     getIn: function() {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-        return seq ? seq.inPoint.seconds : 0;
+        if (!seq) return 0;
+        // Protecció: després de trims, inPoint pot ser undefined (mateix patró que zoomToSelection)
+        return (typeof seq.inPoint !== "undefined") ? seq.inPoint.seconds : 0;
     },
 
     /**
@@ -100,7 +103,9 @@ FASTPASS.Timeline = {
      */
     getOut: function() {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-        return seq ? seq.outPoint.seconds : 0;
+        if (!seq) return 0;
+        // Protecció: després de trims, outPoint pot ser undefined
+        return (typeof seq.outPoint !== "undefined") ? seq.outPoint.seconds : 0;
     },
 
     /**

@@ -17,61 +17,98 @@
     FASTPASS_UI.Workflows.Cut = {
 
         /**
-         * Realitza un Ripple Trim In al clip principal de Mp4.
+         * Ripple Trim In usant el cabezal (CTI) com a referència de tall.
+         * Després del ripple:
+         *   - El clip (vídeo + àudio) es recorta a l'altura del CTI
+         *   - Tot es desplaça cap a l'esquerra solidàriament (definidors inclosos)
+         *   - SOLO el delimitador IN de seqüència es mou a 00:00
+         *   - OUT es desplaça cap a l'esquerra: newOut = oldOut - cutTime
+         *   - Els marcadors es recol·loquen via get/clear/set existents
          */
         runCutIn: async function () {
             try {
                 const config = FASTPASS_UI.Config.get();
-                const elProg = document.getElementById('programa').value; // Ej: "04_TN VESPRE"
+                const elProg = document.getElementById('programa').value;
                 const elBloc = document.getElementById('bloc').value;
 
-                // 📍 LOG DE CONTROL: Mira qué vale elProg en la consola
-                console.log("DEBUG: Valor del select programa:", elProg);
-
-                // Buscamos en el mapeo. Si no existe, usamos el State o un fallback.
                 const progData = config.mapeoProgramas[elProg];
-                console.log("DEBUG: progData:", progData);
-
-                // Si progData es undefined, el token será "TNV" por defecto para que no rompa el JSX
                 const shortToken = (progData && progData.wott) ? progData.wott : "TNV";
-                console.log("DEBUG: shortToken:", shortToken);
 
                 log(`🔍 Buscant seqüència per tokens: [${shortToken}] + [${elBloc}]`);
-                // LLAMADA DIRECTA AL NUEVO BRIDGE
                 const foundName = await callJSX(`Context.findSequence('${shortToken}', '${elBloc}')`);
-                log(`🔍 [FLOW-CUT] foundName = "${foundName}"`);
-                
+
                 if (!foundName || foundName.indexOf("ERR:") !== -1) {
                     getUtils().status("⚠️ No trobo la seqüència!", "error");
                     return;
                 }
 
-                // Si la encuentra, actualizamos el estado y seguimos con el Ripple Trim
                 window.FASTPASS_UI.State.activeSequenceName = foundName;
-                log(`🔍 [FLOW-CUT] activeSequenceName asignado.`);
-                // Validar que la secuencia activa coincide con la encontrada (y con los selectores)
-                if (!(await getUtils().validateActiveSequence())) {
-                    log(`⚠️ [FLOW-CUT] Validación de secuencia activa falló.`);
+                if (!(await getUtils().validateActiveSequence())) return;
+
+                const T_MP4 = config.tracks.video.mp4;
+
+                // ── 1. Cabezal (CTI) com a referència de tall ──
+                const cutTime = parseFloat(await callJSX('Timeline.get()') || "0");
+                if (cutTime <= 0.04) {
+                    getUtils().status("CTI ja a zero o quasi", "warn");
+                    return;
+                }
+                log(`📐 [FLOW-CUT] Punt de tall (CTI): ${cutTime.toFixed(2)}s`);
+
+                const clip = await getClipsLogic().at(T_MP4, cutTime, "video");
+                if (!clip) {
+                    getUtils().status("No hi ha clip al punt de tall", "error");
                     return;
                 }
 
-                const T_MP4 = config.tracks.video.mp4;
-                log(`🔍 [FLOW-CUT] T_MP4: ${T_MP4}`);
-                const ctiRaw = await callJSX('Timeline.get()');
-                const val = parseFloat(ctiRaw || "0");
+                // ── 2. Capturar marcadors ABANS del ripple ──
+                var markersBefore = [];
+                try {
+                    const raw = await callJSX('Markers.get()');
+                    markersBefore = JSON.parse(raw || "[]");
+                } catch (e) { log(`⚠️ No s'han pogut llegir marcadors: ${e.message}`); }
 
-                const clip = await getClipsLogic().at(T_MP4, val, "video");
-                log(`🔍 [FLOW-CUT] clip: ${clip ? JSON.stringify(clip) : 'null'}`);
+                // ── 3. Ripple trim: retalla el clip (vídeo + àudio) al CTI i ho desplaça tot a zero ──
+                log(`✂️ Aplicant Ripple Trim In a V${T_MP4} (CTI: ${cutTime.toFixed(2)}s)`);
+                await getClipsLogic().rippleIn(T_MP4, clip.index, cutTime, clip);
 
-                if (clip) {
-                    log(`✂️ Aplicant Ripple Trim In a V${T_MP4} (Time: ${val}s)`);
-                    await getClipsLogic().rippleIn(T_MP4, clip.index, val, clip);
-                    await callJSX('Timeline.set(0)');
-                    getUtils().status("IN: Tall OK", "exito");
-                } else {
-                    log(`⚠️ [FLOW-CUT] No hi ha clip al cabezal (track ${T_MP4}, time ${val})`);
-                    getUtils().status("No hi ha clip al cabezal", "error");
+                // ── 4. Llegir el final real del clip DESPRÉS del ripple ──
+                //    (evita dependre de seq.outPoint, que pot ser undefined)
+                const clipAfterRaw = await callJSX(`Clips.get(${T_MP4}, 0, 'video')`);
+                var clipEndAfter = 0.04;
+                try {
+                    const cd = JSON.parse(clipAfterRaw);
+                    clipEndAfter = cd.end || 0.04;
+                } catch (e) { log(`⚠️ No s'ha pogut llegir clip end: ${e.message}`); }
+
+                // ── 5. SOLO moure seq IN a 0. OUT = final real del clip ──
+                await callJSX('Timeline.in(0)');
+                await callJSX(`Timeline.out(${clipEndAfter})`);
+                log(`📍 Seq: IN=0 OUT=${clipEndAfter.toFixed(2)}s (del clip V${T_MP4})`);
+
+                // ── 6. Recol·locar marcadors desplaçats (sense nou JSX) ──
+                if (markersBefore.length > 0) {
+                    await callJSX('Markers.clear()');
+                    var kept = 0;
+                    for (var i = 0; i < markersBefore.length; i++) {
+                        var mk = markersBefore[i];
+                        var newTime = mk.time - cutTime;
+                        if (newTime >= 0) {
+                            var nameParam = "'Linia Escaleta'";
+                            if (mk.name && mk.name !== "Línia Escaleta" && mk.name !== "Linia Escaleta") {
+                                nameParam = "'" + mk.name.replace(/'/g, "\\'") + "'";
+                            }
+                            var comment = (mk.comments || "").replace(/'/g, "\\'");
+                            await callJSX("Markers.set(" + newTime + ", '" + comment + "', " + nameParam + ")");
+                            kept++;
+                        }
+                    }
+                    log(`📍 Marcadors: ${kept}/${markersBefore.length} recol·locats (shift -${cutTime.toFixed(2)}s)`);
                 }
+
+                // ── 7. CTI a 0 ──
+                await callJSX('Timeline.set(0)');
+                getUtils().status(`IN: Tall OK (-${cutTime.toFixed(1)}s)`, "exito");
             } catch (e) { console.error('Error en runCutIn:', e); getUtils().handleError(e, "CutIn"); }
         },
 

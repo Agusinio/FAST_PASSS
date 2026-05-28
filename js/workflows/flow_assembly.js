@@ -51,6 +51,1545 @@
 
     FASTPASS_UI.Workflows.Assembly = {
 
+        // ── Estat intern: caché de diagnòstic de clips ──
+        _clipsLogged: false,
+
+        // ═══════════════════════════════════════════════════════════════
+        // HELPER: UPSERT atòmic de marcadors amb protecció d'errors
+        // BUG #8: Evita que un JSON.parse falli si callJSX retorna
+        // un valor no-JSON (ex: "ERR:..." o buit).
+        // ═══════════════════════════════════════════════════════════════
+        _safePlaceByPrefixes: async function (placements, label) {
+            try {
+                var raw = await callJSX('Markers.placeByPrefixes(\'' + JSON.stringify(placements) + '\')');
+                if (!raw || raw === '[]' || raw === '{}') {
+                    return { placed: 0, moved: 0, created: 0 };
+                }
+                var result = JSON.parse(raw);
+                if (result.error) {
+                    log('🔴 [' + label + '] ERROR JSX: ' + result.error, 'ERROR');
+                }
+                return result;
+            } catch (e) {
+                log('💥 [' + label + '] Crash protegint placeByPrefixes: ' + e.message, 'ERROR');
+                return { placed: 0, moved: 0, created: 0, error: e.message };
+            }
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // HELPER: Color de marcador segons especificació MARKER_COLORS.md
+        // agrupacio != null → 6 (Blau)
+        // agrupacio == null + durada == 0 → 4 (Groc, gràfics)
+        // agrupacio == null + durada > 0 → 1 (Vermell)
+        // BUG #10: Autònom, sense dependre de parseDurada (local a _classifyItems).
+        // ═══════════════════════════════════════════════════════════════
+        _getColorIdx: function (line) {
+            if (line.agrupacio) return 6;
+            var dStr = line.durada || line.duradaOnAir || '0:00';
+            var parts = dStr.split(':').map(Number);
+            var dSec = 0;
+            if (parts.length === 2) dSec = parts[0] * 60 + parts[1];
+            else if (parts.length === 3) dSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+            else dSec = (typeof parts[0] === 'number') ? parts[0] : 0;
+            return dSec === 0 ? 4 : 1;
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // SUB-FUNCIONS ATÒMIQUES per a setup estructural (Fase D0)
+        //
+        // Cada funció és independent: es pot cridar per separat segons
+        // les necessitats de cada flux (F1-F6). Això evita executar
+        // càlculs innecessaris (ex: F4 no necessita àncores temporals,
+        // F6 no necessita DensityFootprint).
+        //
+        // Origen: descomposició de l'antic _setupEstructural() monolític.
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * _loadAssemblyContext()
+         * Carrega el manifest, reader, bloc actiu, línies d'escaleta,
+         * clips V1 i referències. Primer pas obligatori per a qualsevol
+         * flux que treballi amb el timeline.
+         *
+         * @returns {{ ctx, manifest, reader, targetBlock, lines,
+         *            lineIndexByNum, clips, refFromManifest, refInPoint }}
+         *          | null si falla la validació
+         */
+        _loadAssemblyContext: async function () {
+            if (!(await getUtils().validateActiveSequence())) return null;
+            log("📍 [_loadAssemblyContext] Carregant context...");
+
+            // ── LOG DIAGNÒSTIC: Llista de clips en V1 (només el primer cop) ──
+            if (!this._clipsLogged) {
+                this._clipsLogged = true;
+                try {
+                    const v1Clips = await getClipsLogic().getTrackClips(1, "video");
+                    log(`🎬 [DIAGNÒSTIC] Clips en V1: ${v1Clips.length} clips`);
+                    v1Clips.forEach(function(c, i) {
+                        log(`   V1[${i}] name="${c.name}" start=${c.start.toFixed(3)} end=${c.end.toFixed(3)} dur=${(c.end - c.start).toFixed(3)}`);
+                    });
+                } catch (clipErr) {
+                    log(`⚠️ [DIAGNÒSTIC] No s'han pogut llegir els clips V1: ${clipErr.message}`);
+                }
+            }
+
+            const ctx = FASTPASS_UI.State;
+            if (!ctx.progData) {
+                const config = FASTPASS_UI.Config.get();
+                const progSelect = document.getElementById('programa');
+                const blocSelect = document.getElementById('bloc');
+                if (progSelect && progSelect.value && config.mapeoProgramas) {
+                    ctx.progData = config.mapeoProgramas[progSelect.value];
+                    ctx.bloque = blocSelect ? blocSelect.value : 'V1';
+                    log("⚠️ [RECUPERAT] progData recuperat des del select.");
+                } else {
+                    log("⚠️ No es pot determinar el programa. Abortant.");
+                    return null;
+                }
+            }
+
+            if (!ctx.config) { ctx.config = FASTPASS_UI.Config.get(); }
+            if (!ctx.dateDir) {
+                log("⚠️ [_loadAssemblyContext] dateDir no disponible a State. Usant data del sistema com a fallback.");
+                ctx.dateDir = getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
+            }
+
+            const manifestPath = FASTPASS_UI.SessionManifest.getPath(ctx);
+            log(`🔍 [_loadAssemblyContext] Cercant manifest a: ${manifestPath}`);
+            const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
+            if (!manifest || !manifest.escaletaItems || manifest.escaletaItems.length === 0) {
+                log("⚠️ No es troben items d'escaleta al manifest. Executa primer «Muntar».", "ERROR");
+                return null;
+            }
+
+            const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+            const targetBlock = ctx.bloque.toLowerCase();
+
+            let lines = manifest.escaletaItems.filter(l => {
+                if (l.flotant === true) return false;
+                const ag = l.agrupacio;
+                return ag && ag.toString().toLowerCase() === targetBlock;
+            });
+
+            lines.sort((a, b) => {
+                const horaA = a.horaEntradaOnAir || a.horaEntradaPrevista;
+                const horaB = b.horaEntradaOnAir || b.horaEntradaPrevista;
+                return reader.tcToSeconds(horaA) - reader.tcToSeconds(horaB);
+            });
+
+            const lineIndexByNum = {};
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].num) lineIndexByNum[lines[i].num] = i;
+            }
+
+            log(`📋 Estructura des del manifest: ${lines.length} items per al bloc ${ctx.bloque}`);
+            if (lines.length === 0) {
+                log("⚠️ El bloc no té línies d'escaleta definides.", "WARN");
+                return null;
+            }
+
+            const refFromManifest = manifest.ref;
+            if (!refFromManifest || refFromManifest.mp4ExpandedInPoint === undefined || refFromManifest.mp4ExpandedInPoint === null) {
+                log("⚠️ No es troba ref al manifest. Executa primer «Muntar».", "ERROR");
+                return null;
+            }
+            const refInPoint = refFromManifest.mp4ExpandedInPoint;
+            log(`📐 Ref del manifest: inPoint=${refInPoint.toFixed(2)}s (tier=${refFromManifest.InTier})`);
+
+            const clips = await getClipsLogic().getTrackClips(1, "video");
+
+            // â”€â”€ Detectar primer Ã­tem no agrupat (agrupacio:null) dins del rang del bloc â”€â”€
+            var firstUngroupedItem = this._detectFirstUngroupedItem(manifest, reader, lines, targetBlock);
+            if (firstUngroupedItem) {
+                log(`ðŸ”´ [Ungrouped] Detectat primer Ã­tem no agrupat: ${firstUngroupedItem.num || '?'} - ${(firstUngroupedItem.titol || '').substring(0, 60)}`);
+            }
+
+            return { ctx, manifest, reader, targetBlock, lines, lineIndexByNum, clips, refFromManifest, refInPoint, firstUngroupedItem };
+        },
+
+        /**
+         * _detectFirstUngroupedItem(manifest, reader, lines, targetBlock)
+         * Escaneja manifest.escaletaItems per trobar el primer Ã­tem amb
+         * agrupacio:null que caigui cronolÃ²gicament dins del rang del bloc.
+         *
+         * Cas d''Ãºs: blocs amb items intercalats no agrupats (ex: 02DP, 02Dir, 02
+         * entre 555 i 03 del V2). Aquests items no es capturen amb el filtre
+         * agrupacio===targetBlock perÃ² pertanyen al rang temporal del bloc.
+         *
+         * @param {Object} manifest - Manifest de sessiÃ³
+         * @param {Object} reader - EscaletaReader
+         * @param {Array} lines - LÃ­nies del bloc (filtrades per agrupacio)
+         * @param {string} targetBlock - ID del bloc (ex: "v2")
+         * @returns {Object|null} - Primer Ã­tem no agrupat o null
+         */
+        _detectFirstUngroupedItem: function (manifest, reader, lines, targetBlock) {
+            if (!lines || lines.length === 0) return null;
+            if (!manifest || !manifest.escaletaItems || manifest.escaletaItems.length === 0) return null;
+
+            // â”€â”€ Rang temporal del bloc (segons la primera i Ãºltima lÃ­nia agrupada) â”€â”€
+            var blockStartStr = lines[0].horaEntradaOnAir || lines[0].horaEntradaPrevista;
+            var blockEndStr = lines[lines.length - 1].horaEntradaOnAir || lines[lines.length - 1].horaEntradaPrevista;
+            if (!blockStartStr || !blockEndStr) return null;
+            var blockStartSec = reader.tcToSeconds(blockStartStr);
+            var blockEndSec = reader.tcToSeconds(blockEndStr);
+            if (blockStartSec === null || blockEndSec === null) return null;
+
+            // â”€â”€ Escanejar tots els items del manifest â”€â”€
+            var allItems = manifest.escaletaItems;
+            for (var i = 0; i < allItems.length; i++) {
+                var item = allItems[i];
+                if (item.flotant === true) continue;
+                var ag = item.agrupacio;
+                if (ag !== null && ag !== undefined) continue;  // TÃ© agrupacio â†’ no Ã©s orfe
+
+                var itemTimeStr = item.horaEntradaOnAir || item.horaEntradaPrevista;
+                if (!itemTimeStr) continue;
+                var itemTimeSec = reader.tcToSeconds(itemTimeStr);
+                if (itemTimeSec === null) continue;
+
+                // Dins del rang del bloc?
+                if (itemTimeSec >= blockStartSec && itemTimeSec <= blockEndSec) {
+                    return item;  // Primer match
+                }
+            }
+            return null;
+        },
+
+        /**
+         * _calcDensityFootprint(clips)
+         * Wrapper atòmic per a calcDensityFootprintV2.
+         * Calcula zones de densitat, ruptures multi-senyal
+         * i parells DP+DIR. Pur, sense efectes secundaris.
+         *
+         * @param {Array} clips - Clips V1 del timeline
+         * @returns {Object} densityData { zones, breaks, dpDirPairs, totalDuration }
+         */
+        _calcDensityFootprint: function (clips) {
+            return FASTPASS_UI.Logic.Assembly.calcDensityFootprintV2(clips);
+        },
+
+        /**
+         * _classifyItems(lines)
+         * Classifica les línies d'escaleta en 4 categories i retorna
+         * els helpers de parsing necessaris per a la resta de fluxos.
+         *
+         * Categories:
+         *   - structuralItems: ítems amb durada > 0 o agrupacio + OnAir
+         *   - graphicItems:    sufixos gràfics (chy, gf, p2, td, ...)
+         *   - farosItems:      structuralItems amb horaEntradaOnAir real
+         *   - aproximadosItems: structuralItems sense OnAir (prevista/
+         *                       deduïts o forçats per sufix)
+         *
+         * @param {Array} lines - Línies d'escaleta filtrades per bloc
+         * @returns {{ structuralItems, graphicItems, farosItems,
+         *            aproximadosItems, parseDurada,
+         *            getEffectiveDuradaSec, getRawDuradaSec,
+         *            isGraphicByNum, isForcedStructuralByNum }}
+         */
+        _classifyItems: function (lines) {
+            // ─── HELPERS ───
+            const parseDurada = (str) => {
+                if (!str || str === "0:00") return 0;
+                const parts = str.split(':').map(Number);
+                if (parts.length === 2) return parts[0] * 60 + parts[1];
+                else if (parts.length === 3) return parts[0] * 60 + parts[1] + parts[2] / 25;
+                else if (parts.length === 4) return parts[0] * 3600 + parts[1] * 60 + parts[2] + parts[3] / 25;
+                return 0;
+            };
+
+            const getEffectiveDuradaSec = (line) => {
+                const dStr = line.durada || '';
+                if (dStr === '' || dStr === '0:00') {
+                    const onAir = line.duradaOnAir || '0:00';
+                    return parseDurada(onAir);
+                }
+                return parseDurada(dStr);
+            };
+
+            const getRawDuradaSec = (line) => parseDurada(line.durada || '0:00');
+
+            // ─── GRAPHIC SUFFIXES ───
+            const GRAPHIC_SUFFIXES = new Set([
+                'chy', 'chy1', 'chy2',
+                'gf', 'gf1', 'gf2', 'gf_01', 'gf_02', 'gf_011',
+                'te', 'te1', 'te2', 'te3',
+                'p2', 'p21', 'p22', 'p23', 'p24', 'p3', 'p4', 'p5', 'p51', 'p52',
+                'p5_01', 'p5_02', 'p7', 'p7_01', 'p7_02', 'p7_03', 'p7_0',
+                'p71', 'p72', 'p73', 'p',
+                'td1', 'td2', 'td3', 'td4', 'td_01', 'td_02', 'td_at1',
+                'qr', 'rq',
+                'at1', 'at2', 'at3', '_at1', '_at2', '_at3', 'ae', 't', 'teloc',
+                '**********'
+            ]);
+            const FORCED_STRUCTURAL_SUFFIXES = new Set(['lead', 'i', 'dp', 'dir', 'f']);
+
+            const isGraphicByNum = (num) => {
+                if (!num) return false;
+                const clean = num.toString().toLowerCase().trim();
+                const match = clean.match(/^\d+(.*)$/);
+                if (!match || match[1] === '') return false;
+                return GRAPHIC_SUFFIXES.has(match[1]);
+            };
+
+            const isForcedStructuralByNum = (num) => {
+                if (!num) return false;
+                const clean = num.toString().toLowerCase().trim();
+                const match = clean.match(/^\d+(.*)$/);
+                if (!match || match[1] === '') return true;
+                return FORCED_STRUCTURAL_SUFFIXES.has(match[1]);
+            };
+
+            // ─── CLASSIFICACIÓ D'ÍTEMS ───
+            const structuralItems = [];
+            const graphicItems = [];
+            for (const line of lines) {
+                const rawNum = (line.num || '').toString().trim();
+                if (rawNum === '' || rawNum === '.') {
+                    log(`   ⏭️ [SKIP] Ítem sense num vàlid: "${line.titol || '?'}" → ignorat`);
+                    continue;
+                }
+                const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
+                if (!horaRef || horaRef === "00:00:00") continue;
+                const dSec = getRawDuradaSec(line);
+                const hasOnAir = line.horaEntradaOnAir
+                    && line.horaEntradaOnAir !== '00:00:00'
+                    && line.horaEntradaOnAir.trim() !== '';
+
+                if (isGraphicByNum(line.num)) {
+                    graphicItems.push(line);
+                    log(`   📌 [D9b·GRAFIC] ${line.num}: sufix gràfic → Fase 3`);
+                } else if (dSec > 0) {
+                    structuralItems.push(line);
+                } else if (line.agrupacio && hasOnAir) {
+                    structuralItems.push(line);
+                } else if (line.agrupacio) {
+                    structuralItems.push(line);
+                } else {
+                    graphicItems.push(line);
+                }
+            }
+            log(`📋 Items: ${structuralItems.length} estructurals, ${graphicItems.length} gràfics`);
+
+            // ─── FAROS I APROXIMATS ───
+            const farosItems = [];
+            const aproximadosItems = [];
+            for (const item of structuralItems) {
+                const onAir = item.horaEntradaOnAir;
+                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') {
+                    farosItems.push(item);
+                } else if (item.agrupacio || isForcedStructuralByNum(item.num)) {
+                    aproximadosItems.push(item);
+                    if (!item.agrupacio && isForcedStructuralByNum(item.num)) {
+                        log(`   📌 [D9c·FORCED] ${item.num}: sufix estructural forçat → Fase 2`);
+                    }
+                } else {
+                    graphicItems.push(item);
+                }
+            }
+            log(`📍 Faros: ${farosItems.length} (${farosItems.map(l => l.num).join(', ')})`);
+            log(`📍 Aproximats: ${aproximadosItems.length} (${aproximadosItems.map(l => l.num).join(', ')})`);
+            log(`📋 Gràfics (total acumulat): ${graphicItems.length}`);
+
+            return {
+                structuralItems, graphicItems, farosItems, aproximadosItems,
+                parseDurada, getEffectiveDuradaSec, getRawDuradaSec,
+                isGraphicByNum, isForcedStructuralByNum
+            };
+        },
+
+        /**
+         * _calcTemporalAnchors(manifest, reader, structuralItems, clips)
+         * Calcula les 4 àncores temporals necessàries per projectar
+         * TC d'emissió → temps de timeline.
+         *
+         * Tipus d'àncora:
+         *   - anchorOnAirSec:  àncora absoluta del bloc (blockInSec)
+         *   - anchorEfectiva:  millor àncora disponible (F2/F3)
+         *   - refF1:           referència per al primer marcador OnAir
+         *   - tlClipStartSec:  posició de F1 al timeline (via clip V1 real)
+         *
+         * BUG #3 FIX (2026-05-26): Llegeix clipStart i clipInPoint del clip
+         * V1 real del timeline. Abans usava tlBlockInPointSec del manifest
+         * (valor stale del moment de creació del projecte).
+         *
+         * @param {Object} manifest        - Manifest de sessió
+         * @param {Object} reader          - EscaletaReader
+         * @param {Array}  structuralItems - Ítems estructurals classificats
+         * @param {Array}  [clips]         - Clips V1 del timeline (opcional, fallback a manifest)
+         * @returns {{ tlClipStartSec, anchorOnAirSec, anchorSource,
+         *            anchorEfectiva, anchorEfOrigen, refF1, refF1Origen,
+         *            anchorEfTimelineSec, clipStart, clipInPoint }}
+         *          | null si no hi ha àncora temporal
+         */
+        _calcTemporalAnchors: function (manifest, reader, structuralItems, clips) {
+            // ─── DADES DEL CLIP V1 REAL (timeline) ───
+            // BUG #3 FIX (2026-05-26): Llegim clipStart i clipInPoint del clip V1 real
+            // en lloc de tlBlockInPointSec del manifest (valor stale del moment de creació).
+            var clipStart = 0;
+            var clipInPoint = manifest.ref.tlBlockInPointSec || 0; // fallback al manifest
+            if (clips && clips.length > 0 && clips[0]) {
+                clipStart = (typeof clips[0].start === 'number') ? clips[0].start : 0;
+                if (clips[0].inPoint !== undefined && clips[0].inPoint !== null) {
+                    clipInPoint = clips[0].inPoint;
+                }
+            }
+
+            log('🔧 [BUG3·FIX] Clip V1 real: start=' + clipStart.toFixed(3) + 's, inPoint=' + clipInPoint.toFixed(3) + 's vs manifest tlBlockInPointSec=' + (manifest.ref.tlBlockInPointSec || 0).toFixed(3) + 's');
+
+            // ─── DADES INVARIANTS DEL MANIFEST ───
+            var worldSecMediaStart = manifest.ref.worldSecMediaStart || 0;
+
+            // ─── ÀNCORA ONAIR (F1: cascada blockInSec → worldBlockAnchorSec → worldBlockStartSec) ───
+            var anchorOnAirSec = null;
+            var anchorSource = '';
+            if (manifest.ref.blockInSec !== null && manifest.ref.blockInSec !== undefined) {
+                anchorOnAirSec = manifest.ref.blockInSec;
+                anchorSource = 'blockInSec';
+            } else if (manifest.ref.worldBlockAnchorSec !== null && manifest.ref.worldBlockAnchorSec !== undefined) {
+                anchorOnAirSec = manifest.ref.worldBlockAnchorSec;
+                anchorSource = 'worldBlockAnchorSec';
+            } else if (manifest.ref.worldBlockStartSec !== null && manifest.ref.worldBlockStartSec !== undefined) {
+                anchorOnAirSec = manifest.ref.worldBlockStartSec;
+                anchorSource = 'worldBlockStartSec';
+            }
+            if (anchorOnAirSec === null || anchorOnAirSec === undefined) {
+                log("⚠️ No hi ha àncora temporal al manifest. Cal reintentar «Muntar».", "ERROR");
+                return null;
+            }
+
+            // ─── REFERÈNCIA F1 (primer ítem estructural amb OnAir) ───
+            var refF1 = anchorOnAirSec;
+            var refF1Origen = 'blockInSec (fallback)';
+            if (structuralItems.length > 0) {
+                var refLine = structuralItems[0];
+                var rfOnAir = refLine.horaEntradaOnAir;
+                var rfHasOnAir = rfOnAir && rfOnAir !== '00:00:00' && rfOnAir.trim() !== '';
+                if (rfHasOnAir) {
+                    refF1 = reader.tcToSeconds(rfOnAir);
+                    refF1Origen = 'OnAir (1r: ' + (refLine.num || '?') + ')';
+                } else {
+                    var rfDeduced = reader._deduceOnAirEntrada(refLine, manifest.escaletaItems, null);
+                    if (rfDeduced !== null) {
+                        refF1 = rfDeduced;
+                        refF1Origen = 'OnAirDeducido (1r: ' + (refLine.num || '?') + ')';
+                    }
+                }
+            }
+
+            // ─── tlClipStartSec DINÀMIC per F1 ───
+            // BUG #3 FIX (2026-05-26): Usem clipStart i clipInPoint reals del clip V1
+            // en lloc de tlBlockInPointSec stale del manifest.
+            // Fórmula: tlClipStartSec = clipStart + (refF1 - worldSecMediaStart) - clipInPoint
+            // Així, F1: idealPosSec = tlClipStartSec + (itemOnAirSec - refF1)
+            //      = clipStart + (itemOnAirSec - worldSecMediaStart) - clipInPoint  ✓
+            var tlClipStartSec = clipStart + (refF1 - worldSecMediaStart) - clipInPoint;
+
+            // ─── ÀNCORA EFECTIVA (compartida per F2 i F3) ───
+            var anchorEfectiva = anchorOnAirSec;
+            var anchorEfOrigen = 'blockInSec (fallback)';
+            if (structuralItems.length > 0) {
+                var firstLine = structuralItems[0];
+                var fOnAir = firstLine.horaEntradaOnAir;
+                var fPrevista = firstLine.horaEntradaPrevista;
+                var fHasOnAir = fOnAir && fOnAir !== '00:00:00' && fOnAir.trim() !== '';
+                var fHasPrevista = fPrevista && fPrevista !== '00:00:00';
+
+                if (fHasOnAir) {
+                    anchorEfectiva = reader.tcToSeconds(fOnAir);
+                    anchorEfOrigen = 'OnAir (1r: ' + (firstLine.num || '?') + ')';
+                } else {
+                    var fDeduced = reader._deduceOnAirEntrada(firstLine, manifest.escaletaItems, null);
+                    if (fDeduced !== null) {
+                        anchorEfectiva = fDeduced;
+                        anchorEfOrigen = 'OnAirDeducido (1r: ' + (firstLine.num || '?') + ')';
+                    } else if (fHasPrevista) {
+                        anchorEfectiva = reader.tcToSeconds(fPrevista);
+                        anchorEfOrigen = 'Prevista (1r: ' + (firstLine.num || '?') + ')';
+                    }
+                }
+            }
+
+            // ─── anchorEfTimelineSec DINÀMIC per F2/F3 ───
+            // BUG #3 FIX (2026-05-26): Usem clipStart i clipInPoint reals.
+            // Fórmula: anchorEfTimelineSec = clipStart + (anchorEfectiva - worldSecMediaStart) - clipInPoint
+            // Així, F2: idealPosSec = anchorEfTimelineSec + (deduced - anchorEfectiva)
+            //      = clipStart + (deduced - worldSecMediaStart) - clipInPoint  ✓
+            var anchorEfTimelineSec = clipStart + (anchorEfectiva - worldSecMediaStart) - clipInPoint;
+
+            log('📍 [ESTRUCTURAL] Àncora OnAir: ' + anchorOnAirSec.toFixed(3) + 's (font: ' + anchorSource + '), tlClipStart: ' + tlClipStartSec.toFixed(3) + 's, anchorEfTL: ' + anchorEfTimelineSec.toFixed(3) + 's');
+            log('📍 [F1·PURA] Referència F1: ' + (refF1 !== null ? refF1.toFixed(1) + 's (' + refF1Origen + ')' : 'CAP') + '  |  efectiva (1r): ' + anchorEfectiva.toFixed(1) + 's (' + anchorEfOrigen + ')');
+
+            return {
+                tlClipStartSec, anchorOnAirSec, anchorSource,
+                anchorEfectiva, anchorEfOrigen, refF1, refF1Origen,
+                anchorEfTimelineSec: anchorEfTimelineSec,
+                clipStart: clipStart,
+                clipInPoint: clipInPoint
+            };
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // D1·CorrelationSnap: Algoritme de Δ consensuat
+        //
+        // Analitza múltiples marcadors OnAir/Deducido vs talls del
+        // timeline. Si diversos marcadors comparteixen el mateix
+        // desplaçament (Δ) respecte als talls, aquest Δ és el snap
+        // correcte. Exclou el marcador a 00:00 del càlcul.
+        //
+        // Pesos: OnAir=1.0, Deducido=0.7, DensityBreak×1.5
+        // Confiança mínima: 30%. Funció pura (sense efectes secundaris).
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * _correlationSnap(markers, clips, densityData, manifestItems, reader)
+         */
+        _correlationSnap: function (markers, clips, densityData, manifestItems, reader) {
+            var BUCKET_SIZE = 0.04;
+            var SEARCH_WINDOW = 2.0;
+            var MIN_CONFIDENCE = 0.30;
+            var ON_AIR_WEIGHT = 1.0;
+            var DEDUCED_WEIGHT = 0.7;
+            var DENSITY_BONUS = 1.5;
+            var DENSITY_PROXIMITY = 0.5;
+            var EXCLUDE_ZERO_THRESHOLD = 0.01;
+
+            if (!markers || markers.length === 0 || !clips || clips.length === 0) {
+                log('   🔬 [CorrelationSnap] Sense marcadors o clips per analitzar.');
+                return { delta: null, confidence: 0, votes: 0, totalWeight: 0, onAirCount: 0, deducedCount: 0, breakdown: [] };
+            }
+
+            var prefixToItem = {};
+            for (var i = 0; i < manifestItems.length; i++) {
+                var item = manifestItems[i];
+                if (item.num) prefixToItem[String(item.num)] = item;
+            }
+
+            var _extractPrefix = function (comment) {
+                if (!comment) return '';
+                var spaceDashIdx = comment.indexOf(' -');
+                if (spaceDashIdx <= 0) return '';
+                return comment.substring(0, spaceDashIdx).replace(/^\s+|\s+$/g, '');
+            };
+
+            var _nearDensityBreak = function (timeSec) {
+                if (!densityData || !densityData.breaks) return false;
+                var breaks = densityData.breaks;
+                for (var b = 0; b < breaks.length; b++) {
+                    if (Math.abs(breaks[b].time - timeSec) < DENSITY_PROXIMITY) return true;
+                }
+                return false;
+            };
+
+            var _classifyMarker = function (prefix) {
+                if (!prefix || !prefixToItem[prefix]) return 'unknown';
+                var item = prefixToItem[prefix];
+                var onAir = item.horaEntradaOnAir;
+                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') return 'onAir';
+                return 'deduced';
+            };
+
+            // ── Histograma de Δ ──
+            var histogram = {};
+            var totalWeight = 0;
+            var onAirCount = 0;
+            var deducedCount = 0;
+            var breakdown = [];
+
+            for (var mi = 0; mi < markers.length; mi++) {
+                var mk = markers[mi];
+                var markerTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
+                if (isNaN(markerTime)) continue;
+
+                if (markerTime < EXCLUDE_ZERO_THRESHOLD) {
+                    log('   🔬 [CorrelationSnap] Excloent marcador a ' + markerTime.toFixed(3) + 's (00:00)');
+                    continue;
+                }
+
+                var comment = mk.comments || '';
+                var prefix = _extractPrefix(comment);
+                var markerType = _classifyMarker(prefix);
+                var baseWeight = (markerType === 'onAir') ? ON_AIR_WEIGHT : ((markerType === 'deduced') ? DEDUCED_WEIGHT : 0.3);
+                if (markerType === 'onAir') onAirCount++;
+                else if (markerType === 'deduced') deducedCount++;
+
+                // Buscar tall més proper (±SEARCH_WINDOW)
+                var nearestDist = SEARCH_WINDOW + 999;
+                var nearestCut = null;
+                for (var ci = 0; ci < clips.length; ci++) {
+                    var dStart = clips[ci].start - markerTime;
+                    var dEnd = clips[ci].end - markerTime;
+                    if (Math.abs(dStart) < Math.abs(nearestDist)) { nearestDist = dStart; nearestCut = clips[ci].start; }
+                    if (Math.abs(dEnd) < Math.abs(nearestDist)) { nearestDist = dEnd; nearestCut = clips[ci].end; }
+                }
+
+                if (Math.abs(nearestDist) > SEARCH_WINDOW) {
+                    breakdown.push({ prefix: prefix, time: markerTime, type: markerType, delta: nearestDist, used: false, reason: 'fora de finestra' });
+                    continue;
+                }
+
+                // Bucket i pes
+                var bucketIdx = Math.round(nearestDist / BUCKET_SIZE);
+                var densityNear = _nearDensityBreak(markerTime);
+                var w = baseWeight * (densityNear ? DENSITY_BONUS : 1.0);
+
+                if (!histogram[bucketIdx]) histogram[bucketIdx] = { weight: 0, deltas: [] };
+                histogram[bucketIdx].weight += w;
+                histogram[bucketIdx].deltas.push(nearestDist);
+                totalWeight += w;
+
+                breakdown.push({ prefix: prefix, time: markerTime, type: markerType, delta: nearestDist, weight: w, densityNear: densityNear, used: true });
+            }
+
+            // ── Trobar el bucket amb més pes ──
+            var bestBucket = null;
+            var bestWeight = 0;
+            var bestVotes = 0;
+            var avgDeltaInBucket = 0;
+            var bucketKeys = Object.keys(histogram);
+            for (var bk = 0; bk < bucketKeys.length; bk++) {
+                var key = bucketKeys[bk];
+                var entry = histogram[key];
+                if (entry.weight > bestWeight) {
+                    bestWeight = entry.weight;
+                    bestBucket = parseInt(key, 10);
+                    bestVotes = entry.deltas.length;
+                    // Mitjana dels Δ dins del bucket
+                    var sumD = 0;
+                    for (var dd = 0; dd < entry.deltas.length; dd++) sumD += entry.deltas[dd];
+                    avgDeltaInBucket = entry.deltas.length > 0 ? (sumD / entry.deltas.length) : (bestBucket * BUCKET_SIZE);
+                }
+            }
+
+            var confidence = totalWeight > 0 ? (bestWeight / totalWeight) : 0;
+
+            if (confidence < MIN_CONFIDENCE || bestBucket === null) {
+                log('   🔬 [CorrelationSnap] Confiança insuficient: ' + (confidence * 100).toFixed(0) + '% < ' + (MIN_CONFIDENCE * 100).toFixed(0) + '% | millor bucket=' + bestBucket + ' (' + bestWeight.toFixed(2) + '/' + totalWeight.toFixed(2) + ')');
+                return { delta: null, confidence: confidence, votes: bestVotes, totalWeight: totalWeight, onAirCount: onAirCount, deducedCount: deducedCount, breakdown: breakdown };
+            }
+
+            log('   🔬 [CorrelationSnap] Δ consensuat: ' + avgDeltaInBucket.toFixed(3) + 's (bucket=' + bestBucket + ', confiança=' + (confidence * 100).toFixed(0) + '%, vots=' + bestVotes + ', OnAir=' + onAirCount + ', Deducido=' + deducedCount + ')');
+
+            return {
+                delta: avgDeltaInBucket,
+                confidence: confidence,
+                votes: bestVotes,
+                totalWeight: totalWeight,
+                onAirCount: onAirCount,
+                deducedCount: deducedCount,
+                breakdown: breakdown
+            };
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // _setupEstructural(): Convenience wrapper que crida les 4
+        // sub-funcions atòmiques. Mantingut per compatibilitat amb codi
+        // existent. Els nous fluxos (F1-F6) criden les sub-funcions
+        // directament per evitar càlculs innecessaris.
+        // ═══════════════════════════════════════════════════════════════
+        _setupEstructural: async function () {
+            log("📍 [_setupEstructural] Wrapper→ sub-funcions atòmiques...");
+
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) return null;
+            const { ctx, manifest, reader, targetBlock, lines, lineIndexByNum, clips, refFromManifest, refInPoint } = ctxData;
+
+            const densityData = this._calcDensityFootprint(clips);
+
+            const classData = this._classifyItems(lines);
+            const { structuralItems, graphicItems, farosItems, aproximadosItems, parseDurada, getEffectiveDuradaSec, getRawDuradaSec, isGraphicByNum, isForcedStructuralByNum } = classData;
+
+            const anchors = this._calcTemporalAnchors(manifest, reader, structuralItems, clips);
+            if (!anchors) return null;
+            const { tlClipStartSec, anchorOnAirSec, anchorSource, anchorEfectiva, anchorEfOrigen, refF1, refF1Origen, anchorEfTimelineSec } = anchors;
+
+            return {
+                ctx, manifest, reader, targetBlock, lines, lineIndexByNum,
+                clips, densityData, refFromManifest, refInPoint,
+                structuralItems, graphicItems, farosItems, aproximadosItems,
+                itemPositions: new Map(), placedMarkers: [],
+                tlClipStartSec, anchorOnAirSec, anchorSource, anchorEfTimelineSec,
+                anchorEfectiva, anchorEfOrigen, refF1, refF1Origen,
+                parseDurada, getEffectiveDuradaSec, getRawDuradaSec,
+                isGraphicByNum, isForcedStructuralByNum
+            };
+        },
+
+        /**
+         * 🟢 placeOnAirMarkers: Col·loca marcadors amb TC exacte d'emissió (OnAir).
+         * Entry point per al botó F1 de la UI.
+         * Usa sub-funcions atòmiques: _loadAssemblyContext, _classifyItems, _calcTemporalAnchors.
+         * NO necessita _calcDensityFootprint.
+         * Usa placeByPrefixes (upsert atòmic en JSX): mou existents, crea nous.
+         */
+        placeOnAirMarkers: async function () {
+            log('🟢 [F1·OnAir] Iniciant col·locació independent...');
+
+            // ── Pas 1: Carregar context ──
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F1·OnAir] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips, firstUngroupedItem } = ctxData;
+
+            // ── Pas 2: Classificar ítems ──
+            const classData = this._classifyItems(lines);
+            const { structuralItems } = classData;
+
+            // ── Pas 3: Calcular àncores (necessitem refF1 + tlClipStartSec) ──
+            const anchors = this._calcTemporalAnchors(manifest, reader, structuralItems, clips);
+            if (!anchors) { log('⚠️ [F1·OnAir] _calcTemporalAnchors ha fallat. Abortant.'); return; }
+            const { tlClipStartSec, refF1 } = anchors;
+
+            if (refF1 === null) {
+                log('⚠️ [F1·OnAir] Sense referència F1 (cap ítem amb OnAir al bloc). Saltant F1.');
+                return;
+            }
+
+            var placements = [];
+            var itemPositions = new Map();
+
+            for (var si = 0; si < structuralItems.length; si++) {
+                var line = structuralItems[si];
+                var onAir = line.horaEntradaOnAir;
+                var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+                if (!hasOnAir) continue;
+
+                var itemOnAirSec = reader.tcToSeconds(onAir);
+                if (itemOnAirSec === null || itemOnAirSec === 0) continue;
+                var idealPosSec = tlClipStartSec + (itemOnAirSec - refF1);
+                if (idealPosSec < 0) idealPosSec = 0;
+
+                var num = line.num || '?';
+                var safeT = idealPosSec.toFixed(2);
+                var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                var comment = (num ? num + ' - ' : '') + titol;
+                comment = comment.trim();
+                var colorIdx = this._getColorIdx(line);
+
+                log('🔵 [F1·OnAir] ' + num + ': OnAir=' + itemOnAirSec.toFixed(1) + 's → timeline ' + safeT + 's  [Δ=' + (itemOnAirSec - refF1).toFixed(1) + 's]' + (idealPosSec === 0 && (itemOnAirSec - refF1) < 0 ? ' (→ 00:00)' : ''));
+
+                placements.push({ prefix: num, timeSec: parseFloat(safeT), comment: comment, colorIdx: colorIdx });
+                itemPositions.set(line.num, idealPosSec);
+            }
+
+            // ── BUG #4: Marcador vermell per a ítem no agrupat (agrupacio:null) ──
+            if (firstUngroupedItem) {
+                var ugOnAir = firstUngroupedItem.horaEntradaOnAir;
+                var ugHasOnAir = ugOnAir && ugOnAir !== '00:00:00' && ugOnAir.trim() !== '';
+                if (ugHasOnAir) {
+                    var ugOnAirSec = reader.tcToSeconds(ugOnAir);
+                    if (ugOnAirSec !== null && ugOnAirSec !== 0) {
+                        var ugIdealPos = tlClipStartSec + (ugOnAirSec - refF1);
+                        if (ugIdealPos < 0) ugIdealPos = 0;
+                        var ugNum = firstUngroupedItem.num || '?';
+                        var ugSafeT = ugIdealPos.toFixed(2);
+                        var ugTitol = (firstUngroupedItem.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                        var ugComment = ugNum + ' - ' + ugTitol;
+                        ugComment = ugComment.trim();
+                        log('🔴 [F1·OnAir] UNGROUPED ' + ugNum + ': OnAir=' + ugOnAirSec.toFixed(1) + 's -> timeline ' + ugSafeT + 's');
+                        placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: this._getColorIdx(firstUngroupedItem) });
+                        itemPositions.set(firstUngroupedItem.num, ugIdealPos);
+                    }
+                }
+            }
+
+            if (placements.length === 0) {
+                log('🔵 [F1·OnAir] Cap marcador OnAir per col·locar. ✓ FINALITZAT.');
+                return;
+            }
+
+            // UPSERT atòmic amb protecció d'errors (BUG #8)
+            var result = await this._safePlaceByPrefixes(placements, 'F1·OnAir');
+            log('🔵 [F1·OnAir] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
+        /**
+         * 🟠 placeDeducedOnAirMarkers: Col·loca marcadors amb TC inferit (OnAirDeducido).
+         * Entry point per al botó F2 de la UI.
+         * Usa sub-funcions atòmiques: _loadAssemblyContext, _classifyItems, _calcTemporalAnchors.
+         * NO necessita _calcDensityFootprint.
+         * Usa placeByPrefixes (upsert atòmic en JSX): mou existents, crea nous.
+         */
+        placeDeducedOnAirMarkers: async function () {
+            log('🟠 [F2·Deducido] Iniciant col·locació independent...');
+
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F2·Deducido] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips, firstUngroupedItem } = ctxData;
+
+            const classData = this._classifyItems(lines);
+            const { structuralItems } = classData;
+
+            const anchors = this._calcTemporalAnchors(manifest, reader, structuralItems, clips);
+            if (!anchors) { log('⚠️ [F2·Deducido] _calcTemporalAnchors ha fallat. Abortant.'); return; }
+            // BUG #3 FIX (2026-05-26): anchorEfTimelineSec ja usa clipStart/clipInPoint reals
+            const { anchorEfTimelineSec, anchorEfectiva } = anchors;
+
+            var placements = [];
+            var itemPositions = new Map();
+
+            for (var si = 0; si < structuralItems.length; si++) {
+                var line = structuralItems[si];
+                var onAir = line.horaEntradaOnAir;
+                var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+                if (hasOnAir) continue;
+
+                var deduced = reader._deduceOnAirEntrada(line, manifest.escaletaItems, null);
+                if (deduced === null) continue;
+
+                // anchorEfTimelineSec = (anchorEfectiva - mediaStart) - tlBlockInPointSec
+                // idealPosSec = anchorEfTimelineSec + (deduced - anchorEfectiva)
+                //   = (deduced - mediaStart) - tlBlockInPointSec  ✓
+                var idealPosSec = anchorEfTimelineSec + (deduced - anchorEfectiva);
+                if (idealPosSec < 0) idealPosSec = 0;
+
+                var num = line.num || '?';
+                var safeT = idealPosSec.toFixed(2);
+                var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                var comment = (num ? num + ' - ' : '') + titol;
+                comment = comment.trim();
+                var colorIdx = this._getColorIdx(line);
+
+                log('🟠 [F2·Deducido] ' + num + ': OnAirDeducido=' + deduced.toFixed(1) + 's → timeline ' + safeT + 's [rel]' + (idealPosSec === 0 && (deduced - anchorEfectiva) < 0 ? ' (TC negatiu → 00:00)' : ''));
+
+                placements.push({ prefix: num, timeSec: parseFloat(safeT), comment: comment, colorIdx: colorIdx });
+                itemPositions.set(line.num, idealPosSec);
+            }
+
+            // ── BUG #4: Marcador vermell per a ítem no agrupat (agrupacio:null) ──
+            if (firstUngroupedItem) {
+                var ugOnAir = firstUngroupedItem.horaEntradaOnAir;
+                var ugHasOnAir = ugOnAir && ugOnAir !== '00:00:00' && ugOnAir.trim() !== '';
+                if (!ugHasOnAir) {
+                    var ugDeduced = reader._deduceOnAirEntrada(firstUngroupedItem, manifest.escaletaItems, null);
+                    if (ugDeduced !== null) {
+                        var ugIdealPos = anchorEfTimelineSec + (ugDeduced - anchorEfectiva);
+                        if (ugIdealPos < 0) ugIdealPos = 0;
+                        var ugNum = firstUngroupedItem.num || '?';
+                        var ugSafeT = ugIdealPos.toFixed(2);
+                        var ugTitol = (firstUngroupedItem.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                        var ugComment = ugNum + ' - ' + ugTitol;
+                        ugComment = ugComment.trim();
+                        log('🔴 [F2·Deducido] UNGROUPED ' + ugNum + ': OnAirDeducido=' + ugDeduced.toFixed(1) + 's -> timeline ' + ugSafeT + 's');
+                        placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: this._getColorIdx(firstUngroupedItem) });
+                        itemPositions.set(firstUngroupedItem.num, ugIdealPos);
+                    }
+                }
+            }
+
+            if (placements.length === 0) {
+                log('🟠 [F2·Deducido] Cap marcador per col·locar. ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F2·Deducido');
+            log('🟠 [F2·Deducido] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
+        /**
+         * 🟡 placeScheduledMarkers: Col·loca marcadors amb horaPrevista com a fallback.
+         * Entry point per al botó F3 de la UI.
+         * Usa sub-funcions atòmiques: _loadAssemblyContext, _classifyItems, _calcTemporalAnchors.
+         * NO necessita _calcDensityFootprint.
+         * Usa placeByPrefixes (upsert atòmic en JSX): mou existents, crea nous.
+         */
+        placeScheduledMarkers: async function () {
+            log('🟡 [F3·Prevista] Iniciant col·locació independent...');
+
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F3·Prevista] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips, firstUngroupedItem } = ctxData;
+
+            const classData = this._classifyItems(lines);
+            const { structuralItems } = classData;
+
+            const anchors = this._calcTemporalAnchors(manifest, reader, structuralItems, clips);
+            if (!anchors) { log('⚠️ [F3·Prevista] _calcTemporalAnchors ha fallat. Abortant.'); return; }
+            // BUG #3 FIX (2026-05-26): anchorEfTimelineSec ja usa clipStart/clipInPoint reals
+            const { anchorEfTimelineSec, anchorEfectiva } = anchors;
+
+            var placements = [];
+            var itemPositions = new Map();
+
+            for (var si = 0; si < structuralItems.length; si++) {
+                var line = structuralItems[si];
+                var onAir = line.horaEntradaOnAir;
+                var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+                if (hasOnAir) continue;
+
+                var deduced = reader._deduceOnAirEntrada(line, manifest.escaletaItems, null);
+                if (deduced !== null) continue;
+
+                var prevista = line.horaEntradaPrevista;
+                var hasPrevista = prevista && prevista !== '00:00:00';
+                if (!hasPrevista) continue;
+
+                var previstaSec = reader.tcToSeconds(prevista);
+                if (previstaSec === null) continue;
+
+                // anchorEfTimelineSec = (anchorEfectiva - mediaStart) - tlBlockInPointSec
+                // idealPosSec = anchorEfTimelineSec + (previstaSec - anchorEfectiva)
+                //   = (previstaSec - mediaStart) - tlBlockInPointSec  ✓
+                var idealPosSec = anchorEfTimelineSec + (previstaSec - anchorEfectiva);
+                if (idealPosSec < 0) idealPosSec = 0;
+
+                var num = line.num || '?';
+                var safeT = idealPosSec.toFixed(2);
+                var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                var comment = (num ? num + ' - ' : '') + titol;
+                comment = comment.trim();
+                var colorIdx = this._getColorIdx(line);
+
+                log('🟡 [F3·Prevista] ' + num + ': Prevista=' + previstaSec.toFixed(1) + 's → timeline ' + safeT + 's [rel]' + (idealPosSec === 0 && (previstaSec - anchorEfectiva) < 0 ? ' (TC negatiu → 00:00)' : ''));
+
+                placements.push({ prefix: num, timeSec: parseFloat(safeT), comment: comment, colorIdx: colorIdx });
+                itemPositions.set(line.num, idealPosSec);
+            }
+
+            // ── BUG #4: Marcador vermell per a ítem no agrupat (agrupacio:null) ──
+            if (firstUngroupedItem) {
+                var ugAlreadyPlaced = itemPositions.has(firstUngroupedItem.num);
+                if (!ugAlreadyPlaced) {
+                    var ugPrevista = firstUngroupedItem.horaEntradaPrevista;
+                    var ugHasPrevista = ugPrevista && ugPrevista !== '00:00:00';
+                    if (ugHasPrevista) {
+                        var ugPrevistaSec = reader.tcToSeconds(ugPrevista);
+                        if (ugPrevistaSec !== null) {
+                            var ugIdealPos = anchorEfTimelineSec + (ugPrevistaSec - anchorEfectiva);
+                            if (ugIdealPos < 0) ugIdealPos = 0;
+                            var ugNum = firstUngroupedItem.num || '?';
+                            var ugSafeT = ugIdealPos.toFixed(2);
+                            var ugTitol = (firstUngroupedItem.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                            var ugComment = ugNum + ' - ' + ugTitol;
+                            ugComment = ugComment.trim();
+                            log('🔴 [F3·Prevista] UNGROUPED ' + ugNum + ': Prevista=' + ugPrevistaSec.toFixed(1) + 's -> timeline ' + ugSafeT + 's');
+                            placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: this._getColorIdx(firstUngroupedItem) });
+                            itemPositions.set(firstUngroupedItem.num, ugIdealPos);
+                        }
+                    }
+                }
+            }
+
+            if (placements.length === 0) {
+                log('🟡 [F3·Prevista] Cap marcador per col·locar. ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F3·Prevista');
+            log('🟡 [F3·Prevista] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // D1·F3.5·CorrelationSnap: Δ de consens entre marcadors OnAir i
+        // Deducidos contra talls del timeline.
+        //
+        // Només processa marcadors NO definitiws que siguin OnAir o
+        // Deducido. Els Previstos NO es processen aquí (→ F4).
+        //
+        // Pipeline:
+        //   1. _loadAssemblyContext        → clips, manifest, reader, lines
+        //   2. _calcDensityFootprint(clips) → densityData (breaks)
+        //   3. Markers.get                  → marcadors actuals
+        //   4. Filtrar no-definitius + classificar OnAir/Deducido
+        //   5. _correlationSnap(...)        → Δ consensuat
+        //   6. Si confiança ≥ 30%: placeByPrefixes amb name:"definitiu"
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * 🔵 correlationSnapMarkers: F3.5·CorrelationSnap
+         * Entry point per al botó F3.5 de la UI.
+         * Aplica Δ de consens NOMÉS a OnAir i Deducidos.
+         * Usa _loadAssemblyContext, _calcDensityFootprint, _correlationSnap.
+         * NO necessita _calcTemporalAnchors.
+         */
+        correlationSnapMarkers: async function () {
+            log('🔷 [F3.5·CorrelationSnap] Iniciant snapeig per correlació (OnAir+Deducido)...');
+
+            // ── Pas 1: Carregar context ──
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F3.5·CorrelationSnap] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips } = ctxData;
+
+            // ── Pas 2: Calcular petjada de densitat ──
+            const densityData = this._calcDensityFootprint(clips);
+            log('   🔷 [F3.5·CorrelationSnap] DensityFootprint: ' + (densityData && densityData.breaks ? densityData.breaks.length : 0) + ' breaks.');
+
+            // ── Pas 3: Obtenir marcadors actuals del timeline ──
+            var markersRaw = await callJSX('Markers.get()');
+            var allMarkers = [];
+            try { allMarkers = JSON.parse(markersRaw); } catch (e) { allMarkers = []; }
+            log('   🔷 [F3.5·CorrelationSnap] Marcadors al timeline: ' + allMarkers.length);
+
+            // ── Pas 4: Filtrar només OnAir + Deducido (NO Previstos) ──
+            // Construir prefix→item per classificar
+            var manifestItems = manifest.escaletaItems || [];
+            var prefixToItem = {};
+            for (var ii = 0; ii < manifestItems.length; ii++) {
+                var mItem = manifestItems[ii];
+                if (mItem.num) prefixToItem[String(mItem.num)] = mItem;
+            }
+
+            var _extractPrefix35 = function (comment) {
+                if (!comment) return '';
+                var idx = comment.indexOf(' -');
+                if (idx <= 0) return '';
+                return comment.substring(0, idx).replace(/^\s+|\s+$/g, '');
+            };
+
+            var _isOnAirOrDeduced = function (prefix) {
+                if (!prefix || !prefixToItem[prefix]) return false;
+                var item = prefixToItem[prefix];
+                var onAir = item.horaEntradaOnAir;
+                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') return true; // OnAir
+                var deduced = reader._deduceOnAirEntrada(item, manifestItems, null);
+                if (deduced !== null) return true; // Deducido
+                return false; // Previsto → NO processar
+            };
+
+            var candidateMarkers = [];
+            var skippedPrevistos = 0;
+            for (var i = 0; i < allMarkers.length; i++) {
+                var mk = allMarkers[i];
+                if (mk.name === 'definitiu') continue;
+                var prefix = _extractPrefix35(mk.comments || '');
+                if (_isOnAirOrDeduced(prefix)) {
+                    candidateMarkers.push(mk);
+                } else {
+                    skippedPrevistos++;
+                }
+            }
+            log('   🔷 [F3.5·CorrelationSnap] OnAir+Deducido: ' + candidateMarkers.length + ' | Previstos saltats: ' + skippedPrevistos + ' | Definitius ignorats: ' + (allMarkers.length - candidateMarkers.length - skippedPrevistos));
+
+            if (candidateMarkers.length === 0) {
+                log('🔷 [F3.5·CorrelationSnap] Cap marcador OnAir/Deducido no-definitiu. ✓ FINALITZAT.');
+                return;
+            }
+
+            // ── Pas 5: CorrelationSnap → trobar Δ consensuat ──
+            var snapResult = this._correlationSnap(candidateMarkers, clips, densityData, manifest.escaletaItems, reader);
+
+            if (snapResult.delta === null) {
+                log('🔷 [F3.5·CorrelationSnap] CorrelationSnap no ha trobat Δ fiable (confiança=' + (snapResult.confidence * 100).toFixed(0) + '%). ✓ FINALITZAT.');
+                return;
+            }
+
+            // ── Pas 6: Aplicar Δ a cada marcador candidat ──
+            var delta = snapResult.delta;
+            log('   🔷 [F3.5·CorrelationSnap] Aplicant Δ=' + delta.toFixed(3) + 's a ' + candidateMarkers.length + ' marcadors...');
+
+            var placements = [];
+            for (var j = 0; j < candidateMarkers.length; j++) {
+                var cmk = candidateMarkers[j];
+                var cmkTime = (typeof cmk.time === 'number' ? cmk.time : parseFloat(cmk.time));
+                // BUG #7: Preservar marcadors a ~0.00s sense aplicar Δ.
+                // _correlationSnap els exclou del càlcul de l'histograma,
+                // però correlationSnapMarkers aplicava Δ a tots els candidats.
+                var correctedTime = (cmkTime < 0.01) ? 0 : (cmkTime + delta);
+                if (correctedTime < 0) correctedTime = 0;
+
+                var comment = cmk.comments || '';
+                var prefix = _extractPrefix35(comment);
+
+                if (!prefix) {
+                    log('   ⚠️ [F3.5·CorrelationSnap] Marcador sense prefix detectable a ' + cmk.time + 's. Saltant.');
+                    continue;
+                }
+
+                placements.push({
+                    prefix: prefix,
+                    timeSec: correctedTime,
+                    comment: comment,
+                    name: 'definitiu',
+                    colorIdx: (typeof cmk.color === 'number' && cmk.color >= 0) ? cmk.color : null
+                });
+
+                log('   🔷 [F3.5·CorrelationSnap] ' + prefix + ': ' + cmk.time.toFixed(2) + 's → ' + correctedTime.toFixed(2) + 's [Δ=' + delta.toFixed(3) + 's]');
+            }
+
+            if (placements.length === 0) {
+                log('🔷 [F3.5·CorrelationSnap] Cap placement construït. ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F3.5·CorrelationSnap');
+            log('🔷 [F3.5·CorrelationSnap] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + ' | Δ=' + delta.toFixed(3) + 's | confiança=' + (snapResult.confidence * 100).toFixed(0) + '%. ✓ FINALITZAT.');
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // D2·F4·DensitySnap v2: Matching seqüencial de marcadors
+        // (Previstos + OnAir/Deducido orfes) contra punts d'inflexió
+        // de densitat del timeline.
+        //
+        // ESTRATÈGIA (v2): El matching és per ORDRE, no per proximitat
+        // temporal. El marcador N-èsim s'emparella amb el break N-èsim.
+        // Si un marcador està a 30s del seu break, s'emparella igual.
+        // Sense finestres de temps, sense llindars màgics.
+        //
+        // Per capes:
+        //   - F3.5·CorrelationSnap: OnAir+Deducido → Δ consens (si falla → passen a F4)
+        //   - F4·DensitySnap v2: Previstos + OnAir/Deducido orfes → matching seqüencial contra breaks
+        //   - F5·OrphanSnap: marcadors sobrants (sense break) → ±2s cut snap
+        //
+        // Pipeline:
+        //   1. _loadAssemblyContext        → clips, manifest, reader, lines
+        //   2. _calcDensityFootprint(clips) → densityData (breaks ordenats)
+        //   3. Markers.get                  → marcadors actuals
+        //   4. Filtrar no-definitius: Previstos + OnAir/Deducido orfes
+        //   5. Pool unificat ordenat per temps
+        //   6. Matching seqüencial: candidate[j] → breaks[j].time
+        //   7. Sobrants mantenen posició original (→ F5)
+        //   8. placeByPrefixes amb name:"definitiu"
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * 🔵 snapFaroMarkers: F4·DensitySnap v2
+         * Entry point per al botó F4 de la UI.
+         * Matching SEQÜENCIAL de marcadors (Previstos + OnAir/Deducido
+         * orfes) contra punts d'inflexió de densitat del timeline.
+         * El marcador N-èsim s'emparella amb el break N-èsim.
+         * Sense finestres de temps ni type-matching.
+         * Usa _loadAssemblyContext, _calcDensityFootprint.
+         * NO necessita _calcTemporalAnchors ni _correlationSnap.
+         */
+        snapFaroMarkers: async function () {
+            log('🔵 [F4·DensitySnap v2] Iniciant matching seqüencial (Previstos + OnAir/Deducido orfes)...');
+
+            // ── Pas 1: Carregar context ──
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F4·DensitySnap v2] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips } = ctxData;
+
+            // ── Pas 2: Calcular petjada de densitat ──
+            const densityData = this._calcDensityFootprint(clips);
+            const breaks = (densityData && densityData.breaks) ? densityData.breaks : [];
+            log('   🔵 [F4·DensitySnap v2] DensityFootprint: ' + breaks.length + ' breaks.');
+
+            // ── Pas 3: Obtenir marcadors actuals del timeline ──
+            var markersRaw = await callJSX('Markers.get()');
+            var allMarkers = [];
+            try { allMarkers = JSON.parse(markersRaw); } catch (e) { allMarkers = []; }
+            log('   🔵 [F4·DensitySnap v2] Marcadors al timeline: ' + allMarkers.length);
+
+            // ── Pas 4: Filtrar no-definitius + classificar Previstos i OnAir/Deducido ──
+            var manifestItems = manifest.escaletaItems || [];
+            var prefixToItem = {};
+            for (var ii = 0; ii < manifestItems.length; ii++) {
+                var mItem = manifestItems[ii];
+                if (mItem.num) prefixToItem[String(mItem.num)] = mItem;
+            }
+
+            var _extractPrefix = function (comment) {
+                if (!comment) return '';
+                var idx = comment.indexOf(' -');
+                if (idx <= 0) return '';
+                return comment.substring(0, idx).replace(/^\s+|\s+$/g, '');
+            };
+
+            var _isPrevisto = function (prefix) {
+                if (!prefix || !prefixToItem[prefix]) return false;
+                var item = prefixToItem[prefix];
+                var onAir = item.horaEntradaOnAir;
+                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') return false;
+                var deduced = reader._deduceOnAirEntrada(item, manifestItems, null);
+                if (deduced !== null) return false;
+                var prevista = item.horaEntradaPrevista;
+                return prevista && prevista !== '00:00:00';
+            };
+
+            // ── v2: També detectem OnAir/Deducido (orfes de F3.5) ──
+            var _isOnAirOrDeduced = function (prefix) {
+                if (!prefix || !prefixToItem[prefix]) return false;
+                var item = prefixToItem[prefix];
+                var onAir = item.horaEntradaOnAir;
+                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') return true;
+                var deduced = reader._deduceOnAirEntrada(item, manifestItems, null);
+                if (deduced !== null) return true;
+                return false;
+            };
+
+            // ── Classificar marcadors no-definitius en 3 categories ──
+            var previstos = [];
+            var orphanOnAirDeducido = [];
+            var skippedOther = 0;
+            var skippedDef = 0;
+            for (var i = 0; i < allMarkers.length; i++) {
+                var mk = allMarkers[i];
+                if (mk.name === 'definitiu') { skippedDef++; continue; }
+                var prefix = _extractPrefix(mk.comments || '');
+                if (_isPrevisto(prefix)) {
+                    previstos.push(mk);
+                } else if (_isOnAirOrDeduced(prefix)) {
+                    orphanOnAirDeducido.push(mk);
+                } else {
+                    skippedOther++;
+                }
+            }
+            log('   🔵 [F4·DensitySnap v2] Previstos: ' + previstos.length + ' | OnAir/Deducido orfes: ' + orphanOnAirDeducido.length + ' | Altres: ' + skippedOther + ' | Definitius: ' + skippedDef);
+
+            // ── Pool unificat: Previstos + OnAir/Deducido orfes, ordenats per temps ──
+            var allCandidates = previstos.concat(orphanOnAirDeducido);
+            allCandidates.sort(function (a, b) {
+                var ta = (typeof a.time === 'number') ? a.time : parseFloat(a.time);
+                var tb = (typeof b.time === 'number') ? b.time : parseFloat(b.time);
+                return ta - tb;
+            });
+            log('   🔵 [F4·DensitySnap v2] Candidats totals (pool unificat): ' + allCandidates.length + ' | Breaks disponibles: ' + breaks.length);
+
+            if (allCandidates.length === 0) {
+                log('🔵 [F4·DensitySnap v2] Cap marcador candidat per processar. ✓ FINALITZAT.');
+                return;
+            }
+
+            // ── Pas 5: Matching seqüencial candidate[j] → breaks[j].time ──
+            var maxPairs = Math.min(allCandidates.length, breaks.length);
+            var placements = [];
+            var snappedCount = 0;
+            var keptCount = 0;
+
+            for (var j = 0; j < allCandidates.length; j++) {
+                var mk = allCandidates[j];
+                var mkTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
+                var comment = mk.comments || '';
+                var prefix = _extractPrefix(comment);
+
+                if (!prefix) {
+                    log('   ⚠️ [F4·DensitySnap v2] Marcador sense prefix a ' + mkTime.toFixed(2) + 's. Saltant.');
+                    continue;
+                }
+
+                // Detectar font del marcador per al log
+                var source = _isPrevisto(prefix) ? 'Previsto' : 'OnAir/Deducido';
+
+                var targetTime;
+                if (j < maxPairs) {
+                    // Matching seqüencial: candidat[j] → break[j]
+                    targetTime = breaks[j].time;
+                    if (targetTime < 0) targetTime = 0;
+                    snappedCount++;
+                    log('   🔵 [F4·DensitySnap v2] ' + prefix + ' (' + source + '): ' + mkTime.toFixed(2) + 's → break[' + j + '] ' + targetTime.toFixed(2) + 's [matching=' + (j + 1) + '/' + maxPairs + ']');
+                } else {
+                    // Sense break disponible → manté posició original (F5 s'encarregarà)
+                    targetTime = mkTime;
+                    keptCount++;
+                    log('   🔵 [F4·DensitySnap v2] ' + prefix + ' (' + source + '): ' + mkTime.toFixed(2) + 's → manté (sense break disponible, F5 pendent)');
+                }
+
+                placements.push({
+                    prefix: prefix,
+                    timeSec: targetTime,
+                    comment: comment,
+                    name: 'definitiu',
+                    colorIdx: (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null
+                });
+            }
+
+            if (placements.length === 0) {
+                log('🔵 [F4·DensitySnap v2] Cap placement construït. ✓ FINALITZAT.');
+                return;
+            }
+
+            // UPSERT atòmic amb name:"definitiu" + protecció d'errors (BUG #8)
+            var result = await this._safePlaceByPrefixes(placements, 'F4·DensitySnap v2');
+            log('🔵 [F4·DensitySnap v2] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + ' | Snapejats: ' + snappedCount + ' | Mantinguts (→F5): ' + keptCount + '. ✓ FINALITZAT.');
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // D3·F5·OrphanSnap: Snapeig de marcadors no-definitius
+        // (Previstos + huérfanos) contra talls del timeline.
+        //
+        // Flux no acumulatiu: només processa marcadors NO marcats com
+        // "definitiu" (els que F4 no ha snapejat).
+        //
+        // Estratègia:
+        //   - Previstos: snap a ruptura de densitat (±2s), fallback a tall
+        //   - Huérfanos (resto): snap simple al tall més proper (±2s)
+        //   - Sense tall dins la finestra: manté posició original
+        //
+        // Pipeline:
+        //   1. _loadAssemblyContext        → clips, manifest, reader, lines
+        //   2. _calcDensityFootprint(clips) → densityData (breaks)
+        //   3. Markers.get                  → marcadors actuals
+        //   4. Filtrar no-definitius (name !== "definitiu") en JS
+        //   5. Classificar: Prevista vs orfe (via manifest.escaletaItems)
+        //   6. Snap a break/cut segons tipus
+        //   7. placeByPrefixes (sense name:"definitiu" — no bloqueja)
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * 🟣 snapOrphanMarkers: F5·OrphanSnap
+         * Entry point per al botó F5 de la UI.
+         * Usa _loadAssemblyContext, _calcDensityFootprint.
+         * NO necessita _calcTemporalAnchors ni _classifyItems complets.
+         */
+        snapOrphanMarkers: async function () {
+            log('🟣 [F5·OrphanSnap] Iniciant snapeig de marcadors orfes...');
+
+            // ── Pas 1: Carregar context ──
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F5·OrphanSnap] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips } = ctxData;
+
+            // ── Pas 2: Density footprint (per ancorar Previstos a breaks) ──
+            const densityData = this._calcDensityFootprint(clips);
+            log('   🟣 [F5·OrphanSnap] DensityFootprint: ' + (densityData && densityData.breaks ? densityData.breaks.length : 0) + ' breaks.');
+
+            // ── Pas 3: Obtenir marcadors del timeline ──
+            var markersRaw = await callJSX('Markers.get()');
+            var allMarkers = [];
+            try { allMarkers = JSON.parse(markersRaw); } catch (e) { allMarkers = []; }
+            log('   🟣 [F5·OrphanSnap] Marcadors al timeline: ' + allMarkers.length);
+
+            // ── Pas 4: Filtrar NO definitius ──
+            var nonDefinitive = [];
+            for (var i = 0; i < allMarkers.length; i++) {
+                if (allMarkers[i].name !== 'definitiu') {
+                    nonDefinitive.push(allMarkers[i]);
+                }
+            }
+            log('   🟣 [F5·OrphanSnap] No-definitius: ' + nonDefinitive.length + ' / ' + allMarkers.length);
+
+            if (nonDefinitive.length === 0) {
+                log('🟣 [F5·OrphanSnap] Cap marcador no-definitiu. ✓ FINALITZAT.');
+                return;
+            }
+
+            // ── Pas 5: Build prefix→item per classificar Prevista vs orfe ──
+            var manifestItems = manifest.escaletaItems || [];
+            var prefixToItem = {};
+            for (var ii = 0; ii < manifestItems.length; ii++) {
+                var mItem = manifestItems[ii];
+                if (mItem.num) prefixToItem[String(mItem.num)] = mItem;
+            }
+
+            var _extractPrefix = function (comment) {
+                if (!comment) return '';
+                var idx = comment.indexOf(' -');
+                if (idx <= 0) return '';
+                return comment.substring(0, idx).replace(/^\s+|\s+$/g, '');
+            };
+
+            var _isPrevista = function (prefix) {
+                if (!prefix || !prefixToItem[prefix]) return false;
+                var lineItem = prefixToItem[prefix];
+                var onAir = lineItem.horaEntradaOnAir;
+                var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+                if (hasOnAir) return false;
+                var deduced = reader._deduceOnAirEntrada(lineItem, manifestItems, null);
+                if (deduced !== null) return false;
+                var prevista = lineItem.horaEntradaPrevista;
+                return prevista && prevista !== '00:00:00';
+            };
+
+            // ── Helpers de snap ──
+            var _findNearestCut = function (timeSec, windowSec) {
+                var bestDist = windowSec + 999;
+                for (var ci = 0; ci < clips.length; ci++) {
+                    var dStart = clips[ci].start - timeSec;
+                    var dEnd = clips[ci].end - timeSec;
+                    if (Math.abs(dStart) < Math.abs(bestDist)) bestDist = dStart;
+                    if (Math.abs(dEnd) < Math.abs(bestDist)) bestDist = dEnd;
+                }
+                if (Math.abs(bestDist) <= windowSec) return timeSec + bestDist;
+                return timeSec;
+            };
+
+            var _findNearestBreak = function (timeSec, windowSec) {
+                if (!densityData || !densityData.breaks || densityData.breaks.length === 0) return null;
+                var bestDist = windowSec + 999;
+                var bestBreakTime = null;
+                for (var bi = 0; bi < densityData.breaks.length; bi++) {
+                    var d = densityData.breaks[bi].time - timeSec;
+                    if (Math.abs(d) < Math.abs(bestDist)) {
+                        bestDist = d;
+                        bestBreakTime = densityData.breaks[bi].time;
+                    }
+                }
+                if (Math.abs(bestDist) <= windowSec) return timeSec + bestDist;
+                return null;
+            };
+
+            // ── Pas 6: Snapejar cada marcador no-definitiu ──
+            var SNAP_WINDOW = 2.0;
+            var placements = [];
+            var snappedCount = 0;
+            var previstaCount = 0;
+            var orfeCount = 0;
+
+            for (var j = 0; j < nonDefinitive.length; j++) {
+                var mk = nonDefinitive[j];
+                var mkTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
+                if (isNaN(mkTime)) continue;
+
+                var comment = mk.comments || '';
+                var prefix = _extractPrefix(comment);
+                if (!prefix) {
+                    log('   ⚠️ [F5·OrphanSnap] Sense prefix a ' + mkTime.toFixed(2) + 's. Saltant.');
+                    continue;
+                }
+
+                var isPrev = _isPrevista(prefix);
+                var newTime = mkTime;
+
+                if (isPrev) {
+                    previstaCount++;
+                    // Estratègia Prevista: break → tall → original
+                    var breakSnap = _findNearestBreak(mkTime, SNAP_WINDOW);
+                    if (breakSnap !== null) {
+                        newTime = breakSnap;
+                        log('   🟣 [F5] ' + prefix + ' (Prevista): ' + mkTime.toFixed(2) + 's → break ' + newTime.toFixed(2) + 's');
+                    } else {
+                        newTime = _findNearestCut(mkTime, SNAP_WINDOW);
+                        if (newTime !== mkTime) {
+                            log('   🟣 [F5] ' + prefix + ' (Prevista): ' + mkTime.toFixed(2) + 's → tall ' + newTime.toFixed(2) + 's');
+                        }
+                    }
+                } else {
+                    orfeCount++;
+                    newTime = _findNearestCut(mkTime, SNAP_WINDOW);
+                    if (newTime !== mkTime) {
+                        log('   🟣 [F5] ' + prefix + ' (orfè): ' + mkTime.toFixed(2) + 's → tall ' + newTime.toFixed(2) + 's');
+                    }
+                }
+
+                if (newTime !== mkTime) snappedCount++;
+                if (newTime < 0) newTime = 0;
+
+                placements.push({
+                    prefix: prefix,
+                    timeSec: newTime,
+                    comment: comment,
+                    colorIdx: (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null
+                });
+            }
+
+            log('   🟣 [F5·OrphanSnap] Previstos: ' + previstaCount + ' | Orfes: ' + orfeCount + ' | Snapejats: ' + snappedCount + ' | Sense canvi: ' + (nonDefinitive.length - snappedCount));
+
+            if (placements.length === 0) {
+                log('🟣 [F5·OrphanSnap] Cap placement. ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F5·OrphanSnap');
+            log('🟣 [F5·OrphanSnap] Snapejats: ' + snappedCount + ' | Moguts: ' + (result.moved || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // D4·F6·Gràfics: Col·locació de marcadors gràfics en gaps
+        // entre marcadors estructurals existents, sense solapament.
+        //
+        // Flux no acumulatiu: col·loca els graphicItems amb color 4
+        // (groc/verd). Calcula la posició ideal via TC (OnAir o Prevista)
+        // i ajusta per evitar solapaments amb marcadors veïns (gap 0.5s).
+        //
+        // Pipeline:
+        //   1. _loadAssemblyContext        → manifest, reader, lines
+        //   2. _classifyItems(lines)       → graphicItems, structuralItems
+        //   3. _calcTemporalAnchors        → tlClipStartSec, anchorEfectiva
+        //   4. Markers.get                 → marcadors existents (per gaps)
+        //   5. Calcular posició per cada graphicItem
+        //   6. Ajustar per evitar solapaments (gap mínim 0.5s)
+        //   7. placeByPrefixes amb colorIdx:4
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * 🟢 placeGraphicMarkers: F6·Gràfics
+         * Entry point per al botó F6 de la UI.
+         * Usa _loadAssemblyContext, _classifyItems, _calcTemporalAnchors.
+         * NO necessita _calcDensityFootprint.
+         */
+        placeGraphicMarkers: async function () {
+            log('🟢 [F6·Gràfics] Iniciant col·locació de marcadors gràfics...');
+
+            // ── Pas 1: Carregar context ──
+            const ctxData = await this._loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F6·Gràfics] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines } = ctxData;
+
+            // ── Pas 2: Classificar ítems ──
+            const classData = this._classifyItems(lines);
+            const { graphicItems, structuralItems } = classData;
+
+            if (graphicItems.length === 0) {
+                log('🟢 [F6·Gràfics] Cap ítem gràfic per col·locar. ✓ FINALITZAT.');
+                return;
+            }
+            log('   🟢 [F6·Gràfics] Ítems gràfics: ' + graphicItems.length);
+
+            // ── Pas 3: Calcular àncores temporals ──
+            const anchors = this._calcTemporalAnchors(manifest, reader, structuralItems);
+            if (!anchors) { log('⚠️ [F6·Gràfics] _calcTemporalAnchors ha fallat. Abortant.'); return; }
+            const { anchorEfTimelineSec, anchorEfectiva } = anchors;
+
+            // ── Pas 4: Obtenir marcadors existents (per detectar gaps) ──
+            var markersRaw = await callJSX('Markers.get()');
+            var existingMarkers = [];
+            try { existingMarkers = JSON.parse(markersRaw); } catch (e) { existingMarkers = []; }
+            log('   🟢 [F6·Gràfics] Marcadors existents: ' + existingMarkers.length);
+
+            // ── Pas 5: Per cada ítem gràfic, calcular posició i evitar solapaments ──
+            var MIN_GAP_SEC = 0.5;
+            var placements = [];
+
+            for (var gi = 0; gi < graphicItems.length; gi++) {
+                var gItem = graphicItems[gi];
+                var gNum = String(gItem.num || '');
+
+                // Determinar TC de referència (OnAir → Prevista)
+                var refSec = null;
+                var onAir = gItem.horaEntradaOnAir;
+                var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+                if (hasOnAir) {
+                    refSec = reader.tcToSeconds(onAir);
+                }
+                if (refSec === null || refSec === undefined) {
+                    var prevista = gItem.horaEntradaPrevista;
+                    if (prevista && prevista !== '00:00:00') {
+                        refSec = reader.tcToSeconds(prevista);
+                    }
+                }
+
+                if (refSec === null || refSec === undefined) {
+                    log('   ⚠️ [F6·Gràfics] ' + gNum + ': sense TC de referència. Saltant.');
+                    continue;
+                }
+
+                // Projectar a temps de timeline
+                var idealPosSec = anchorEfTimelineSec + (refSec - anchorEfectiva);
+                if (idealPosSec < 0) idealPosSec = 0;
+
+                // Ajustar per evitar solapament amb marcadors existents
+                var adjustedTime = idealPosSec;
+                for (var mi = 0; mi < existingMarkers.length; mi++) {
+                    var mTime = (typeof existingMarkers[mi].time === 'number') ? existingMarkers[mi].time : parseFloat(existingMarkers[mi].time);
+                    if (isNaN(mTime)) continue;
+                    if (Math.abs(adjustedTime - mTime) < MIN_GAP_SEC) {
+                        adjustedTime = mTime + MIN_GAP_SEC;
+                    }
+                }
+
+                var safeT = adjustedTime.toFixed(2);
+                var titol = (gItem.titol || '').substring(0, 60);
+                var comment = (gNum ? gNum + ' - ' : '') + titol;
+                comment = comment.trim();
+
+                var gapInfo = (adjustedTime !== idealPosSec) ? ' (ajustat +' + (adjustedTime - idealPosSec).toFixed(2) + 's per gap)' : '';
+                log('   🟢 [F6·Gràfics] ' + gNum + ': → ' + safeT + 's' + gapInfo);
+
+                placements.push({
+                    prefix: gNum,
+                    timeSec: parseFloat(safeT),
+                    comment: comment,
+                    colorIdx: 4
+                });
+            }
+
+            if (placements.length === 0) {
+                log('🟢 [F6·Gràfics] Cap marcador gràfic per col·locar. ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F6·Gràfics');
+            log('🟢 [F6·Gràfics] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
         /**
          * Realitza el posicionament automàtic de rètols després del scene Detection.
          */
@@ -395,15 +1934,15 @@
 
         /**
          * Match de footprint i snap magnètic a talls.
-         * Refactoritzat per usar tcRef si el manifest està disponible.
+         * Refactoritzat per usar ref si el manifest està disponible.
          */
         _placeMagicChyrons: async function (block, clips, tracks, options = {}) {
             log(`   🔮 Aplicant Precision Placement a ${block.id}...`);
 
-            // 1. Carregar manifest per obtenir tcRef i item d'escaleta
+            // 1. Carregar manifest per obtenir ref i item d'escaleta
             const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
             const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
-            const tcRef = manifest.tcRef;
+            const ref = manifest.ref;
             const reader = window.EscaletaReader;
 
             let blockStartManual = clips[0].start;
@@ -411,13 +1950,13 @@
             let usePrecision = false;
             let precisionBlockStart = 0;
 
-            if (tcRef && tcRef.offset !== null && reader) {
+            if (ref && ref.offsetSec !== null && reader) {
                 // Intentar buscar l'ítem d'escaleta que correspon a aquest bloc de rètols
                 // block.id pot ser "11", "11f", etc. block.numBase és "11".
                 const item = manifest.escaletaItems.find(i => i.num === block.id || i.num === block.numBase);
                 if (item && item.horaEntradaOnAir) {
-                    const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-                    precisionBlockStart = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                    const worldSecOnAir = reader.tcToSeconds(item.horaEntradaOnAir);
+                    precisionBlockStart = (worldSecOnAir - ref.worldSecMediaStart) + ref.offsetSec;
                     usePrecision = true;
                     log(`      📐 Usant Precision Timing (OnAir): blockStart=${precisionBlockStart.toFixed(2)}s`);
                 }
@@ -635,10 +2174,10 @@
         /* verifyTcRefFootprint: Compara els talls reals (V1) amb la previsió OnAir.
         * Si la vericidat és alta (>=75%), calcula el drift i permet corregir l'offset.
         */
-        verifyTcRefFootprint: async function (videoItems, clips, tcRef, reader) {
+        verifyTcRefFootprint: async function (videoItems, clips, ref, reader) {
             log("🦶 [Footprint] Verificant sincronia amb talls de V1...");
-            if (!tcRef || !tcRef.mediaStart || tcRef.offset === null) {
-                log("⚠️ [Footprint] tcRef incomplet. No es pot verificar.");
+            if (!ref || !ref.worldSecMediaStart || ref.offsetSec === null) {
+                log("⚠️ [Footprint] ref incomplet. No es pot verificar.");
                 return { confidence: 0, correction: 0 };
             }
 
@@ -651,8 +2190,8 @@
             if (testItems.length === 0) return { confidence: 1, correction: 0 };
 
             for (const item of testItems) {
-                const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-                const idealSeqPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
+                const worldSecOnAir = reader.tcToSeconds(item.horaEntradaOnAir);
+                const idealSeqPos = (worldSecOnAir - ref.worldSecMediaStart) + ref.offsetSec;
 
                 // Busquem el tall més proper a V1
                 let bestMatch = null;
@@ -687,141 +2226,6 @@
             };
         },
 
-        /**
-         * placePrecisionMarkers: Col·loca marcadors al timeline amb precisió OnAir.
-         * Utilitza el Manifest de Sessió com a font de veritat.
-         */
-        placePrecisionMarkers: async function () {
-            log("📍 [MARKERS] Iniciant col·locació de marcadors d'estructura...");
-            const reader = window.EscaletaReader;
-
-            // 1. Carregar context i manifest
-            const mainButton = FASTPASS_UI.Workflows.MainButton;
-            const ctx = await mainButton._setupContext();
-            const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
-
-            if (!manifest.phases.boundsCalculated || !manifest.tcRef.mediaStart) {
-                log("⚠️ [MARKERS] Manifest sense dades OnAir. No es pot procedir amb precisió.");
-                return;
-            }
-
-            const tcRef = manifest.tcRef;
-            const videoItems = manifest.escaletaItems.filter(l => l.teVideo && l.horaEntradaOnAir);
-            const clips = await getClipsLogic().getTrackClips(1, "video");
-
-            if (clips.length === 0) {
-                log("❌ [MARKERS] No hi ha clips a V1. Avortant.");
-                return;
-            }
-
-            // 2. Verificació de Footprint (Auto-ajust de tcRef.offset si hi ha un trossejat real)
-            const footprint = await this.verifyTcRefFootprint(videoItems, clips, tcRef, reader);
-            if (footprint.autoCorrected) {
-                log(`✨ [Footprint] Aplicant auto-correcció d'offset: ${footprint.correction.toFixed(3)}s`);
-                tcRef.offset += footprint.correction;
-                await FASTPASS_UI.SessionManifest.save(ctx, {
-                    tcRef: tcRef,
-                    footprintVerification: footprint
-                });
-            }
-
-            // 3. Netejar marcadors i col·locar els nous basats en OnAir
-            await callJSX(`Markers.clear()`);
-
-            // Preparar cortes (inicios de clip) per a snapToCut
-            const cortes = clips.map(c => c.start);
-            let ultimoCorteUsado = -1;
-
-            // Funció local de snap adaptada per a placePrecisionMarkers
-            // Té tolerància més ajustada per a OnAir (0.5s = 12 frames a 25fps)
-            // i més ampla per a Prevista (2s)
-            const snapOnAir = (idealPos, esOnAir) => {
-                const tolerancia = esOnAir ? 0.5 : 2.0;
-                let millorCorte = idealPos;
-                let menorDistancia = Infinity;
-                for (let i = 0; i < cortes.length; i++) {
-                    const dist = Math.abs(cortes[i] - idealPos);
-                    if (dist < menorDistancia && dist <= tolerancia) {
-                        menorDistancia = dist;
-                        millorCorte = cortes[i];
-                    }
-                }
-                return millorCorte;
-            };
-
-            let count = 0;
-            for (const item of manifest.escaletaItems) {
-                let markerPos;
-                let esOnAir = false;
-
-                if (item.horaEntradaOnAir) {
-                    // Mode precís: TC OnAir real
-                    const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-                    markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
-                    esOnAir = true;
-                } else if (item.horaEntradaPrevista && tcRef.realStart !== undefined && tcRef.realStart !== null && tcRef.clipStart !== undefined && tcRef.clipStart !== null) {
-                    // Mode fallback: hora prevista, relativa a realStart
-                    // Quan un item NO té horaEntradaOnAir (ex: bloc V4 sense emissió real),
-                    // usem la hora prevista i calculem la posició relativa al timeline:
-                    //   markerPos = (previstSec - realStartSec) + clipStart
-                    // On:
-                    //   previstSec = segons absoluts de la hora prevista
-                    //   realStartSec = segons absoluts de l'inici real del bloc (tcRef.realStart)
-                    //   clipStart = posició del clip al timeline (post-inserció)
-                    const previstSec = reader.tcToSeconds(item.horaEntradaPrevista);
-                    markerPos = (previstSec - tcRef.realStart) + tcRef.clipStart;
-                    esOnAir = false;
-                } else {
-                    continue; // Sense cap referència temporal, saltem
-                }
-
-                if (markerPos < -0.1) continue; // Fora de seqüència (handles)
-
-                // ── Snap al frame de tall real ──
-                // El TC OnAir és precís en segons, però el timeline treballa en frames.
-                // snapOnAir busca el corte (inici de clip) més proper dins la tolerància
-                // i ajusta el marcador al frame exacte. Per OnAir la tolerància és mínima
-                // (0.5s = 12 frames) per no desviar-se del TC real. Per Prevista és més
-                // ampla (2s) perquè la dada és menys fiable.
-                const posFinal = snapOnAir(markerPos, esOnAir);
-                if (Math.abs(posFinal - markerPos) > 0.04) {
-                    log(`   📐 Snap frame: "${item.num}" ${posFinal.toFixed(2)}s (ideal ${markerPos.toFixed(2)}s, dif=${(posFinal - markerPos).toFixed(3)}s)`);
-                }
-
-                const label = `${item.num ? item.num + ' - ' : ''}${item.titol}`;
-                await callJSX(`Markers.set(${posFinal}, '${getUtils().escape(label)}')`);
-                count++;
-                if (!esOnAir) {
-                    log(`   📍 [FALLBACK] "${item.num}" sense OnAir → markerPos=${posFinal.toFixed(2)}s (previst=${item.horaEntradaPrevista}, realStart=${reader.secondsToTC(tcRef.realStart)})`);
-                }
-            }
-
-            // 4. Marcadors estructurals especials (IPD, tag +++)
-            for (const item of manifest.escaletaItems) {
-                if (item.titol && item.titol.includes("+++")) {
-                    let markerPos;
-                    let esOnAir = false;
-                    if (item.horaEntradaOnAir) {
-                        const onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-                        markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
-                        esOnAir = true;
-                    } else if (item.horaEntradaPrevista && tcRef.realStart !== undefined && tcRef.realStart !== null && tcRef.clipStart !== undefined && tcRef.clipStart !== null) {
-                        const previstSec = reader.tcToSeconds(item.horaEntradaPrevista);
-                        markerPos = (previstSec - tcRef.realStart) + tcRef.clipStart;
-                    } else {
-                        continue;
-                    }
-                    if (markerPos < 0) continue;
-                    const posFinal = snapOnAir(markerPos, esOnAir);
-                    await callJSX(`Markers.set(${posFinal}, 'IPD - ${getUtils().escape(item.titol)}')`);
-                }
-            }
-
-            await FASTPASS_UI.SessionManifest.save(ctx, { phases: { markersPlaced: true } });
-            log(`✅ [MARKERS] ${count} marcadors col·locats amb precisió OnAir.`);
-        },
-
-
 /**
  * Obtiene una estructura de bloques a partir de los marcadores presentes en la timeline.
  * Cada marcador debe tener un comentario con el formato "ID - TIPO" (p.ej. "11 - INTRO").
@@ -840,9 +2244,17 @@ _getStructureFromMarkers: async function () {
     // Ordenar por tiempo
     markers.sort((a, b) => a.time - b.time);
     const structure = [];
+    // Filtrar solo marcadores ESTRUCTURALES (color 1 o 6) para la
+    // referencia de bloques. Los marcadores gráficos (color 4) e IPD
+    // (color 7) NO representan bloques estructurales y deben ignorarse.
+    const STRUCTURAL_COLORS = new Set([1, 6]);
     for (let i = 0; i < markers.length; i++) {
         const m = markers[i];
-        const comment = m.comment || '';
+        const markerColor = m.color !== undefined ? m.color : -1;
+        if (markerColor >= 0 && !STRUCTURAL_COLORS.has(markerColor)) {
+            continue; // ignorar gráficos (4), IPDs (7), etc.
+        }
+        const comment = m.comments || '';
         // Extraer ID y tipo del comentario (formato "ID - TIPO")
         const parts = comment.split(' - ');
         const id = parts[0] || `M${i + 1}`;
@@ -854,670 +2266,8 @@ _getStructureFromMarkers: async function () {
             chyrons: [] // sin chyrons, se inferirán más adelante
         });
     }
-    log(`📊 Estructura generada a partir de ${structure.length} marcadors.`);
+    log(`📊 Estructura generada a partir de ${structure.length} marcadors estructurals (ignorats ${markers.length - structure.length} no estructurals).`);
     return structure;
-},
-
-/**
- * placeStructureMarkers: Col·loca els marcadors d'escaleta al timeline basant-se en el JSON literal.
- * Útil si el projecte ja existia o si l'usuari ha reajustat el vídeo i vol realinear les marques.
- */
-placeStructureMarkers: async function () {
-    if (!(await getUtils().validateActiveSequence())) return;
-    log("📍 Col·locant marcadors d'escaleta (Mode Guiat)...");
-
-    try {
-        const ctx = FASTPASS_UI.State;
-        // Si ctx.progData no existe, intentar obtenerlo de los selects
-        if (!ctx.progData) {
-            const config = FASTPASS_UI.Config.get();
-            const progSelect = document.getElementById('programa');
-            const blocSelect = document.getElementById('bloc');
-            if (progSelect && progSelect.value && config.mapeoProgramas) {
-                ctx.progData = config.mapeoProgramas[progSelect.value];
-                ctx.bloque = blocSelect ? blocSelect.value : 'V1';
-                log("⚠️ [RECUPERAT] progData recuperat des del select.");
-            } else {
-                log("⚠️ No es pot determinar el programa. Abortant.");
-                return;
-            }
-        }
-
-        const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-
-        // Buscar el JSON más reciente para el programa
-        const latest = await reader.findLatest(ctx.progData.archivo);
-        if (!latest) {
-            log("⚠️ No es troba la dades de la escaleta.", "ERROR");
-            return;
-        }
-
-        const data = await reader.load(latest.path);
-        if (!data) {
-            log("⚠️ No s'ha pogut carregar l'escaleta.", "ERROR");
-            return;
-        }
-        // Log de estructura JSON extraída
-        log(`📋 Estructura JSON: cleanFeed=${data.cleanFeed ? '✓' : '✗'}, linies=${data.escaleta?.liniesEscaleta?.length || 0}, bloc=${ctx.bloque}`);
-
-        let lines = reader.getLinesForBlock(data, ctx.bloque);
-        const block = reader.getBlock(data, ctx.bloque);
-
-        // Determinar el rango temporal basado en las líneas V1 (agrupacio coincidente)
-        if (lines.length > 0) {
-            const allLines = data.escaleta?.liniesEscaleta || [];
-            // Ordenar líneas V1 por hora
-            const sortedV1 = lines.slice().sort((a, b) => {
-                const horaA = a.horaEntradaOnAir || a.horaEntradaPrevista;
-                const horaB = b.horaEntradaOnAir || b.horaEntradaPrevista;
-                return reader.tcToSeconds(horaA) - reader.tcToSeconds(horaB);
-            });
-            const firstStartSec = reader.tcToSeconds(sortedV1[0].horaEntradaPrevista);
-            const lastEndSec = reader.tcToSeconds(sortedV1[sortedV1.length - 1].horaSortidaPrevista);
-
-            // Filtrar todas las líneas que estén dentro de ese rango, excluyendo líneas de otros bloques y las que empiezan justo en el límite superior
-            const blockLines = allLines.filter(line => {
-                const horaEntrada = line.horaEntradaOnAir || line.horaEntradaPrevista;
-                if (!horaEntrada || horaEntrada === "00:00:00") return false;
-                const entrySec = reader.tcToSeconds(horaEntrada);
-                // Excluir líneas que empiezan justo en el límite superior (pertenecen al siguiente bloque)
-                if (entrySec >= lastEndSec) {
-
-                    return false;
-                }
-                // Si la línea tiene agrupacio definido y no coincide con el bloque, excluir (es de otro bloque)
-                const ag = line.agrupacio;
-                if (ag !== null && ag !== undefined && ag.toString().trim() !== '') {
-                    // Comparar case-insensitive con el bloque
-                    if (ag.toString().toLowerCase() !== ctx.bloque.toLowerCase()) {
-
-                        return false;
-                    }
-                }
-                // Incluir solo líneas que estén dentro del rango (firstStartSec <= entrySec < lastEndSec)
-                if (entrySec >= firstStartSec) {
-
-                    return true;
-                } else {
-
-                    return false;
-                }
-            });
-
-            // Reemplazar lines con el bloque completo (ya incluye las líneas V1)
-            lines = blockLines;
-        }
-
-        // Ordenar línies per hora d'entrada
-        lines.sort((a, b) => {
-            const horaA = a.horaEntradaOnAir || a.horaEntradaPrevista;
-            const horaB = b.horaEntradaOnAir || b.horaEntradaPrevista;
-            return reader.tcToSeconds(horaA) - reader.tcToSeconds(horaB);
-        });
-        // Log de línies extretes (comentat per reduir ruido)
-        // log(`🔍 [DEBUG] Línies d'escaleta extretes (${lines.length}):`);
-        // lines.slice(0, 5).forEach((line, idx) => {
-        //     log(`   ${idx}: num=${line.num || ''} titol=${line.titol || ''} hora=${line.horaEntradaOnAir || line.horaEntradaPrevista || ''}`);
-        // });
-        // if (lines.length > 5) {
-        //     log(`   ... i ${lines.length - 5} més`);
-        // }
-        if (!block) {
-            log("⚠️ El bloc no es troba al JSON.", "ERROR");
-            return;
-        }
-
-        if (lines.length === 0) {
-            log("⚠️ El bloc no té línies d'escaleta definides.", "WARN");
-            return;
-        }
-
-        // Netejar marcadors previs
-        await callJSX("Markers.clear()");
-
-        // ── Carregar tcRef del manifest per a càlculs precisos ──
-        // En lloc d'usar calcClipBounds (mètode antic basat en block.in/block.out),
-        // carreguem el tcRef del manifest que conté els càlculs precisos de
-        // calcPrecisionTrimBounds (sistema de Tiers). Si no hi ha manifest,
-        // fem fallback a calcClipBounds.
-        const cleanFeed = reader.getCleanFeed(data);
-        const handles = ctx.config.handles || reader.HANDLE_SECS || 1;
-        let refInPoint, refOutPoint, refDuration;
-        let tcRefFromManifest = null;
-
-        try {
-            const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
-            if (manifest && manifest.tcRef && manifest.tcRef.inPoint !== undefined && manifest.tcRef.inPoint !== null) {
-                tcRefFromManifest = manifest.tcRef;
-                refInPoint = tcRefFromManifest.inPoint;
-                refOutPoint = tcRefFromManifest.realEnd
-                    ? (tcRefFromManifest.realEnd - reader.tcToSeconds(cleanFeed.mediaStart)) + handles
-                    : null;
-                refDuration = refOutPoint ? (refOutPoint - refInPoint) : null;
-                log(`📐 Usant tcRef del manifest: inPoint=${refInPoint.toFixed(2)}s (tier=${tcRefFromManifest.tierIn})`);
-            }
-        } catch (e) {
-            log(`⚠️ No s'ha pogut carregar manifest: ${e.message}. Usant calcClipBounds.`);
-        }
-
-        // Fallback si no tenim tcRef del manifest
-        if (refInPoint === undefined) {
-            const bounds = reader.calcClipBounds(cleanFeed.mediaStart, block.in, block.out, handles, cleanFeed.mediaStop);
-            refInPoint = bounds.inPoint;
-            refOutPoint = bounds.outPoint;
-            refDuration = bounds.duration;
-            log(`📐 Usant calcClipBounds (fallback): inPoint=${refInPoint.toFixed(2)}s`);
-        }
-
-        log(`📋 Línies d'escaleta trobades: ${lines.length}`);
-
-        // Encontrar el clip que coincide con el bloque (usando inPoint, outPoint, duración)
-        const clips = await getClipsLogic().getTrackClips(1, "video");
-        
-        // ─── ANÀLISI DE DENSITAT DE CORTES (CLIP-ESCALETA) ───
-        const windowSec = ctx.config.analysis?.windowSec || 30;
-        const threshold = ctx.config.analysis?.densityThreshold || 4;
-        const densityData = FASTPASS_UI.Logic.Assembly.calcDensityFootprint(clips, windowSec, threshold);
-        // ──────────────────────────────────────────────────────
-
-        let matchedClip = null;
-        if (clips.length > 0) {
-            // 1. Búsqueda por inPoint (tolerancia 5 segundos)
-            let minDiff = Infinity;
-            for (const clip of clips) {
-                const diff = Math.abs(clip.inPoint - refInPoint);
-                if (diff < minDiff && diff < 5) {
-                    minDiff = diff;
-                    matchedClip = clip;
-                }
-            }
-            // 2. Si no, búsqueda por outPoint
-            if (!matchedClip && refOutPoint !== null) {
-                minDiff = Infinity;
-                for (const clip of clips) {
-                    const diff = Math.abs(clip.outPoint - refOutPoint);
-                    if (diff < minDiff && diff < 5) {
-                        minDiff = diff;
-                        matchedClip = clip;
-                    }
-                }
-            }
-            // 3. Si no, búsqueda por duración (tolerancia 10 segundos)
-            if (!matchedClip && refDuration !== null) {
-                minDiff = Infinity;
-                for (const clip of clips) {
-                    const clipDuration = clip.outPoint - clip.inPoint;
-                    const diff = Math.abs(clipDuration - refDuration);
-                    if (diff < minDiff && diff < 10) {
-                        minDiff = diff;
-                        matchedClip = clip;
-                    }
-                }
-            }
-            // 4. Si aún no, tomar el clip con start más grande (supuestamente el último insertado)
-            if (!matchedClip) {
-                matchedClip = clips.reduce((latest, clip) => (clip.start > latest.start ? clip : latest), clips[0]);
-                log(`⚠️ No se encontró clip por coincidencia exacta, se usará el clip con start más grande (${matchedClip.start.toFixed(2)}s).`);
-            } else {
-                log(`📋 Clip del bloque encontrado: start=${matchedClip.start.toFixed(2)}s`);
-            }
-        }
-
-        // ── Recalcular offset si l'usuari ha trimat el clip ──
-        // Quan l'usuari trima el clip manualment abans de prémer "Estructura",
-        // el clipStart real canvia però l'offset original (calculat a la creació)
-        // queda desfasat. Aquí llegim la posició actual del clip i recalculem.
-        if (matchedClip && tcRefFromManifest) {
-            const currentClipStart = matchedClip.start;
-            const newOffset = currentClipStart - tcRefFromManifest.inPoint;
-            if (tcRefFromManifest.offset !== null && Math.abs(newOffset - tcRefFromManifest.offset) > 0.1) {
-                log(`📐 Offset recalculat per trim detectat: ${tcRefFromManifest.offset.toFixed(3)}s → ${newOffset.toFixed(3)}s (clipStart: ${tcRefFromManifest.clipStart?.toFixed(3) || '?'}s → ${currentClipStart.toFixed(3)}s)`);
-                tcRefFromManifest.offset = newOffset;
-                tcRefFromManifest.clipStart = currentClipStart;
-                await FASTPASS_UI.SessionManifest.save(ctx, { tcRef: tcRefFromManifest });
-            }
-        }
-
-        // Función auxiliar para convertir durada (formato "0:34" o "1:00" o "0:34:00") a segundos
-        const parseDurada = (str) => {
-            if (!str || str === "0:00") return 0;
-            const parts = str.split(':').map(Number);
-            if (parts.length === 2) { // minutos:segundos
-                return parts[0] * 60 + parts[1];
-            } else if (parts.length === 3) { // minutos:segundos:frames (asumir 25 fps)
-                return parts[0] * 60 + parts[1] + parts[2] / 25;
-            } else if (parts.length === 4) { // HH:MM:SS:FF
-                return parts[0] * 3600 + parts[1] * 60 + parts[2] + parts[3] / 25;
-            }
-            return 0;
-        };
-
-        // ============================================================
-        // Función auxiliar: obtener duración efectiva en segundos
-        // Prioriza duradaOnAir cuando durada es "0:00" o está vacío
-        // (porque algunos items tienen durada=0 pero duradaOnAir>0,
-        // como el item "01" que tiene durada "0:00" y duradaOnAir "0:33")
-        // ============================================================
-        const getEffectiveDuradaSec = (line) => {
-            const dStr = line.durada || '';
-            if (dStr === '' || dStr === '0:00') {
-                const onAir = line.duradaOnAir || '0:00';
-                return parseDurada(onAir);
-            }
-            return parseDurada(dStr);
-        };
-
-        // --- ALGORITMO DE SNAP A CORTES ---
-        // Clasificación de ítem según duración y agrupacio.
-        // Usa getEffectiveDuradaSec para consistencia con la separación
-        // en dos fases (estructurales vs gráficos).
-        const clasificarItem = (line) => {
-            const dSec = getEffectiveDuradaSec(line);
-            const num = (line.num || '').toLowerCase();
-            // Grafismo: agrupacio=null y duración 0
-            if (!line.agrupacio && dSec === 0) return 'GRAFISMO';
-            // No verticalizable: agrupacio=null y duración > 0 (ROJO)
-            if (!line.agrupacio && dSec > 0) return 'NO_VERTICALIZABLE';
-            // LEAD: puede ser de cualquier duración, clasificar como CORTO (minDur=0)
-            // para que snapToCut no exija una duración mínima de clip.
-            if (num.indexOf('lead') !== -1) return 'CORTO';
-            // CONNEX DIRECTE: clasificar como MEDIO aunque tenga duración larga en
-            // escaleta, porque en el timeline el clip de conexión es muy corto
-            // (se solapa con imágenes de recurso que lo tapan parcialmente)
-            if (num.indexOf('dir') !== -1) return 'MEDIO';
-            // DONAPAS: mismo tratamiento que CONNEX DIRECTE
-            if (num.indexOf('dp') !== -1) return 'MEDIO';
-            // Verticalizable: determinar categoría por duración
-            if (dSec >= 30) return 'LARGO';       // ≥30s: INTRO, DIFERIT
-            if (dSec >= 5) return 'MEDIO';        // ≥5s y <30s: INSERT, CONNEXIO, DONAPAS
-            return 'CORTO';                       // <5s: VIDEO, IPD
-        };
-
-        // Snap a corte según categoría
-        const snapToCut = (idealPos, categoria, cortes, clips, ultimoCorteUsado, densityData) => {
-            const tolerancias = { LARGO: 2.0, MEDIO: 2.0, CORTO: 1.0, GRAFISMO: 1.0, NO_VERTICALIZABLE: 2.0 };
-            const minDurs = { LARGO: 15, MEDIO: 5, CORTO: 0, GRAFISMO: 0, NO_VERTICALIZABLE: 0 };
-            const tolerancia = tolerancias[categoria] || 2.0;
-            const minDur = minDurs[categoria] || 0;
-
-            // Prioritat: Ruptures de patró detectades per anàlisi de densitat (F3B)
-            if (densityData && densityData.breaks) {
-                for (const brk of densityData.breaks) {
-                    if (Math.abs(brk.time - idealPos) <= tolerancia) {
-                        log(`   🎯 [SNAP-DENSITY] Ruptura detectada a ${brk.time.toFixed(2)}s (tolerància ${tolerancia}s)`);
-                        return { corte: brk.time, idx: brk.clipIdx };
-                    }
-                }
-            }
-
-            for (let i = ultimoCorteUsado + 1; i < cortes.length; i++) {
-                const corte = cortes[i];
-                if (corte >= idealPos - tolerancia) {
-                    const dur = clips[i].end - clips[i].start;
-                    // Si es clip muy corto (<1s) y no es GRAFISMO/CORTO, saltarlo
-                    if (dur < 1.0 && categoria !== 'GRAFISMO' && categoria !== 'CORTO') continue;
-                    if (dur >= minDur) {
-                        return { corte, idx: i };
-                    }
-                }
-            }
-            // Fallback: buscar el corte más cercano a idealPos que cumpla minDur
-            let mejorCorte = idealPos;
-            let mejorIdx = -1;
-            let menorDistancia = Infinity;
-            for (let i = ultimoCorteUsado + 1; i < cortes.length; i++) {
-                const dur = clips[i].end - clips[i].start;
-                // Saltar clips muy cortos (<1s) si no son GRAFISMO/CORTO
-                if (dur < 1.0 && categoria !== 'GRAFISMO' && categoria !== 'CORTO') continue;
-                if (dur < minDur) continue;
-                const dist = Math.abs(cortes[i] - idealPos);
-                if (dist < menorDistancia && dist <= 10.0) {
-                    menorDistancia = dist;
-                    mejorCorte = cortes[i];
-                    mejorIdx = i;
-                }
-            }
-            if (mejorIdx >= 0) {
-                return { corte: mejorCorte, idx: mejorIdx };
-            }
-            // No hay ningún corte válido cercano: respetar la posición ideal
-            return { corte: idealPos, idx: -1 };
-        };
-
-        // Preparar cortes (inicios de clip)
-        const cortes = clips.map(c => c.start);
-        let ultimoCorteUsado = -1;
-
-        const extractBlockId = (num) => {
-            if (!num) return '';
-            const match = num.match(/^(\d+)/);
-            return match ? match[1] : '';
-        };
-
-        // Acumular posiciones de marcadores colocados
-        const placedMarkers = [];
-        // Arrays separados para tracking de cada tipo de marcador
-        const placedGraphicMarkers = [];
-        const placedIpdMarkers = [];
-
-        // ============================================================
-        // Clasificar items en 3 grupos:
-        // - ESTRUCTURALES: durada > 0 (usando durada literal, NO duradaOnAir)
-        // - IPD: durada = 0 Y agrupacio != null (imágenes dentro de conexiones)
-        // - GRAFISMOS: durada = 0 Y agrupacio = null (elementos superpuestos)
-        // ============================================================
-        const getRawDuradaSec = (line) => parseDurada(line.durada || '0:00');
-
-        const structuralItems = [];
-        const ipdItems = [];
-        const graphicItems = [];
-        for (const line of lines) {
-            const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
-            if (!horaRef || horaRef === "00:00:00") continue;
-            const dSec = getRawDuradaSec(line);
-            if (dSec > 0) {
-                structuralItems.push(line);
-            } else if (line.agrupacio && line.duradaOnAir) {
-                ipdItems.push(line);
-            } else {
-                graphicItems.push(line);
-            }
-        }
-        log(`📋 Items: ${structuralItems.length} estructurals, ${ipdItems.length} IPDs, ${graphicItems.length} gràfics`);
-
-        // ============================================================
-        // FASE 1: Marcadores Estructurales (duración > 0)
-        // ============================================================
-        // Primer marcador forzado a 00:00 sin aplicar ninguna lógica.
-        // Siguientes: posición = posición_marker_anterior + duración_item_anterior
-        // A cada posición se le aplica snapToCut para encontrar el frame
-        // exacto de transición entre clips del timeline.
-        // ============================================================
-        let currentStructuralPos = 0; // acumulador aditivo para estructurales
-        const structuralItemPositions = []; // paralelo a structuralItems
-
-        for (const line of structuralItems) {
-            const dSec = getEffectiveDuradaSec(line);
-            const categoria = clasificarItem(line);
-
-            // Primer marcador: forzar 00:00
-            const posIdeal = (placedMarkers.length === 0) ? 0 : currentStructuralPos;
-
-            // Aplicar snap a cortes (SOLO para estructurales)
-            const resultado = snapToCut(posIdeal, categoria, cortes, clips, ultimoCorteUsado, densityData);
-            const posicionFinal = resultado.corte;
-            ultimoCorteUsado = resultado.idx;
-
-            const safeT = posicionFinal.toFixed(2);
-            const num = line.num || '';
-            const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
-            const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
-
-            log(`📍 [ESTRUCTURAL] ${num}: → timeline ${safeT}s (${categoria}, ideal ${posIdeal.toFixed(2)}s)`);
-
-            if (comment) {
-                // Color: AZUL (6) si tiene agrupacio, ROJO (1) si no tiene
-                const colorIdx = line.agrupacio ? 6 : 1;
-                const script = `Markers.set(${safeT}, '${comment}', 'color=${colorIdx}')`;
-                await callJSX(script);
-                placedMarkers.push(parseFloat(safeT));
-            }
-
-            // Guardar posición para que los gráficos puedan referenciarla
-            structuralItemPositions.push(posicionFinal);
-
-            // Avanzar posición acumulada para el siguiente estructural
-            // Usar la posición REAL (posicionFinal) como base, no la ideal acumulada
-            currentStructuralPos = posicionFinal + dSec;
-        }
-
-        // ============================================================
-        // RONDA 2: IPDs (items con duración 0 pero con agrupacio)
-        // Se colocan dentro del rango de su padre estructural (conexión).
-        // CON snapToCut porque producen cortes detectables en el timeline.
-        // NO alteran la posición aditiva de los estructurales.
-        // Color: TURQUESA (7)
-        // ============================================================
-
-        const findParentStructural = (line, allLines, structuralItems, structuralItemPositions) => {
-            const lineIdx = allLines.indexOf(line);
-            for (let i = lineIdx - 1; i >= 0; i--) {
-                const prevLine = allLines[i];
-                const prevIdx = structuralItems.indexOf(prevLine);
-                if (prevIdx >= 0) {
-                    const parentPos = structuralItemPositions[prevIdx];
-                    let limit;
-                    if (prevIdx + 1 < structuralItemPositions.length) {
-                        limit = structuralItemPositions[prevIdx + 1];
-                    } else {
-                        const parentDur = getEffectiveDuradaSec(structuralItems[prevIdx]);
-                        limit = parentPos + Math.max(parentDur, 4);
-                    }
-                    return { parentPos, limit, parentIdx: prevIdx };
-                }
-            }
-            return null;
-        };
-
-        for (const line of ipdItems) {
-            const parentInfo = findParentStructural(line, lines, structuralItems, structuralItemPositions);
-            if (!parentInfo) continue;
-
-            const { parentPos, limit } = parentInfo;
-
-            // Encontrar el índice del clip del padre para buscar el SIGUIENTE corte
-            // No usar ultimoCorteUsado global porque apunta al último estructural
-            // (que puede estar muy lejos), no al clip donde está el padre.
-            let parentCorteIdx = -1;
-            for (let i = 0; i < cortes.length; i++) {
-                if (cortes[i] >= parentPos) {
-                    parentCorteIdx = i;
-                    break;
-                }
-            }
-            if (parentCorteIdx < 0) parentCorteIdx = ultimoCorteUsado;
-
-            // Aplicar snapToCut desde el clip del padre
-            // snapToCut busca desde parentCorteIdx + 1, que es el SIGUIENTE clip
-            const resultado = snapToCut(parentPos, 'CORTO', cortes, clips, parentCorteIdx, densityData);
-            let posicionFinal = resultado.corte;
-            ultimoCorteUsado = resultado.idx;
-
-            // Limitar al rango del padre
-            posicionFinal = Math.min(posicionFinal, limit - 0.04);
-            posicionFinal = Math.max(posicionFinal, parentPos);
-
-            const safeT = posicionFinal.toFixed(2);
-            const num = line.num || '';
-            const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
-            const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
-
-            log(`📍 [IPD] ${num}: → timeline ${safeT}s (dins de item ${structuralItems[parentInfo.parentIdx].num})`);
-
-            if (comment) {
-                const script = `Markers.set(${safeT}, '${comment}', 'color=7')`; // TURQUESA
-                await callJSX(script);
-                placedMarkers.push(parseFloat(safeT));
-                placedIpdMarkers.push(parseFloat(safeT));
-            }
-        }
-
-
-        // ============================================================
-        // RONDA 3: GRAFISMOS (duración === 0)
-        // ============================================================
-        // Se colocan DENTRO de su item padre estructural, posicionados
-        // hacia el FINAL del rango del padre:
-        //   - Último grafismo a 4s del límite (inicio del siguiente estructural)
-        //   - Separados 4s entre sí (si el espacio lo permite)
-        //   - Margen de 1/3 al inicio del padre (sin grafismos en el primer tercio)
-        //   - Si no hay espacio suficiente, se comprime el spacing
-        // NO se aplica snapToCut.
-        // Color: AMARILLO (4)
-        // ============================================================
-
-        // 1. Agrupar grafismos por padre estructural
-        const grafismosByParent = new Map(); // parentStructuralIdx → [{line, comment}]
-
-        for (const line of graphicItems) {
-            const num = line.num || '';
-            const titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
-            const comment = `${num ? num + ' - ' : ''}${titol}`.trim();
-            if (!comment) continue;
-
-            // Encontrar el item padre estructural
-            const lineIdx = lines.indexOf(line);
-            let parentStructuralIdx = -1;
-            for (let i = lineIdx - 1; i >= 0; i--) {
-                const prevLine = lines[i];
-                const prevIdx = structuralItems.indexOf(prevLine);
-                if (prevIdx >= 0) {
-                    parentStructuralIdx = prevIdx;
-                    break;
-                }
-            }
-
-            // Si no hay padre, usar el primer estructural como fallback
-            if (parentStructuralIdx < 0 && structuralItemPositions.length > 0) {
-                parentStructuralIdx = 0;
-            }
-
-            if (parentStructuralIdx < 0) continue;
-
-            if (!grafismosByParent.has(parentStructuralIdx)) {
-                grafismosByParent.set(parentStructuralIdx, []);
-            }
-            grafismosByParent.get(parentStructuralIdx).push({ line, comment });
-        }
-
-        // 2. Para cada grupo de grafismos, calcular posiciones desde el final del rango
-        for (const [parentIdx, grafismos] of grafismosByParent) {
-            const parentPos = structuralItemPositions[parentIdx];
-            const count = grafismos.length;
-
-            // Calcular límite del rango
-            let limit;
-            if (parentIdx + 1 < structuralItemPositions.length) {
-                limit = structuralItemPositions[parentIdx + 1];
-            } else {
-                const parentDur = getEffectiveDuradaSec(structuralItems[parentIdx]);
-                limit = parentPos + Math.max(parentDur, 4);
-            }
-
-            const rangeTotal = limit - parentPos;
-
-            // Margen de 1/3 al inicio del padre (sin grafismos en este margen)
-            const marginStart = parentPos + rangeTotal / 3;
-
-            // Último grafismo a 4s del límite
-            const lastPos = limit - 4.0;
-
-            // Calcular spacing entre grafismos
-            const spanNeeded = 4.0 * Math.max(count - 1, 0);
-            const spanAvailable = lastPos - marginStart;
-
-            let spacing;
-            if (count <= 1) {
-                spacing = 0;
-            } else if (spanAvailable >= spanNeeded) {
-                spacing = 4.0; // Hay espacio suficiente
-            } else {
-                // No hay suficiente espacio: comprimir spacing
-                spacing = Math.max(spanAvailable / (count - 1), 0.04);
-            }
-
-            // Colocar cada grafismo respetando el orden original de la escaleta
-            // (k=0 → primer item de la escaleta → posición más cercana a marginStart)
-            // (k=count-1 → último item → posición más cercana a limit)
-            for (let k = 0; k < count; k++) {
-                const posDesdeFinal = lastPos - spacing * (count - 1 - k);
-                const posicionFinal = Math.max(marginStart + 0.04, posDesdeFinal);
-
-                const { line, comment } = grafismos[k];
-                const num = line.num || '';
-                const safeT = posicionFinal.toFixed(2);
-
-                log(`📍 [GRÀFIC] ${num}: → timeline ${safeT}s (dins de item ${structuralItems[parentIdx].num})`);
-
-                const script = `Markers.set(${safeT}, '${comment}', 'color=4')`;
-                await callJSX(script);
-                placedMarkers.push(parseFloat(safeT));
-                placedGraphicMarkers.push(parseFloat(safeT));
-            }
-        }
-
-        // Resumen de aplicación en timeline
-        if (placedMarkers.length > 0) {
-            placedMarkers.sort((a, b) => a - b);
-            const firstPos = placedMarkers[0];
-            const lastPos = placedMarkers[placedMarkers.length - 1];
-            log(`📍 Marcadors colocats: ${placedMarkers.length} (${formatTC(firstPos)} → ${formatTC(lastPos)})`);
-            const expectedFirst = 0;
-            const diff = Math.abs(firstPos - expectedFirst);
-            if (diff > 1.0) {
-                log(`   ⚠️ Desviación del primer marcador: ${diff.toFixed(2)}s (puede indicar offset incorrecto)`);
-            }
-        }
-
-        // ─── DELIMITADORS DE BLOC (Solució A + C Simplificada) ───
-        // Ja no usem marcadors taronja. Els punts In/Out de la seqüència són la veritat absoluta.
-        
-        // Si els punts de la seqüència estan a 0 o al final, la IA proposa els ideals
-        let blocIn = parseFloat(await callJSX("Timeline.getIn()"));
-        let blocOut = parseFloat(await callJSX("Timeline.getOut()"));
-        
-        if (blocIn === 0 && refInPoint !== undefined) blocIn = refInPoint;
-        if (blocOut === 0 && refOutPoint !== undefined) blocOut = refOutPoint;
-
-        // 1. Aplicar punts a la seqüència
-        await callJSX(`Timeline.range(${blocIn}, ${blocOut})`);
-
-        // 2. TRIM EFECTIU (F5): ESTRUCTURA ara talla els clips realment
-        const T_MP4 = ctx.config.tracks.video.mp4;
-        log(`✂️ [TRIM-ESTRUCTURA] Aplicant trim efectiu a IN:${blocIn.toFixed(2)}s, OUT:${blocOut.toFixed(2)}s`);
-        
-        const clipAtIn = await window.FASTPASS_UI.Logic.Clips.at(T_MP4, blocIn, "video");
-        if (clipAtIn) {
-            await window.FASTPASS_UI.Logic.Clips.rippleIn(T_MP4, clipAtIn.index, blocIn, clipAtIn);
-        }
-        await window.FASTPASS_UI.Logic.Clips.rippleOut(T_MP4, blocOut, 'video', false);
-
-        // 3. Dataset Builder: Registrem si hi ha hagut correcció respecte a la proposta IA (refInPoint)
-        if (refInPoint !== undefined && Math.abs(blocIn - refInPoint) > 0.05) {
-            this._logLearning(ctx, refInPoint, blocIn, refOutPoint, blocOut);
-        }
-
-        log("✅ Clips tallats i estructura a punt.");
-
-        // --- LISTADO DETALLADO DE MARCADORES ---
-        const markersRaw = await callJSX(`Markers.get()`);
-        if (markersRaw && markersRaw !== "[]") {
-            try {
-                const markersList = JSON.parse(markersRaw);
-                if (markersList.length > 0) {
-                    markersList.sort((a, b) => a.time - b.time);
-                    log(`📋 MARCADORS A TIMELINE (${markersList.length}):`);
-                    markersList.forEach((m, idx) => {
-                        const tc = formatTC(m.time);
-                        const name = m.name || '';
-                        const comment = m.comments || '';
-                        log(`   Marcador ${idx}: ${tc} | "${comment}" | nom="${name}"`);
-                    });
-                }
-            } catch (e) {
-                log(`   ⚠️ Error al parsear marcadors: ${e.message}`);
-            }
-        }
-
-        // Dump de tots els clips en V1 després de col·locar els marcadors
-        log(`📋 CLIPS EN V1 (${clips.length}):`);
-        clips.forEach((clip, idx) => {
-            log(`   Clip ${idx}: start=${clip.start.toFixed(2)}s | end=${clip.end.toFixed(2)}s | dur=${(clip.end - clip.start).toFixed(2)}s | inPoint=${clip.inPoint.toFixed(2)}s | outPoint=${clip.outPoint.toFixed(2)}s`);
-        });
-
-        getUtils().status("Marcadors OK", "exito");
-
-    } catch (e) { getUtils().handleError(e, "placeStructureMarkers"); }
 },
 
 /**
@@ -1637,78 +2387,6 @@ _logLearning: async function(ctx, aiIn, humanIn, aiOut, humanOut) {
     } catch(e) { console.log("Learning log error", e); }
 },
 
-/**
- * placeOnAirMarkers: Col·loca marcadors al timeline per a cada item d'escaleta
- * que tingui un temps OnAir real (horaEntradaOnAir). Utilitza el Manifest de Sessió
- * per obtenir el tcRef (offset, mediaStart) i convertir els TCs OnAir a posicions
- * de timeline. Serveix per a verificar visualment que els TCs OnAir coincideixen
- * amb els talls reals del vídeo.
- */
-placeOnAirMarkers: async function() {
-    if (!(await getUtils().validateActiveSequence())) return;
-    log("📍 [ONAIR] Iniciant col·locació de marcadors OnAir...");
-
-    try {
-        // 1. Carregar context i manifest
-        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
-        const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
-
-        if (!manifest.tcRef || manifest.tcRef.offset === null || !manifest.tcRef.mediaStart) {
-            log("⚠️ [ONAIR] Manifest sense tcRef complet. No es poden col·locar marcadors.");
-            getUtils().status("Sense dades OnAir", "error");
-            return;
-        }
-
-        const tcRef = manifest.tcRef;
-        const reader = window.EscaletaReader;
-        if (!reader) {
-            log("⚠️ [ONAIR] EscaletaReader no disponible.");
-            return;
-        }
-
-        // 2. Filtrar items que tinguin horaEntradaOnAir
-        const onAirItems = (manifest.escaletaItems || []).filter(function(item) {
-            return item.horaEntradaOnAir && item.horaEntradaOnAir !== "00:00:00";
-        });
-
-        if (onAirItems.length === 0) {
-            log("⚠️ [ONAIR] No hi ha items amb horaEntradaOnAir al manifest.");
-            getUtils().status("Sense items OnAir", "error");
-            return;
-        }
-
-        log(`📍 [ONAIR] ${onAirItems.length} items amb temps OnAir detectats.`);
-
-        // 3. Netejar marcadors previs i col·locar els nous
-        await callJSX("Markers.clear()");
-
-        var count = 0;
-        for (var i = 0; i < onAirItems.length; i++) {
-            var item = onAirItems[i];
-            // Calcular posició al timeline: (onAirSec - mediaStart) + offset
-            var onAirSec = reader.tcToSeconds(item.horaEntradaOnAir);
-            var markerPos = (onAirSec - tcRef.mediaStart) + tcRef.offset;
-
-            if (markerPos < -0.1) continue; // Fora de rang
-
-            var safeT = markerPos.toFixed(4);
-            var num = item.num || '';
-            var titol = (item.titol || '').replace(/'/g, "\\'").substring(0, 60);
-            var comment = (num ? num + ' - ' : '') + titol;
-
-            log(`📍 [ONAIR] "${comment}" → timeline ${safeT}s (OnAir: ${item.horaEntradaOnAir})`);
-
-            if (comment) {
-                await callJSX("Markers.set(" + safeT + ", '" + comment + "', 'color=6')");
-                count++;
-            }
-        }
-
-        log(`✅ [ONAIR] ${count} marcadors col·locats al timeline.`);
-        getUtils().status(count + " marcadors OnAir", "exito");
-
-    } catch (e) { getUtils().handleError(e, "placeOnAirMarkers"); }
-},
 
 /**
  * Solució C: Actualitza el punt d'entrada del bloc al cabezal actual (CTI).
@@ -1737,9 +2415,436 @@ updateBlocOutFromCTI: async function() {
         await callJSX(`Markers.set(${cti}, 'BLOC_OUT', 'color=3')`);
         getUtils().status("Out Bloc fixat", "exito");
     } catch (e) { getUtils().handleError(e, "updateBlocOut"); }
+},
+
+// ====================================================================
+// SISTEMA DE DEPURACIÓN Y ANÁLISIS DE MARCADORES (Fases 2-4: crudo, cocinado, usuario)
+// ====================================================================
+
+/**
+ * FASE 2a: Crudo (inout) — Lee el WorkArea del timeline y lo guarda en fase 'crudo'.
+ */
+runInOutCrudo: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [INOUT Crudo] Capturant WorkArea del timeline...");
+    try {
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const waIn  = parseFloat(await callJSX("Timeline.getWorkAreaIn()"));
+        const waOut = parseFloat(await callJSX("Timeline.getWorkAreaOut()"));
+        await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'crudo', {
+            workAreaIn: waIn,
+            workAreaOut: waOut,
+            capturedAt: new Date().toISOString()
+        });
+        getUtils().status("INOUT Crudo capturat", "exito");
+    } catch (e) { getUtils().handleError(e, "runInOutCrudo"); }
+},
+
+/**
+ * FASE 2b: Crudo (marks) — Marcadores en posición ideal (sin snapToCut).
+ * Cada marcador se coloca en posIdeal = posIdeal acumulada.
+ *
+ * CORRECCIÓN v2.9.6: Ahora carga el manifest para obtener offsetSec y worldSecMediaStart.
+ * Si existe offsetSec, se usa como posición base del primer marcador en lugar de forzar 0.
+ * Esto evita la discrepancia cuando el clip está desplazado en el timeline.
+ * NO se aplica applyGlobalOffsetSec porque offsetSec ya refleja la posición real del clip.
+ */
+placeRawMarkers: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [MARKS Crudos] Col·locant marcadors en posició ideal...");
+    try {
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+        if (!reader) { log("⚠️ EscaletaReader no disponible."); return; }
+
+        // Cargar escaleta
+        const latest = await reader.findLatest(ctx.progData.archivo);
+        if (!latest) { log("⚠️ No es troba l'escaleta."); return; }
+        const data = await reader.load(latest.path);
+        if (!data) { log("⚠️ No s'ha pogut carregar l'escaleta."); return; }
+
+        var lines = reader.getLinesForBlock(data, ctx.bloque);
+        if (!lines || lines.length === 0) { log("⚠️ El bloc no té línies."); return; }
+
+        // Ordenar por hora
+        lines.sort(function(a, b) {
+            var ha = a.horaEntradaOnAir || a.horaEntradaPrevista || '00:00:00';
+            var hb = b.horaEntradaOnAir || b.horaEntradaPrevista || '00:00:00';
+            return reader.tcToSeconds(ha) - reader.tcToSeconds(hb);
+        });
+
+        // ── Carregar manifest per obtenir refs estructurals ──
+        var manifest = null;
+        try {
+            manifest = await FASTPASS_UI.SessionManifest.load(ctx);
+        } catch (e) {
+            log(`⚠️ [MARKS Crudo] No s'ha pogut carregar manifest: ${e.message}`);
+        }
+
+        // ── Determinar blockInSec: TC del primer frame del clip al timeline ──
+        // Cercar el clip del cleanFeed que coincideix amb ctx.bloque
+        var blockInSec = null;
+        var clipsInfo = data.cleanFeed && data.cleanFeed.clips ? data.cleanFeed.clips : [];
+        for (var ci = 0; ci < clipsInfo.length; ci++) {
+            if (clipsInfo[ci].id === ctx.bloque && clipsInfo[ci].in) {
+                blockInSec = reader.tcToSeconds(clipsInfo[ci].in);
+                log(`📍 [MARKS Crudo] Clip "${ctx.bloque}" trobat: block.in=${clipsInfo[ci].in} → ${blockInSec.toFixed(2)}s, block.out=${clipsInfo[ci].out}`);
+                break;
+            }
+        }
+
+        // ── FIX (2026-05-26·HOMOGENEÏTZACIÓ): tlClipStartSec DINÀMIC ──
+        // Mateixa fórmula que _calcTemporalAnchors:
+        //   tlClipStartSec = (blockInSec - mediaStart) - tlBlockInPointSec
+        // on blockInSec prové de cleanFeed.clips[].in (l'àncora canònica).
+        var worldSecMediaStart = (manifest && manifest.ref) ? (manifest.ref.worldSecMediaStart || 0) : 0;
+        var tlBlockInPointSec = (manifest && manifest.ref) ? (manifest.ref.tlBlockInPointSec || 0) : 0;
+        var tlClipStartSec = (blockInSec !== null)
+            ? (blockInSec - worldSecMediaStart) - tlBlockInPointSec
+            : 0;
+        log(`📍 [MARKS Crudo] tlClipStartSec DINÀMIC: (${(blockInSec||0).toFixed(2)}s - ${worldSecMediaStart.toFixed(0)}s) - ${tlBlockInPointSec.toFixed(2)}s = ${tlClipStartSec.toFixed(3)}s`);
+
+        // ── LOG DE CLIPS DEL TIMELINE (per a diagnòstic) ──
+        try {
+            const tlClips = await getClipsLogic().getTrackClips(1, 'video');
+            log(`📍 [MARKS Crudo] ─── CLIPS EN V1 (${tlClips.length} clips) ───`);
+            for (var tc = 0; tc < tlClips.length; tc++) {
+                var c = tlClips[tc];
+                log(`📍 [MARKS Crudo]   Clip #${tc}: [${c.start.toFixed(2)}s → ${c.end.toFixed(2)}s] dur=${(c.end - c.start).toFixed(2)}s "${c.name || ''}"`);
+            }
+            log(`📍 [MARKS Crudo] ─── FI CLIPS ───`);
+        } catch (e2) {
+            log(`⚠️ [MARKS Crudo] No s'han pogut llegir els clips del timeline: ${e2.message}`);
+        }
+
+        // Determinar l'àncora de referència per al càlcul de posicions
+        // Prioritat: block.in del cleanFeed > primer OnAir de la llista > 0
+        var anchorOnAirSec = blockInSec;
+        if (anchorOnAirSec === null) {
+            // Fallback: primer OnAir disponible a les línies del bloc
+            for (var i = 0; i < lines.length; i++) {
+                var h = lines[i].horaEntradaOnAir || lines[i].horaEntradaPrevista;
+                if (h && h !== "00:00:00") {
+                    anchorOnAirSec = reader.tcToSeconds(h);
+                    break;
+                }
+            }
+            if (anchorOnAirSec === null) anchorOnAirSec = 0;
+            log(`📍 [MARKS Crudo] ⚠️ block.in no disponible. Usant primer OnAir del bloc com a àncora: ${anchorOnAirSec.toFixed(3)}s`);
+        } else {
+            log(`📍 [MARKS Crudo] Usant block.in del cleanFeed com a àncora: ${anchorOnAirSec.toFixed(3)}s`);
+        }
+
+        // Limpiar marcadores previos
+        await callJSX("Markers.clear()");
+
+        // Colocar marcadors en posició ideal (basada en OnAir, sense snap)
+        // Per a cada item de l'escaleta (estructural, IPD o grafisme), es col·loca
+        // un marcador si té una referència temporal (OnAir o Prevista).
+        // Color per tipus: 6=blau estructural, 7=turquesa IPD, 4=groc grafisme
+        var allLines = data.escaleta.liniesEscaleta || [];
+        var markersData = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            var itemOnAirSec = reader.getItemEntradaSec(line, allLines, data);
+            if (itemOnAirSec === null) continue; // Sense referència temporal
+
+            var dSec = reader.getItemDuradaSec(line);
+            var esEstructural = reader.isItemEstructural(line);
+            var esIPD = (!esEstructural && line.agrupacio && line.duradaOnAir);
+            var color = esEstructural ? 6 : (esIPD ? 7 : 4);
+            var categoria = esEstructural ? "ESTRUCTURAL" : (esIPD ? "IPD" : "GRAFISME");
+
+            // Posició al timeline: tlClipStartSec + desplaçament respecte a l'àncora
+            var posTimeline = tlClipStartSec + (itemOnAirSec - anchorOnAirSec);
+            var safeT = posTimeline.toFixed(2);
+            var num = line.num || '';
+            var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
+            var comment = (num ? num + ' - ' : '') + titol;
+
+            log("📍 [MARKS Crudo] " + num + ": → timeline " + safeT + "s (cat=" + categoria + ", tlClipStart=" + tlClipStartSec.toFixed(2) + "s, itemOnAir=" + itemOnAirSec.toFixed(2) + "s, anchorOnAir=" + anchorOnAirSec.toFixed(2) + "s)");
+
+            if (comment) {
+                await callJSX("Markers.set(" + safeT + ", '" + comment + "', 'color=" + color + "')");
+            }
+
+            markersData.push({
+                num: num,
+                titol: line.titol || '',
+                additPosSec: posTimeline,
+                posColocada: posTimeline,
+                categoria: categoria,
+                duradaSec: dSec,
+                baseOffsetSec: tlClipStartSec
+            });
+        }
+
+        // Guardar fase crudo (marks) — merge con inoutCrudo anterior
+        await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'crudo', {
+            markers: markersData,
+            baseOffsetSec: tlClipStartSec,
+            anchorOnAirSec: anchorOnAirSec,
+            capturedAt: new Date().toISOString()
+        });
+
+        getUtils().status(markersData.length + " MARKS Crudos (tlClipStart=" + tlClipStartSec.toFixed(2) + "s, anchorOnAir=" + anchorOnAirSec.toFixed(2) + "s)", "exito");
+    } catch (e) { getUtils().handleError(e, "placeRawMarkers"); }
+},
+
+/**
+ * Helper: snap al corte más cercano dentro de 2s de tolerancia.
+ */
+_snapSimple: function(pos, clipCuts) {
+    var best = pos;
+    var minD = Infinity;
+    for (var i = 0; i < clipCuts.length; i++) {
+        var d = Math.abs(clipCuts[i] - pos);
+        if (d < minD && d <= 2.0) { minD = d; best = clipCuts[i]; }
+    }
+    return best;
+},
+
+/**
+ * FASE 3a: Cocinado (inout) — WorkArea snapeado a corte real + sceneDetect.
+ * Coloca marcadores de validación a ±1s (color naranja).
+ */
+runInOutCocinado: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [INOUT Cocinado] Calculant WorkArea snapejat...");
+    try {
+        const clips  = await getClipsLogic().getTrackClips(1, 'video');
+        if (clips.length === 0) { log("⚠️ No hi ha clips a V1."); return; }
+        const clipCuts = clips.map(function(c) { return c.start; });
+
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const analysis = await FASTPASS_UI.Logic.Analysis._load(
+            FASTPASS_UI.Logic.Analysis._getPath(ctx)
+        );
+        const waCrudo = analysis.crudo || {};
+
+        const waInCrudo  = (waCrudo.workAreaIn !== undefined && waCrudo.workAreaIn !== null) ? waCrudo.workAreaIn : 0;
+        const waOutCrudo = (waCrudo.workAreaOut !== undefined && waCrudo.workAreaOut !== null) ? waCrudo.workAreaOut : (clips[clips.length - 1] ? clips[clips.length - 1].end : 0);
+
+        // Snap a corte más cercano
+        const snapIn  = this._snapSimple(waInCrudo, clipCuts);
+        const snapOut = this._snapSimple(waOutCrudo, clipCuts);
+
+        // Aplicar WorkArea en Premiere
+        await callJSX("Timeline.setWorkArea(" + snapIn + ", " + snapOut + ")");
+
+        // Colocar marcadores de validación a ±1s (color naranja = 3)
+        const validIn  = snapIn + 1.0;
+        const validOut = snapOut - 1.0;
+        await callJSX("Markers.set(" + validIn + ", 'VALID_IN', 'color=3')");
+        await callJSX("Markers.set(" + validOut + ", 'VALID_OUT', 'color=3')");
+
+        // Guardar sceneDetect + inout dins fase 'cocinado' (merge automàtic)
+        await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'cocinado', {
+            clipCuts: clipCuts,
+            totalClips: clips.length,
+            workAreaIn: snapIn,
+            workAreaOut: snapOut,
+            snapDeltaIn:  snapIn - waInCrudo,
+            snapDeltaOut: snapOut - waOutCrudo,
+            validInMarker: validIn,
+            validOutMarker: validOut,
+            capturedAt: new Date().toISOString()
+        });
+
+        getUtils().status("INOUT Cocinado OK", "exito");
+    } catch (e) { getUtils().handleError(e, "runInOutCocinado"); }
+},
+
+/**
+ * FASE 3b: Cocinado (marks) — col·loca les 3 fases de marcadors + captura deltaCrudo.
+ */
+placeCookedMarkers: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [MARKS Cocinado] Col·locant marcadors amb snap a cortes...");
+    try {
+        // Col·locar les 3 fases de marcadors estructurals
+        await this.placeOnAirMarkers();
+        await this.placeDeducedOnAirMarkers();
+        await this.placeScheduledMarkers();
+
+        // Ahora leer los marcadores del timeline para guardarlos como marksCocinado
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const analysis = await FASTPASS_UI.Logic.Analysis._load(
+            FASTPASS_UI.Logic.Analysis._getPath(ctx)
+        );
+        const marksCrudo = analysis.crudo || { markers: [] };
+
+        // Leer marcadores del timeline
+        const markersRaw = await callJSX("Markers.get()");
+        var timelineMarkers = [];
+        if (markersRaw && markersRaw !== "[]") {
+            try { timelineMarkers = JSON.parse(markersRaw); } catch (e) {}
+        }
+
+        // Mapear por num extraído del comentario
+        var crudoMap = {};
+        for (var i = 0; i < marksCrudo.markers.length; i++) {
+            var m = marksCrudo.markers[i];
+            crudoMap[m.num] = m;
+        }
+
+        var cookedMarkers = [];
+        for (var j = 0; j < timelineMarkers.length; j++) {
+            var tm = timelineMarkers[j];
+            var comment = tm.comments || tm.comment || '';
+            // Extraer num del comentario (formato "NN - TITOL")
+            var numMatch = comment.match(/^(\d+)/);
+            var num = numMatch ? numMatch[1] : '';
+            var titol = comment.replace(/^\d+\s*-\s*/, '').trim();
+            var crudoRef = crudoMap[num] || null;
+
+            cookedMarkers.push({
+                num: num,
+                titol: titol,
+                additPosSec: crudoRef ? crudoRef.additPosSec : tm.time,
+                posColocada: tm.time,
+                corteUsado: -1,
+                deltaCrudo: crudoRef ? (tm.time - crudoRef.additPosSec) : 0,
+                categoria: "ESTRUCTURAL",
+                snapApplied: crudoRef ? (Math.abs(tm.time - crudoRef.additPosSec) > 0.04) : false
+            });
+        }
+
+        // Guardar sceneDetect + marks dins fase 'cocinado' (merge automàtic)
+        {
+            const clips = await getClipsLogic().getTrackClips(1, 'video');
+            const clipCuts = clips.map(function(c) { return c.start; });
+            await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'cocinado', {
+                clipCuts: clipCuts,
+                totalClips: clips.length,
+                capturedAt: new Date().toISOString()
+            });
+        }
+
+        await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'cocinado', {
+            markers: cookedMarkers,
+            capturedAt: new Date().toISOString()
+        });
+
+        getUtils().status(cookedMarkers.length + " MARKS Cocinados", "exito");
+    } catch (e) { getUtils().handleError(e, "placeCookedMarkers"); }
+},
+
+/**
+ * FASE 4a: Usuario (inout) — Lee marcadores VALID_IN/VALID_OUT del timeline.
+ */
+capturaUsuarioInOut: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [CAPTURA IN/OUT] Llegint marcadors de validació...");
+    try {
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const analysis = await FASTPASS_UI.Logic.Analysis._load(
+            FASTPASS_UI.Logic.Analysis._getPath(ctx)
+        );
+        const inoutCocinado = analysis.cocinado || {};
+
+        // Leer todos los marcadores del timeline
+        const markersRaw = await callJSX("Markers.get()");
+        var markers = [];
+        if (markersRaw && markersRaw !== "[]") {
+            try { markers = JSON.parse(markersRaw); } catch (e) {}
+        }
+
+        var validInPos = null;
+        var validOutPos = null;
+        for (var i = 0; i < markers.length; i++) {
+            var m = markers[i];
+            var comment = (m.comments || m.comment || '').trim();
+            if (comment === 'VALID_IN') validInPos = m.time;
+            if (comment === 'VALID_OUT') validOutPos = m.time;
+        }
+
+        if (validInPos === null || validOutPos === null) {
+            log("⚠️ No s'han trobat els marcadors VALID_IN/VALID_OUT al timeline.");
+            getUtils().status("No hi ha marcadors de validació", "error");
+            return;
+        }
+
+        var deltaIn  = inoutCocinado.validInMarker !== undefined ? (validInPos - inoutCocinado.validInMarker) : 0;
+        var deltaOut = inoutCocinado.validOutMarker !== undefined ? (validOutPos - inoutCocinado.validOutMarker) : 0;
+
+        await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'usuario', {
+            validInMarker: validInPos,
+            validOutMarker: validOutPos,
+            deltaVsCocinado_in: deltaIn,
+            deltaVsCocinado_out: deltaOut,
+            capturedAt: new Date().toISOString()
+        });
+
+        getUtils().status("IN/OUT Usuari capturat", "exito");
+    } catch (e) { getUtils().handleError(e, "capturaUsuarioInOut"); }
+},
+
+/**
+ * FASE 4b: Usuario (marks) — Lee todos los marcadores del timeline.
+ */
+capturaUsuarioMarks: async function() {
+    if (!(await getUtils().validateActiveSequence())) return;
+    log("📍 [CAPTURA MARKS] Llegint marcadors del timeline...");
+    try {
+        const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+        const analysis = await FASTPASS_UI.Logic.Analysis._load(
+            FASTPASS_UI.Logic.Analysis._getPath(ctx)
+        );
+        const marksCrudo   = analysis.crudo   || { markers: [] };
+        const marksCocinado = analysis.cocinado || { markers: [] };
+
+        // Leer todos los marcadores del timeline
+        const markersRaw = await callJSX("Markers.get()");
+        var markers = [];
+        if (markersRaw && markersRaw !== "[]") {
+            try { markers = JSON.parse(markersRaw); } catch (e) {}
+        }
+
+        // Construir mapas de referencia
+        var crudoMap = {};
+        for (var i = 0; i < marksCrudo.markers.length; i++) {
+            var m = marksCrudo.markers[i];
+            crudoMap[m.num] = m;
+        }
+        var cocinadoMap = {};
+        for (var j = 0; j < marksCocinado.markers.length; j++) {
+            var m = marksCocinado.markers[j];
+            cocinadoMap[m.num] = m;
+        }
+
+        var userMarkers = [];
+        for (var k = 0; k < markers.length; k++) {
+            var tm = markers[k];
+            var comment = tm.comments || tm.comment || '';
+            // Saltar marcadores de validación
+            if (comment === 'VALID_IN' || comment === 'VALID_OUT') continue;
+            // Extraer num del comentario
+            var numMatch = comment.match(/^(\d+)/);
+            var num = numMatch ? numMatch[1] : '';
+            var titol = comment.replace(/^\d+\s*-\s*/, '').trim();
+
+            var crudoRef = crudoMap[num] || null;
+            var cocinadoRef = cocinadoMap[num] || null;
+
+            userMarkers.push({
+                num: num,
+                titol: titol,
+                posUsuario: tm.time,
+                deltaVsCocinado: cocinadoRef ? (tm.time - cocinadoRef.posColocada) : 0,
+                deltaVsCrudo: crudoRef ? (tm.time - crudoRef.additPosSec) : 0
+            });
+        }
+
+        await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'usuario', {
+            markers: userMarkers,
+            capturedAt: new Date().toISOString()
+        });
+
+        getUtils().status(userMarkers.length + " MARKS Usuari capturats", "exito");
+    } catch (e) { getUtils().handleError(e, "capturaUsuarioMarks"); }
 }
-    };
+};
 
 window.FASTPASS_UI.Workflows.Assembly = FASTPASS_UI.Workflows.Assembly;
 }) ();
-

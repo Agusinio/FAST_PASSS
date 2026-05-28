@@ -26,3 +26,10 @@ yarn-error.log*
 *.bak
 *.old
 FAST _PASSS_OLD/
+
+# macOS resource forks
+._*
+
+# Código obsoleto / archivos generados
+OLD_CODE/
+graphify-out/

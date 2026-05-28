@@ -32,10 +32,14 @@
             try {
                 const raw = await utils.callJSX(`IO.readTxt('${utils.escape(path)}')`);
                 if (raw && !raw.startsWith('ERR') && raw !== '') {
-                    return JSON.parse(raw);
+                    const parsed = JSON.parse(raw);
+                    const items = parsed.escaletaItems ? parsed.escaletaItems.length : 0;
+                    utils.log(`📂 [SessionManifest] Manifest carregat: ${items} items d'escaleta (${path.substring(Math.max(0, path.length - 60))})`, 'DEBUG');
+                    return parsed;
                 }
+                utils.log(`⚠️ [SessionManifest] Manifest buit o no trobat: ${path}`, 'DEBUG');
             } catch (e) {
-                // El fitxer probablement no existeix encara
+                utils.log(`⚠️ [SessionManifest] Error parsejant manifest: ${e.message} (${path})`, 'WARN');
             }
             return this._empty(ctx);
         },
@@ -49,14 +53,17 @@
             updated._lastUpdated = new Date().toISOString();
             
             const path = this.getPath(ctx);
-            const json = JSON.stringify(updated, null, 2);
+            const json = JSON.stringify(updated);
             const utils = window.FASTPASS_UI.Utils;
             
-            await utils.callJSX(`IO.writeTxt('${utils.escape(path)}', '${utils.escape(json)}')`);
+            const writeResult = await utils.callJSX(`IO.writeTxt('${utils.escape(path)}', '${utils.escape(json)}')`);
+            if (writeResult === '[]') {
+                utils.log(`❌ [SessionManifest] Error escrivint manifest a: ${path} (writeTxt ha fallat)`, 'ERROR');
+            }
             
             // Sincronització immediata amb l'estat global per a compatibilitat
-            if (updated.tcRef) {
-                window.FASTPASS_UI.State.tcRef = updated.tcRef;
+            if (updated.ref) {
+                window.FASTPASS_UI.State.ref = updated.ref;
             }
             if (updated.hierarchy) {
                 window.FASTPASS_UI.State.hierarchy = updated.hierarchy;
@@ -80,11 +87,13 @@
                 },
                 cleanFeed: {},
                 blockBounds: {},
-                tcRef: {
-                    mediaStart: null,
-                    inPoint:    null,
-                    clipStart:  null,
-                    offset:     null
+                ref: {
+                    worldSecMediaStart: null,
+                    mp4ExpandedInPoint: null,
+                    tlBlockInPointSec:  null,
+                    tlClipStartSec:     null,
+                    offsetSec:          null,
+                    blockInSec:         null
                 },
                 hierarchy: {}, // Fase 4: Mapa de lineID -> data
                 clips: [],

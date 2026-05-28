@@ -300,6 +300,221 @@
         },
 
         /**
+         * calcDensityFootprintV2: Detecció multi-senyal de ruptures de patró
+         * amb finestres adaptatives (10s), outliers de durada i gaps entre clips.
+         *
+         * Tres senyals complementàries (Fix 13):
+         *   A. Canvi de densitat HIGH↔LOW en finestres de 10s (pes: 0.4)
+         *   B. Outlier de durada de clip vs mediana de veïns ±3 (pes: 0.3)
+         *   C. Gap gran (>2s) entre clips consecutius (pes: 0.3)
+         *
+         * Les senyals es fusionen per confidence score. Només es reporten
+         * ruptures amb confidence >= 0.4 (almenys una senyal forta o dues dèbils).
+         *
+         * @param {Array}  clips              - Array de clips V1 {start, end}
+         * @param {number} [windowSec=10]     - Mida de finestra per densitat
+         * @param {number} [thresholdCutsPerMin=4] - Umbral HIGH vs LOW
+         * @returns {{ zones, breaks, totalDuration }}
+         */
+        calcDensityFootprintV2: function(clips, windowSec, thresholdCutsPerMin) {
+            windowSec = windowSec !== undefined ? windowSec : 10;
+            thresholdCutsPerMin = thresholdCutsPerMin !== undefined ? thresholdCutsPerMin : 4;
+
+            if (!clips || clips.length < 2) {
+                return { zones: [], breaks: [], totalDuration: 0 };
+            }
+
+            const totalDuration = clips[clips.length - 1].end - clips[0].start;
+            const timelineStart = clips[0].start;
+
+            // ─── SENYAL A: Finestres de densitat (10s) ───
+            const zones = [];
+            let windowStart = timelineStart;
+            while (windowStart < timelineStart + totalDuration) {
+                const windowEnd = windowStart + windowSec;
+                let cutsInWindow = 0;
+                for (const clip of clips) {
+                    if (clip.start > windowStart && clip.start < windowEnd) {
+                        cutsInWindow++;
+                    }
+                }
+                const cutsPerMin = (cutsInWindow / windowSec) * 60;
+                const type = cutsPerMin >= thresholdCutsPerMin ? 'HIGH' : 'LOW';
+                zones.push({
+                    start: windowStart,
+                    end: Math.min(windowEnd, timelineStart + totalDuration),
+                    cutsPerMin: parseFloat(cutsPerMin.toFixed(2)),
+                    type
+                });
+                windowStart = windowEnd;
+            }
+
+            // Detectar cambios de tipo entre ventanas consecutivas
+            const densityBreaks = [];
+            for (let i = 1; i < zones.length; i++) {
+                const prev = zones[i - 1];
+                const curr = zones[i];
+                if (prev.type !== curr.type) {
+                    const boundary = prev.end;
+                    let closestCut = boundary;
+                    let closestIdx = -1;
+                    let minDist = Infinity;
+                    for (let j = 0; j < clips.length; j++) {
+                        const dist = Math.abs(clips[j].start - boundary);
+                        if (dist < minDist && dist <= windowSec) {
+                            minDist = dist;
+                            closestCut = clips[j].start;
+                            closestIdx = j;
+                        }
+                    }
+                    densityBreaks.push({
+                        time: closestCut,
+                        fromType: prev.type,
+                        toType: curr.type,
+                        clipIdx: closestIdx,
+                        signal: 'DENSITY'
+                    });
+                }
+            }
+
+            // ─── SENYAL B: Outliers de durada de clip ───
+            const durationOutliers = [];
+            for (let i = 0; i < clips.length; i++) {
+                const dur = clips[i].end - clips[i].start;
+                if (dur < 1.0) continue;
+
+                // Mediana de duraciones en vecindario ±3
+                const neighborDurs = [];
+                for (let j = Math.max(0, i - 3); j <= Math.min(clips.length - 1, i + 3); j++) {
+                    if (j === i) continue;
+                    const nd = clips[j].end - clips[j].start;
+                    if (nd >= 1.0) neighborDurs.push(nd);
+                }
+                if (neighborDurs.length < 2) continue;
+
+                neighborDurs.sort(function(a, b) { return a - b; });
+                var mid = Math.floor(neighborDurs.length / 2);
+                const median = neighborDurs.length % 2 === 1
+                    ? neighborDurs[mid]
+                    : (neighborDurs[mid - 1] + neighborDurs[mid]) / 2;
+
+                if (median > 0) {
+                    const ratio = dur / median;
+                    if (ratio > 3.0 || ratio < 0.33) {
+                        durationOutliers.push({
+                            time: clips[i].start,
+                            clipIdx: i,
+                            dur: parseFloat(dur.toFixed(2)),
+                            median: parseFloat(median.toFixed(2)),
+                            ratio: parseFloat(ratio.toFixed(2)),
+                            signal: 'DURATION_OUTLIER'
+                        });
+                    }
+                }
+            }
+
+            // ─── SENYAL C: Gaps grans entre clips consecutius ───
+            const largeGaps = [];
+            for (let i = 1; i < clips.length; i++) {
+                const gap = clips[i].start - clips[i - 1].end;
+                if (gap > 2.0) {
+                    largeGaps.push({
+                        time: clips[i].start,
+                        clipIdx: i,
+                        gap: parseFloat(gap.toFixed(2)),
+                        signal: 'LARGE_GAP'
+                    });
+                }
+            }
+
+            // ─── SENYAL D: Detecció de parells DP+DIR (Fix 21) ───
+            // Identifica clips llargs consecutius (patró Donapas+Conexión Directe).
+            // Un parell DP+DIR són dos clips contigus amb durada > 8s cadascun,
+            // envoltats per clips curts (< 5s) a ambdós extrems.
+            // Aquests clips llargs tenen una densitat de talls molt baixa
+            // i són clarament diferenciables dels videos/offs curts.
+            const dpDirPairs = [];
+            for (let i = 0; i < clips.length - 1; i++) {
+                const durA = clips[i].end - clips[i].start;
+                const durB = clips[i + 1].end - clips[i + 1].start;
+                // Ambdós clips han de ser llargs (> 8s)
+                if (durA < 8.0 || durB < 8.0) continue;
+                // Verificar que estan envoltats per clips curts
+                var prevIsShort = (i === 0) || ((clips[i - 1].end - clips[i - 1].start) < 5.0);
+                var nextIsShort = (i + 2 >= clips.length) || ((clips[i + 2].end - clips[i + 2].start) < 5.0);
+                if (prevIsShort && nextIsShort) {
+                    dpDirPairs.push({
+                        clipIdxA: i,
+                        clipIdxB: i + 1,
+                        durA: parseFloat(durA.toFixed(2)),
+                        durB: parseFloat(durB.toFixed(2))
+                    });
+                }
+            }
+
+            if (dpDirPairs.length > 0) {
+                utils.log('🔗 [DP+DIR] ' + dpDirPairs.length + ' parells de clips llargs detectats:');
+                dpDirPairs.forEach(function(p) {
+                    utils.log('   🔗 clips #' + p.clipIdxA + ' (dur=' + p.durA + 's) + #' + p.clipIdxB + ' (dur=' + p.durB + 's)');
+                });
+            }
+
+            // ─── COMBINAR SENYALS: Fusionar per clipIdx ───
+            const allSignals = densityBreaks.concat(durationOutliers).concat(largeGaps);
+
+            const signalMap = new Map();
+            for (var s = 0; s < allSignals.length; s++) {
+                const sig = allSignals[s];
+                const key = sig.clipIdx >= 0 ? 'clip_' + sig.clipIdx : 'time_' + sig.time.toFixed(2);
+                if (!signalMap.has(key)) {
+                    signalMap.set(key, { time: sig.time, clipIdx: sig.clipIdx, signals: [], confidence: 0.0 });
+                }
+                const entry = signalMap.get(key);
+                entry.signals.push(sig.signal);
+                if (sig.signal === 'DENSITY') entry.confidence += 0.4;
+                else if (sig.signal === 'DURATION_OUTLIER') entry.confidence += 0.3;
+                else if (sig.signal === 'LARGE_GAP') entry.confidence += 0.3;
+                // Fix 21: Bonus DP+DIR — si el clipIdx pertany a un parell DP+DIR, +0.4 extra
+                if (sig.clipIdx >= 0) {
+                    for (var p = 0; p < dpDirPairs.length; p++) {
+                        if (sig.clipIdx === dpDirPairs[p].clipIdxA || sig.clipIdx === dpDirPairs[p].clipIdxB) {
+                            entry.confidence += 0.4;
+                            entry.dpDirBonus = true;
+                            break;
+                        }
+                    }
+                }
+                // Mantener el clipIdx más informativo
+                if (sig.clipIdx >= 0) entry.clipIdx = sig.clipIdx;
+            }
+
+            // Filtrar: solo breaks con confidence >= 0.4
+            const breaks = [];
+            signalMap.forEach(function(entry) {
+                if (entry.confidence >= 0.4) {
+                    breaks.push({
+                        time: entry.time,
+                        clipIdx: entry.clipIdx,
+                        signals: entry.signals,
+                        confidence: parseFloat(entry.confidence.toFixed(2)),
+                        dpDirPair: entry.dpDirBonus || false
+                    });
+                }
+            });
+
+            // Ordenar por tiempo
+            breaks.sort(function(a, b) { return a.time - b.time; });
+
+            utils.log('📊 [DensityFootprint v2] ' + zones.length + ' zones (window=' + windowSec + 's, llindar=' + thresholdCutsPerMin + ' talls/min), ' + breaks.length + ' ruptures multi-senyal, ' + dpDirPairs.length + ' parells DP+DIR');
+            breaks.forEach(function(b) {
+                var dpTag = b.dpDirPair ? ' [DP+DIR]' : '';
+                utils.log('   🔀 Ruptura a ' + b.time.toFixed(2) + 's (clip #' + b.clipIdx + '), confiança=' + b.confidence.toFixed(2) + ', senyals=[' + b.signals.join(', ') + ']' + dpTag);
+            });
+
+            return { zones: zones, breaks: breaks, dpDirPairs: dpDirPairs, totalDuration: totalDuration };
+        },
+
+        /**
          * _resolveTrackForWott: Determina la pista de video destí segons el rol del wott.
          *
          * Regles de routing (valors reals del Profile.json):

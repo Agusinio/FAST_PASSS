@@ -13,11 +13,30 @@
         <div class="section-container">
             <div class="section-label"><span>SETUP</span></div>
             <div class="section-content">
-                <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">
-                    <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
+                <div class="semaforo-strip">
+                    <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">
+                        <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
+                    </div>
+                    <div class="semaforo-item" title="Estat de l'Escaleta JSON (Servidor)">
+                        <div id="sem-esc" class="light off"></div>
+                        <span>ESC</span>
+                    </div>
+                    <div class="semaforo-item" title="MP4 CleanFeed al projecte/timeline">
+                        <div id="sem-mp4" class="light off"></div>
+                        <span>MP4</span>
+                    </div>
+                    <div class="semaforo-item" title="Rètols (Wotts) al Bin CHY">
+                        <div id="sem-wot" class="light off"></div>
+                        <span>WOT</span>
+                    </div>
+                    <div class="semaforo-item" title="Subtítols projectats al timeline">
+                        <div id="sem-srt" class="light off"></div>
+                        <span>SRT</span>
+                    </div>
                 </div>
                 <div class="setup-grid">
                     <div class="setup-inputs">
+                        
                         <div class="inline-input-group">
                             <label for="programa">PROG:</label>
                             <select id="programa"><option value="">Tria...</option></select>
@@ -37,24 +56,7 @@
                             <label for="conductor">COND:</label>
                             <select id="conductor"><option value="">Tria...</option></select>
                         </div>
-                        <div class="semaforo-strip">
-                            <div class="semaforo-item" title="Estat de l'Escaleta JSON (Servidor)">
-                                <div id="sem-esc" class="light off"></div>
-                                <span>ESC</span>
-                            </div>
-                            <div class="semaforo-item" title="MP4 CleanFeed al projecte/timeline">
-                                <div id="sem-mp4" class="light off"></div>
-                                <span>MP4</span>
-                            </div>
-                            <div class="semaforo-item" title="Rètols (Wotts) al Bin CHY">
-                                <div id="sem-wot" class="light off"></div>
-                                <span>WOT</span>
-                            </div>
-                            <div class="semaforo-item" title="Subtítols projectats al timeline">
-                                <div id="sem-srt" class="light off"></div>
-                                <span>SRT</span>
-                            </div>
-                        </div>
+                        
                     </div>
                     <div class="setup-button-container">
                         <button id="btnMainAction" class="btn-big-sq">NOU</button>
@@ -93,19 +95,25 @@
             <div class="section-label"><span>GRÀFICS</span></div>
             <div class="section-content">
                  <div class="graphics-strip">
-                    <button id="btnResetGrafs" class="secondary btn-sq-std reset-text" title="Limpiar Gráficos">RESET</button>
-                    
+                    <button id="btnMarksF1" class="secondary btn-sq-double-high">F1·OnAir</button>
+                    <button id="btnMarksF2" class="secondary btn-sq-double-high">F2·Deducido</button>
+                    <button id="btnMarksF3" class="secondary btn-sq-double-high">F3·Prevista</button>
+                    <button id="btnMarksF35" class="secondary btn-sq-double-high">F3.5·Correlation</button>
+                    <button id="btnMarksF4" class="secondary btn-sq-double-high">F4·DensitySnap</button>
+                    <button id="btnMarksF5" class="secondary btn-sq-double-high">F5·OrphanSnap</button>
+                    <button id="btnMarksF6" class="secondary btn-sq-double-high">F6·Gràfics</button>
                     <div class="retols-group">
-                        <button id="btnPlaceChyrons" class="secondary">RETOLS</button>
+                        <button id="btnPlaceChyrons" class="secondary btn-sq-double-high">CHYRONS</button>
                         <input type="text" id="txt-retol-part" placeholder="..." readonly>
                     </div>
-
-                    <button id="btnSetBlocIn" class="secondary btn-sq-std" title="Col·locar marcadors OnAir al timeline">OnAir</button>
+                    <!-- Botons ocults de moment:
+                    <button id="btnResetGrafs" class="secondary btn-sq-std reset-text" title="Limpiar Gráficos">RESET</button>
                     <button id="btnPlaceStructure" class="secondary">ESTRUCTURA</button>
                     <button id="btnSetBlocOut" class="secondary btn-sq-std" title="Fixar Out del Bloc al cabezal">O</button>
                     <button id="btnPlaceGrafic" class="secondary btn-sq-std">GRAFIC</button>
                     <button id="btnPlaceGraph169" class="secondary btn-sq-std">16:9</button>
                     <button id="btnBg" class="secondary btn-sq-std">FONS</button>
+                    -->
                  </div>
             </div>
         </div>
@@ -138,14 +146,15 @@
             <div class="section-label"><span>RENDER</span></div>
             <div class="section-content">
                 <div class="render-strip">
-                    <button id="btnRenderVideo" class="secondary btn-big-sq-full">VÍDEO</button>
-                    <button id="btnRenderPortada" class="secondary btn-big-sq-full">PORTADA</button>
-                    <button id="btnRenderClose" class="secondary btn-big-sq-full">TANCAR</button>
+                    <button id="btnRenderVideo" class="secondary btn-sq-double-high">VÍDEO</button>
+                    <button id="btnRenderPortada" class="secondary btn-sq-double-high">PORTADA</button>
+                    <button id="btnRenderClose" class="secondary btn-sq-double-high">TANCAR</button>
                 </div>
             </div>
         </div>
 
-    </div> 
+
+    </div>
 
     <!-- OVERLAY: SETUP -->
     <div id="setup-overlay">
@@ -156,7 +165,14 @@
     <!-- SCRIPTS -->
     <script src="js/lib/CSInterface.js"></script>
     <script src="js/core/utils.js"></script>
-    <script src="js/core/config.js"></script>
+    <script src="js/core/11_Configuracio.js"></script>
+    <!-- EscaletaReader: sub-mòduls en ordre de dependència -->
+    <script src="js/core/escaleta_timecode.js"></script>
+    <script src="js/core/escaleta_config.js"></script>
+    <script src="js/core/escaleta_io.js"></script>
+    <script src="js/core/escaleta_items.js"></script>
+    <script src="js/core/escaleta_bounds.js"></script>
+    <script src="js/core/escaleta_fallback.js"></script>
     <script src="js/core/escaleta_reader.js"></script>
     <script src="js/core/session_manifest.js"></script>
     <script src="js/core/state.js"></script>
@@ -174,6 +190,7 @@
     <script src="js/logic/13_Parse.js"></script>
     <script src="js/logic/14_Assembly_Logic.js"></script>
     <script src="js/logic/15_FFmpeg_Logic.js"></script>
+    <script src="js/logic/16_Analysis_Logic.js"></script>
     <script src="js/workflows/flow_mainButton.js"></script>
     <script src="js/workflows/flow_cut.js"></script>
     <script src="js/workflows/flow_retols.js"></script>

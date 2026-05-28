@@ -39,12 +39,15 @@
                 }
         
                 const config = FASTPASS_UI.Config.get();
+                // D7.2: Preservar State.dateDir si ja va ser corregit per _runNew().
+                // La data d'emissió de l'escaleta és la font única de veritat.
+                // Només s'usa getFormattedDate() com a fallback si State.dateDir no existeix.
+                const existingDateDir = (window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir);
                 const ctx = {
                     config: config,
                     progData: config.mapeoProgramas[elProg.value],
                     bloque: elBloc.value,
-                    // Usamos la fecha de la utilidad
-                    dateDir: getUtils().getFormattedDate().replace(/"/g, "").trim()
+                    dateDir: existingDateDir || getUtils().getFormattedDate().replace(/"/g, "").trim()
                 };
                 // Actualizar estado global
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
@@ -52,10 +55,10 @@
                 }
             
                 // 1. RUTA DE RECERCA
-                const folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
+                let folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
                 
                 // 2. ESCANEIG GENÈRIC (Usant Utils.readFolder a través de Scanner)
-                const projectFiles = await getUtils().readFolder(folderPath);
+                let projectFiles = await getUtils().readFolder(folderPath);
 
                 if (!projectFiles || projectFiles.length === 0) {
                     getUtils().log("ℹ️ Carpeta buida o inexistent. Conclusió: NEW", "DEBUG");
@@ -63,11 +66,89 @@
             
                 // 3. LÒGICA DE NEGOCI (Usant el teu Scanner.js)
                 const progKey = ctx.progData.archivo_wott || ctx.progData.archivo;
-                const existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
+                let existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
                     projectFiles,
                     progKey,
                     ctx.bloque
                 );
+
+                // ── FIX A1: Si no s'ha trobat projecte al dateDir actual, escanejar
+                // directoris germans (DD_MM_YYYY) sota progData.directorio. Això resol
+                // el cas on State.dateDir és del programa anterior o de la data del sistema,
+                // però el projecte real està en un altre directori de data.
+                if (!existingProjectName) {
+                    const parentPath = config.rutas.destinoBase + ctx.progData.directorio + "/";
+                    const dateDirs = await getUtils().readFolder(parentPath);
+                    if (dateDirs && dateDirs.length > 0) {
+                        // Filtrar només directoris amb format DD_MM_YYYY
+                        const datePattern = /^\d{2}_\d{2}_\d{4}$/;
+                        const candidateDirs = dateDirs
+                            .filter(function(d) { return datePattern.test(d.name); })
+                            .sort(function(a, b) { return new Date(b.mtime) - new Date(a.mtime); });
+                        
+                        getUtils().log("🔍 [checkContext] Escanejant " + candidateDirs.length + " directoris germans per trobar projecte " + progKey + "_" + ctx.bloque, "DEBUG");
+                        
+                        for (var di = 0; di < candidateDirs.length; di++) {
+                            // 🔒 FIX B1: Només acceptar directoris dins de la finestra temporal
+                            // (avui, o ahir si hora < 4 AM). Evita trobar projectes obsolets
+                            // de dies anteriors quan el dateDir actual està buit.
+                            if (!getUtils().isDateDirInTemporalWindow(candidateDirs[di].name)) {
+                                continue;
+                            }
+                            const candidatePath = parentPath + candidateDirs[di].name + "/";
+                            const candidateFiles = await getUtils().readFolder(candidatePath);
+                            if (candidateFiles && candidateFiles.length > 0) {
+                                const match = FASTPASS_UI.Logic.Scan.selectedProject(
+                                    candidateFiles, progKey, ctx.bloque
+                                );
+                                if (match) {
+                                    // Trobat! Actualitzar dateDir i reescanejar
+                                    const oldDateDir = ctx.dateDir;
+                                    ctx.dateDir = candidateDirs[di].name;
+                                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                                        window.FASTPASS_UI.State.dateDir = candidateDirs[di].name;
+                                    }
+                                    existingProjectName = match;
+                                    folderPath = candidatePath;
+                                    projectFiles = candidateFiles;
+                                    getUtils().log("✅ [checkContext] Projecte trobat a dir germà: " + candidateDirs[di].name + " (dateDir corregit des de " + oldDateDir + ")", "DEBUG");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // ── FIX A2: Si encara no s'ha trobat, intentar deduir dateDir des de
+                    // l'escaleta JSON (font única de veritat). Si l'escaleta té data d'emissió
+                    // diferent de la del sistema o State, es corregeix i es re-escaneja.
+                    if (!existingProjectName) {
+                        try {
+                            const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                            if (reader) {
+                                const escMeta = await reader.findLatest(ctx.progData.archivo);
+                                if (escMeta && escMeta.filename) {
+                                    const emissionDate = getUtils().extractDateFromEscaletaFilename(escMeta.filename);
+                                    if (emissionDate && emissionDate !== ctx.dateDir) {
+                                        const oldDateDir = ctx.dateDir;
+                                        ctx.dateDir = emissionDate;
+                                        if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                                            window.FASTPASS_UI.State.dateDir = emissionDate;
+                                        }
+                                        // Re-escanejar amb el dateDir corregit
+                                        folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
+                                        projectFiles = await getUtils().readFolder(folderPath);
+                                        existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
+                                            projectFiles, progKey, ctx.bloque
+                                        );
+                                        getUtils().log("📅 [checkContext] dateDir corregit des d'escaleta: " + oldDateDir + " → " + emissionDate + (existingProjectName ? " (projecte trobat!)" : " (sense projecte)"), "DEBUG");
+                                    }
+                                }
+                            }
+                        } catch (eDate) {
+                            getUtils().log("⚠️ [checkContext] Error deduint dateDir d'escaleta: " + eDate.message, "DEBUG");
+                        }
+                    }
+                }
             
                 let conclusion = 'NEW';
                 let lockOwner = null;
@@ -232,6 +313,18 @@
             
             } catch (e) {
                 getUtils().log("💥 Error checkContext: " + e.message, "ERROR");
+                // FIX A3: No mantenir 'NEW' per defecte en cas d'error.
+                // Un error de xarxa/permisos es pot interpretar erròniament com
+                // "carpeta buida". Forcem WAITING per evitar que l'usuari premi
+                // "NOU PROJECTE" i sobrescrigui un projecte existent.
+                this.updateButton('WAITING', {
+                    msg: "Error de xarxa o permisos. Reintentant...",
+                    config: {},
+                    progData: {},
+                    bloque: '---',
+                    dateDir: '',
+                    name: 'ERROR'
+                });
             }
         },
 
