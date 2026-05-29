@@ -29,8 +29,8 @@ FAST _PASSS_OLD/
 # macOS resource forks
 ._*
 
-# Código obsoleto / archivos generados
-OLD_CODE/
+# Archivos generados / caché
+graphify-out/
 
 # Archivos temporales Roo Code
 .roo/progress/*.md
