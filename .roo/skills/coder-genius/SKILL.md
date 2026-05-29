@@ -42,7 +42,7 @@ You must strictly adhere to the project's layered architecture:
 
 ### Formateo de JSON (`bin/fmt-json.ps1`)
 
-Cuando se necesite formatear archivos JSON de escaletas (e.g., `P:\VERTICALITZACIO_INFORMATIUS\ESCALETES\TN_*.json`) para inspección visual, usar el script PowerShell:
+Cuando se necesite formatear archivos JSON de escaletas (e.g., `\\public.ad-ccrtv.local\Public\VERTICALITZACIO_INFORMATIUS\ESCALETES\TN_*.json`) para inspección visual, usar el script PowerShell:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File "bin\fmt-json.ps1" -FilePath "ruta\al\archivo.json"
@@ -56,13 +56,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "bin\fmt-json.ps1" -FilePath
 
 **Precaución:** El script reescribe el archivo in-place. Si se necesita preservar el original, hacer copia previa.
 
-Para formatear múltiples archivos a la vez:
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "
- & 'bin\fmt-json.ps1' 'P:\...\archivo1.json'
- & 'bin\fmt-json.ps1' 'P:\...\archivo2.json'
-"
-```
+Para formateo diario por lotes, usar [`check_and_fmt.ps1`](bin/check_and_fmt.ps1) (ver skill [`fmt-escaletes`](.roo/skills/fmt-escaletes/SKILL.md)).
 
 ## � CODING STYLE
 
@@ -73,32 +67,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "
 
 ### 🐙 Git Portable
 
-El proyecto usa Git portable ubicado en `E:\PortableGit`. Para **commits acumulativos**, usar siempre la ruta completa al binario:
+El proyecto usa Git portable ubicado en `E:\PortableGit`. Para el flujo completo de trabajo Git (commits, push, convenciones), consultar la skill dedicada: [`git`](.roo/skills/git/SKILL.md).
 
-```
-"E:\PortableGit\bin\git.exe" <comando>
-```
+**Comandos rápidos:**
 
-**Credenciales (ya configuradas en el repo local)**:
-- `user.name`: `Agusinio`
-- `user.email`: `agonzalez.x@gmail.com`
-
-**Flujo típico de commit**:
 ```cmd
-"E:\PortableGit\bin\git.exe" add -A
-"E:\PortableGit\bin\git.exe" commit -m "BUGs #X-#Y: descripcion del cambio"
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" status
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" add -A
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" commit -m "mensaje"
 ```
 
-**Repo remoto** (cuando se configure):
-```cmd
-"E:\PortableGit\bin\git.exe" remote add origin https://github.com/Agusinio/FAST_PASSS.git
-"E:\PortableGit\bin\git.exe" push -u origin main
-```
-
-**Precaución**: `.gitignore` ya excluye `._*` (resource forks de macOS), `OLD_CODE/` y `graphify-out/`. No commitear archivos `._*` — si aparecen en `git status`, limpiarlos con:
-```powershell
-Remove-Item -Path '.\.git\objects\pack\._*' -Force
-```
+**⚠️ No commitear sin que el usuario haya testeado en Premiere.**
 
 ---
 © 2026 FAST >>> PASS | Assistant Skill v2.11.0

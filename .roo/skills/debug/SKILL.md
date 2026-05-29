@@ -1,0 +1,158 @@
+---
+name: debug
+description: Estrategias de diagnóstico, logging táctico e interpretación de session_manifest para debugging de FAST >>> PASS.
+modeSlugs:
+  - debug
+  - code
+---
+
+# 🪲 Debug — Estrategias de Diagnóstico
+
+Skill para diagnosticar bugs en la extensión **FAST >>> PASS** usando herramientas de logging, análisis de manifiesto y trazado de flujos.
+
+---
+
+## 🔍 Flujo de Diagnóstico Estándar
+
+```
+1. REPRODUCIR → 2. CAPTURAR → 3. ANALIZAR → 4. DIAGNOSTICAR → 5. FIX
+     │               │              │              │               │
+  El usuario    Activar       Leer logs      Identificar    Implementar
+  describe      logging       session_       causa raíz     en Code
+  el bug        táctico       manifest                     (Architect
+                                                           primero)
+```
+
+---
+
+## 📊 Estructura de `session_manifest`
+
+El manifiesto de sesión se genera en `flow_mainButton.js` y registra cada fase del assembly. Se guarda en:
+
+```
+\\public.ad-ccrtv.local\Public\VERTICALITZACIO_INFORMATIUS\[FECHA]\session_manifest.json
+```
+
+### Campos clave para debugging
+
+| Campo | Ruta | Qué indica |
+|-------|------|------------|
+| `ref.program` | `manifest.ref.program` | Programa (TNC, TNM, TNV) |
+| `ref.block` | `manifest.ref.block` | Bloque (V1-V5) |
+| `ref.dateDir` | `manifest.ref.dateDir` | Ruta UNC del directorio de fecha |
+| `escaletaItems[]` | `manifest.escaletaItems` | Items procesados de la escaleta |
+| `escaletaItems[].id` | — | Identificador de línea (ej: `TNC_V1_05`) |
+| `escaletaItems[].onAir` | — | `horaEntradaOnAir` y `horaSalidaOnAir` |
+| `escaletaItems[].agrupacio` | — | `"v1"`, `"v2"` o `null` |
+| `escaletaItems[].duradaSegons` | — | Duración en segundos |
+| `phases[]` | `manifest.phases` | Fases del assembly (crudo, cocinado, usuario) |
+| `phases[].markers[]` | — | Marcadores con `prefix`, `timeSec`, `comment` |
+| `precisionTiers` | `cleanFeedData.precisionTiers` | Cálculos de IN/OUT por tier |
+
+### Cómo leerlo
+
+```javascript
+// Abrir en VSCode y buscar por prefijo de marcador:
+// "F1" → marcadores estructurales
+// "F2" → marcadores IPD (identidad-previsión-durada)
+// "F3" → marcadores de grafismo (3.5, 4, 5)
+// "F6" → marcadores de usuario
+```
+
+---
+
+## 🎯 Logging Táctico
+
+### Dónde añadir logs
+
+El logger del proyecto está en [`js/core/logger.js`](js/core/logger.js). Para debugging puntual, añadir `FASTPASS_UI.log()` en el scope adecuado:
+
+```javascript
+// En flow_assembly.js (Workflow layer)
+FASTPASS_UI.log("[DEBUG] flow_assembly:_placeMp4Block → block=" + blockIdx + " agrupacio=" + agrup, "high");
+
+// En escaleta_bounds.js (Core layer)  
+log("[DEBUG] calcPrecisionTrimBounds → prevVideoData.endSec=" + prevVideoData.endSec + " agrupacio=" + blockAgrupacio_IN);
+```
+
+### Niveles de log
+
+| Nivel | Uso |
+|-------|-----|
+| `"high"` | Siempre visible. Para diagnósticos críticos. |
+| `"normal"` | Visible por defecto. Para trazado de flujo. |
+| `"low"` | Solo visible en modo verbose. Detalles finos. |
+
+### Puntos calientes para logging
+
+| Archivo | Función | Qué loguear |
+|---------|---------|-------------|
+| [`flow_assembly.js`](js/workflows/flow_assembly.js) | `_placeMp4Block` | `blockIdx`, `agrupacio`, `trimIn`, `trimOut` |
+| [`escaleta_bounds.js`](js/core/escaleta_bounds.js) | `calcPrecisionTrimBounds` | `Tier0-IN`, `Tier1-IN`, `Tier2-OUT` valores |
+| [`escaleta_items.js`](js/core/escaleta_items.js) | `_deduceOnAirEntrada` | `prevItem.agrupacio`, `item.agrupacio`, `accumulated` |
+| [`flow_assembly.js`](js/workflows/flow_assembly.js) | `_placeMagicChyrons` | `clipIndex`, `time`, `prefix`, `comment` |
+
+---
+
+## 🧪 Patrones Comunes de Bugs
+
+### Bug: MP4 IN incorrecto (cross-agrupacio)
+
+**Síntoma:** El IN del MP4 de un bloque toma el final del vídeo de otro bloque (diferente agrupacio).
+
+**Diagnóstico:**
+1. Abrir `session_manifest.json` → `escaletaItems`
+2. Buscar items del bloque afectado por `agrupacio`
+3. Verificar `precisionTiers.Tier0-IN` — si apunta a un `prevVideoItem.endSec` de otra agrupacio → bug en `calcPrecisionTrimBounds`
+4. Verificar `precisionTiers.Tier1-IN` — si `_deduceOnAirEntrada` acumula duraciones de otra agrupacio → bug en `escaleta_items.js`
+
+**Fix típico:** Añadir filtro `if (item.agrupacio && prevItem.agrupacio !== item.agrupacio) continue;`
+
+### Bug: Marcador F2·Deducido mal colocado
+
+**Síntoma:** "02i" (primer ítem con intro) no está a 00:00.
+
+**Diagnóstico:**
+1. En `session_manifest` → `phases[0].markers` (crudo)
+2. Buscar `prefix: "F2"` con `comment` que contenga "Deducido"
+3. Verificar `timeSec` — si > 0 para el primer ítem → bug en `_placeIpdChyrons`
+4. Causa: `idealPosSec` no se fuerza a 0 cuando `deduced ≈ anchorEfectiva`
+
+**Fix típico:** `if (Math.abs(deduced - anchorEfectiva) < 0.01) idealPosSec = 0;`
+
+### Bug: Marcadores F3.5/F4/F5 color incorrecto
+
+**Síntoma:** Marcadores de grafismo aparecen verdes en vez de su color asignado.
+
+**Diagnóstico:**
+1. Marcadores legacy tienen `.color = -1` → `cmk.color >= 0` falla
+2. `_setMarkerColor` no se llama → el marcador queda con color por defecto (verde = 0)
+
+**Fix típico:** Usar `_getColorIdx` como fallback cuando `cmk.color < 0`.
+
+---
+
+## 📁 Archivos de Diagnóstico
+
+| Archivo | Propósito |
+|---------|-----------|
+| [`docs/debug/DERIVA_INGESTA_23FRAMES.md`](docs/debug/DERIVA_INGESTA_23FRAMES.md) | Análisis de deriva de frames en ingesta |
+| [`docs/debug/FLASH_WHITE_CLEANUP_PROBLEM.md`](docs/debug/FLASH_WHITE_CLEANUP_PROBLEM.md) | Problema de limpieza de flash blanco |
+| [`docs/debug/Informe Tecnico.md`](docs/debug/Informe Tecnico.md) | Informe técnico general |
+| [`docs/debug/INFORME_REVISION_CODIGO.md`](docs/debug/INFORME_REVISION_CODIGO.md) | Revisión de calidad de código |
+
+---
+
+## 🔄 Integración con el Flujo Multi-Agente
+
+1. **Usuario reporta bug** → Orchestrator asigna a Debug
+2. **Debugger diagnostica** → Lee `session_manifest`, añade logs, reproduce
+3. **Debugger documenta** → Escribe hallazgos en `docs/debug/`
+4. **Debugger pasa a Architect** → Con causa raíz identificada
+5. **Architect diseña fix** → Plan en `docs/plans/`
+6. **Coder implementa** → Siguiendo `coder-genius` skill
+7. **Debugger verifica** → Confirma que el fix funciona
+
+---
+
+© 2026 FAST >>> PASS | debug Skill v1.0.0

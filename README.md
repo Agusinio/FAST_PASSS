@@ -13,35 +13,46 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 
 ---
 
-## 🗂️ Estructura del projecte (organització actual)
+## 🗂️ Estructura del projecte
 
 ### **Arrel del projecte** – Informació essencial i punt d'entrada
 
 | Fitxer/Directori | Propòsit |
 |------------------|----------|
 | `README.md` | Aquest fitxer. Guia d'inici i visió general. |
-| `ARCHITECTURE_MAP.md` | Mapa d'arquitectura de 5 capes (v2.6.0). |
-| `OPERATIVE_FLOW.md` | Flux operatiu detallat de totes les fases. |
 | `index.html` | Interfície principal del panell (UI). |
-| `setup.html` | Pàgina de configuració. |
-| `style.css` | Estils CSS de la interfície. |
-| `package.json` | Configuració del projecte (dependències). |
-| `CSXS/` | Configuració de l'extensió CEP (manifest). |
-| `js/` | **Codi JavaScript** (lògica d'orquestració). |
-| `jsx/` | **Codi ExtendScript** (mòduls atòmics per a Premiere). |
+| `Profile.json` | Configuració de perfils (programes, tracks, rutas). |
+| `package.json` | Configuració del projecte (dependències CEP). |
+| `CSXS/` | Configuració de l'extensió CEP (`manifest.xml`). |
+| `js/` | **Codi JavaScript** — cervell de l'extensió. |
+| `jsx/` | **Codi ExtendScript** — múscul atòmic per Premiere. |
+| `bin/` | Scripts PowerShell d'automatització i anàlisi. |
+| `presets/` | Presets d'exportació (`.epr`). |
 
-### **Carpetes de documentació i desenvolupament** – Contingut tècnic i d'ajuda
+### **Documentació** — `docs/`
 
 | Carpeta | Contingut |
 |---------|-----------|
-| `docs/` | Documentació general del projecte. |
-| `docs/audits/` | Auditories tècniques (versions anteriors). |
-| `docs/INFO/` | Informació auxiliar, guies, workflows, etc. |
-| `.dev/` | Fitxers de desenvolupament i configuració interna. |
-| `.roo/` | Configuració de l'eina Roo (skill coder‑genius). |
-| `.vscode/` | Configuració de Visual Studio Code. |
+| `docs/guides/` | Guies: arquitectura, usuari, botonera, desenvolupament, Git. |
+| `docs/specs/` | Especificacions tècniques: escaleta JSON, markers, NNEWS, classificació. |
+| `docs/audits/` | Auditories tècniques històriques (v2.4.2 → v2.9.5). |
+| `docs/plans/` | Plans d'implementació actius i completats (`done/`). |
+| `docs/debug/` | Informes de debugging i diagnòstic. |
+| `docs/reference/` | Material de referència: keyframes, temps onAir. |
+| `docs/archive/` | Codi obsolet, estructures històriques. |
+| `docs/SAMPLES/` | Mostres de codi SDK oficial, snippets, fitxers NNEWS. |
 
-### **Codi font** – Organització per capes
+### **Centre de control** — `.roo/`
+
+| Fitxer | Propòsit |
+|--------|----------|
+| `.roo/agents.md` | Arquitectura multi-agent i punt d'entrada. |
+| `.roo/features.json` | Catàleg de features i bugs (registre viu). |
+| `.roo/init.ps1` | Script de validació d'entorn de desenvolupament. |
+| `.roo/progress/` | Tracking de sessions de treball. |
+| `.roo/skills/` | Skills especialitzades (coder-genius, fmt-escaletes, powershell, debug, git). |
+
+### **Codi font** – Organització per capes (5 Tiers)
 
 | Capa | Directori | Responsabilitat |
 |------|-----------|-----------------|
@@ -57,8 +68,9 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 
 ### 1. **Requisits**
 - Adobe Premiere Pro (versió compatible amb CEP).
-- Extensió instal·lada i activada (veure `CSXS/manifest.xml`).
+- Extensió instal·lada i activada (veure [`CSXS/manifest.xml`](CSXS/manifest.xml)).
 - Accés al NAS amb l'estructura esperada de fitxers.
+- Git portable a `E:\PortableGit` (per desenvolupament).
 
 ### 2. **Execució**
 1. Obre Premiere Pro.
@@ -67,32 +79,37 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 4. El botó principal canviarà segons l'estat del projecte (**NOU**, **OBRIR**, **ANAR‑HI**, **ACTUALITZAR**).
 
 ### 3. **Documentació clau**
-- [🗺️ Mapa d'arquitectura](ARCHITECTURE_MAP.md) – Visió de les 5 capes.
-- [⚙️ Flux operatiu](OPERATIVE_FLOW.md) – Detall de cada fase.
-- [📚 Documentació tècnica](docs/) – Auditories, informes, guies.
+- [🗺️ Mapa d'arquitectura](docs/guides/ARCHITECTURE_MAP.md) — Visió de les 5 capes.
+- [⚙️ Flux operatiu](docs/guides/OPERATIVE_FLOW.md) — Detall de cada fase.
+- [📖 Guia d'usuari](docs/guides/USER_GUIDE.md) — Manual d'ús del panell.
+- [🕹️ Guia de botonera](docs/guides/GUIA_BOTONERA.md) — Funcionalitats de cada botó.
+- [🛠️ Guia de desenvolupament](docs/guides/DEVELOPMENT.md) — Convencions i flux de treball.
+- [ Documentació tècnica](docs/) — Auditories, especificacions, plans.
 
 ### 4. **Desenvolupament**
-- Els fitxers de configuració i tasques pendents es troben a `.dev/`.
-- La carpeta `docs/INFO/` conté guies específiques (GIT, botonera, inici ràpid).
-- Utilitza `npm test` (si s'afegeixen tests) per validar canvis.
+- El centre de control multi-agent és a [`.roo/`](.roo/) — consulta [`agents.md`](.roo/agents.md).
+- Les skills especialitzades són a [`.roo/skills/`](.roo/skills/).
+- Scripts d'automatització a [`bin/`](bin/).
+- Valida l'entorn amb: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\.roo\init.ps1"`
 
 ---
 
 ## 🔧 Manteniment i actualitzacions
 
 - **Versió actual:** 2.9.5 (TACTICAL).
-- **Roadmap:** Consulta `OPERATIVE_FLOW.md` per a les millores pendents.
-- **Auditories tècniques:** Es guarden a `docs/audits/` per a referència històrica.
-- **Tasques pendents:** Es gestionen a `.dev/PENDING_TASKS.md`.
+- **Roadmap:** Consulta [`docs/guides/OPERATIVE_FLOW.md`](docs/guides/OPERATIVE_FLOW.md) per a les millores pendents.
+- **Auditories tècniques:** Es guarden a [`docs/audits/`](docs/audits/) per a referència històrica.
+- **Bugs i features:** Registre viu a [`.roo/features.json`](.roo/features.json).
+- **Tracking de sessions:** [`plans/HANDOFF_*.md`](plans/) i [`.roo/progress/`](.roo/progress/).
 
 ---
 
 ## 📄 Llicència
 
-Aquest projecte és d'ús intern.  
+Aquest projecte és d'ús intern.
 © 2026 FAST >>> PASS – Tots els drets reservats.
 
 ---
 
-*Documentació generada el 2026‑04‑13.  
-Per a qualsevol dubte, revisa la documentació tècnica a `docs/`.*
+*Documentació actualitzada el 2026-05-29 (reestructuració Harness Engineering).
+Per a qualsevol dubte, revisa la documentació tècnica a [`docs/`](docs/).*
