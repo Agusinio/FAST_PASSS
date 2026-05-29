@@ -1113,12 +1113,18 @@
                     continue;
                 }
 
+                // BUG #14: Si el marcador existent no té color vàlid (pre-BUG #9),
+                // derivar el color de l'ítem d'escaleta via _getColorIdx.
+                var colorIdx = (typeof cmk.color === 'number' && cmk.color >= 0) ? cmk.color : null;
+                if (colorIdx === null && prefixToItem[prefix]) {
+                    colorIdx = this._getColorIdx(prefixToItem[prefix]);
+                }
                 placements.push({
                     prefix: prefix,
                     timeSec: correctedTime,
                     comment: comment,
                     name: 'definitiu',
-                    colorIdx: (typeof cmk.color === 'number' && cmk.color >= 0) ? cmk.color : null
+                    colorIdx: colorIdx
                 });
 
                 log('   🔷 [F3.5·CorrelationSnap] ' + prefix + ': ' + cmk.time.toFixed(2) + 's → ' + correctedTime.toFixed(2) + 's [Δ=' + delta.toFixed(3) + 's]');
@@ -1292,12 +1298,18 @@
                     log('   🔵 [F4·DensitySnap v2] ' + prefix + ' (' + source + '): ' + mkTime.toFixed(2) + 's → manté (sense break disponible, F5 pendent)');
                 }
 
+                // BUG #14: Si el marcador existent no té color vàlid (pre-BUG #9),
+                // derivar el color de l'ítem d'escaleta via _getColorIdx.
+                var colorIdxF4 = (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null;
+                if (colorIdxF4 === null && prefixToItem[prefix]) {
+                    colorIdxF4 = this._getColorIdx(prefixToItem[prefix]);
+                }
                 placements.push({
                     prefix: prefix,
                     timeSec: targetTime,
                     comment: comment,
                     name: 'definitiu',
-                    colorIdx: (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null
+                    colorIdx: colorIdxF4
                 });
             }
 
@@ -1472,11 +1484,17 @@
                 if (newTime !== mkTime) snappedCount++;
                 if (newTime < 0) newTime = 0;
 
+                // BUG #14: Si el marcador existent no té color vàlid (pre-BUG #9),
+                // derivar el color de l'ítem d'escaleta via _getColorIdx.
+                var colorIdxF5 = (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null;
+                if (colorIdxF5 === null && prefixToItem[prefix]) {
+                    colorIdxF5 = this._getColorIdx(prefixToItem[prefix]);
+                }
                 placements.push({
                     prefix: prefix,
                     timeSec: newTime,
                     comment: comment,
-                    colorIdx: (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null
+                    colorIdx: colorIdxF5
                 });
             }
 
