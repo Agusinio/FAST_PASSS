@@ -852,11 +852,11 @@
                 // anchorEfTimelineSec = (anchorEfectiva - mediaStart) - tlBlockInPointSec
                 // idealPosSec = anchorEfTimelineSec + (deduced - anchorEfectiva)
                 //   = (deduced - mediaStart) - tlBlockInPointSec  ✓
-                // BUG #15: El primer ítem estructural (intro) és la seva pròpia àncora
-                // (deduced == anchorEfectiva) → idealPosSec = anchorEfTimelineSec + 0.
+                // BUG #15: Si aquest ítem és la font de l'àncora efectiva
+                // (deduced ≈ anchorEfectiva), idealPosSec = anchorEfTimelineSec + 0.
                 // Forcem 00:00 perquè l'inici del bloc és la posició esperada.
                 var idealPosSec;
-                if (si === 0) {
+                if (Math.abs(deduced - anchorEfectiva) < 0.01) {
                     idealPosSec = 0;
                 } else {
                     idealPosSec = anchorEfTimelineSec + (deduced - anchorEfectiva);

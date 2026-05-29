@@ -464,6 +464,8 @@
         }
 
         // -- Tier 1 (IN): Primer item estructural del bloc --
+        // BUG #16: Sempre calcular Tier1-IN per competir amb Tier0-IN.
+        // El IN ha de ser el punt més aviat fiable → guanya el mínim.
         var structuralItemsInBlock = [];
         for (var si = 0; si < blockLines.length; si++) {
             if (this.isItemEstructural(blockLines[si])) {
@@ -471,23 +473,38 @@
             }
         }
 
-        if (InTier === 0 && structuralItemsInBlock.length > 0) {
+        var tier1InCandidate = null;
+        var tier1InLabel = '';
+
+        if (structuralItemsInBlock.length > 0) {
             var firstItem = structuralItemsInBlock[0];
-            var entradaSec = this.getItemEntradaSec(firstItem, allLines, data);
-            if (entradaSec !== null) {
-                worldBlockStartSec = entradaSec;
-                InTier = 1;
-                worldBlockAnchorSec = entradaSec;
-                log('   \u2705 Tier1-IN: "' + firstItem.num + '" entrada -> ' + worldBlockStartSec.toFixed(2) + 's');
-            } else if (structuralItemsInBlock.length > 0) {
+            tier1InCandidate = this.getItemEntradaSec(firstItem, allLines, data);
+            if (tier1InCandidate !== null) {
+                tier1InLabel = 'primer estructural "' + firstItem.num + '" entrada';
+            } else {
                 var lastResort = structuralItemsInBlock[structuralItemsInBlock.length - 1];
-                var resortSec = this.getItemEntradaSec(lastResort, allLines, data);
-                if (resortSec !== null) {
-                    worldBlockStartSec = resortSec;
-                    InTier = 1;
-                    worldBlockAnchorSec = resortSec;
-                    log('   \u2705 Tier1-IN (last resort): "' + lastResort.num + '" entrada -> ' + worldBlockStartSec.toFixed(2) + 's');
+                tier1InCandidate = this.getItemEntradaSec(lastResort, allLines, data);
+                if (tier1InCandidate !== null) {
+                    tier1InLabel = 'last-resort "' + lastResort.num + '" entrada';
                 }
+            }
+        }
+
+        // COMPETÈNCIA Tier0 ↔ Tier1: guanya el mínim (IN més aviat)
+        if (InTier === 0 && tier1InCandidate !== null) {
+            // Sense Tier0 → Tier1 guanya per defecte
+            worldBlockStartSec = tier1InCandidate;
+            InTier = 1;
+            worldBlockAnchorSec = tier1InCandidate;
+            log('   \u2705 Tier1-IN: ' + tier1InLabel + ' -> ' + worldBlockStartSec.toFixed(2) + 's');
+        } else if (tier1InCandidate !== null && worldBlockStartSec !== null) {
+            if (tier1InCandidate < worldBlockStartSec) {
+                log('   \uD83D\uDFE1 Tier1-COMPETE: ' + tier1InLabel + '=' + tier1InCandidate.toFixed(2) + 's < Tier0-IN=' + worldBlockStartSec.toFixed(2) + 's. Guanya Tier1 (més aviat).');
+                worldBlockStartSec = tier1InCandidate;
+                InTier = 1;
+                worldBlockAnchorSec = tier1InCandidate;
+            } else {
+                log('   \u2139\uFE0F Tier1-NOCOMPETE: ' + tier1InLabel + '=' + tier1InCandidate.toFixed(2) + 's \u2265 Tier0-IN=' + worldBlockStartSec.toFixed(2) + 's. Es manté Tier0.');
             }
         }
 
