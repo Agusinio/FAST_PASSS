@@ -20,7 +20,6 @@ yarn-error.log*
 
 # IDEs
 .vscode/project_settings.json
-# (Mantenemos .vscode de momento si tiene configuraciones útiles específicas)
 
 # Backups
 *.bak
@@ -32,4 +31,7 @@ FAST _PASSS_OLD/
 
 # Código obsoleto / archivos generados
 OLD_CODE/
-graphify-out/
+
+# Archivos temporales Roo Code
+.roo/progress/*.md
+!.roo/progress/README.md

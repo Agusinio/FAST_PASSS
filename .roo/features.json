@@ -1,0 +1,283 @@
+{
+  "project": "FAST >>> PASS",
+  "version": "2.9.5",
+  "codename": "LIPO-PRO",
+  "description": "Extensión CEP para Adobe Premiere Pro — Automatización de producción de informativos y verticalización 9:16",
+  "updated": "2026-05-29",
+
+  "architecture": {
+    "tiers": {
+      "1_workflows": { "path": "js/workflows/", "role": "Orquestración — El Director" },
+      "2_action_logic": { "path": "js/logic/", "role": "Ejecución — Las Manos" },
+      "3_inspectors": { "path": "js/inspectors/", "role": "Descubrimiento — Los Ojos" },
+      "4_core": { "path": "js/core/", "role": "Fundamentos — El Cerebro" },
+      "5_jsx_atoms": { "path": "jsx/", "role": "Átomos ExtendScript — El Músculo" }
+    },
+    "paradigm": "Brain (JS) vs Muscle (JSX)",
+    "communication": "JSON via callJSX bridge. JSX errors prefixed 'ERR:' for auto-detection."
+  },
+
+  "features": {
+    "production": [
+      {
+        "id": "NEW_PROJECT",
+        "name": "Creación de Proyecto (NOU)",
+        "status": "active",
+        "priority": "critical",
+        "description": "Abre plantilla .prproj, importa MP4 cleanFeed con trim de precisión, Wotts (CHY), SRT y portadas. Montaje automático en timeline.",
+        "files": ["js/workflows/flow_mainButton.js", "js/logic/3_Project_Logic.js"],
+        "ui": "Botón NOU → sección SETUP"
+      },
+      {
+        "id": "ESCALETA_JSON",
+        "name": "Integración de Escaleta JSON",
+        "status": "active",
+        "priority": "critical",
+        "description": "Lectura de snapshots JSON desde NAS. Cálculo IN/OUT con handles 20s. Mapeo bloque↔líneas via 'agrupacio'. 10 módulos en js/core/escaleta_*.js.",
+        "files": [
+          "js/core/escaleta_reader.js", "js/core/escaleta_io.js", "js/core/escaleta_items.js",
+          "js/core/escaleta_bounds.js", "js/core/escaleta_onair.js", "js/core/escaleta_trim.js",
+          "js/core/escaleta_config.js", "js/core/escaleta_fallback.js", "js/core/escaleta_overrides.js",
+          "js/core/escaleta_timecode.js"
+        ],
+        "spec": "docs/specs/ESCALETA_JSON_SPEC.md"
+      },
+      {
+        "id": "PRECISION_TRIM",
+        "name": "Trim de Precisión (Tier0/Tier1/Tier2)",
+        "status": "active",
+        "priority": "critical",
+        "description": "Sistema 3-tier para IN/OUT del MP4. Tier0: video anterior (mismo agrupacio). Tier1: items estructurales OnAir. Tier2: siguiente video OnAir. Filtro por agrupacio.",
+        "files": ["js/core/escaleta_bounds.js", "js/core/escaleta_items.js", "js/core/escaleta_trim.js"]
+      },
+      {
+        "id": "RIBBON_EDITING",
+        "name": "Edición Rápida de Vídeo",
+        "status": "active",
+        "priority": "high",
+        "description": "IN (Ripple Trim), OUT (cierre con limpieza de pistas), navegación ◀/▶ entre clips, Slider posición X para reframing 9:16.",
+        "files": ["js/workflows/flow_cut.js", "js/workflows/flow_KF.js"],
+        "ui": "Sección VÍDEO: IN, OUT, TROSEJA, ◀, ▶, KEY, Slider"
+      },
+      {
+        "id": "WOTT_PLACEMENT",
+        "name": "Colocación de Rètols (Wotts)",
+        "status": "active",
+        "priority": "high",
+        "description": "Parseo de .mov en CHYRONS: [PROGRAMA]_[DATA]_[BLOC]_[ID]_[TIPUS]_[TEXT]. Colocación por timestamp: V4 (Nomcarrec/Firma/Tema-Titol), V6 (LlocData). Snap a cortes.",
+        "files": ["js/workflows/flow_assembly.js", "js/logic/13_Parse.js", "js/logic/14_Assembly_Logic.js"],
+        "spec": "docs/specs/TECHNICAL_SPECS.md"
+      },
+      {
+        "id": "SUBTITLES",
+        "name": "Gestión de Subtítulos (SRT)",
+        "status": "active",
+        "priority": "high",
+        "description": "Preparar pistas de texto, ajustar IN/OUT de clips SRT, estiramiento proporcional (acordeón).",
+        "files": ["js/workflows/flow_srt.js", "js/logic/10_Srt_Logic.js"],
+        "ui": "Sección SUBTÍTOLS: PREPARAR, IN, OUT, AJUSTAR"
+      },
+      {
+        "id": "RENDER",
+        "name": "Render y Exportación",
+        "status": "active",
+        "priority": "high",
+        "description": "VÍDEO: envía a Adobe Media Encoder con preset H264 1080x1920. PORTADA: genera PNG del frame actual.",
+        "files": ["js/workflows/flow_render.js", "js/logic/9_Render_Logic.js"],
+        "ui": "Sección RENDER: VÍDEO, PORTADA"
+      },
+      {
+        "id": "CONTEXT_SYSTEM",
+        "name": "Sistema de Contexto (Semáforos)",
+        "status": "active",
+        "priority": "high",
+        "description": "Síntesis de estado: NEW/UPDATE/GO/LOAD. 4 semáforos visuales (JSON, MP4, Rètols, Subtítols). Inspectors: SourceAssets, App, Session.",
+        "files": ["js/core/4_Context.js", "js/inspectors/1_SourceAssets.js", "js/inspectors/2_App.js", "js/inspectors/3_Session.js"],
+        "ui": "4 indicadores semáforo en cabecera"
+      },
+      {
+        "id": "KEYFRAMES",
+        "name": "Motor de Keyframes e Interpolación",
+        "status": "active",
+        "priority": "medium",
+        "description": "Auto-reframe inteligente 16:9→9:16. Interpolación: LINEAR, BEZIER, HOLD. Escala base 47%, offset vertical automático.",
+        "files": ["js/workflows/flow_KF.js", "jsx/modules/7_KF.jsx"],
+        "spec": "docs/specs/TECHNICAL_SPECS.md"
+      },
+      {
+        "id": "FFMPEG",
+        "name": "Integración FFmpeg",
+        "status": "active",
+        "priority": "medium",
+        "description": "Procesamiento de vídeo externo vía FFmpeg. Render limpio, clean-swap de clips.",
+        "files": ["js/logic/15_FFmpeg_Logic.js"]
+      },
+      {
+        "id": "NNEWS",
+        "name": "Integración Natural News (NNews)",
+        "status": "planned",
+        "priority": "low",
+        "description": "Clean-Swap workflow: sustituir clips con gráficos quemados por versiones limpias desde NNews. Análisis de formato .nnp/.nzp/.xml.",
+        "files": ["js/logic/11_NNews_Logic.js", "js/core/nnews_parser.js"],
+        "spec": "docs/specs/NNEWS_FORMAT_ANALYSIS.md"
+      }
+    ],
+
+    "debug": [
+      {
+        "id": "STRUCTURE_MARKERS",
+        "name": "Marcadores de Estructura (F1–F6)",
+        "status": "debug_tool",
+        "priority": "debug",
+        "description": "HERRAMIENTA DE DEBUG — Coloca marcadores de colores en el timeline para verificar la estructura detectada. 3 rondas: Estructurales (🔵/🔴), IPDs (🔷), Grafismos (🟡). NO es funcionalidad de producción final.",
+        "files": ["js/workflows/flow_assembly.js", "jsx/modules/8_Markers.jsx"],
+        "spec": "docs/specs/ITEM_CLASSIFICATION.md",
+        "colors_spec": "docs/specs/MARKER_COLORS.md",
+        "buttons": {
+          "F1": "Previstos — Marcadores por horaEntradaPrevista",
+          "F2": "Deducidos — Marcadores por horaEntradaOnAir deducida (cadena hacia atrás)",
+          "F3": "Crudos — Marcadores por horaEntradaOnAir literal del JSON",
+          "F3.5": "CorrelationSnap — Ajusta F3 a cortes de vídeo detectados",
+          "F4": "DensitySnap — Ajusta marcadores usando densidad de cortes",
+          "F5": "OrphanSnap — Ajusta marcadores huérfanos a cortes cercanos",
+          "F6": "Cocinados — Coloca marcadores 'cocinados' (combinación de fuentes)"
+        }
+      },
+      {
+        "id": "ANALYSIS_PHASES",
+        "name": "Fases de Análisis (crudo/cocinado/usuario)",
+        "status": "debug_tool",
+        "priority": "debug",
+        "description": "Sistema de logging de fases para debug de marcadores. Registra estado en cada fase del pipeline: crudo → cocinado → usuario.",
+        "files": ["js/logic/16_Analysis_Logic.js"]
+      }
+    ]
+  },
+
+  "bugs": {
+    "resolved": [
+      {
+        "id": "#8",
+        "desc": "CRASH F2: JSON.parse de respuesta 'ERR:...' del JSX → SyntaxError",
+        "root_cause": "callJSX() envuelve JSX en try/catch. Si JSX falla, retorna 'ERR:...' y JSON.parse('ERR:...') lanza excepción.",
+        "fix": "Nuevo helper _safePlaceByPrefixes con try/catch, maneja respuestas ERR:, strings vacíos y JSON malformado. 7 call sites reemplazados.",
+        "files": ["js/workflows/flow_assembly.js"],
+        "commit": "—",
+        "date": "2026-05-28"
+      },
+      {
+        "id": "#9",
+        "desc": "Color de marcadores perdido al hacer delete+create en placeByPrefixes",
+        "root_cause": "_setMarkerColor() llamaba a setColorByIndex() (API Premiere) que NO persiste .color. Al leer existing.color después, devolvía -1 → marcador verde.",
+        "fix": "_setMarkerColor ahora siempre asigna markerObj.color = colorIdx ANTES de setColorByIndex(). Guard p.colorIdx >= 0 en placeByPrefixes.",
+        "files": ["jsx/modules/8_Markers.jsx"],
+        "commit": "—",
+        "date": "2026-05-28"
+      },
+      {
+        "id": "#10",
+        "desc": "Marcador rojo inesperado: lógica de color 'agrupacio ? 6 : 1' no distinguía rojo/amarillo",
+        "root_cause": "La lógica no implementaba la especificación completa de MARKER_COLORS.md: azul (6)=con agrupacio, amarillo (4)=sin agrupacio+durada 0, rojo (1)=sin agrupacio+durada>0.",
+        "fix": "Nuevo helper _getColorIdx con parsing inline de durada. 6 puntos actualizados: 3 estructurales + 3 UNGROUPED.",
+        "files": ["js/workflows/flow_assembly.js"],
+        "commit": "—",
+        "date": "2026-05-28"
+      },
+      {
+        "id": "#11",
+        "desc": "OUT del MP4 incorrecto por duradaOnAir inconsistente (TNC V2: OUT recortado a 54s en vez de extenderse 78s)",
+        "root_cause": "horaEntradaOnAir del siguiente ítem es un hecho duro del playout. duradaOnAir es dato derivado que puede ser incorrecto. El cap de block.out machacaba el valor correcto.",
+        "fix": "Tres capas: (1) getItemSortidaSec: nivel 3 compite con nivel 1/2, gana MAX. (2) Tier2 OUT siempre compite con Tier1. (3) Cap de block.out solo en fallback (OutTier<=0).",
+        "files": ["js/core/escaleta_items.js", "js/core/escaleta_bounds.js"],
+        "commit": "—",
+        "date": "2026-05-28"
+      },
+      {
+        "id": "#12",
+        "desc": "Ítems gráficos (TE, GI, etc.) colocados como estructurales por el codepath UNGROUPED",
+        "root_cause": "_detectFirstUngroupedItem encontraba items con agrupacio:null sin verificar si eran gráficos. _classifyItems sí los clasificaba pero era ignorado en UNGROUPED.",
+        "fix": "Set compartido _GRAPHIC_SUFFIXES + helper _isGraphicByNum. Los 3 bloques UNGROUPED ahora filtran con !this._isGraphicByNum().",
+        "files": ["js/workflows/flow_assembly.js"],
+        "commit": "a0d448d",
+        "date": "2026-05-28"
+      },
+      {
+        "id": "#13",
+        "desc": "_deduceOnAirSortida y Tier 2 cruzan fronteras de agrupacio → OUT extendido 104s (TNV V1)",
+        "root_cause": "El fix de BUG #11 (competencia con siguiente OnAir) no filtraba por agrupacio. Competía con ítems de otros bloques y totems (agrupacio null).",
+        "fix": "_deduceOnAirSortida: filtrar por mismo agrupacio. Tier2 Estrategia A: mismo filtro. Estrategia B: solo bloques sin agrupacio. Regresión BUG #11 verificada.",
+        "files": ["js/core/escaleta_items.js", "js/core/escaleta_bounds.js"],
+        "commit": "—",
+        "date": "2026-05-28"
+      },
+      {
+        "id": "#14",
+        "desc": "F3.5/F4/F5 cambian el color de los marcadores a verde al hacer snap",
+        "root_cause": "Marcadores legacy tienen .color = -1. Al construir placements, cmk.color >= 0 falla → pasa null → placeByPrefixes no llama _setMarkerColor → marcador verde.",
+        "fix": "Fallback _getColorIdx(prefixToItem[prefix]) cuando cmk.color < 0 en F3.5, F4, F5. Así los marcadores heredan el color correcto de su item.",
+        "files": ["js/workflows/flow_assembly.js"],
+        "commit": "19369c3",
+        "date": "2026-05-29"
+      },
+      {
+        "id": "#15",
+        "desc": "Marcador F2·Deducido '01i' no se coloca en 00:00 (TNC: colocado a 3.72s)",
+        "root_cause": "El primer item estructural usa _deduceOnAirEntrada que da anchorEfectiva=deduced → idealPosSec = anchorEfTimelineSec + 0 = 3.72s en vez de 00:00.",
+        "fix": "Si Math.abs(deduced - anchorEfectiva) < 0.01 (el item ES el anchor), forzar idealPosSec = 0.",
+        "files": ["js/workflows/flow_assembly.js"],
+        "commit": "523aa8c",
+        "date": "2026-05-29"
+      },
+      {
+        "id": "#16",
+        "desc": "MP4 IN asigna worldBlockStartSec del item anterior (cross-agrupacio contamination)",
+        "root_cause": "Dos bugs: (B1) _deduceOnAirEntrada no filtraba por agrupacio → items de otros bloques contaminaban la deducción. (B2) Tier0-IN usaba prevVideoData.endSec sin filtrar por agrupacio → video de totem contaminaba V1.",
+        "fix": "B1: filtro item.agrupacio && prevItem.agrupacio !== item.agrupacio → continue. B2: filtro blockAgrupacio_IN && vid.item.agrupacio !== blockAgrupacio_IN → continue.",
+        "files": ["js/core/escaleta_items.js", "js/core/escaleta_bounds.js"],
+        "commit": "dbb4548",
+        "date": "2026-05-29"
+      }
+    ],
+    "active": [
+      {
+        "id": "#17",
+        "desc": "TNV V3: OUT del MP4 extendido ~41s — posible inconsistencia de datos en la escaleta",
+        "status": "investigating",
+        "priority": "low",
+        "note": "Pausado por el usuario. Posible inconsistencia en los datos de playout. No implementar fix hasta confirmar.",
+        "files": ["js/core/escaleta_items.js", "js/core/escaleta_bounds.js"],
+        "date": "2026-05-28"
+      }
+    ]
+  },
+
+  "sessions": [
+    {
+      "date": "2026-05-28",
+      "handoff": "plans/HANDOFF_2026-05-28.md",
+      "summary": "BUGs #8-#13 resueltos. Formateo de 3 JSONs (TNC, TNM, TNV). Sistema de marcadores estabilizado.",
+      "bugs_resolved": ["#8", "#9", "#10", "#11", "#12", "#13"]
+    },
+    {
+      "date": "2026-05-29",
+      "handoff": null,
+      "summary": "BUGs #14, #15, #16 resueltos. Inicio reestructuración Harness Engineering: .roo/ como centro de control, agents.md, features.json, init.ps1.",
+      "bugs_resolved": ["#14", "#15", "#16"]
+    }
+  ],
+
+  "git": {
+    "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
+    "portable": "E:\\PortableGit\\bin\\git.exe",
+    "branch": "main",
+    "status": "Commits locales pendientes de push por problema de red"
+  },
+
+  "paths": {
+    "escaletas_nas": "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\ESCALETES\\",
+    "proyectos_premiere": "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PROVES\\",
+    "bin": "bin/",
+    "docs": "docs/",
+    "plans": "plans/"
+  }
+}
