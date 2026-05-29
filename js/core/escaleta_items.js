@@ -98,6 +98,11 @@
             var prevItem = allLines[i];
             if (!prevItem) continue;
             if (prevItem.flotant === true) continue;
+            // BUG #16-B1: Filtrar per agrupacio. Si l'item té agrupacio,
+            // només considerar items del MATEIX agrupacio. null !== "v1",
+            // per tant els items null (totems) no contaminen la deducció
+            // d'items que pertanyen a un bloc.
+            if (item.agrupacio && prevItem.agrupacio !== item.agrupacio) continue;
 
             var prevOnAir = prevItem.horaEntradaOnAir;
             if (prevOnAir && prevOnAir !== "00:00:00") {

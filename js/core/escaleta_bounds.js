@@ -431,10 +431,18 @@
             ? this.tcToSeconds(firstBlockItem.horaEntradaPrevista)
             : null;
 
+        // BUG #16-B2: Obtenir l'agrupacio del bloc per filtrar Tier0-IN.
+        // Si el bloc té agrupacio, només considerar videos del MATEIX agrupacio
+        // com a prevVideoData. Així evitem que videos d'altres agrupacions
+        // (per ex. sumaris amb agrupacio:null) contaminin el càlcul.
+        var blockAgrupacio_IN = blockLines.length > 0 ? blockLines[0].agrupacio : null;
+
         var prevVideoData = null;
         if (blockRefSec !== null) {
             for (var vi = 0; vi < allOnAirVideos.length; vi++) {
                 var vid = allOnAirVideos[vi];
+                // BUG #16-B2: Filtrar per agrupacio
+                if (blockAgrupacio_IN && vid.item.agrupacio !== blockAgrupacio_IN) continue;
                 if (vid.endSec < blockRefSec) {
                     if (!prevVideoData || vid.endSec > prevVideoData.endSec) {
                         prevVideoData = vid;
@@ -451,7 +459,7 @@
             if (gap <= maxGap) {
                 worldBlockStartSec = prevVideoData.endSec;
                 InTier = 10;
-                log('   \u2705 Tier0-IN: item anterior "' + prevVideoData.item.num + '" acaba a ' + worldBlockStartSec.toFixed(2) + 's');
+                log('   \u2705 Tier0-IN: item anterior "' + prevVideoData.item.num + '" (agrupacio:' + (prevVideoData.item.agrupacio || 'null') + ') acaba a ' + worldBlockStartSec.toFixed(2) + 's');
 
                 var caretas = this._findCaretasBetween(allLines, prevVideoData.idx, blockStartIdx, data);
                 if (caretas.totalDur > 0) {
@@ -461,6 +469,8 @@
             } else {
                 log('   \u23ED\uFE0F Tier0-IN: gap=' + gap.toFixed(0) + 's > maxGap=' + maxGap + 's. Usant Tier1.');
             }
+        } else if (blockAgrupacio_IN) {
+            log('   \u2139\uFE0F Tier0-IN: Sense video previ amb agrupacio="' + blockAgrupacio_IN + '". Es delega a Tier1.');
         }
 
         // -- Tier 1 (IN): Primer item estructural del bloc --
