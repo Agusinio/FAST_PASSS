@@ -45,7 +45,7 @@
                 try {
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader) {
-                        const earlyMeta = await reader.findLatest(ctx.progData.archivo);
+                        const earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
                         if (earlyMeta && earlyMeta.filename) {
                             const emissionDate = getUtils().extractDateFromEscaletaFilename(earlyMeta.filename);
                             if (emissionDate) {
@@ -109,7 +109,7 @@
                         // handles es llegeixen de Config.get().handles (font única: 11_Configuracio.js)
                         // _getHandleSecs() a escaleta_reader.js consulta Config automàticament
 
-                        const jsonMeta = await reader.findLatest(ctx.progData.archivo);
+                        const jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
                         if (jsonMeta) {
                             // dateDir ja ha estat resolt abans del primer save (D7.1)
                             const jsonData = await reader.load(jsonMeta.path);

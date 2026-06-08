@@ -2329,9 +2329,9 @@ debugBlockItems: async function (blockId = "V1") {
 
     // 1. Obtenir dades de l'escaleta actual (carregar JSON més recent)
     const programArchivo = "TN_VESPRE"; // TODO: obtenir del context
-    const latest = await reader.findLatest(programArchivo);
+    const latest = await reader.findLatest(programArchivo, blockId);
     if (!latest) {
-        log(`⚠️ No s'ha trobat JSON d'escaleta per a ${programArchivo}`);
+        log(`⚠️ No s'ha trobat JSON d'escaleta per a ${programArchivo}/${blockId}`);
         return;
     }
     const data = await reader.load(latest.path);
@@ -2504,7 +2504,7 @@ placeRawMarkers: async function() {
         if (!reader) { log("⚠️ EscaletaReader no disponible."); return; }
 
         // Cargar escaleta
-        const latest = await reader.findLatest(ctx.progData.archivo);
+        const latest = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
         if (!latest) { log("⚠️ No es troba l'escaleta."); return; }
         const data = await reader.load(latest.path);
         if (!data) { log("⚠️ No s'ha pogut carregar l'escaleta."); return; }

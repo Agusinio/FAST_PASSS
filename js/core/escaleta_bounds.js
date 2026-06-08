@@ -50,18 +50,72 @@
     /**
      * getBlock: Retorna el bloc VERTICAL per ID ("V1", "V2"...).
      */
+    /**
+     * getBlock: Retorna el bloc VERTICAL per ID ("V1", "V2"...).
+     *
+     * Nou format (JSON per bloc, clips[] buit): reconstrueix el bloc a partir
+     * de mediaStart/mediaStop del cleanFeed i les línies d'escaleta.
+     *
+     * Format antic (JSON global, clips[] amb V1..V4): comportament original.
+     *
+     * @returns {Object|null} { id, tipus, in, out, titol, ready, creat }
+     */
     ER.getBlock = function (data, blockId) {
-        var clips = data && data.cleanFeed && data.cleanFeed.clips ? data.cleanFeed.clips : null;
-        if (!clips) return null;
-        var block = null;
-        for (var i = 0; i < clips.length; i++) {
-            if (clips[i].id === blockId) { block = clips[i]; break; }
+        if (!data || !data.cleanFeed || !blockId) return null;
+
+        var clips = data.cleanFeed.clips;
+        if (clips && clips.length > 0) {
+            // ─── Format antic: buscar dins de clips[] ───
+            var block = null;
+            for (var i = 0; i < clips.length; i++) {
+                if (clips[i].id === blockId) { block = clips[i]; break; }
+            }
+            if (!block) {
+                log('\u26A0\uFE0F [ER:Bounds] Bloc "' + blockId + '" no trobat al cleanFeed (format antic)');
+                return null;
+            }
+            return block;
         }
-        if (!block) {
-            log('\u26A0\uFE0F [ER:Bounds] Bloc "' + blockId + '" no trobat al cleanFeed');
+
+        // ─── Nou format: JSON per bloc (clips[] buit) ───
+        // El blockId es valida contra les línies d'escaleta (agrupacio)
+        var lines = this.getLinesForBlock(data, blockId);
+        if (lines.length === 0) {
+            log('\u26A0\uFE0F [ER:Bounds] Bloc "' + blockId + '" sense línies a l\'escaleta (nou format)');
             return null;
         }
-        return block;
+
+        // Derivar in/out de mediaStart/mediaStop
+        var cf = data.cleanFeed;
+        var mediaStart = cf.mediaStart || '00:00:00:00';
+        var mediaStop  = cf.mediaStop  || mediaStart;
+
+        // Buscar el primer i últim item amb horaEntradaOnAir per a l'interval real
+        var firstOnAir = null;
+        var lastOnAir  = null;
+        for (var j = 0; j < lines.length; j++) {
+            if (lines[j].horaEntradaOnAir) {
+                if (!firstOnAir) firstOnAir = lines[j].horaEntradaOnAir;
+                lastOnAir = lines[j].horaEntradaOnAir;
+            }
+        }
+
+        // in: primer OnAir si existeix, sinó mediaStart
+        // out: mediaStop (truncat al bloc en el nou format)
+        var blockIn  = firstOnAir || mediaStart;
+        var blockOut = mediaStop;
+
+        log('\uD83D\uDCCB [ER:Bounds] Bloc "' + blockId + '" reconstruït (nou format): in=' + blockIn + ' out=' + blockOut + ' (' + lines.length + ' línies)');
+
+        return {
+            id: blockId,
+            tipus: 'VERTICAL',
+            in: blockIn,
+            out: blockOut,
+            titol: (data.parallelAntena && data.parallelAntena.nom) ? data.parallelAntena.nom + ' ' + blockId : blockId,
+            ready: true,
+            creat: false
+        };
     };
 
     /**

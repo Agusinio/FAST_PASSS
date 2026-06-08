@@ -129,6 +129,7 @@
         if (origen === 'TNV' || ruta.indexOf('TN-VESPRE') !== -1 || ruta.indexOf('TNVESPRE') !== -1) return 'TNV';
         if (origen === 'TNM' || ruta.indexOf('TN-MIGDIA') !== -1 || ruta.indexOf('TNMIGDIA') !== -1) return 'TNM';
         if (origen === 'COM' || ruta.indexOf('TN-COMARQUES') !== -1 || ruta.indexOf('TNCOMARQUES') !== -1) return 'TNC';
+        if (ruta.indexOf('MATINS') !== -1) return 'MAT';
         return null;
     };
 

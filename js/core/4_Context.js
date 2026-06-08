@@ -125,7 +125,7 @@
                         try {
                             const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                             if (reader) {
-                                const escMeta = await reader.findLatest(ctx.progData.archivo);
+                                const escMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
                                 if (escMeta && escMeta.filename) {
                                     const emissionDate = getUtils().extractDateFromEscaletaFilename(escMeta.filename);
                                     if (emissionDate && emissionDate !== ctx.dateDir) {

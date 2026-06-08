@@ -54,8 +54,31 @@
      * @param {string} programArchivo - e.g. "TN_MIGDIA", "TN_COMARQUES"
      * @returns {Promise<{path:string, filename:string}|null>}
      */
-    ER.findLatest = async function (programArchivo) {
-        log('\uD83D\uDCE1 [ER:IO] Cercant JSON per a: ' + programArchivo);
+    /**
+     * extractBlockIdFromFilename: Extreu el blockId (V1, V2, V3, V4) del nom d'un fitxer JSON.
+     * Format esperat: PROGRAMA_BLOCKID_... (ex: TN_VESPRE_V1_GF_FOTOS_...)
+     * També detecta MATINS_V1, TN_MIGDIA_V2, etc.
+     * @param {string} filename
+     * @returns {string|null} BlockId (ex: "V1") o null si no es pot extreure
+     */
+    ER.extractBlockIdFromFilename = function (filename) {
+        if (!filename) return null;
+        // Patró: després del prefix de programa, V seguit de dígits
+        var m = filename.match(/_(V\d+)_/i);
+        return m ? m[1].toUpperCase() : null;
+    };
+
+    /**
+     * findLatest: Llista la carpeta d'escaletes i troba el JSON més recent
+     * per al programa indicat.
+     * @param {string} programArchivo - e.g. "TN_MIGDIA", "TN_COMARQUES"
+     * @param {string} [blockId] - Opcional. ID del bloc ("V1", "V2"...). Si es proporciona,
+     *        filtra per {PROGRAMA}_{BLOCK}_* per trobar el JSON específic del bloc.
+     * @returns {Promise<{path:string, filename:string}|null>}
+     */
+    ER.findLatest = async function (programArchivo, blockId) {
+        var searchLabel = programArchivo + (blockId ? '/' + blockId : '');
+        log('\uD83D\uDCE1 [ER:IO] Cercant JSON per a: ' + searchLabel);
         try {
             var raw = await callJSX("IO.listFolder('" + this._escapePath(this.ESCALETES_PATH) + "')");
             if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) {
@@ -71,15 +94,31 @@
                 return null;
             }
 
+            // Construir prefix: si hi ha blockId, busquem {PROG}_{BLOCK}_
+            // sinó, busquem {PROG}_ (comportament legacy)
             var prefix = programArchivo.toUpperCase() + '_';
+            if (blockId) {
+                prefix += blockId.toUpperCase() + '_';
+            }
             var candidates = files.filter(function (f) {
                 return !f.isDir &&
                     f.name.toUpperCase().indexOf(prefix) === 0 &&
                     f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
             });
 
+            // Si no trobem amb blockId, intentem sense (fallback legacy)
+            if (candidates.length === 0 && blockId) {
+                log('\u26A0\uFE0F [ER:IO] Cap JSON amb prefix ' + prefix + '. Intentant sense blockId...');
+                var legacyPrefix = programArchivo.toUpperCase() + '_';
+                candidates = files.filter(function (f) {
+                    return !f.isDir &&
+                        f.name.toUpperCase().indexOf(legacyPrefix) === 0 &&
+                        f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
+                });
+            }
+
             if (candidates.length === 0) {
-                log('\u26A0\uFE0F [ER:IO] Cap JSON trobat per a ' + programArchivo);
+                log('\u26A0\uFE0F [ER:IO] Cap JSON trobat per a ' + searchLabel);
                 return null;
             }
 
@@ -101,7 +140,7 @@
      * @returns {Promise<{ found: boolean, ready: boolean, timestamp: string }>}
      */
     ER.getStatus = async function (programArchivo, blockId) {
-        var latest = await this.findLatest(programArchivo);
+        var latest = await this.findLatest(programArchivo, blockId);
         if (!latest) return { found: false, ready: false };
 
         var data = await this.load(latest.path);
@@ -115,9 +154,12 @@
             .filter(function (l) { return l.num && (l.teVideo || ['OFT', 'BVI'].indexOf(l.font) !== -1); })
             .map(function (l) { return l.num; });
 
+        // En el nou format (clips[] buit), block sempre es reconstrueix → ready=true
+        var isReady = !!(block && (block.ready || true));
+
         return {
             found: true,
-            ready: !!(block && block.ready),
+            ready: isReady,
             filename: latest.filename,
             timestamp: latest.filename.split('_').slice(-2).join('_').replace('.json', ''),
             mediaStop: mediaScan.mediaStop || null,
