@@ -23,6 +23,7 @@ Skill para gestionar el control de versiones del proyecto usando Git Portable ub
 | **user.name** | `Agusinio` |
 | **user.email** | `agonzalez.x@gmail.com` |
 | **Remote origin** | `https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git` |
+| **⚠️ Proxy corporativo** | `http://172.20.0.152:8088` (obligatorio — sin proxy, `schannel` falla el handshake TLS) |
 
 ---
 
@@ -109,9 +110,24 @@ refactor: reestructuración Harness Engineering — .roo/ como centro de control
 |---------|-------|----------|
 | `git : The term 'git' is not recognized` | Git Portable no está en PATH | Usar ruta completa: `"E:\PortableGit\bin\git.exe"` |
 | `fatal: not a git repository` | Falta el flag `-C` | Añadir `-C "ruta\al\repo"` |
-| `fatal: unable to access ... Recv failure` | Problema de red | Los commits son locales. Reintentar push más tarde. |
-| `Your branch is ahead of 'origin/main' by N commits` | Commits locales sin push | Hacer `push` cuando la red esté disponible |
+| `schannel: failed to receive handshake, SSL/TLS connection failed` | **Proxy corporativo no configurado**. Git Portable con `schannel` no detecta el proxy del sistema. | Configurar: `git config --local http.proxy http://172.20.0.152:8088` y `https.proxy` igual. Verificar con `powershell -Command "[System.Net.WebRequest]::GetSystemWebProxy().GetProxy('https://github.com')"` |
+| `fatal: unable to access ... Recv failure: Connection was reset` | Sin proxy o red inestable | Verificar conectividad: `Test-NetConnection -ComputerName github.com -Port 443`. Si TCP OK pero Git falla → falta proxy. Si TCP también falla → esperar. |
+| `Your branch is ahead of 'origin/main' by N commits` | Commits locales sin push | Hacer `push` con proxy: `git -c http.proxy=http://172.20.0.152:8088 push origin main` |
 | `warning: LF will be replaced by CRLF` | Conversión de finales de línea | Inofensivo. Windows ↔ Unix line endings. |
+
+### 🔧 Diagnóstico de Proxy
+
+```powershell
+# 1. Detectar el proxy del sistema
+powershell -Command "[System.Net.WebRequest]::GetSystemWebProxy().GetProxy('https://github.com')"
+
+# 2. Verificar conectividad TCP a GitHub
+powershell -Command "Test-NetConnection -ComputerName github.com -Port 443"
+
+# 3. Configurar proxy en el repo (permanente)
+E:\PortableGit\bin\git.exe -C "c:/Users/gonz_agu/AppData/Roaming/Adobe/CEP/extensions/FAST_PASSS" config --local http.proxy http://172.20.0.152:8088
+E:\PortableGit\bin\git.exe -C "c:/Users/gonz_agu/AppData/Roaming/Adobe/CEP/extensions/FAST_PASSS" config --local https.proxy http://172.20.0.152:8088
+```
 
 ---
 
