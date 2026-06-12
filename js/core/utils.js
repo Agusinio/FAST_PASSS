@@ -11,9 +11,57 @@
         isJsxReady: false,
         csInterface: csInterface,
 
+        _logBuffer: [],
+        _debugLogPath: null,
+
+        /**
+         * Inicialitza (o reinicia) el fitxer de log per al projecte actiu.
+         * Es crida des de _runNew() i _runLoad() per tenir un log per projecte.
+         * @param {string} folderPath - Ruta absoluta a la carpeta del projecte (ex: \\...\\09_06_2026\)
+         * @param {string} projectName - Nom del fitxer .prproj (ex: Pruebas_TNV_V1_TEMA.prproj)
+         */
+        _setLogPath: function(folderPath, projectName) {
+            var normalized = folderPath.replace(/\\/g, '\\').replace(/\/$/, '');
+            this._debugLogPath = normalized + '\\' + projectName + '.log';
+            this._logBuffer = [];
+            try {
+                window.cep.fs.writeFile(this._debugLogPath, '');
+            } catch(e) {}
+            this.log("📄 Log iniciat per a: " + projectName, "DEBUG");
+        },
+
+        /**
+         * Retorna timestamp ISO local: [YYYY-MM-DD HH:MM:SS]
+         */
+        _timestamp: function() {
+            var d = new Date();
+            var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+            return '[' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+                   ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + ']';
+        },
+
         log: function(msg, level) { 
             const colors = { "INFO": "🔵", "DEBUG": "🟢", "ERROR": "🔴", "WARN": "🟡" };
-            console.log(`${colors[level || "INFO"]} [FASTPASS]: ${msg}`); 
+            var ts = this._timestamp();
+            var formatted = ts + ' ' + (colors[level || "INFO"] || '🔵') + ' [FASTPASS]: ' + msg;
+            console.log(formatted);
+            // Escriure al fitxer de debug del projecte perquè el Cline pugui llegir-lo
+            if (this._debugLogPath) {
+                this._logBuffer.push(formatted);
+                try {
+                    window.cep.fs.writeFile(this._debugLogPath, this._logBuffer.join('\n') + '\n');
+                } catch(e) {}
+            }
+        },
+
+        clearLogFile: function() {
+            this._logBuffer = [];
+            if (this._debugLogPath) {
+                try {
+                    window.cep.fs.writeFile(this._debugLogPath, '');
+                    this.log("🧹 Log file reiniciat", "DEBUG");
+                } catch(e) {}
+            }
         },
 
         /**
@@ -244,19 +292,27 @@
         },
 
         /**
-         * FIX B1: Valida que un dateDir (DD_MM_YYYY) estigui dins de la finestra
+         * Valida que un dateDir (DD_MM_YYYY) estigui dins de la finestra
          * temporal permesa per a la cerca de projectes en directoris germans.
          *
          * Regles:
          *   - Sempre s'accepta el dia d'avui.
-         *   - Si l'hora actual és < 4 AM, també s'accepta ahir (marge de madrugada).
-         *   - Qualsevol altra data es rebutja.
+         *   - Sempre s'accepta ahir (l'editor pot necessitar obrir el projecte
+         *     del dia anterior fins al dia següent).
+         *   - Qualsevol data anterior (fa 2+ dies) es rebutja.
+         *   - NO s'usa mtime del directori perquè no és fiable (s'actualitza
+         *     amb auto-save, .lock, etc.).
          *
          * @param {string} dateDirStr - Data en format DD_MM_YYYY, ex: "26_05_2026"
          * @returns {boolean} true si la data està dins de la finestra permesa
          */
         isDateDirInTemporalWindow: function(dateDirStr) {
             if (!dateDirStr) return false;
+
+            // Nomes s'accepten directoris d'avui o ahir (finestra de 22h implicita:
+            // cada projecte viu al seu directori de data, i l'editor pot necessitar
+            // obrir-lo fins al dia seguent). Qualsevol data anterior es rebutja.
+            // NO usem dirMtime perque no es fiable (s'actualitza amb auto-save, locks...).
             var parts = dateDirStr.split('_');
             if (parts.length !== 3) return false;
             var d = parseInt(parts[0], 10);
@@ -271,9 +327,11 @@
             yesterday.setDate(yesterday.getDate() - 1);
 
             var dirTime = dirDate.getTime();
-            if (dirTime === today.getTime()) return true;
-            if (now.getHours() < 4 && dirTime === yesterday.getTime()) return true;
-            return false;
+            var accepted = (dirTime === today.getTime() || dirTime === yesterday.getTime());
+            if (window.FASTPASS_UI && window.FASTPASS_UI.Utils) {
+                window.FASTPASS_UI.Utils.log('🔒 [TemporalWindow] dir=' + dateDirStr + ' accepted=' + accepted, 'DEBUG');
+            }
+            return accepted;
         },
 
         /**
@@ -288,15 +346,24 @@
          */
         extractDateFromEscaletaFilename: function(filename) {
             if (!filename) return null;
-            var parts = filename.replace('.json', '').split('_');
-            if (parts.length >= 2) {
-                var yyyymmdd = parts[parts.length - 2];
-                if (yyyymmdd && yyyymmdd.length === 8 && /^\d{8}$/.test(yyyymmdd)) {
-                    var dd = yyyymmdd.substring(6, 8);
-                    var mm = yyyymmdd.substring(4, 6);
-                    var yyyy = yyyymmdd.substring(0, 4);
-                    return dd + '_' + mm + '_' + yyyy;
-                }
+            var noExt = filename.replace(/\.json$/i, '');
+            var parts = noExt.split('_');
+            if (parts.length < 2) return null;
+            // Nou format: YYYYMMDD al segment [0]
+            if (/^\d{8}$/.test(parts[0])) {
+                var yyyymmdd = parts[0];
+                var dd = yyyymmdd.substring(6, 8);
+                var mm = yyyymmdd.substring(4, 6);
+                var yyyy = yyyymmdd.substring(0, 4);
+                return dd + '_' + mm + '_' + yyyy;
+            }
+            // Fallback: format antic
+            var yyyymmddOld = parts[parts.length - 2];
+            if (yyyymmddOld && yyyymmddOld.length === 8 && /^\d{8}$/.test(yyyymmddOld)) {
+                var dd2 = yyyymmddOld.substring(6, 8);
+                var mm2 = yyyymmddOld.substring(4, 6);
+                var yyyy2 = yyyymmddOld.substring(0, 4);
+                return dd2 + '_' + mm2 + '_' + yyyy2;
             }
             return null;
         },

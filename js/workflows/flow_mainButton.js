@@ -15,6 +15,7 @@
     FASTPASS_UI.Workflows.MainButton = {
 
         runMainAction: async function (action, data) {
+            getUtils().clearLogFile();
             log("⏯️ Iniciant workflow: [" + action + "]");
             getUtils().updateUIState('BUSY');
 
@@ -89,6 +90,9 @@
                     folderPath: folderPath,
                     sanitizedTheme: sanitizedTheme
                 };
+
+                // ─── Inicialitzar fitxer de log per a aquest projecte ──────────────
+                getUtils()._setLogPath(folderPath, fileName);
 
                 // ─── NOU: Inicialitzar Manifest de Sessió ──────────────────────────
                 // Registrem l'inici del procés per tenir una font de veritat persistent
@@ -612,6 +616,9 @@
             const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
             const destPath = (folderPath + "/" + projName).replace(/\\/g, "/");
             log(`📂 Abriendo proyecto existente: ${destPath}`);
+
+            // ─── Inicialitzar fitxer de log per a aquest projecte ──────────────────
+            getUtils()._setLogPath(folderPath, projName);
 
             const forceOverride = data.forceOverride || false;
             

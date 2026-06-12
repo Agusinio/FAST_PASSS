@@ -524,7 +524,17 @@
                 log('   \u23ED\uFE0F Tier0-IN: gap=' + gap.toFixed(0) + 's > maxGap=' + maxGap + 's. Usant Tier1.');
             }
         } else if (blockAgrupacio_IN) {
-            log('   \u2139\uFE0F Tier0-IN: Sense video previ amb agrupacio="' + blockAgrupacio_IN + '". Es delega a Tier1.');
+            // Tier0-IN cross-agrupacio: No hi ha video previ al mateix agrupacio.
+            // Intentar deduir l'IN usant OnAir d'items anteriors (qualsevol agrupacio)
+            // via _deduceOnAirEntrada amb ignoreAgrupacio=true.
+            var crossDeducedIn = this._deduceOnAirEntrada(firstBlockItem, allLines, data, true);
+            if (crossDeducedIn !== null) {
+                worldBlockStartSec = crossDeducedIn;
+                InTier = 10;
+                log('   \uD83D\uDD17 Tier0-IN (cross-agrupacio): OnAir deduit des d\'item anterior (qualsevol agrupacio) -> ' + worldBlockStartSec.toFixed(2) + 's');
+            } else {
+                log('   \u2139\uFE0F Tier0-IN: Sense video previ amb agrupacio="' + blockAgrupacio_IN + '" ni OnAir anterior deduible. Es delega a Tier1.');
+            }
         }
 
         // -- Tier 1 (IN): Primer item estructural del bloc --
@@ -567,6 +577,15 @@
                 worldBlockStartSec = tier1InCandidate;
                 InTier = 1;
                 worldBlockAnchorSec = tier1InCandidate;
+            } else if (structuralItemsInBlock.length > 0 && structuralItemsInBlock[0].horaEntradaOnAir) {
+                // Si el primer item estructural té OnAir REAL (no previst), és la font més
+                // fiable. Tier0 cross-agrupacio és una deducció d'items d'altres agrupacions
+                // → l'OnAir real del bloc PREVAL independentment de quin sigui més aviat.
+                var tier0old = worldBlockStartSec;
+                worldBlockStartSec = tier1InCandidate;
+                InTier = 1;
+                worldBlockAnchorSec = tier1InCandidate;
+                log('   \uD83C\uDFAF Tier1-ONAIR-PREVAL: primer estructural "' + structuralItemsInBlock[0].num + '" té horaEntradaOnAir=' + structuralItemsInBlock[0].horaEntradaOnAir + ' (' + tier1InCandidate.toFixed(2) + 's). Guanya sobre Tier0-IN=' + tier0old.toFixed(2) + 's (cross-agrupacio).');
             } else {
                 log('   \u2139\uFE0F Tier1-NOCOMPETE: ' + tier1InLabel + '=' + tier1InCandidate.toFixed(2) + 's \u2265 Tier0-IN=' + worldBlockStartSec.toFixed(2) + 's. Es manté Tier0.');
             }
@@ -588,9 +607,6 @@
         // ================================================================
         // OUT: worldBlockEndSec
         // ================================================================
-        var worldBlockEndSec = null;
-        var OutTier = 0;
-
         // -- Tier 1 OUT (max): sortida més avançada de TOTS els items del bloc --
         // Itera sobre tots els blockLines perquè un IPD amb duradaOnAir>0
         // pot córrer en paral·lel al darrer item estructural.
@@ -701,6 +717,32 @@
             } else {
                 log('   \u274C No es pot determinar el final del bloc ' + blockId, 'ERROR');
                 return null;
+            }
+        }
+
+        // ── Guard de IN/OUT invertit ──
+        // Si el IN acaba sent >= OUT, vol dir que el primer item estructural
+        // té una referència temporal invàlida (Prevista no fiable en molinets
+        // reutilitzats o intros amb TC desplaçat).
+        // En aquest cas, deduir IN = block.in - durada del primer item.
+        // Així la intro es manté al principi del clip amb la seva durada real.
+        if (worldBlockStartSec !== null && worldBlockEndSec !== null &&
+            worldBlockStartSec >= worldBlockEndSec) {
+            var originalIN = worldBlockStartSec;
+            var blockInFallback = this.getBlock(data, blockId);
+            if (blockInFallback && blockInFallback.in) {
+                var blockInSec = this.tcToSeconds(blockInFallback.in);
+                // Restar la durada del primer item estructural (la intro/molinet)
+                // perquè quedi dins del clip, abans del block.in
+                var firstItem = structuralItemsInBlock[0];
+                var firstItemDur = this.getItemDuradaSec(firstItem);
+                var correctedIN = blockInSec - firstItemDur;
+                if (correctedIN < worldBlockEndSec) {
+                    worldBlockStartSec = correctedIN;
+                    worldBlockAnchorSec = correctedIN;
+                    InTier = 2;
+                    log('   \uD83D\uDD04 [IN/OUT-GUARD] IN original (' + originalIN.toFixed(1) + 's) >= OUT (' + worldBlockEndSec.toFixed(1) + 's). Prevista no fiable. IN = block.in(' + blockInFallback.in + ') - durada(' + (firstItem.num || '?') + ':' + firstItemDur.toFixed(1) + 's) = ' + correctedIN.toFixed(1) + 's.');
+                }
             }
         }
 

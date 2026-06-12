@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ============================================================================
  * WORKFLOW: ASSEMBLY (Montatge Automàtic i Orquestració) - v2.6.0 literal
  * ============================================================================
@@ -254,12 +254,20 @@
             if (!manifest || !manifest.escaletaItems || manifest.escaletaItems.length === 0) return null;
 
             // â”€â”€ Rang temporal del bloc (segons la primera i Ãºltima lÃ­nia agrupada) â”€â”€
-            var blockStartStr = lines[0].horaEntradaOnAir || lines[0].horaEntradaPrevista;
-            var blockEndStr = lines[lines.length - 1].horaEntradaOnAir || lines[lines.length - 1].horaEntradaPrevista;
-            if (!blockStartStr || !blockEndStr) return null;
-            var blockStartSec = reader.tcToSeconds(blockStartStr);
-            var blockEndSec = reader.tcToSeconds(blockEndStr);
-            if (blockStartSec === null || blockEndSec === null) return null;
+            var blockStartSec = (manifest.ref && manifest.ref.worldBlockStartSec != null)
+                ? manifest.ref.worldBlockStartSec
+                : null;
+            var blockEndSec = (manifest.ref && manifest.ref.worldBlockEndSec != null)
+                ? manifest.ref.worldBlockEndSec
+                : null;
+            if (blockStartSec === null || blockEndSec === null) {
+                var blockStartStr = lines[0].horaEntradaOnAir || lines[0].horaEntradaPrevista;
+                var blockEndStr = lines[lines.length - 1].horaEntradaOnAir || lines[lines.length - 1].horaEntradaPrevista;
+                if (!blockStartStr || !blockEndStr) return null;
+                blockStartSec = reader.tcToSeconds(blockStartStr);
+                blockEndSec = reader.tcToSeconds(blockEndStr);
+                if (blockStartSec === null || blockEndSec === null) return null;
+            }
 
             // â”€â”€ Escanejar tots els items del manifest â”€â”€
             var allItems = manifest.escaletaItems;
@@ -773,7 +781,7 @@
                 var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
                 var comment = (num ? num + ' - ' : '') + titol;
                 comment = comment.trim();
-                var colorIdx = this._getColorIdx(line);
+                var colorIdx = 6;  // Blau fix per OnAir (D10)
 
                 log('🔵 [F1·OnAir] ' + num + ': OnAir=' + itemOnAirSec.toFixed(1) + 's → timeline ' + safeT + 's  [Δ=' + (itemOnAirSec - refF1).toFixed(1) + 's]' + (idealPosSec === 0 && (itemOnAirSec - refF1) < 0 ? ' (→ 00:00)' : ''));
 
@@ -840,6 +848,46 @@
             var placements = [];
             var itemPositions = new Map();
 
+            // ── D10·F2: Forçar marcador del 1r ítem a 00:00 si no existeix ──
+            // Quan l'usuari ha trimeat l'IN del MP4, 00:00 és l'inici del bloc.
+            // El bucle principal salta els ítems amb OnAir (→ F1), però si F1 no
+            // va col·locar el marcador o ha quedat fora del timeline, F2 ha de
+            // garantir que el 1r ítem tingui marcador a 00:00.
+            if (structuralItems.length > 0) {
+                var firstItem = structuralItems[0];
+                var firstNum = firstItem.num;
+                if (firstNum) {
+                    var markersRaw = await callJSX('Markers.get()');
+                    var allMarkers = [];
+                    try { allMarkers = JSON.parse(markersRaw); } catch (e) { allMarkers = []; }
+                    var hasFirstItemMarker = false;
+                    for (var mi = 0; mi < allMarkers.length; mi++) {
+                        var mk = allMarkers[mi];
+                        if (typeof mk.time === 'number' && Math.abs(mk.time) < 0.02) {
+                            var mkPrefix = '';
+                            var mkComment = mk.comments || '';
+                            var spaceDashIdx = mkComment.indexOf(' -');
+                            if (spaceDashIdx > 0) mkPrefix = mkComment.substring(0, spaceDashIdx).trim();
+                            if (mkPrefix === String(firstNum)) {
+                                hasFirstItemMarker = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!hasFirstItemMarker) {
+                        var firstTitol = (firstItem.titol || '').replace(/'/g, "\\'").substring(0, 60);
+                        var firstComment = firstNum + ' - ' + firstTitol;
+                        firstComment = firstComment.trim();
+                        var firstColorIdx = 5;  // Cyan (F2Â·Deducido) (D10)
+                        log('🟠 [F2·Deducido] Forçant marcador 1r ítem ' + firstNum + ' a 00:00 (no existia)');
+                        placements.push({ prefix: firstNum, timeSec: 0, comment: firstComment, colorIdx: firstColorIdx });
+                        itemPositions.set(firstNum, 0);
+                    } else {
+                        log('🟠 [F2·Deducido] 1r ítem ' + firstNum + ' ja té marcador a 00:00. ✓');
+                    }
+                }
+            }
+
             for (var si = 0; si < structuralItems.length; si++) {
                 var line = structuralItems[si];
                 var onAir = line.horaEntradaOnAir;
@@ -868,7 +916,7 @@
                 var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
                 var comment = (num ? num + ' - ' : '') + titol;
                 comment = comment.trim();
-                var colorIdx = this._getColorIdx(line);
+                var colorIdx = 6;  // Blau fix per OnAir (D10)
 
                 log('🟠 [F2·Deducido] ' + num + ': OnAirDeducido=' + deduced.toFixed(1) + 's → timeline ' + safeT + 's [rel]' + (idealPosSec === 0 && (deduced - anchorEfectiva) < 0 ? ' (TC negatiu → 00:00)' : ''));
 
@@ -961,7 +1009,7 @@
                 var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
                 var comment = (num ? num + ' - ' : '') + titol;
                 comment = comment.trim();
-                var colorIdx = this._getColorIdx(line);
+                var colorIdx = 6;  // Blau fix per OnAir (D10)
 
                 log('🟡 [F3·Prevista] ' + num + ': Prevista=' + previstaSec.toFixed(1) + 's → timeline ' + safeT + 's [rel]' + (idealPosSec === 0 && (previstaSec - anchorEfectiva) < 0 ? ' (TC negatiu → 00:00)' : ''));
 

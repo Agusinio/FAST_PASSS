@@ -1,11 +1,25 @@
-# PLAN DE ATAQUE: Integración de la Escaleta JSON en FAST >>> PASS
-> Última actualización: 2026-04-18 | Estado: **IMPLEMENTADO ✅**
+c# ESPECIFICACIÓN: Integración de la Escaleta JSON en FAST >>> PASS
+> Última actualización: 2026-06-09 | Estado: **IMPLEMENTADO ✅** | **Actualizado con formato real de archivos 2026-06-08**
 
 ---
 
 ## Contexto y Objetivo
 
-Los ficheros `TN_MIGDIA_XXXXXXXX_XXXXXX.json` (y equivalentes por programa) son **snapshots de la escaleta en tiempo real** exportados por el sistema de producción. Contienen toda la información necesaria para construir automáticamente los proyectos de Premiere Pro por bloque vertical (V1, V2, V3...).
+Los ficheros `TN_COMARQUES_V1_AFECTACIONS_..._20260608_141037.json` (y equivalentes por programa y bloque) son **snapshots de la escaleta en tiempo real** exportados por el sistema de producción. **Cada archivo contiene la escaleta COMPLETA del programa (todos los bloques)** — el sufijo en el nombre de archivo indica el bloque que motivó su generación, pero internamente `liniesEscaleta[]` incluye ítems de todos los bloques (V1, V2, V3...) y ítems sin bloque (`agrupacio: null`).
+
+**El `cleanFeed` es invariante para un mismo programa**: todos los archivos de un mismo programa (ej: TN_VESPRE V2, V3, V5) deben compartir el mismo `assetId` y `mediaPath`. Si dos archivos del mismo programa apuntan a MP4s diferentes, hay que reportarlo porque es un error en los datos de producción.
+
+**Formato de nombre de archivo real:**
+```
+[PROGRAMA]_[BLOQUE]_[TITULO_DESCRIPTIVO]_[YYYYMMDD]_[HHMMSS].json
+```
+Ejemplos (08/06/2026):
+- `TN_COMARQUES_V1_AFECTACIONS_VISITA_PAPA_ENTORN_SAGRADA_FAMI_20260608_141037.json`
+- `TN_MIGDIA_V1_pg_bona_tarda_i_DONA_PAS_CONGRES__CONN_POL_MARSA__IPD_PAPA_AL_CONGRES__DISCURS_DEL_PAPA_AL_CONGRES__IPD_SANCHEZ_I_PAPA_NUNCIATURA_20260608_144534.json`
+- `TN_VESPRE_V2_GF_SELECTIVITAT__Intro__PREVIA_SELECTIVITAT_I_VAGA_DEMA_20260608_213050.json`
+- `TN_VESPRE_V3_GF_Florentino__Intro__FLORENTINO_PEREZ_A_PARTIR_DARA_20260608_214044.json`
+
+> ✅ **Verificado 2026-06-09**: V2 y V3 de TN_VESPRE comparten `assetId: PRO51050904` y `mediaPath: \\DSMEDIA01\...\51050904_20260608205922_TN_VESPRE_senyal_net.MP4`.
 
 **Fuente de datos confirmada:**
 ```
@@ -14,9 +28,10 @@ Los ficheros `TN_MIGDIA_XXXXXXXX_XXXXXX.json` (y equivalentes por programa) son 
 
 El objetivo es:
 1. **Listar y leer** el JSON más reciente del programa seleccionado desde esa ruta de red.
-2. **Usar el MP4 del `cleanFeed`** (señal limpia completa del programa), aplicando un decalaje temporal para situar el clip en el punto de inicio del bloque.
-3. **Añadir handles de 20s** (margen de seguridad antes y después del bloque) porque el TC de emisión no es exacto.
-4. **Substituir el motor de extracción actual** (basado en nombres de directorios) por este nuevo motor basado en JSON.
+2. **Filtrar** las líneas del bloque correcto usando el campo `agrupacio` (ej: `"v1"`, `"v2"`).
+3. **Usar el MP4 del `cleanFeed`** (señal limpia completa del programa), aplicando un decalaje temporal para situar el clip en el punto de inicio del bloque.
+4. **Añadir handles de 20s** (margen de seguridad antes y después del bloque) porque el TC de emisión no es exacto.
+5. **Substituir el motor de extracción actual** (basado en nombres de directorios) por este nuevo motor basado en JSON.
 
 ---
 

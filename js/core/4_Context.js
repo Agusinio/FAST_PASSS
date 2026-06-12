@@ -19,7 +19,7 @@
         missing: { wotts: false, media: false, srt: false, portada: false },
 
         async checkContext() {
-            if (!getUtils().isJsxReady) return;
+            if (!getUtils().isJsxReady) return; 
         
             // 📍 Capturamos los elementos del DOM al inicio
             const elProg = document.getElementById('programa');
@@ -42,7 +42,35 @@
                 // D7.2: Preservar State.dateDir si ja va ser corregit per _runNew().
                 // La data d'emissió de l'escaleta és la font única de veritat.
                 // Només s'usa getFormattedDate() com a fallback si State.dateDir no existeix.
+                // BUG #1 FIX (2026-06-09): Resetear dateDir si el programa ha canviat.
+                // Evita contaminació creuada entre programes (ex: TNCOMARQUES → TN_VESPRE).
+                const progId = (config.mapeoProgramas[elProg.value] && config.mapeoProgramas[elProg.value].archivo) || '';
+                const lastProg = (window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.lastProgram);
+                if (progId && lastProg && progId !== lastProg) {
+                    getUtils().log('🔄 [checkContext] Programa canviat (' + lastProg + ' → ' + progId + '). Resetejant dateDir.', 'DEBUG');
+                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                        window.FASTPASS_UI.State.dateDir = null;
+                    }
+                }
+                // Resetear dateDir també si canvia el bloc dins del mateix programa.
+                // Evita que un dateDir heretat d'un workflow anterior falli el scan
+                // i mostri erròniament "NOU PROJECTE" quan el projecte ja existeix.
+                const lastBloc = (window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.lastBloc);
+                if (elBloc.value && lastBloc && elBloc.value !== lastBloc) {
+                    getUtils().log('🔄 [checkContext] Bloc canviat (' + lastBloc + ' → ' + elBloc.value + '). Resetejant dateDir.', 'DEBUG');
+                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                        window.FASTPASS_UI.State.dateDir = null;
+                    }
+                }
                 const existingDateDir = (window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir);
+                // Guardar programa actual per a la següent comparació
+                if (window.FASTPASS_UI && window.FASTPASS_UI.State && progId) {
+                    window.FASTPASS_UI.State.lastProgram = progId;
+                }
+                // Guardar bloc actual per a la següent comparació
+                if (window.FASTPASS_UI && window.FASTPASS_UI.State && elBloc.value) {
+                    window.FASTPASS_UI.State.lastBloc = elBloc.value;
+                }
                 const ctx = {
                     config: config,
                     progData: config.mapeoProgramas[elProg.value],
@@ -128,7 +156,13 @@
                                 const escMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
                                 if (escMeta && escMeta.filename) {
                                     const emissionDate = getUtils().extractDateFromEscaletaFilename(escMeta.filename);
-                                    if (emissionDate && emissionDate !== ctx.dateDir) {
+                                    // BUG #2 FIX (2026-06-09): Validar que la data extreta de l'escaleta
+                                    // estigui dins de la finestra temporal (avui o ahir si <4AM).
+                                    // Evita que FIX A2 sobrescrigui dateDir amb una data obsoleta
+                                    // (ex: JSON del 03/06 quan avui és 08/06).
+                                    // FIX A2 no té mtime (data extreta de JSON), però el fallback date-based
+                                    // ara accepta ahir sense restricció horària
+                                    if (emissionDate && emissionDate !== ctx.dateDir && getUtils().isDateDirInTemporalWindow(emissionDate)) {
                                         const oldDateDir = ctx.dateDir;
                                         ctx.dateDir = emissionDate;
                                         if (window.FASTPASS_UI && window.FASTPASS_UI.State) {

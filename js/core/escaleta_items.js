@@ -86,7 +86,7 @@
      * @param {object} [data] - JSON complet (per overrides de durada)
      * @returns {number|null}
      */
-    ER._deduceOnAirEntrada = function (item, allLines, data) {
+    ER._deduceOnAirEntrada = function (item, allLines, data, ignoreAgrupacio) {
         if (!item || !allLines || allLines.length === 0) return null;
 
         var itemIdx = allLines.indexOf(item);
@@ -102,7 +102,9 @@
             // només considerar items del MATEIX agrupacio. null !== "v1",
             // per tant els items null (totems) no contaminen la deducció
             // d'items que pertanyen a un bloc.
-            if (item.agrupacio && prevItem.agrupacio !== item.agrupacio) continue;
+            // ignoreAgrupacio=true permet creuar fronteres d'agrupacio
+            // (útil per a Tier0-IN quan no hi ha video previ al mateix agrupacio).
+            if (!ignoreAgrupacio && item.agrupacio && prevItem.agrupacio !== item.agrupacio) continue;
 
             var prevOnAir = prevItem.horaEntradaOnAir;
             if (prevOnAir && prevOnAir !== "00:00:00") {
@@ -175,7 +177,21 @@
     ER.getItemEntradaSec = function (item, allLines, data) {
         if (!item) return null;
         var h = item.horaEntradaOnAir;
-        if (h && h !== "00:00:00") return this.tcToSeconds(h);
+        if (h && h !== "00:00:00") {
+            var onAirSec = this.tcToSeconds(h);
+            // MOLINET: items repetibles (reapareixen en blocs posteriors).
+            // El seu horaEntradaOnAir pot ser de l'última aparició, no de la primera.
+            // Si OnAir és >120s posterior a Prevista, es descarta i s'usa Prevista.
+            var titol = (item.titol || '').toUpperCase();
+            if (titol.indexOf('MOLINET') !== -1 && item.horaEntradaPrevista && item.horaEntradaPrevista !== '00:00:00') {
+                var prevSec = this.tcToSeconds(item.horaEntradaPrevista);
+                if (onAirSec - prevSec > 120) {
+                    log('   \uD83D\uDD04 [MOLINET] ' + (item.num || '?') + ': OnAir=' + onAirSec.toFixed(1) + 's > Prevista=' + prevSec.toFixed(1) + 's (+' + (onAirSec - prevSec).toFixed(0) + 's). OnAir descartat (molinet reutilitzat).');
+                    return prevSec;
+                }
+            }
+            return onAirSec;
+        }
         if (allLines && allLines.length > 0) {
             var deduced = this._deduceOnAirEntrada(item, allLines, data);
             if (deduced !== null) return deduced;

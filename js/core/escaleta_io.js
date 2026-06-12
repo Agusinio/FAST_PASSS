@@ -56,14 +56,12 @@
      */
     /**
      * extractBlockIdFromFilename: Extreu el blockId (V1, V2, V3, V4) del nom d'un fitxer JSON.
-     * Format esperat: PROGRAMA_BLOCKID_... (ex: TN_VESPRE_V1_GF_FOTOS_...)
-     * També detecta MATINS_V1, TN_MIGDIA_V2, etc.
+     * Nou format: YYYYMMDD_HHMMSS_PROGRAMA_BLOQUE_...json
      * @param {string} filename
      * @returns {string|null} BlockId (ex: "V1") o null si no es pot extreure
      */
     ER.extractBlockIdFromFilename = function (filename) {
         if (!filename) return null;
-        // Patró: després del prefix de programa, V seguit de dígits
         var m = filename.match(/_(V\d+)_/i);
         return m ? m[1].toUpperCase() : null;
     };
@@ -71,9 +69,12 @@
     /**
      * findLatest: Llista la carpeta d'escaletes i troba el JSON més recent
      * per al programa indicat.
+     *
+     * NOU FORMAT (2026-06-12): YYYYMMDD_HHMMSS_PROGRAMA_BLOQUE_...json
+     * La data és al principi del nom → filtrar per data és trivial.
+     *
      * @param {string} programArchivo - e.g. "TN_MIGDIA", "TN_COMARQUES"
-     * @param {string} [blockId] - Opcional. ID del bloc ("V1", "V2"...). Si es proporciona,
-     *        filtra per {PROGRAMA}_{BLOCK}_* per trobar el JSON específic del bloc.
+     * @param {string} [blockId] - Opcional. ID del bloc ("V1", "V2"...)
      * @returns {Promise<{path:string, filename:string}|null>}
      */
     ER.findLatest = async function (programArchivo, blockId) {
@@ -94,25 +95,67 @@
                 return null;
             }
 
-            // Construir prefix: si hi ha blockId, busquem {PROG}_{BLOCK}_
-            // sinó, busquem {PROG}_ (comportament legacy)
-            var prefix = programArchivo.toUpperCase() + '_';
+            // ── NOU FORMAT: YYYYMMDD_HHMMSS_PROGRAMA_BLOQUE_...json ──
+            // El prefix de cerca és el programa i bloc dins del nom (no al principi)
+            // Ex: "20260611_141042_TN_COMARQUES_V1_Segona..."
+            // Busquem per substring: "_PROGRAMA_BLOQUE_" a qualsevol posició
+            var searchToken = '_' + programArchivo.toUpperCase() + '_';
             if (blockId) {
-                prefix += blockId.toUpperCase() + '_';
+                searchToken += blockId.toUpperCase() + '_';
             }
+
+            // Helper: extreu data sortable del nou format (segments [0]+[1] = YYYYMMDDHHMMSS)
+            function _extractSortDate(name) {
+                var noExt = name.replace(/\.json$/i, '');
+                var parts = noExt.split('_');
+                if (parts.length >= 2 && /^\d{8}$/.test(parts[0]) && /^\d{6}$/.test(parts[1])) {
+                    return parts[0] + parts[1];
+                }
+                // Fallback: format antic (data al final)
+                if (parts.length >= 2) {
+                    var datePart = parts[parts.length - 2];
+                    var timePart = parts[parts.length - 1];
+                    if (/^\d{8}$/.test(datePart) && /^\d{6}$/.test(timePart)) {
+                        return datePart + timePart;
+                    }
+                }
+                return '00000000000000';
+            }
+
             var candidates = files.filter(function (f) {
                 return !f.isDir &&
-                    f.name.toUpperCase().indexOf(prefix) === 0 &&
+                    f.name.toUpperCase().indexOf(searchToken) !== -1 &&
                     f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
             });
 
-            // Si no trobem amb blockId, intentem sense (fallback legacy)
+            // ── Fallback seqüencial: si no hi ha JSON del bloc, buscar V+1, V+2... ──
             if (candidates.length === 0 && blockId) {
-                log('\u26A0\uFE0F [ER:IO] Cap JSON amb prefix ' + prefix + '. Intentant sense blockId...');
-                var legacyPrefix = programArchivo.toUpperCase() + '_';
+                var blockNum = parseInt(blockId.replace(/^V/i, ''));
+                if (!isNaN(blockNum) && blockNum < 5) {
+                    for (var next = blockNum + 1; next <= 5; next++) {
+                        var nextToken = '_' + programArchivo.toUpperCase() + '_V' + next + '_';
+                        var nextCandidates = files.filter(function (f) {
+                            return !f.isDir &&
+                                f.name.toUpperCase().indexOf(nextToken) !== -1 &&
+                                f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
+                        });
+                        if (nextCandidates.length > 0) {
+                            log('\uD83D\uDD04 [ER:IO] Fallback seq\u00FCencial: V' + blockNum + ' \u2192 JSON del bloc V' + next + ' (' + nextCandidates.length + ' candidats)');
+                            nextCandidates.sort(function (a, b) {
+                                return _extractSortDate(b.name).localeCompare(_extractSortDate(a.name));
+                            });
+                            var bestNext = nextCandidates[0];
+                            log('\u2705 [ER:IO] JSON m\u00E9s recent (via fallback V' + next + '): ' + bestNext.name);
+                            return { path: bestNext.path, filename: bestNext.name };
+                        }
+                    }
+                }
+                // Fallback legacy: buscar només per programa (sense bloc)
+                log('\u26A0\uFE0F [ER:IO] Cap JSON amb token ' + searchToken + '. Intentant sense blockId...');
+                var legacyToken = '_' + programArchivo.toUpperCase() + '_';
                 candidates = files.filter(function (f) {
                     return !f.isDir &&
-                        f.name.toUpperCase().indexOf(legacyPrefix) === 0 &&
+                        f.name.toUpperCase().indexOf(legacyToken) !== -1 &&
                         f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
                 });
             }
@@ -122,7 +165,9 @@
                 return null;
             }
 
-            candidates.sort(function (a, b) { return b.name.localeCompare(a.name); });
+            candidates.sort(function (a, b) {
+                return _extractSortDate(b.name).localeCompare(_extractSortDate(a.name));
+            });
             var best = candidates[0];
             log('\u2705 [ER:IO] JSON m\u00E9s recent: ' + best.name);
             return { path: best.path, filename: best.name };
