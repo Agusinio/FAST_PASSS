@@ -14,14 +14,54 @@
 
     FASTPASS_UI.Logic.Scan = {
 
-        _discardOld: function (files, guardaHours) {
-            const now = Date.now();
-            const cutoff = now - (guardaHours * 60 * 60 * 1000);
-            return files.filter(f => {
-                if (!f.mtime) return true;
-                const fileTime = new Date(f.mtime).getTime();
-                return isNaN(fileTime) ? true : (fileTime >= cutoff);
-            });
+        /**
+         * Extreu YYYYMMDD del nom d'un fitxer de media (MP4/SRT/MOV/PNG).
+         * Format esperat: ..._YYYYMMDDHHMMSS_... o ..._YYYYMMDD_...
+         * @param {string} name - Nom del fitxer
+         * @returns {string|null} "20260618" o null
+         */
+        _extractDateFromFileName: function (name) {
+            if (!name) return null;
+            var parts = name.split('_');
+            // Cercar un segment de 8 dígits (YYYYMMDD) en qualsevol posició
+            for (var i = 0; i < parts.length; i++) {
+                if (/^\d{8}$/.test(parts[i])) {
+                    return parts[i];
+                }
+            }
+            // També buscar dins d'un segment de 14 dígits (YYYYMMDDHHMMSS)
+            for (var j = 0; j < parts.length; j++) {
+                if (/^\d{14}$/.test(parts[j])) {
+                    return parts[j].substring(0, 8);
+                }
+            }
+            return null;
+        },
+
+        /**
+         * Filtra fitxers per data extreta del nom (NO per mtime).
+         * @param {Array} files - Llista de fitxers [{name, mtime}]
+         * @param {string} datePrefix - Data en format YYYYMMDD (ex: "20260618")
+         * @param {string} nameFilter - Substring a buscar al nom (ex: "TNV_V1_")
+         * @param {string} extension - Extensió del fitxer (ex: ".MP4", ".MOV")
+         * @returns {Array} Fitxers filtrats
+         */
+        _filterByDateInName: function (files, datePrefix, nameFilter, extension) {
+            if (!files || files.length === 0) return [];
+            var prefix = nameFilter.toUpperCase();
+            var ext = extension.toUpperCase();
+            var dateTarget = datePrefix; // "20260618"
+            return files.filter(function (f) {
+                var name = f.name.toUpperCase();
+                if (name.indexOf(prefix) === -1) return false;
+                if (ext && !name.endsWith(ext)) return false;
+                // Filtrar per data en el nom
+                if (dateTarget) {
+                    var fileDate = this._extractDateFromFileName(f.name);
+                    if (!fileDate || fileDate !== dateTarget) return false;
+                }
+                return true;
+            }.bind(this));
         },
 
         selectedProject: function(fileList, progKey, blocKey) {
@@ -46,28 +86,38 @@
                 const pathNAS = ctx.config.rutas.verticalitzacio;
                 const allFiles = await utils.readFolder(pathNAS);
                 if (!allFiles || allFiles.length === 0) return { mp4: null, srt: null };
-    
-                // 🕒 FILTRO ÚNICO: Solo lo que esté dentro de las X horas (ej: 22h)
-                const freshFiles = this._discardOld(allFiles, ctx.config.guarda || 22);
-                
-                const prefix = `${ctx.progData.archivo}_${ctx.bloque}_`.toUpperCase();
-    
-                const validFiles = freshFiles.filter(f => {
-                    const name = f.name.toUpperCase();
-                    return name.indexOf(prefix) !== -1 && (name.endsWith(".MP4") || name.endsWith(".SRT"));
-                });
-    
+
+                // Convertir dateDir (YYYY_MM_DD) a datePrefix (YYYYMMDD) per filtrar per data en el nom
+                var datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                var prefix = ctx.progData.archivo + '_' + ctx.bloque + '_';
+
+                var validFiles = this._filterByDateInName(allFiles, datePrefix, prefix, null);
+                // Si no trobem res amb filtre de data, intentem sense data (fallback legacy)
+                if (validFiles.length === 0) {
+                    utils.log('⚠️ [SCAN:media] Cap MP4/SRT amb data ' + datePrefix + '. Intentant sense filtre de data...', 'DEBUG');
+                    validFiles = this._filterByDateInName(allFiles, null, prefix, null);
+                }
+
                 if (validFiles.length === 0) return { mp4: null, srt: null };
-    
-                // Ordenamos por el más reciente por si hay re-renders
-                validFiles.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-    
-                const getAsset = (ext) => {
-                    const f = validFiles.find(c => c.name.toUpperCase().endsWith(ext));
-                    return f ? { name: f.name, path: pathNAS + f.name } : null;
+
+                // Ordenar per data en el nom (més recent primer)
+                validFiles.sort(function (a, b) {
+                    var da = this._extractDateFromFileName(a.name);
+                    var db = this._extractDateFromFileName(b.name);
+                    return (db || '').localeCompare(da || '');
+                }.bind(this));
+
+                var getAsset = function (ext) {
+                    var upperExt = ext.toUpperCase();
+                    for (var i = 0; i < validFiles.length; i++) {
+                        if (validFiles[i].name.toUpperCase().endsWith(upperExt)) {
+                            return { name: validFiles[i].name, path: pathNAS + validFiles[i].name };
+                        }
+                    }
+                    return null;
                 };
-    
-                return { mp4: getAsset(".MP4"), srt: getAsset(".SRT") };
+
+                return { mp4: getAsset('.MP4'), srt: getAsset('.SRT') };
             } catch (e) { return { mp4: null, srt: null }; }
         },
 
@@ -76,22 +126,26 @@
                 const pathNAS = ctx.config.rutas.chyrons;
                 const allFiles = await utils.readFolder(pathNAS);
                 if (!allFiles || allFiles.length === 0) return { tema: "PENDENT", list: [] };
-    
-                const freshFiles = this._discardOld(allFiles, ctx.config.guarda || 22);
-    
-                const fProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott.toUpperCase() : "TNV";
-                const fBloc = ctx.bloque ? `_${ctx.bloque}_`.toUpperCase() : "_V1_";
-    
-                let filtered = freshFiles.filter(f => {
-                    const name = f.name.toUpperCase();
-                    return name.includes(fProg) && name.includes(fBloc) && name.endsWith(".MOV");
-                });
-    
-                // SCAN comentado para reducir ruido
-                // utils.log(`🔍 [SCAN] Encontrados ${filtered.length} archivos .MOV después de filtrar por ${fProg} y ${fBloc}`, "DEBUG");
-                // filtered.forEach((f, idx) => utils.log(`   ${idx}: ${f.name}`, "DEBUG"));
-                if (filtered.length === 0) return { tema: "PENDENT", list: [] };
-                filtered.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+
+                var datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                var fProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott.toUpperCase() : 'TNV';
+                var fBloc = ctx.bloque ? '_' + ctx.bloque + '_' : '_V1_';
+                var nameFilter = fProg + fBloc;
+
+                var filtered = this._filterByDateInName(allFiles, datePrefix, nameFilter, '.MOV');
+                if (filtered.length === 0) {
+                    utils.log('⚠️ [SCAN:wotts] Cap .MOV amb data ' + datePrefix + '. Intentant sense filtre de data...', 'DEBUG');
+                    filtered = this._filterByDateInName(allFiles, null, nameFilter, '.MOV');
+                }
+
+                if (filtered.length === 0) return { tema: 'PENDENT', list: [] };
+
+                // Ordenar per data en el nom
+                filtered.sort(function (a, b) {
+                    var da = this._extractDateFromFileName(a.name);
+                    var db = this._extractDateFromFileName(b.name);
+                    return (db || '').localeCompare(da || '');
+                }.bind(this));
 
                 // 2. EXTRACCIÓ INTEL·LIGENT DEL TEMA
                 // 1. Buscamos el archivo fuente (preferiblemente el que dice Tema-Titol)
@@ -155,21 +209,34 @@
                 const pathNAS = ctx.config.rutas.chyrons;
                 const allFiles = await utils.readFolder(pathNAS);
                 if (!allFiles || allFiles.length === 0) return [];
-    
-                // 🕒 FILTRO ÚNICO: Ventana de tiempo estricta
-                const freshFiles = this._discardOld(allFiles, ctx.config.guarda || 22);
-                
-                const fProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott.toUpperCase() : "TNV";
-                const fBloc = ctx.bloque ? `_${ctx.bloque}_`.toUpperCase() : "_V1_";
-    
-                let filtered = freshFiles.filter(f => {
-                    const name = f.name.toUpperCase();
-                    return name.includes(fProg) && name.includes(fBloc) && 
-                           name.includes("TEMA-TITOL") && name.endsWith(".PNG");
+
+                var datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                var fProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott.toUpperCase() : 'TNV';
+                var fBloc = ctx.bloque ? '_' + ctx.bloque + '_' : '_V1_';
+                var nameFilter = fProg + fBloc;
+
+                // Portades: filtrar per TEMA-TITOL i .PNG
+                var allFiltered = this._filterByDateInName(allFiles, datePrefix, nameFilter, '.PNG');
+                var filtered = allFiltered.filter(function (f) {
+                    return f.name.toUpperCase().indexOf('TEMA-TITOL') !== -1;
                 });
-    
-                filtered.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-                return filtered.map(f => ({ name: f.name, path: pathNAS + f.name }));
+
+                if (filtered.length === 0) {
+                    utils.log('⚠️ [SCAN:portadas] Cap .PNG amb data ' + datePrefix + '. Intentant sense filtre de data...', 'DEBUG');
+                    var allLegacy = this._filterByDateInName(allFiles, null, nameFilter, '.PNG');
+                    filtered = allLegacy.filter(function (f) {
+                        return f.name.toUpperCase().indexOf('TEMA-TITOL') !== -1;
+                    });
+                }
+
+                // Ordenar per data en el nom
+                filtered.sort(function (a, b) {
+                    var da = this._extractDateFromFileName(a.name);
+                    var db = this._extractDateFromFileName(b.name);
+                    return (db || '').localeCompare(da || '');
+                }.bind(this));
+
+                return filtered.map(function (f) { return { name: f.name, path: pathNAS + f.name }; });
             } catch (e) { return []; }
         }
     };

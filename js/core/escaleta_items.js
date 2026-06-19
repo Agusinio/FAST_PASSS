@@ -12,7 +12,7 @@
  *   - isItemEstructural(item)
  *   - getItemDuradaSec(item)
  *   - _deduceOnAirEntrada(item, allLines, data)
- *   - _deduceOnAirSortida(item, allLines)
+ *   - _deduceOnAirSortida(item, allLines, allowCrossAgrupacio)
  *   - getItemEntradaSec(item, allLines, data)
  *   - getItemSortidaSec(item, allLines, data)
  * ============================================================================
@@ -133,16 +133,24 @@
      * _deduceOnAirSortida: Dedueix l'OnAir de sortida usant el primer
      * item posterior amb horaEntradaOnAir vàlida.
      *
+     * Two-phase strategy controlled by allowCrossAgrupacio:
+     *   Phase 1 (always): same agrupacio (BUG #13). Can compete with primaryResult.
+     *   Phase 2 (allowCrossAgrupacio=true): cross-agrupacio fallback.
+     *     Only used as last resort when primaryResult AND Phase 1 both fail.
+     *     Must NOT compete with a valid primaryResult (BUG #19).
+     *
      * @param {object} item
      * @param {Array} allLines
+     * @param {boolean} [allowCrossAgrupacio] - Default false. True enables Phase 2.
      * @returns {number|null}
      */
-    ER._deduceOnAirSortida = function (item, allLines) {
+    ER._deduceOnAirSortida = function (item, allLines, allowCrossAgrupacio) {
         if (!item || !allLines || allLines.length === 0) return null;
 
         var itemIdx = allLines.indexOf(item);
         if (itemIdx < 0 || itemIdx >= allLines.length - 1) return null;
 
+        // ── Phase 1: same agrupacio (BUG #13) ──
         for (var i = itemIdx + 1; i < allLines.length; i++) {
             var nextItem = allLines[i];
             if (!nextItem) continue;
@@ -157,6 +165,24 @@
             var nextOnAir = nextItem.horaEntradaOnAir;
             if (nextOnAir && nextOnAir !== "00:00:00") {
                 return this.tcToSeconds(nextOnAir);
+            }
+        }
+
+        // ── Phase 2 (BUG #19): cross-agrupacio fallback ──
+        // Només s'activa quan allowCrossAgrupacio=true (cridat des de
+        // getItemSortidaSec com a últim recurs). NO ha de competir
+        // amb primaryResult — només és fallback absolut.
+        // Només per items amb agrupacio (blocs), no per a totems (null).
+        if (allowCrossAgrupacio && item.agrupacio) {
+            for (var j = itemIdx + 1; j < allLines.length; j++) {
+                var nextItem2 = allLines[j];
+                if (!nextItem2) continue;
+                if (nextItem2.flotant === true) continue;
+                var nextOnAir2 = nextItem2.horaEntradaOnAir;
+                if (nextOnAir2 && nextOnAir2 !== "00:00:00") {
+                    log('   \uD83D\uDD17 [deduceOnAirSortida] "' + item.num + '" (agrupacio:' + item.agrupacio + '): cross-agrupacio fallback \u2192 "' + nextItem2.num + '" (agrupacio:' + (nextItem2.agrupacio || 'null') + ') OnAir=' + nextOnAir2);
+                    return this.tcToSeconds(nextOnAir2);
+                }
             }
         }
 
@@ -207,10 +233,14 @@
 
     /**
      * getItemSortidaSec: 4 nivells de resolució per a la sortida.
-     *   1. horaEntradaOnAir + durada
+     *   1. horaEntradaOnAir + durada (si l'item té OnAir propi)
      *   2. OnAirDeducido entrada + durada
-     *   3. SalidaOnAirDeducida (primer OnAir posterior)
-     *   4. horaEntradaPrevista + durada
+     *   3. SalidaOnAirDeducida — Phase 1: mateix agrupacio (pot competir)
+     *   4. SalidaOnAirDeducida — Phase 2: cross-agrupacio (només fallback)
+     *   5. horaEntradaPrevista + durada
+     *
+     * BUG #19: Phase 2 cross-agrupacio NO competeix amb primaryResult.
+     * Només s'usa quan primaryResult i Phase 1 fallen (últim recurs).
      *
      * @param {object} item
      * @param {Array} [allLines]
@@ -235,23 +265,33 @@
             }
         }
 
-        // --- Competidor: següent horaEntradaOnAir (fet dur del playout) ---
-        var nextOnAirSec = null;
+        // --- Competidor Phase 1: same agrupacio (fet dur del playout) ---
+        // BUG #11: duradaOnAir pot ser inconsistent. El següent OnAir del
+        // MATEIX agrupacio és un fet dur del playout i SÍ competeix.
+        var nextOnAirSameAgrupacio = null;
         if (allLines && allLines.length > 0) {
-            nextOnAirSec = this._deduceOnAirSortida(item, allLines);
+            nextOnAirSameAgrupacio = this._deduceOnAirSortida(item, allLines, false);
         }
 
-        // BUG #11: duradaOnAir pot ser inconsistent. El següent OnAir
-        // és un fet dur del playout i ha de competir, no ser només fallback.
-        if (primaryResult !== null && nextOnAirSec !== null && nextOnAirSec > primaryResult) {
-            log('   🟡 [getItemSortidaSec] "' + item.num + '": següent OnAir=' + nextOnAirSec.toFixed(2) + 's > duradaOnAir=' + primaryResult.toFixed(2) + 's. Guanya següent OnAir.');
-            return nextOnAirSec;
+        if (primaryResult !== null && nextOnAirSameAgrupacio !== null && nextOnAirSameAgrupacio > primaryResult) {
+            log('   🟡 [getItemSortidaSec] "' + item.num + '": Phase1 same-agrup OnAir=' + nextOnAirSameAgrupacio.toFixed(2) + 's > primaryResult=' + primaryResult.toFixed(2) + 's. Guanya Phase1 (fet dur del playout).');
+            return nextOnAirSameAgrupacio;
         }
         if (primaryResult !== null) return primaryResult;
+        if (nextOnAirSameAgrupacio !== null) return nextOnAirSameAgrupacio;
 
-        // --- Fallback ---
-        if (nextOnAirSec !== null) return nextOnAirSec;
+        // --- Phase 2 cross-agrupacio (BUG #19): només fallback absolut ---
+        // Si primaryResult i Phase 1 fallen, és l'últim recurs.
+        // No ha de competir, no és aquí.
+        if (allLines && allLines.length > 0) {
+            var nextOnAirCross = this._deduceOnAirSortida(item, allLines, true);
+            if (nextOnAirCross !== null) {
+                log('   🔗 [getItemSortidaSec] "' + item.num + '": Phase2 cross-agrup OnAir=' + nextOnAirCross.toFixed(2) + 's (últim recurs).');
+                return nextOnAirCross;
+            }
+        }
 
+        // --- Últim fallback: Prevista ---
         h = item.horaEntradaPrevista;
         if (h && h !== "00:00:00") {
             return this.tcToSeconds(h) + this.getItemDuradaSec(item);

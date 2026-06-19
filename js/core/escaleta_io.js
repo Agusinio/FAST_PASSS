@@ -77,8 +77,20 @@
      * @param {string} [blockId] - Opcional. ID del bloc ("V1", "V2"...)
      * @returns {Promise<{path:string, filename:string}|null>}
      */
-    ER.findLatest = async function (programArchivo, blockId) {
-        var searchLabel = programArchivo + (blockId ? '/' + blockId : '');
+    /**
+     * findLatest: Cerca el JSON d'escaleta més recent per a un programa i bloc.
+     *
+     * NOU FORMAT (2026-06-12): YYYYMMDD_HHMMSS_PROGRAMA_BLOQUE_...json
+     *
+     * @param {string} programArchivo - e.g. "TN_MIGDIA", "TN_COMARQUES"
+     * @param {string} [blockId] - ID del bloc ("V1", "V2"...)
+     * @param {string} [datePrefix] - Prefix de data YYYYMMDD per filtrar
+     *        (ex: "20260618"). Si es proporciona, NOMÉS es consideren
+     *        fitxers d'aquest dia. Sense datePrefix, comportament legacy.
+     * @returns {Promise<{path:string, filename:string}|null>}
+     */
+    ER.findLatest = async function (programArchivo, blockId, datePrefix) {
+        var searchLabel = programArchivo + (blockId ? '/' + blockId : '') + (datePrefix ? ' [' + datePrefix + ']' : '');
         log('\uD83D\uDCE1 [ER:IO] Cercant JSON per a: ' + searchLabel);
         try {
             var raw = await callJSX("IO.listFolder('" + this._escapePath(this.ESCALETES_PATH) + "')");
@@ -95,16 +107,16 @@
                 return null;
             }
 
-            // ── NOU FORMAT: YYYYMMDD_HHMMSS_PROGRAMA_BLOQUE_...json ──
-            // El prefix de cerca és el programa i bloc dins del nom (no al principi)
-            // Ex: "20260611_141042_TN_COMARQUES_V1_Segona..."
-            // Busquem per substring: "_PROGRAMA_BLOQUE_" a qualsevol posició
-            var searchToken = '_' + programArchivo.toUpperCase() + '_';
-            if (blockId) {
-                searchToken += blockId.toUpperCase() + '_';
+            // Helper: extreu YYYYMMDD del prefix del nom (nou format)
+            function _extractDateFromName(name) {
+                var parts = name.split('_');
+                if (parts.length >= 1 && /^\d{8}$/.test(parts[0])) {
+                    return parts[0]; // "20260618"
+                }
+                return null;
             }
 
-            // Helper: extreu data sortable del nou format (segments [0]+[1] = YYYYMMDDHHMMSS)
+            // Helper: extreu data sortable (YYYYMMDDHHMMSS)
             function _extractSortDate(name) {
                 var noExt = name.replace(/\.json$/i, '');
                 var parts = noExt.split('_');
@@ -122,42 +134,61 @@
                 return '00000000000000';
             }
 
-            var candidates = files.filter(function (f) {
+            // ── Filtrar per programa (sempre) ──
+            var progToken = '_' + programArchivo.toUpperCase() + '_';
+            var allProgFiles = files.filter(function (f) {
                 return !f.isDir &&
-                    f.name.toUpperCase().indexOf(searchToken) !== -1 &&
+                    f.name.toUpperCase().indexOf(progToken) !== -1 &&
                     f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
             });
 
-            // ── Fallback seqüencial: si no hi ha JSON del bloc, buscar V+1, V+2... ──
+            if (allProgFiles.length === 0) {
+                log('\u26A0\uFE0F [ER:IO] Cap JSON trobat per a ' + programArchivo);
+                return null;
+            }
+
+            // ── Si tenim datePrefix, filtrar ESTRICTAMENT per data ──
+            if (datePrefix) {
+                allProgFiles = allProgFiles.filter(function (f) {
+                    var d = _extractDateFromName(f.name);
+                    return d === datePrefix;
+                });
+                if (allProgFiles.length === 0) {
+                    log('\u26A0\uFE0F [ER:IO] Cap JSON del dia ' + datePrefix + ' per a ' + programArchivo);
+                    return null;
+                }
+            }
+
+            // ── Dins dels fitxers del dia (o tots si no hi ha datePrefix), buscar pel bloc ──
+            var candidates = null;
+            if (blockId) {
+                var blockToken = '_' + blockId.toUpperCase() + '_';
+                candidates = allProgFiles.filter(function (f) {
+                    return f.name.toUpperCase().indexOf(blockToken) !== -1;
+                });
+            } else {
+                candidates = allProgFiles;
+            }
+
+            // ── Fallback seqüencial dins del MATEIX DIA: V1→V2→V3→V4→V5 ──
             if (candidates.length === 0 && blockId) {
                 var blockNum = parseInt(blockId.replace(/^V/i, ''));
                 if (!isNaN(blockNum) && blockNum < 5) {
                     for (var next = blockNum + 1; next <= 5; next++) {
-                        var nextToken = '_' + programArchivo.toUpperCase() + '_V' + next + '_';
-                        var nextCandidates = files.filter(function (f) {
-                            return !f.isDir &&
-                                f.name.toUpperCase().indexOf(nextToken) !== -1 &&
-                                f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
+                        var nextToken = '_V' + next + '_';
+                        candidates = allProgFiles.filter(function (f) {
+                            return f.name.toUpperCase().indexOf(nextToken) !== -1;
                         });
-                        if (nextCandidates.length > 0) {
-                            log('\uD83D\uDD04 [ER:IO] Fallback seq\u00FCencial: V' + blockNum + ' \u2192 JSON del bloc V' + next + ' (' + nextCandidates.length + ' candidats)');
-                            nextCandidates.sort(function (a, b) {
-                                return _extractSortDate(b.name).localeCompare(_extractSortDate(a.name));
-                            });
-                            var bestNext = nextCandidates[0];
-                            log('\u2705 [ER:IO] JSON m\u00E9s recent (via fallback V' + next + '): ' + bestNext.name);
-                            return { path: bestNext.path, filename: bestNext.name };
+                        if (candidates.length > 0) {
+                            log('\uD83D\uDD04 [ER:IO] Fallback seq\u00FCencial (mateix dia): V' + blockNum + ' \u2192 JSON del bloc V' + next + ' (' + candidates.length + ' candidats)');
+                            break;
                         }
                     }
                 }
-                // Fallback legacy: buscar només per programa (sense bloc)
-                log('\u26A0\uFE0F [ER:IO] Cap JSON amb token ' + searchToken + '. Intentant sense blockId...');
-                var legacyToken = '_' + programArchivo.toUpperCase() + '_';
-                candidates = files.filter(function (f) {
-                    return !f.isDir &&
-                        f.name.toUpperCase().indexOf(legacyToken) !== -1 &&
-                        f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
-                });
+                if (candidates.length === 0) {
+                    log('\u26A0\uFE0F [ER:IO] Cap JSON per a V' + blockNum + ' ni fallback V+1..V5 al dia ' + (datePrefix || 'qualsevol'));
+                    return null;
+                }
             }
 
             if (candidates.length === 0) {

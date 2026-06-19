@@ -189,6 +189,13 @@
                 return null;
             }
 
+            // ── Assegurar que el log file estigui configurat per a aquest projecte ──
+            if (manifest.program && manifest.program.projectFile && manifest.program.projectFolder) {
+                if (!getUtils()._debugLogPath) {
+                    getUtils()._setLogPath(manifest.program.projectFolder, manifest.program.projectFile);
+                }
+            }
+
             const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
             const targetBlock = ctx.bloque.toLowerCase();
 
@@ -1618,54 +1625,156 @@
             try { existingMarkers = JSON.parse(markersRaw); } catch (e) { existingMarkers = []; }
             log('   🟢 [F6·Gràfics] Marcadors existents: ' + existingMarkers.length);
 
-            // ── Pas 5: Per cada ítem gràfic, calcular posició i evitar solapaments ──
+            // ── Pas 5: Per cada ítem gràfic, calcular posició usant marcadors pare ──
+            // Estratègia D11: Anclar cada ítem gràfic al marcador del seu
+            // ítem estructural pare (via prefix numèric). Els marcadors
+            // existents al timeline (F1/F2/F3) ja estan ben posicionats.
+            // Ex: "01gf" → cerca marcador amb prefix "01" → posició = parentTime + gap*index
             var MIN_GAP_SEC = 0.5;
             var placements = [];
+
+            // ── Construir mapa de marcadors pare (prefix numèric → temps) ──
+            // Estratègia D11 v2: Cascada de prioritat per trobar el millor pare.
+            // Per a cada baseNum, es busca per ordre: baseNum+"i" > baseNum+"lead" > baseNum exacte > qualsevol amb baseNum.
+            var parentMarkerByPrefix = {};
+            // Primer, indexar tots els marcadors per prefix complet
+            var markersByExactPrefix = {};  // "01i" → time, "01lead" → time, "01" → time
+            var markersByBaseNum = {};      // "01" → [times...]
+            for (var mi = 0; mi < existingMarkers.length; mi++) {
+                var mk = existingMarkers[mi];
+                var mkComment = mk.comments || '';
+                var spaceIdx = mkComment.indexOf(' -');
+                if (spaceIdx <= 0) continue;
+                var mkPrefix = mkComment.substring(0, spaceIdx).trim();
+                var numMatch = mkPrefix.match(/^(\d+)/);
+                if (!numMatch) continue;
+                var baseNum = numMatch[1];
+                var mkTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
+                if (isNaN(mkTime)) continue;
+                // Guardar per prefix exacte (el primer trobat, més proper a 00:00)
+                if (!(mkPrefix in markersByExactPrefix) || mkTime < markersByExactPrefix[mkPrefix]) {
+                    markersByExactPrefix[mkPrefix] = mkTime;
+                }
+                // Guardar per baseNum (tots)
+                if (!markersByBaseNum[baseNum]) markersByBaseNum[baseNum] = [];
+                markersByBaseNum[baseNum].push(mkTime);
+            }
+            // Resoldre cascada per a cada baseNum
+            var PRIORITY_SUFFIXES = ['i', 'lead'];
+            for (var bn in markersByBaseNum) {
+                var found = false;
+                // 1) Buscar per sufixos de prioritat
+                for (var pi = 0; pi < PRIORITY_SUFFIXES.length; pi++) {
+                    var candidateKey = bn + PRIORITY_SUFFIXES[pi];
+                    if (candidateKey in markersByExactPrefix) {
+                        parentMarkerByPrefix[bn] = markersByExactPrefix[candidateKey];
+                        found = true;
+                        break;
+                    }
+                }
+                // 2) Buscar prefix exacte (baseNum sense sufix)
+                if (!found && bn in markersByExactPrefix) {
+                    parentMarkerByPrefix[bn] = markersByExactPrefix[bn];
+                    found = true;
+                }
+                // 3) Fallback: primer marcador amb aquest baseNum (més proper a 00:00)
+                if (!found && markersByBaseNum[bn].length > 0) {
+                    markersByBaseNum[bn].sort(function(a,b) { return a - b; });
+                    parentMarkerByPrefix[bn] = markersByBaseNum[bn][0];
+                }
+            }
+            log('   🟢 [F6·Gràfics] Marcadors pare disponibles: ' + Object.keys(parentMarkerByPrefix).length + ' (' + Object.keys(parentMarkerByPrefix).join(', ') + ')');
+
+            // ── D11 v3: Repartiment simètric de markers gràfics entre pare i següent marcador ──
+            // Precalcular quants gràfics hi ha per cada baseNum
+            var totalGraphicCount = {};
+            for (var gi = 0; gi < graphicItems.length; gi++) {
+                var gNumPre = String(graphicItems[gi].num || '');
+                var gMatch = gNumPre.match(/^(\d+)/);
+                var gBn = gMatch ? gMatch[1] : null;
+                if (gBn) totalGraphicCount[gBn] = (totalGraphicCount[gBn] || 0) + 1;
+            }
+            // Construir mapa del següent marcador després del pare (per calcular parentDuration)
+            // Recollir tots els temps de marcadors existents, ordenats
+            var allMarkerTimes = [];
+            for (var mi2 = 0; mi2 < existingMarkers.length; mi2++) {
+                var mt = (typeof existingMarkers[mi2].time === 'number') ? existingMarkers[mi2].time : parseFloat(existingMarkers[mi2].time);
+                if (!isNaN(mt)) allMarkerTimes.push(mt);
+            }
+            allMarkerTimes.sort(function(a,b) { return a - b; });
+            // Per a cada baseNum, trobar el següent marcador > parentTime
+            var nextMarkerTime = {};
+            for (var bn2 in parentMarkerByPrefix) {
+                var pt = parentMarkerByPrefix[bn2];
+                for (var nti = 0; nti < allMarkerTimes.length; nti++) {
+                    if (allMarkerTimes[nti] > pt + 0.5) {  // +0.5s per evitar el propi pare
+                        nextMarkerTime[bn2] = allMarkerTimes[nti];
+                        break;
+                    }
+                }
+            }
+
+            // ── Per cada prefix, comptador d'ítems gràfics ja col·locats ──
+            var graphicCountByPrefix = {};
 
             for (var gi = 0; gi < graphicItems.length; gi++) {
                 var gItem = graphicItems[gi];
                 var gNum = String(gItem.num || '');
 
-                // Determinar TC de referència (OnAir → Prevista)
-                var refSec = null;
-                var onAir = gItem.horaEntradaOnAir;
-                var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
-                if (hasOnAir) {
-                    refSec = reader.tcToSeconds(onAir);
-                }
-                if (refSec === null || refSec === undefined) {
-                    var prevista = gItem.horaEntradaPrevista;
-                    if (prevista && prevista !== '00:00:00') {
-                        refSec = reader.tcToSeconds(prevista);
+                // Extreure prefix base (ex: "01gf" → "01", "02gf1" → "02")
+                var gNumMatch = gNum.match(/^(\d+)/);
+                var gBaseNum = gNumMatch ? gNumMatch[1] : null;
+
+                var idealPosSec = null;
+
+                // ── INTENT 1: Usar marcador pare del timeline amb repartiment simètric ──
+                if (gBaseNum && gBaseNum in parentMarkerByPrefix) {
+                    var parentTime = parentMarkerByPrefix[gBaseNum];
+                    var totalN = totalGraphicCount[gBaseNum] || 1;
+                    var idx = graphicCountByPrefix[gBaseNum] || 0;
+                    // Calcular durada disponible: fins al següent marcador, o fallback 10s
+                    var parentEnd = nextMarkerTime[gBaseNum];
+                    if (typeof parentEnd !== 'number' || parentEnd <= parentTime) {
+                        parentEnd = parentTime + 10;  // fallback: 10s
                     }
+                    var totalDur = parentEnd - parentTime;
+                    // Espaiat asimètric: 1/3 entre pare i 1r gràfic, 2/3 repartits entre N gràfics
+                    var firstGap = totalDur / 3;
+                    var remainingDur = totalDur - firstGap;
+                    var gap = remainingDur / totalN;
+                    idealPosSec = parentTime + firstGap + (gap * idx);
+                    graphicCountByPrefix[gBaseNum] = idx + 1;
+                    log('   🟢 [F6·Gràfics] ' + gNum + ': anclat al marcador pare "' + gBaseNum + '" (' + parentTime.toFixed(2) + 's) → següent marker a ' + parentEnd.toFixed(2) + 's, gap=' + gap.toFixed(2) + 's [' + (idx+1) + '/' + totalN + ']');
+                } else {
+                    // ── FALLBACK: TC de la pròpia escaleta ──
+                    var refSec = null;
+                    var onAir = gItem.horaEntradaOnAir;
+                    var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+                    if (hasOnAir) {
+                        refSec = reader.tcToSeconds(onAir);
+                    }
+                    if (refSec === null || refSec === undefined) {
+                        var prevista = gItem.horaEntradaPrevista;
+                        if (prevista && prevista !== '00:00:00') {
+                            refSec = reader.tcToSeconds(prevista);
+                        }
+                    }
+                    if (refSec === null || refSec === undefined) {
+                        log('   ⚠️ [F6·Gràfics] ' + gNum + ': sense TC de referència ni marcador pare. Saltant.');
+                        continue;
+                    }
+                    idealPosSec = anchorEfTimelineSec + (refSec - anchorEfectiva);
+                    log('   🟢 [F6·Gràfics] ' + gNum + ': FALLBACK escaleta → ' + idealPosSec.toFixed(2) + 's');
                 }
 
-                if (refSec === null || refSec === undefined) {
-                    log('   ⚠️ [F6·Gràfics] ' + gNum + ': sense TC de referència. Saltant.');
-                    continue;
-                }
-
-                // Projectar a temps de timeline
-                var idealPosSec = anchorEfTimelineSec + (refSec - anchorEfectiva);
                 if (idealPosSec < 0) idealPosSec = 0;
 
-                // Ajustar per evitar solapament amb marcadors existents
-                var adjustedTime = idealPosSec;
-                for (var mi = 0; mi < existingMarkers.length; mi++) {
-                    var mTime = (typeof existingMarkers[mi].time === 'number') ? existingMarkers[mi].time : parseFloat(existingMarkers[mi].time);
-                    if (isNaN(mTime)) continue;
-                    if (Math.abs(adjustedTime - mTime) < MIN_GAP_SEC) {
-                        adjustedTime = mTime + MIN_GAP_SEC;
-                    }
-                }
-
-                var safeT = adjustedTime.toFixed(2);
+                var safeT = idealPosSec.toFixed(2);
                 var titol = (gItem.titol || '').substring(0, 60);
                 var comment = (gNum ? gNum + ' - ' : '') + titol;
                 comment = comment.trim();
 
-                var gapInfo = (adjustedTime !== idealPosSec) ? ' (ajustat +' + (adjustedTime - idealPosSec).toFixed(2) + 's per gap)' : '';
-                log('   🟢 [F6·Gràfics] ' + gNum + ': → ' + safeT + 's' + gapInfo);
+                log('   🟢 [F6·Gràfics] ' + gNum + ': → ' + safeT + 's');
 
                 placements.push({
                     prefix: gNum,

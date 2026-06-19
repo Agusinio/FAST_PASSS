@@ -200,6 +200,9 @@ var isUserDraggingSlider = false;
     }
 
     async function callWorkflow(module, method, ...args) {
+        if (FASTPASS_UI.Utils && FASTPASS_UI.Utils.clearLogFile) {
+            FASTPASS_UI.Utils.clearLogFile();
+        }
         console.log(`🔘 callWorkflow: ${module}.${method}`);
         if (FASTPASS_UI.Workflows[module] && FASTPASS_UI.Workflows[module][method]) {
             try {

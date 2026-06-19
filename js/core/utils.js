@@ -288,7 +288,7 @@
             var day = ("0" + d.getDate()).slice(-2);
             var month = ("0" + (d.getMonth() + 1)).slice(-2);
             var year = d.getFullYear();
-            return day + "_" + month + "_" + year;
+            return year + "_" + month + "_" + day;
         },
 
         /**
@@ -313,11 +313,12 @@
             // cada projecte viu al seu directori de data, i l'editor pot necessitar
             // obrir-lo fins al dia seguent). Qualsevol data anterior es rebutja.
             // NO usem dirMtime perque no es fiable (s'actualitza amb auto-save, locks...).
+            // Format esperat: YYYY_MM_DD
             var parts = dateDirStr.split('_');
             if (parts.length !== 3) return false;
-            var d = parseInt(parts[0], 10);
+            var y = parseInt(parts[0], 10);
             var m = parseInt(parts[1], 10);
-            var y = parseInt(parts[2], 10);
+            var d = parseInt(parts[2], 10);
             if (isNaN(d) || isNaN(m) || isNaN(y)) return false;
 
             var dirDate = new Date(y, m - 1, d);
@@ -349,21 +350,36 @@
             var noExt = filename.replace(/\.json$/i, '');
             var parts = noExt.split('_');
             if (parts.length < 2) return null;
+            var yyyymmdd = null;
             // Nou format: YYYYMMDD al segment [0]
             if (/^\d{8}$/.test(parts[0])) {
-                var yyyymmdd = parts[0];
-                var dd = yyyymmdd.substring(6, 8);
-                var mm = yyyymmdd.substring(4, 6);
-                var yyyy = yyyymmdd.substring(0, 4);
-                return dd + '_' + mm + '_' + yyyy;
+                yyyymmdd = parts[0];
+            } else {
+                // Fallback: format antic (data al penultim segment)
+                var old = parts[parts.length - 2];
+                if (old && old.length === 8 && /^\d{8}$/.test(old)) {
+                    yyyymmdd = old;
+                }
             }
-            // Fallback: format antic
-            var yyyymmddOld = parts[parts.length - 2];
-            if (yyyymmddOld && yyyymmddOld.length === 8 && /^\d{8}$/.test(yyyymmddOld)) {
-                var dd2 = yyyymmddOld.substring(6, 8);
-                var mm2 = yyyymmddOld.substring(4, 6);
-                var yyyy2 = yyyymmddOld.substring(0, 4);
-                return dd2 + '_' + mm2 + '_' + yyyy2;
+            if (!yyyymmdd) return null;
+            var dd = yyyymmdd.substring(6, 8);
+            var mm = yyyymmdd.substring(4, 6);
+            var yyyy = yyyymmdd.substring(0, 4);
+            return yyyy + '_' + mm + '_' + dd;
+        },
+
+        /**
+         * Extreu la data d'emissió en format YYYYMMDD (prefix) des del nom
+         * d'un fitxer d'escaleta. S'usa per filtrar JSONs per data exacta.
+         * @param {string} filename
+         * @returns {string|null} "20260618" o null
+         */
+        extractDatePrefixFromFilename: function(filename) {
+            if (!filename) return null;
+            var noExt = filename.replace(/\.json$/i, '');
+            var parts = noExt.split('_');
+            if (parts.length >= 1 && /^\d{8}$/.test(parts[0])) {
+                return parts[0];
             }
             return null;
         },

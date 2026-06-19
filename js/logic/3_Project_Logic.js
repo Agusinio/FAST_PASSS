@@ -78,7 +78,7 @@
             
             if (resClone && resClone.indexOf("ERR") === -1) {
                 const temaNet = wottData.tema.toUpperCase();
-                const finalSeqName = `${shortProg}_${ctx.bloque}_${temaNet}`;
+                const finalSeqName = `${shortProg}_${temaNet}`;
                 
                 utils.log(`📝 Seqüència clonada [${resClone}]. Renombrant a: ${finalSeqName}`);
                 const safeResClone = encodeURIComponent(resClone).replace(/'/g, "\\'");

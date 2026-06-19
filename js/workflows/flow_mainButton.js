@@ -46,6 +46,8 @@
                 try {
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader) {
+                        // NO passar datePrefix aquí: volem trobar el JSON més recent
+                        // de QUALSEVOL data per determinar la data d'emissió real.
                         const earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
                         if (earlyMeta && earlyMeta.filename) {
                             const emissionDate = getUtils().extractDateFromEscaletaFilename(earlyMeta.filename);
@@ -67,9 +69,32 @@
                     log(`⚠️ [dateDir] Error determinant data d'emissió: ${eDate.message}. Usant data del sistema: ${ctx.dateDir}`);
                 }
 
+                // ─── Extreure el TEMA del JSON d'escaleta (font fiable, no dels chyrons) ──
+                var sanitizedTheme = null;
+                var jsonData = null;
+                var jsonMeta = null;
+                try {
+                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                    if (reader) {
+                        var datePrefixJson = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                        jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson);
+                        if (jsonMeta) {
+                            jsonData = await reader.load(jsonMeta.path);
+                            if (jsonData && jsonData.parallelAntena && jsonData.parallelAntena.nom) {
+                                sanitizedTheme = getUtils().sanitizeName(jsonData.parallelAntena.nom).toUpperCase();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    log('⚠️ [Theme] Error extraient tema del JSON: ' + e.message);
+                }
+
                 const assets = await this._fullScan(ctx);
                 
-                const sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema).toUpperCase();
+                // Si no s'ha pogut extraure del JSON, fallback als chyrons
+                if (!sanitizedTheme) {
+                    sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema).toUpperCase();
+                }
                 const shortProg = ctx.progData.wott || "TNV";
                 // Determinar hora d'inici del programa (per inserir el MP4 desde l'inici del informatiu)
                 const PROGRAM_START_HOURS = {
@@ -113,10 +138,16 @@
                         // handles es llegeixen de Config.get().handles (font única: 11_Configuracio.js)
                         // _getHandleSecs() a escaleta_reader.js consulta Config automàticament
 
-                        const jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
+                        // jsonMeta i jsonData ja estan carregats (extrets abans per al tema)
+                        // Si no es van carregar, tornar-ho a intentar
+                        if (!jsonMeta) {
+                            var datePrefixJson2 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                            jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson2);
+                        }
                         if (jsonMeta) {
-                            // dateDir ja ha estat resolt abans del primer save (D7.1)
-                            const jsonData = await reader.load(jsonMeta.path);
+                            if (!jsonData) {
+                                jsonData = await reader.load(jsonMeta.path);
+                            }
                             if (jsonData) {
                                 // Tots els ítems de l'escaleta (per persistir al manifest)
                                 const allItems = jsonData.escaleta?.liniesEscaleta || [];

@@ -153,7 +153,8 @@
                         try {
                             const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                             if (reader) {
-                                const escMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
+                                var datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                                const escMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefix);
                                 if (escMeta && escMeta.filename) {
                                     const emissionDate = getUtils().extractDateFromEscaletaFilename(escMeta.filename);
                                     // BUG #2 FIX (2026-06-09): Validar que la data extreta de l'escaleta
