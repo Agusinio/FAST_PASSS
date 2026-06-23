@@ -46,9 +46,12 @@
                 try {
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader) {
-                        // NO passar datePrefix aquí: volem trobar el JSON més recent
-                        // de QUALSEVOL data per determinar la data d'emissió real.
-                        const earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
+                        // REGLA D'OR: NUNCA canviar de dia. El datePrefix restringeix
+                        // la cerca al dia actual (o al que ja tingui ctx.dateDir).
+                        // El fallback seqüencial V1→V5 dins de findLatest garanteix
+                        // que si V1 no existeix, s'usi V2 del MATEIX dia (no d'un altre).
+                        var datePrefixD71 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                        const earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixD71);
                         if (earlyMeta && earlyMeta.filename) {
                             const emissionDate = getUtils().extractDateFromEscaletaFilename(earlyMeta.filename);
                             if (emissionDate) {
@@ -69,10 +72,19 @@
                     log(`⚠️ [dateDir] Error determinant data d'emissió: ${eDate.message}. Usant data del sistema: ${ctx.dateDir}`);
                 }
 
-                // ─── Extreure el TEMA del JSON d'escaleta (font fiable, no dels chyrons) ──
+                // ─── Extreure el TEMA del primer ítem estructural del bloc ──
+                // Mateixa lògica que l'extracció de tema dels chyrons:
+                // primer ítem amb teVideo=true o isItemEstructural=true el
+                // títol del qual no sigui una paraula reservada.
                 var sanitizedTheme = null;
                 var jsonData = null;
                 var jsonMeta = null;
+                var RESERVED_THEMES = [
+                    'INTR', 'LÍNIA', 'CHYRON', 'GF', 'PG', 'TD', 'TE',
+                    'P2', 'P5', 'P7', 'LEAD', 'BD', 'BON DIA', 'CHYRONS',
+                    'GUIO', 'COL.LECCIO', 'OFF', 'CURT', 'INTRO', 'CARETA',
+                    'DIFERIT', 'INSERT', 'CONN', 'CONNEXIO', 'IPD', 'DONA PAS', 'MOLINET'
+                ];
                 try {
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader) {
@@ -80,8 +92,33 @@
                         jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson);
                         if (jsonMeta) {
                             jsonData = await reader.load(jsonMeta.path);
-                            if (jsonData && jsonData.parallelAntena && jsonData.parallelAntena.nom) {
-                                sanitizedTheme = getUtils().sanitizeName(jsonData.parallelAntena.nom).toUpperCase();
+                            if (jsonData) {
+                                var lines = reader.getLinesForBlock(jsonData, ctx.bloque);
+                                lines.sort(function (a, b) {
+                                    var ta = reader.tcToSeconds(a.horaEntradaOnAir || a.horaEntradaPrevista || '00:00:00');
+                                    var tb = reader.tcToSeconds(b.horaEntradaOnAir || b.horaEntradaPrevista || '00:00:00');
+                                    return ta - tb;
+                                });
+                                for (var li = 0; li < lines.length; li++) {
+                                    var item = lines[li];
+                                    if (!item.titol) continue;
+                                    if (item.flotant === true) continue;
+                                    var isStructural = reader.isItemEstructural(item) || item.teVideo === true;
+                                    if (!isStructural) continue;
+                                    var upper = item.titol.toUpperCase().trim();
+                                    var isReserved = false;
+                                    for (var ri = 0; ri < RESERVED_THEMES.length; ri++) {
+                                        if (upper.indexOf(RESERVED_THEMES[ri]) !== -1) {
+                                            isReserved = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!isReserved && upper.length > 2) {
+                                        sanitizedTheme = getUtils().sanitizeName(item.titol).toUpperCase();
+                                        log('🏷️ [Theme] Tema extret del JSON: "' + sanitizedTheme + '" (item ' + (item.num || '?') + ')');
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -94,6 +131,7 @@
                 // Si no s'ha pogut extraure del JSON, fallback als chyrons
                 if (!sanitizedTheme) {
                     sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema).toUpperCase();
+                    log('🏷️ [Theme] Tema extret dels chyrons (fallback): "' + sanitizedTheme + '"');
                 }
                 const shortProg = ctx.progData.wott || "TNV";
                 // Determinar hora d'inici del programa (per inserir el MP4 desde l'inici del informatiu)

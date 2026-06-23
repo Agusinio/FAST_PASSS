@@ -27,6 +27,7 @@ FASTPASS.IO = (function () {
                         name: f.name,
                         path: f.fsName,
                         modified: f.modified.getTime(),
+                        created: f.created ? f.created.getTime() : f.modified.getTime(),
                         size: f.length
                     });
                 }

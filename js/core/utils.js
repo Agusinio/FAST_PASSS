@@ -151,11 +151,11 @@
                     if (stat.err === 0) {
                         filesWithStats.push({
                             name: name,
-                            mtime: stat.data.mtime
+                            mtime: stat.data.mtime,
+                            created: stat.data.creationTime || stat.data.mtime
                         });
                     } else {
-                        // Si falla el stat, guardamos con fecha 0
-                        filesWithStats.push({ name: name, mtime: 0 });
+                        filesWithStats.push({ name: name, mtime: 0, created: 0 });
                     }
                 }
                 return filesWithStats;
@@ -170,7 +170,8 @@
                         var converted = items.map(function(item) {
                             return {
                                 name: item.name,
-                                mtime: item.modified || 0
+                                mtime: item.modified || 0,
+                                created: item.created || item.modified || 0
                             };
                         });
                         return converted;
