@@ -104,6 +104,16 @@
                 if (!name.endsWith('.MP4') && !name.endsWith('.SRT')) return false;
                 if (dateTarget) {
                     var fileDate = self._extractDateFromFileName(f.name);
+                    if (!fileDate) {
+                        // Fallback: usar data de creació del fitxer (f.created)
+                        // per a fitxers que no tenen data al nom (ex: .SRT)
+                        if (f.created) {
+                            var d = new Date(f.created);
+                            var dd = ('0' + d.getDate()).slice(-2);
+                            var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+                            fileDate = '' + d.getFullYear() + mm + dd;
+                        }
+                    }
                     if (!fileDate || fileDate !== dateTarget) return false;
                 }
                 return true;

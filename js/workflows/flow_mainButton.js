@@ -51,10 +51,22 @@
                         // El fallback seqüencial V1→V5 dins de findLatest garanteix
                         // que si V1 no existeix, s'usi V2 del MATEIX dia (no d'un altre).
                         var datePrefixD71 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                        const earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixD71);
+                        var earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixD71);
+                        // Fallback a ahir si avui no hi ha JSON (finestra 22h)
+                        if (!earlyMeta && datePrefixD71) {
+                            var yesterday = new Date();
+                            yesterday.setDate(yesterday.getDate() - 1);
+                            var dd2 = ('0' + yesterday.getDate()).slice(-2);
+                            var mm2 = ('0' + (yesterday.getMonth() + 1)).slice(-2);
+                            var datePrefixYesterday = '' + yesterday.getFullYear() + mm2 + dd2;
+                            earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixYesterday);
+                            if (earlyMeta) {
+                                log('📅 [dateDir] Cap JSON d\'avui. Intentant ahir (' + datePrefixYesterday + ')...');
+                            }
+                        }
                         if (earlyMeta && earlyMeta.filename) {
                             const emissionDate = getUtils().extractDateFromEscaletaFilename(earlyMeta.filename);
-                            if (emissionDate) {
+                            if (emissionDate && getUtils().isDateDirInTemporalWindow(emissionDate)) {
                                 const oldDate = ctx.dateDir;
                                 ctx.dateDir = emissionDate;
                                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
@@ -798,17 +810,15 @@
             // 1. Ingesta (Rètols, Media)
             await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
 
-            // 2. Auto-Insert MP4 si V1 està buida
-            // NOTA: Si _runNew ja ha col·locat el cleanFeed MP4, V1 no estarà buida
-            // i aquest bloc NO s'executarà → protegit contra doble inserció.
-            if (assets.media && assets.media.mp4) {
-                const v1Count = await callJSX("Clips.count(1, 'video')");
-                if (parseInt(v1Count) === 0) {
-                    log("🎞️ V1 buida. Autocol·locant vídeo estàndard...");
-                    const escapedMediaName = encodeURIComponent(assets.media.mp4.name);
-                    await callJSX(`Clips.insert('${escapedMediaName}', 1, 0)`);
+            // 2. Auto-Insert SRT si hi ha pista de subtítols buida
+            if (assets.media && assets.media.srt) {
+                const srtCount = await callJSX("Clips.count(1, 'subtitle')");
+                if (parseInt(srtCount) === 0) {
+                    log("🎞️ Pista SRT buida. Autocol·locant SRT...");
+                    const escapedSrtName = encodeURIComponent(assets.media.srt.name);
+                    await callJSX(`Clips.insert('${escapedSrtName}', 1, 0, 'subtitle')`);
                 } else {
-                    log("✅ V1 ja té contingut. No s'autocol·loca MP4.");
+                    log("✅ SRT ja té contingut. No s'autocol·loca SRT.");
                 }
             }
 
