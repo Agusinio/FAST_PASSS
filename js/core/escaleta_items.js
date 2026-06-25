@@ -255,7 +255,12 @@
 
         var h = item.horaEntradaOnAir;
         if (h && h !== "00:00:00") {
-            primaryResult = this.tcToSeconds(h) + this.getItemDuradaSec(item);
+            var duradaSec = this.getItemDuradaSec(item);
+            // Si la durada és 0, l'OnAir sol no defineix una sortida fiable.
+            // Deixem que Phase1 (següent OnAir mateix agrupacio) competeixi.
+            if (duradaSec > 0) {
+                primaryResult = this.tcToSeconds(h) + duradaSec;
+            }
         }
 
         if (primaryResult === null && allLines && allLines.length > 0) {
