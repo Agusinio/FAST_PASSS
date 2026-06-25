@@ -108,8 +108,8 @@
                     const parentPath = config.rutas.destinoBase + ctx.progData.directorio + "/";
                     const dateDirs = await getUtils().readFolder(parentPath);
                     if (dateDirs && dateDirs.length > 0) {
-                        // Filtrar només directoris amb format DD_MM_YYYY
-                        const datePattern = /^\d{2}_\d{2}_\d{4}$/;
+                        // Filtrar només directoris amb format YYYY_MM_DD
+                        const datePattern = /^\d{4}_\d{2}_\d{2}$/;
                         const candidateDirs = dateDirs
                             .filter(function(d) { return datePattern.test(d.name); })
                             .sort(function(a, b) { return new Date(b.mtime) - new Date(a.mtime); });
