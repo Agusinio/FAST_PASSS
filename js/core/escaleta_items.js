@@ -255,12 +255,10 @@
 
         var h = item.horaEntradaOnAir;
         if (h && h !== "00:00:00") {
+            var onAirSec = this.tcToSeconds(h);
             var duradaSec = this.getItemDuradaSec(item);
-            // Si la durada és 0, l'OnAir sol no defineix una sortida fiable.
-            // Deixem que Phase1 (següent OnAir mateix agrupacio) competeixi.
-            if (duradaSec > 0) {
-                primaryResult = this.tcToSeconds(h) + duradaSec;
-            }
+            primaryResult = onAirSec + duradaSec;
+            log('   🔍 [getItemSortidaSec] "' + (item.num || '?') + '": OnAir=' + onAirSec.toFixed(2) + 's + durada=' + duradaSec.toFixed(2) + 's = ' + primaryResult.toFixed(2) + 's');
         }
 
         if (primaryResult === null && allLines && allLines.length > 0) {
