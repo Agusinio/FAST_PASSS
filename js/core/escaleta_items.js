@@ -222,6 +222,10 @@
             var deduced = this._deduceOnAirEntrada(item, allLines, data);
             if (deduced !== null) return deduced;
         }
+        if (allLines && allLines.length > 0) {
+            var deducedEntrada = this._deduceOnAirEntrada(item, allLines, data, true);
+            if (deducedEntrada !== null) return deducedEntrada;
+        }
         h = item.horaEntradaPrevista;
         if (h && h !== "00:00:00") return this.tcToSeconds(h);
         return null;
