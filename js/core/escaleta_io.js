@@ -159,37 +159,13 @@
                 }
             }
 
-            // ── Dins dels fitxers del dia (o tots si no hi ha datePrefix), buscar pel bloc ──
-            var candidates = null;
-            if (blockId) {
-                var blockToken = '_' + blockId.toUpperCase() + '_';
-                candidates = allProgFiles.filter(function (f) {
-                    return f.name.toUpperCase().indexOf(blockToken) !== -1;
-                });
-            } else {
-                candidates = allProgFiles;
-            }
-
-            // ── Fallback seqüencial dins del MATEIX DIA: V1→V2→V3→V4→V5 ──
-            if (candidates.length === 0 && blockId) {
-                var blockNum = parseInt(blockId.replace(/^V/i, ''));
-                if (!isNaN(blockNum) && blockNum < 5) {
-                    for (var next = blockNum + 1; next <= 5; next++) {
-                        var nextToken = '_V' + next + '_';
-                        candidates = allProgFiles.filter(function (f) {
-                            return f.name.toUpperCase().indexOf(nextToken) !== -1;
-                        });
-                        if (candidates.length > 0) {
-                            log('\uD83D\uDD04 [ER:IO] Fallback seq\u00FCencial (mateix dia): V' + blockNum + ' \u2192 JSON del bloc V' + next + ' (' + candidates.length + ' candidats)');
-                            break;
-                        }
-                    }
-                }
-                if (candidates.length === 0) {
-                    log('\u26A0\uFE0F [ER:IO] Cap JSON per a V' + blockNum + ' ni fallback V+1..V5 al dia ' + (datePrefix || 'qualsevol'));
-                    return null;
-                }
-            }
+            // ── NOU COMPORTAMENT (2026-06-29): Sempre agafar el JSON MÉS RECENT
+            // del programa, ignorant el blockId al nom del fitxer.
+            // Cada JSON conté TOTS els ítems de l'escaleta (snapshot complet).
+            // El més recent té les reassignacions d'agrupacio més actualitzades
+            // (ex: ítems moguts de V1 a V4 per l'editor després d'emissió).
+            // ──
+            var candidates = allProgFiles;
 
             if (candidates.length === 0) {
                 log('\u26A0\uFE0F [ER:IO] Cap JSON trobat per a ' + searchLabel);
@@ -200,7 +176,7 @@
                 return _extractSortDate(b.name).localeCompare(_extractSortDate(a.name));
             });
             var best = candidates[0];
-            log('\u2705 [ER:IO] JSON m\u00E9s recent: ' + best.name);
+            log('\u2705 [ER:IO] JSON m\u00E9s recent (global): ' + best.name);
             return { path: best.path, filename: best.name };
 
         } catch (e) {
