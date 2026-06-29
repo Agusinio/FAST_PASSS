@@ -184,6 +184,45 @@
                         }
                     }
                 }
+                // ── FIX A3 (2026-06-29): Validar JSON suficientment recent ──
+                // Si el bloc encara s'està emetent (cap JSON posterior al final del bloc),
+                // mostrar missatge d'espera en lloc de permetre NEW/LOAD amb dades obsoletes.
+                var jsonValid = true;
+                var waitingMsg = null;
+                try {
+                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                    if (reader && reader.findLatestValid) {
+                        var datePrefixA3 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                        var validResult = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixA3);
+                        if (validResult && !validResult.valid) {
+                            jsonValid = false;
+                            if (validResult.estimatedWaitSec !== null && validResult.estimatedWaitSec > 0) {
+                                var waitMin = Math.ceil(validResult.estimatedWaitSec / 60);
+                                waitingMsg = 'ESPERANT DADES... ~' + waitMin + ' min';
+                                getUtils().log('⏳ [checkContext] Bloc ' + ctx.bloque + ' encara emetent-se. Espera estimada: ~' + waitMin + ' min (fi ítem ' + (validResult.num || '?') + ': ' + validResult.source + ')', 'INFO');
+                            } else if (validResult.error) {
+                                waitingMsg = 'SENSE DADES';
+                                getUtils().log('⚠️ [checkContext] ' + validResult.error, 'DEBUG');
+                            } else {
+                                waitingMsg = 'ESPERANT DADES...';
+                            }
+                        }
+                    }
+                } catch (eValid) {
+                    getUtils().log('⚠️ [checkContext] Error validant JSON: ' + eValid.message, 'DEBUG');
+                }
+
+                if (!jsonValid) {
+                    this.updateButton('WAITING', {
+                        msg: waitingMsg || 'ESPERANT DADES...',
+                        config: config,
+                        progData: ctx.progData,
+                        bloque: ctx.bloque,
+                        dateDir: ctx.dateDir,
+                        name: 'WAITING'
+                    });
+                    return;
+                }
             
                 let conclusion = 'NEW';
                 let lockOwner = null;
