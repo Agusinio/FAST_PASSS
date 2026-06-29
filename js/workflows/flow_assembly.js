@@ -88,7 +88,14 @@
         // ═══════════════════════════════════════════════════════════════
         _safePlaceByPrefixes: async function (placements, label) {
             try {
-                var raw = await callJSX('Markers.placeByPrefixes(\'' + JSON.stringify(placements) + '\')');
+                // Sanititzar comentaris: eliminar apòstrofs que trenquen la cadena JSX
+                var safePlacements = JSON.parse(JSON.stringify(placements));
+                for (var sp = 0; sp < safePlacements.length; sp++) {
+                    if (safePlacements[sp].comment) {
+                        safePlacements[sp].comment = safePlacements[sp].comment.replace(/'/g, '');
+                    }
+                }
+                var raw = await callJSX('Markers.placeByPrefixes(\'' + JSON.stringify(safePlacements) + '\')');
                 if (!raw || raw === '[]' || raw === '{}') {
                     return { placed: 0, moved: 0, created: 0 };
                 }
@@ -260,7 +267,7 @@
             if (!lines || lines.length === 0) return null;
             if (!manifest || !manifest.escaletaItems || manifest.escaletaItems.length === 0) return null;
 
-            // â”€â”€ Rang temporal del bloc (segons la primera i Ãºltima lÃ­nia agrupada) â”€â”€
+            // Rang temporal del bloc
             var blockStartSec = (manifest.ref && manifest.ref.worldBlockStartSec != null)
                 ? manifest.ref.worldBlockStartSec
                 : null;
@@ -276,25 +283,40 @@
                 if (blockStartSec === null || blockEndSec === null) return null;
             }
 
-            // â”€â”€ Escanejar tots els items del manifest â”€â”€
+            // Escanejar tots els items del manifest, recollir tots els no agrupats
             var allItems = manifest.escaletaItems;
+            var ungroupedCandidates = [];
             for (var i = 0; i < allItems.length; i++) {
                 var item = allItems[i];
                 if (item.flotant === true) continue;
                 var ag = item.agrupacio;
-                if (ag !== null && ag !== undefined) continue;  // TÃ© agrupacio â†’ no Ã©s orfe
+                if (ag !== null && ag !== undefined) continue;
 
                 var itemTimeStr = item.horaEntradaOnAir || item.horaEntradaPrevista;
                 if (!itemTimeStr) continue;
                 var itemTimeSec = reader.tcToSeconds(itemTimeStr);
                 if (itemTimeSec === null) continue;
 
-                // Dins del rang del bloc?
                 if (itemTimeSec >= blockStartSec && itemTimeSec <= blockEndSec) {
-                    return item;  // Primer match
+                    ungroupedCandidates.push({ item: item, timeSec: itemTimeSec });
                 }
             }
-            return null;
+
+            if (ungroupedCandidates.length === 0) return null;
+
+            // D12: Excloure l'Ãºltim item no agrupat del bloc (Ã©s el final, l'usuari ja l'ha trimeat)
+            // NomÃ©s retornar items intercalats (ex: un 02DP entre 01 i 02)
+            if (ungroupedCandidates.length === 1) return null;  // NomÃ©s hi ha el final
+
+            // Ordenar per temps i retornar el primer que NO sigui l'Ãºltim
+            ungroupedCandidates.sort(function(a, b) { return a.timeSec - b.timeSec; });
+            var lastCandidate = ungroupedCandidates[ungroupedCandidates.length - 1];
+            for (var u = 0; u < ungroupedCandidates.length; u++) {
+                if (ungroupedCandidates[u].item !== lastCandidate.item) {
+                    return ungroupedCandidates[u].item;  // Primer no-final
+                }
+            }
+            return null;  // Tots sÃ³n el final
         },
 
         /**
@@ -939,7 +961,8 @@
                 if (!ugHasOnAir) {
                     var ugDeduced = reader._deduceOnAirEntrada(firstUngroupedItem, manifest.escaletaItems, null);
                     if (ugDeduced !== null) {
-                        var ugIdealPos = anchorEfTimelineSec + (ugDeduced - anchorEfectiva);
+                        // D12: Marcador final d'escaleta → final del timeline
+                        var ugIdealPos = (clips && clips.length > 0) ? clips[clips.length - 1].end : 0;
                         if (ugIdealPos < 0) ugIdealPos = 0;
                         var ugNum = firstUngroupedItem.num || '?';
                         var ugSafeT = ugIdealPos.toFixed(2);
@@ -1034,7 +1057,8 @@
                     if (ugHasPrevista) {
                         var ugPrevistaSec = reader.tcToSeconds(ugPrevista);
                         if (ugPrevistaSec !== null) {
-                            var ugIdealPos = anchorEfTimelineSec + (ugPrevistaSec - anchorEfectiva);
+                            // D12: Marcador final d'escaleta → final del timeline
+                            var ugIdealPos = (clips && clips.length > 0) ? clips[clips.length - 1].end : 0;
                             if (ugIdealPos < 0) ugIdealPos = 0;
                             var ugNum = firstUngroupedItem.num || '?';
                             var ugSafeT = ugIdealPos.toFixed(2);
@@ -1239,25 +1263,26 @@
          * NO necessita _calcTemporalAnchors ni _correlationSnap.
          */
         snapFaroMarkers: async function () {
-            log('🔵 [F4·DensitySnap v2] Iniciant matching seqüencial (Previstos + OnAir/Deducido orfes)...');
+            log('🔵 [F4·DensitySnap v3] Iniciant afinació per capes...');
 
             // ── Pas 1: Carregar context ──
             const ctxData = await this._loadAssemblyContext();
-            if (!ctxData) { log('⚠️ [F4·DensitySnap v2] _loadAssemblyContext ha fallat. Abortant.'); return; }
+            if (!ctxData) { log('⚠️ [F4·DensitySnap v3] _loadAssemblyContext ha fallat. Abortant.'); return; }
             const { manifest, reader, lines, clips } = ctxData;
 
             // ── Pas 2: Calcular petjada de densitat ──
             const densityData = this._calcDensityFootprint(clips);
             const breaks = (densityData && densityData.breaks) ? densityData.breaks : [];
-            log('   🔵 [F4·DensitySnap v2] DensityFootprint: ' + breaks.length + ' breaks.');
+            const zones = (densityData && densityData.zones) ? densityData.zones : [];
+            log('   🔵 [F4·DensitySnap v3] DensityFootprint: ' + breaks.length + ' breaks, ' + zones.length + ' zones.');
 
             // ── Pas 3: Obtenir marcadors actuals del timeline ──
             var markersRaw = await callJSX('Markers.get()');
             var allMarkers = [];
             try { allMarkers = JSON.parse(markersRaw); } catch (e) { allMarkers = []; }
-            log('   🔵 [F4·DensitySnap v2] Marcadors al timeline: ' + allMarkers.length);
+            log('   🔵 [F4·DensitySnap v3] Marcadors al timeline: ' + allMarkers.length);
 
-            // ── Pas 4: Filtrar no-definitius + classificar Previstos i OnAir/Deducido ──
+            // ── Pas 4: Construir prefixToItem i helpers ──
             var manifestItems = manifest.escaletaItems || [];
             var prefixToItem = {};
             for (var ii = 0; ii < manifestItems.length; ii++) {
@@ -1272,104 +1297,189 @@
                 return comment.substring(0, idx).replace(/^\s+|\s+$/g, '');
             };
 
-            var _isPrevisto = function (prefix) {
-                if (!prefix || !prefixToItem[prefix]) return false;
-                var item = prefixToItem[prefix];
-                var onAir = item.horaEntradaOnAir;
-                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') return false;
-                var deduced = reader._deduceOnAirEntrada(item, manifestItems, null);
-                if (deduced !== null) return false;
-                var prevista = item.horaEntradaPrevista;
-                return prevista && prevista !== '00:00:00';
+            // Helper: detectar sufix del prefix (ex: "01i" → "i", "01Lead" → "lead", "02" → "")
+            var _getSuffix = function (prefix) {
+                var m = prefix.match(/^\d+(.*)$/);
+                return m ? m[1].toLowerCase() : '';
             };
 
-            // ── v2: També detectem OnAir/Deducido (orfes de F3.5) ──
-            var _isOnAirOrDeduced = function (prefix) {
-                if (!prefix || !prefixToItem[prefix]) return false;
-                var item = prefixToItem[prefix];
-                var onAir = item.horaEntradaOnAir;
-                if (onAir && onAir !== '00:00:00' && onAir.trim() !== '') return true;
-                var deduced = reader._deduceOnAirEntrada(item, manifestItems, null);
-                if (deduced !== null) return true;
+            // Helper: trobar el break més proper a un temps donat, dins d'un rang [minT, maxT]
+            // usedBreaks: Set opcional de breaks ja assignats a saltar
+            var _findBestBreak = function (targetSec, minT, maxT, usedBreaks) {
+                if (typeof minT === 'undefined') minT = -Infinity;
+                if (typeof maxT === 'undefined') maxT = Infinity;
+                var best = null;
+                var bestDist = Infinity;
+                for (var bi = 0; bi < breaks.length; bi++) {
+                    var bt = breaks[bi].time;
+                    if (bt < minT || bt > maxT) continue;
+                    if (usedBreaks && usedBreaks.has(bt)) continue;
+                    var d = Math.abs(bt - targetSec);
+                    if (d < bestDist) {
+                        bestDist = d;
+                        best = bt;
+                    }
+                }
+                return best;
+            };
+
+            // Helper: detectar si un temps està en zona HIGH
+            var _isInHighZone = function (timeSec) {
+                for (var zi = 0; zi < zones.length; zi++) {
+                    if (timeSec >= zones[zi].start && timeSec <= zones[zi].end) {
+                        return zones[zi].type === 'HIGH';
+                    }
+                }
                 return false;
             };
 
-            // ── Classificar marcadors no-definitius en 3 categories ──
-            var previstos = [];
-            var orphanOnAirDeducido = [];
-            var skippedOther = 0;
+            // ── Filtrar marcadors no-definitius ──
+            var candidates = [];
             var skippedDef = 0;
             for (var i = 0; i < allMarkers.length; i++) {
                 var mk = allMarkers[i];
                 if (mk.name === 'definitiu') { skippedDef++; continue; }
                 var prefix = _extractPrefix(mk.comments || '');
-                if (_isPrevisto(prefix)) {
-                    previstos.push(mk);
-                } else if (_isOnAirOrDeduced(prefix)) {
-                    orphanOnAirDeducido.push(mk);
-                } else {
-                    skippedOther++;
-                }
+                if (!prefix) continue;
+                candidates.push(mk);
             }
-            log('   🔵 [F4·DensitySnap v2] Previstos: ' + previstos.length + ' | OnAir/Deducido orfes: ' + orphanOnAirDeducido.length + ' | Altres: ' + skippedOther + ' | Definitius: ' + skippedDef);
-
-            // ── Pool unificat: Previstos + OnAir/Deducido orfes, ordenats per temps ──
-            var allCandidates = previstos.concat(orphanOnAirDeducido);
-            allCandidates.sort(function (a, b) {
+            if (candidates.length === 0) {
+                log('🔵 [F4·DensitySnap v3] Cap marcador no-definitiu. ✓ FINALITZAT.');
+                return;
+            }
+            // Ordenar per temps
+            candidates.sort(function (a, b) {
                 var ta = (typeof a.time === 'number') ? a.time : parseFloat(a.time);
                 var tb = (typeof b.time === 'number') ? b.time : parseFloat(b.time);
                 return ta - tb;
             });
-            log('   🔵 [F4·DensitySnap v2] Candidats totals (pool unificat): ' + allCandidates.length + ' | Breaks disponibles: ' + breaks.length);
+            log('   🔵 [F4·DensitySnap v3] Candidats: ' + candidates.length + ' | Definitius ignorats: ' + skippedDef);
 
-            if (allCandidates.length === 0) {
-                log('🔵 [F4·DensitySnap v2] Cap marcador candidat per processar. ✓ FINALITZAT.');
-                return;
+            // ── CAPA 0: Construir mapa de temps finals per prefix ──
+            var finalTimes = {};  // prefix → timeSec
+            var timelineEnd = (clips && clips.length > 0) ? clips[clips.length - 1].end : 0;
+
+            // ── CAPA 1: Col·locar marcadors fàcils (anclats) ──
+            // Sufixos estructurals a excloure de la classificació VIDEO
+            var STRUCTURAL_SUFFIXES = new Set(['i', 'lead', 'dir', 'dp', 'f']);
+            var remaining = [];
+            for (var j = 0; j < candidates.length; j++) {
+                var mk1 = candidates[j];
+                var mkTime = (typeof mk1.time === 'number') ? mk1.time : parseFloat(mk1.time);
+                var prefix = _extractPrefix(mk1.comments || '');
+                var suffix = _getSuffix(prefix);
+                var item = prefixToItem[prefix];
+                var durada = item ? (item.durada || '0:00') : '0:00';
+                var duradaSec = 0;
+                var dParts = durada.split(':').map(Number);
+                if (dParts.length === 2) duradaSec = dParts[0] * 60 + dParts[1];
+
+                var placed = false;
+
+                // 1a) Inici de bloc → 00:00 (protegit)
+                if (Math.abs(mkTime) < 0.01) {
+                    finalTimes[prefix] = 0;
+                    placed = true;
+                    log('   🔵 [F4·CAPA1·00:00] ' + prefix + ': ' + mkTime.toFixed(2) + 's → 00:00 (inici bloc)');
+                }
+                // 1b) Final de bloc → final del timeline (últim candidat)
+                else if (j === candidates.length - 1 && mkTime > timelineEnd * 0.8) {
+                    finalTimes[prefix] = timelineEnd;
+                    placed = true;
+                    log('   🔵 [F4·CAPA1·FINAL] ' + prefix + ': ' + mkTime.toFixed(2) + 's → ' + timelineEnd.toFixed(2) + 's (final timeline)');
+                }
+                // 1c) Ítem amb durada > 0 (video) en zona HIGH → break més proper
+                // Excloure sufixos estructurals (i, lead, dir, dp, f) de la classificació VIDEO
+                else if (duradaSec > 0 && _isInHighZone(mkTime) && !STRUCTURAL_SUFFIXES.has(suffix)) {
+                    var bestBreak = _findBestBreak(mkTime, mkTime - 10, mkTime + 20);
+                    if (bestBreak !== null) {
+                        finalTimes[prefix] = bestBreak;
+                        placed = true;
+                        log('   🔵 [F4·CAPA1·VIDEO] ' + prefix + ': ' + mkTime.toFixed(2) + 's → break ' + bestBreak.toFixed(2) + 's (durada=' + durada + ', zona HIGH)');
+                    }
+                }
+
+                if (!placed) {
+                    remaining.push({ mk: mk1, prefix: prefix, suffix: suffix, time: mkTime, item: item });
+                }
             }
 
-            // ── Pas 5: Matching seqüencial candidate[j] → breaks[j].time ──
-            var maxPairs = Math.min(allCandidates.length, breaks.length);
+            // ── CAPA 2: Propagar restriccions (particionar timeline amb markers ja col·locats) ──
+            var placedTimes = Object.values(finalTimes).sort(function(a,b) { return a - b; });
+            log('   🔵 [F4·CAPA2] Marcadors col·locats (capa 1): ' + placedTimes.length + ' → ' + placedTimes.map(function(t){ return t.toFixed(2) + 's'; }).join(', '));
+            log('   🔵 [F4·CAPA2] Marcadors restants: ' + remaining.length);
+
+            // ── CAPA 3: Col·locar marcadors restants dins dels seus rangs acotats ──
+            var iterations = 0;
+            var MAX_ITER = 3;
+            var usedBreaks = new Set();  // breaks ja assignats, per evitar duplicats
+            while (remaining.length > 0 && iterations < MAX_ITER) {
+                iterations++;
+                var stillRemaining = [];
+                // Recalcular rangs amb els marcadors ja col·locats
+                var placedSorted = Object.keys(finalTimes).map(function(k) { return { prefix: k, time: finalTimes[k] }; });
+                placedSorted.sort(function(a, b) { return a.time - b.time; });
+
+                for (var r = 0; r < remaining.length; r++) {
+                    var rem = remaining[r];
+                    var remTime = rem.time;
+                    var remPrefix = rem.prefix;
+                    var remSuffix = rem.suffix;
+
+                    // Trobar el rang [left, right] a partir dels marcadors ja col·locats
+                    var leftTime = 0;
+                    var rightTime = timelineEnd;
+                    for (var ps = 0; ps < placedSorted.length; ps++) {
+                        if (placedSorted[ps].time < remTime) {
+                            leftTime = Math.max(leftTime, placedSorted[ps].time);
+                        }
+                        if (placedSorted[ps].time > remTime) {
+                            rightTime = Math.min(rightTime, placedSorted[ps].time);
+                        }
+                    }
+
+                    // Buscar el millor break dins del rang acotat, saltant els ja usats
+                    var bestBreak = _findBestBreak(remTime, leftTime, rightTime, usedBreaks);
+                    var targetTime = remTime;  // default: mantenir
+
+                    if (bestBreak !== null) {
+                        targetTime = bestBreak;
+                        usedBreaks.add(bestBreak);
+                        log('   🔵 [F4·CAPA3·iter' + iterations + '] ' + remPrefix + ': ' + remTime.toFixed(2) + 's → break ' + bestBreak.toFixed(2) + 's [rang: ' + leftTime.toFixed(2) + 's–' + rightTime.toFixed(2) + 's]');
+                    } else {
+                        log('   🔵 [F4·CAPA3·iter' + iterations + '] ' + remPrefix + ': ' + remTime.toFixed(2) + 's → manté (sense break dins [' + leftTime.toFixed(2) + 's–' + rightTime.toFixed(2) + 's])');
+                    }
+
+                    finalTimes[remPrefix] = targetTime;
+                    // Recalcular placedSorted per a la següent iteració dins d'aquesta capa
+                    placedSorted = Object.keys(finalTimes).map(function(k) { return { prefix: k, time: finalTimes[k] }; });
+                    placedSorted.sort(function(a, b) { return a.time - b.time; });
+                }
+                // Tots col·locats
+                remaining = [];
+            }
+
+            if (remaining.length > 0) {
+                log('   🔵 [F4·CAPA3] ' + remaining.length + ' marcadors sense col·locar després de ' + MAX_ITER + ' iteracions. Mantenint posicions originals.');
+                for (var rr = 0; rr < remaining.length; rr++) {
+                    finalTimes[remaining[rr].prefix] = remaining[rr].time;
+                }
+            }
+
+            // ── Construir placements ──
             var placements = [];
-            var snappedCount = 0;
-            var keptCount = 0;
-
-            for (var j = 0; j < allCandidates.length; j++) {
-                var mk = allCandidates[j];
-                var mkTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
-                var comment = mk.comments || '';
-                var prefix = _extractPrefix(comment);
-
-                if (!prefix) {
-                    log('   ⚠️ [F4·DensitySnap v2] Marcador sense prefix a ' + mkTime.toFixed(2) + 's. Saltant.');
-                    continue;
-                }
-
-                // Detectar font del marcador per al log
-                var source = _isPrevisto(prefix) ? 'Previsto' : 'OnAir/Deducido';
-
-                var targetTime;
-                if (j < maxPairs) {
-                    // Matching seqüencial: candidat[j] → break[j]
-                    targetTime = breaks[j].time;
-                    if (targetTime < 0) targetTime = 0;
-                    snappedCount++;
-                    log('   🔵 [F4·DensitySnap v2] ' + prefix + ' (' + source + '): ' + mkTime.toFixed(2) + 's → break[' + j + '] ' + targetTime.toFixed(2) + 's [matching=' + (j + 1) + '/' + maxPairs + ']');
-                } else {
-                    // Sense break disponible → manté posició original (F5 s'encarregarà)
-                    targetTime = mkTime;
-                    keptCount++;
-                    log('   🔵 [F4·DensitySnap v2] ' + prefix + ' (' + source + '): ' + mkTime.toFixed(2) + 's → manté (sense break disponible, F5 pendent)');
-                }
-
-                // BUG #14: Si el marcador existent no té color vàlid (pre-BUG #9),
-                // derivar el color de l'ítem d'escaleta via _getColorIdx.
-                var colorIdxF4 = (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : null;
-                if (colorIdxF4 === null && prefixToItem[prefix]) {
-                    colorIdxF4 = this._getColorIdx(prefixToItem[prefix]);
+            for (var j2 = 0; j2 < candidates.length; j2++) {
+                var mk2 = candidates[j2];
+                var prefix2 = _extractPrefix(mk2.comments || '');
+                if (!prefix2 || !(prefix2 in finalTimes)) continue;
+                var comment = mk2.comments || '';
+                var colorIdxF4 = (typeof mk2.color === 'number' && mk2.color >= 0) ? mk2.color : null;
+                if (colorIdxF4 === null && prefixToItem[prefix2]) {
+                    colorIdxF4 = this._getColorIdx(prefixToItem[prefix2]);
                 }
                 placements.push({
-                    prefix: prefix,
-                    timeSec: targetTime,
+                    prefix: prefix2,
+                    timeSec: finalTimes[prefix2],
                     comment: comment,
                     name: 'definitiu',
                     colorIdx: colorIdxF4
@@ -1377,13 +1487,12 @@
             }
 
             if (placements.length === 0) {
-                log('🔵 [F4·DensitySnap v2] Cap placement construït. ✓ FINALITZAT.');
+                log('🔵 [F4·DensitySnap v3] Cap placement construït. ✓ FINALITZAT.');
                 return;
             }
 
-            // UPSERT atòmic amb name:"definitiu" + protecció d'errors (BUG #8)
-            var result = await this._safePlaceByPrefixes(placements, 'F4·DensitySnap v2');
-            log('🔵 [F4·DensitySnap v2] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + ' | Snapejats: ' + snappedCount + ' | Mantinguts (→F5): ' + keptCount + '. ✓ FINALITZAT.');
+            var result = await this._safePlaceByPrefixes(placements, 'F4·DensitySnap v3');
+            log('🔵 [F4·DensitySnap v3] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
         },
 
         // ═══════════════════════════════════════════════════════════════

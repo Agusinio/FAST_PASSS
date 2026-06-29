@@ -577,16 +577,11 @@
                 worldBlockStartSec = tier1InCandidate;
                 InTier = 1;
                 worldBlockAnchorSec = tier1InCandidate;
-            } else if (structuralItemsInBlock.length > 0 && structuralItemsInBlock[0].horaEntradaOnAir) {
-                // Si el primer item estructural té OnAir REAL (no previst), és la font més
-                // fiable. Tier0 cross-agrupacio és una deducció d'items d'altres agrupacions
-                // → l'OnAir real del bloc PREVAL independentment de quin sigui més aviat.
-                var tier0old = worldBlockStartSec;
-                worldBlockStartSec = tier1InCandidate;
-                InTier = 1;
-                worldBlockAnchorSec = tier1InCandidate;
-                log('   \uD83C\uDFAF Tier1-ONAIR-PREVAL: primer estructural "' + structuralItemsInBlock[0].num + '" té horaEntradaOnAir=' + structuralItemsInBlock[0].horaEntradaOnAir + ' (' + tier1InCandidate.toFixed(2) + 's). Guanya sobre Tier0-IN=' + tier0old.toFixed(2) + 's (cross-agrupacio).');
             } else {
+                // BUG #16-B3 (2026-06-29): Tier1-ONAIR-PREVAL ELIMINAT.
+                // Quan Tier1 >= Tier0, l'OnAir del primer estructural és MÉS TARD
+                // que el Tier0 (cross-agrupacio o mateix agrupacio). Mantenir Tier0
+                // perquè és més aviat i inclou la intro del bloc (ex: TNM V3 28/06).
                 log('   \u2139\uFE0F Tier1-NOCOMPETE: ' + tier1InLabel + '=' + tier1InCandidate.toFixed(2) + 's \u2265 Tier0-IN=' + worldBlockStartSec.toFixed(2) + 's. Es manté Tier0.');
             }
         }
