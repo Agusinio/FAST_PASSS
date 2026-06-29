@@ -159,29 +159,236 @@
                 }
             }
 
-            // ── NOU COMPORTAMENT (2026-06-29): Sempre agafar el JSON MÉS RECENT
-            // del programa, ignorant el blockId al nom del fitxer.
-            // Cada JSON conté TOTS els ítems de l'escaleta (snapshot complet).
-            // El més recent té les reassignacions d'agrupacio més actualitzades
-            // (ex: ítems moguts de V1 a V4 per l'editor després d'emissió).
-            // ──
-            var candidates = allProgFiles;
-
-            if (candidates.length === 0) {
-                log('\u26A0\uFE0F [ER:IO] Cap JSON trobat per a ' + searchLabel);
-                return null;
-            }
-
-            candidates.sort(function (a, b) {
+            // ── Ordenar per timestamp descendent ──
+            allProgFiles.sort(function (a, b) {
                 return _extractSortDate(b.name).localeCompare(_extractSortDate(a.name));
             });
-            var best = candidates[0];
+
+            // ── NOU COMPORTAMENT (2026-06-29): Sempre agafar el JSON MÉS RECENT
+            // del programa, ignorant el blockId al nom del fitxer.
+            var best = allProgFiles[0];
             log('\u2705 [ER:IO] JSON m\u00E9s recent (global): ' + best.name);
             return { path: best.path, filename: best.name };
 
         } catch (e) {
             log('\u274C [ER:IO] Error en findLatest: ' + e.message);
             return null;
+        }
+    };
+
+    /**
+     * _filenameToUnixSec: Converteix el timestamp del nom d'un fitxer JSON
+     * (YYYYMMDD_HHMMSS) a segons Unix (UTC).
+     * @param {string} filename
+     * @returns {number|null}
+     */
+    ER._filenameToUnixSec = function (filename) {
+        if (!filename) return null;
+        var sortDate = '';
+        var noExt = filename.replace(/\.json$/i, '');
+        var parts = noExt.split('_');
+        if (parts.length >= 2 && /^\d{8}$/.test(parts[0]) && /^\d{6}$/.test(parts[1])) {
+            sortDate = parts[0] + parts[1];
+        } else if (parts.length >= 2 && /^\d{8}$/.test(parts[parts.length - 2]) && /^\d{6}$/.test(parts[parts.length - 1])) {
+            sortDate = parts[parts.length - 2] + parts[parts.length - 1];
+        }
+        if (sortDate.length !== 14) return null;
+        var y = parseInt(sortDate.substring(0, 4), 10);
+        var m = parseInt(sortDate.substring(4, 6), 10);
+        var d = parseInt(sortDate.substring(6, 8), 10);
+        var hh = parseInt(sortDate.substring(8, 10), 10);
+        var mm = parseInt(sortDate.substring(10, 12), 10);
+        var ss = parseInt(sortDate.substring(12, 14), 10);
+        return Date.UTC(y, m - 1, d, hh, mm, ss) / 1000;
+    };
+
+    /**
+     * _getBlockLastItemEndSec: Retorna el timestamp d'emissió (segons del dia)
+     * del final de l'últim ítem d'un bloc dins d'un JSON ja carregat.
+     * @param {Object} data - JSON escaleta parsejat
+     * @param {string} blockId
+     * @returns {{ endSec: number, source: string }|null}
+     */
+    ER._getBlockLastItemEndSec = function (data, blockId) {
+        var lines = this.getLinesForBlock(data, blockId);
+        if (!lines || lines.length === 0) return null;
+
+        // Ordenar per sequencia per trobar l'últim cronològicament
+        var sorted = lines.slice().sort(function (a, b) {
+            return (a.sequencia || 0) - (b.sequencia || 0);
+        });
+        var last = sorted[sorted.length - 1];
+
+        // Prioritat 1: horaEntradaOnAir + duradaOnAir (fet real del playout)
+        if (last.horaEntradaOnAir && last.duradaOnAir) {
+            var entradaSec = this.tcToSeconds(last.horaEntradaOnAir);
+            var duradaSec = this.parseDurada(last.duradaOnAir);
+            if (duradaSec > 0) {
+                return { endSec: entradaSec + duradaSec, source: 'OnAir', num: last.num };
+            }
+        }
+
+        // Prioritat 2: horaSortidaPrevista
+        if (last.horaSortidaPrevista && last.horaSortidaPrevista !== '00:00:00') {
+            return { endSec: this.tcToSeconds(last.horaSortidaPrevista), source: 'Prevista', num: last.num };
+        }
+
+        // Prioritat 3: horaEntradaPrevista + durada
+        if (last.horaEntradaPrevista && last.durada) {
+            var eSec = this.tcToSeconds(last.horaEntradaPrevista);
+            var dSec = this.parseDurada(last.durada);
+            return { endSec: eSec + dSec, source: 'Prevista+durada', num: last.num };
+        }
+
+        return null;
+    };
+
+    /**
+     * findLatestValid: Com findLatest, però valida que el JSON sigui
+     * SUFICIENTMENT RECENT: el seu timestamp ha de ser >= al final
+     * d'emissió de l'últim ítem del bloc.
+     *
+     * Si el JSON més recent no és vàlid, prova el següent (menys recent).
+     * Si cap JSON és vàlid, retorna { valid: false, lastItemEndSec, estimatedWaitSec }.
+     *
+     * @param {string} programArchivo
+     * @param {string} blockId
+     * @param {string} [datePrefix]
+     * @returns {Promise<Object>}
+     *   { valid: true, path, filename, data }
+     *   { valid: false, lastItemEndSec, estimatedWaitSec, blockId }
+     */
+    ER.findLatestValid = async function (programArchivo, blockId, datePrefix) {
+        var searchLabel = programArchivo + '/' + blockId + (datePrefix ? ' [' + datePrefix + ']' : '');
+        log('\uD83D\uDD0D [ER:IO] findLatestValid: ' + searchLabel);
+
+        try {
+            var raw = await callJSX("IO.listFolder('" + this._escapePath(this.ESCALETES_PATH) + "')");
+            if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) {
+                log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llistar: ' + this.ESCALETES_PATH);
+                return { valid: false, lastItemEndSec: null, estimatedWaitSec: null, error: 'No s\'ha pogut llistar la carpeta d\'escaletes' };
+            }
+
+            var files;
+            try { files = JSON.parse(raw); } catch (e) {
+                return { valid: false, lastItemEndSec: null, estimatedWaitSec: null, error: 'Error parsejant llistat' };
+            }
+
+            var progToken = '_' + programArchivo.toUpperCase() + '_';
+            var allProgFiles = files.filter(function (f) {
+                return !f.isDir &&
+                    f.name.toUpperCase().indexOf(progToken) !== -1 &&
+                    f.name.toLowerCase().indexOf('.json') === f.name.length - 5;
+            });
+
+            if (allProgFiles.length === 0) {
+                log('\u26A0\uFE0F [ER:IO] Cap JSON per a ' + programArchivo);
+                return { valid: false, lastItemEndSec: null, estimatedWaitSec: null, error: 'Cap JSON trobat per a ' + programArchivo };
+            }
+
+            function _extractDateFromName(name) {
+                var parts = name.split('_');
+                if (parts.length >= 1 && /^\d{8}$/.test(parts[0])) return parts[0];
+                return null;
+            }
+
+            function _extractSortDate(name) {
+                var noExt = name.replace(/\.json$/i, '');
+                var parts = noExt.split('_');
+                if (parts.length >= 2 && /^\d{8}$/.test(parts[0]) && /^\d{6}$/.test(parts[1])) return parts[0] + parts[1];
+                return '00000000000000';
+            }
+
+            if (datePrefix) {
+                allProgFiles = allProgFiles.filter(function (f) {
+                    return _extractDateFromName(f.name) === datePrefix;
+                });
+                if (allProgFiles.length === 0) {
+                    return { valid: false, lastItemEndSec: null, estimatedWaitSec: null, error: 'Cap JSON del dia ' + datePrefix };
+                }
+            }
+
+            allProgFiles.sort(function (a, b) {
+                return _extractSortDate(b.name).localeCompare(_extractSortDate(a.name));
+            });
+
+            var lastItemEndSec = null;
+            var bestInvalid = null;
+
+            for (var i = 0; i < allProgFiles.length; i++) {
+                var candidate = allProgFiles[i];
+                var data = await this.load(candidate.path, true);
+                if (!data) continue;
+
+                var blockEnd = this._getBlockLastItemEndSec(data, blockId);
+                if (!blockEnd) {
+                    log('\uD83D\uDD04 [ER:IO] ' + candidate.name + ': bloc ' + blockId + ' sense ítems amb dades temporals. Saltant.');
+                    continue;
+                }
+
+                if (lastItemEndSec === null) {
+                    lastItemEndSec = blockEnd.endSec;
+                }
+
+                var jsonUnixSec = this._filenameToUnixSec(candidate.name);
+                if (jsonUnixSec === null) {
+                    log('\u26A0\uFE0F [ER:IO] ' + candidate.name + ': no s\'ha pogut extreure timestamp del nom');
+                    continue;
+                }
+
+                // Convertir lastItemEndSec (segons del dia, ex: 53824 = 14:57:04) a Unix UTC
+                // Necessitem la data base del datePrefix per reconstruir el timestamp absolut
+                var dateBase = datePrefix || _extractDateFromName(candidate.name);
+                if (dateBase) {
+                    var y = parseInt(dateBase.substring(0, 4), 10);
+                    var m = parseInt(dateBase.substring(4, 6), 10);
+                    var d = parseInt(dateBase.substring(6, 8), 10);
+                    var blockEndUnix = Date.UTC(y, m - 1, d, 0, 0, 0) / 1000 + blockEnd.endSec;
+
+                    if (jsonUnixSec >= blockEndUnix) {
+                        log('\u2705 [ER:IO] findLatestValid: ' + candidate.name + ' (JSON=' + jsonUnixSec + ') >= blockEnd(' + blockId + ':' + (blockEnd.num || '?') + ')=' + blockEndUnix + ' (' + blockEnd.source + '). VÀLID.');
+                        return { valid: true, path: candidate.path, filename: candidate.name, data: data };
+                    }
+
+                    log('\u23F3 [ER:IO] ' + candidate.name + ' (JSON=' + jsonUnixSec + ') < blockEnd=' + blockEndUnix + '. JSON massa antic.');
+                    if (!bestInvalid) {
+                        bestInvalid = {
+                            path: candidate.path,
+                            filename: candidate.name,
+                            lastItemEndSec: blockEnd.endSec,
+                            blockEndUnix: blockEndUnix,
+                            source: blockEnd.source,
+                            num: blockEnd.num
+                        };
+                    }
+                }
+            }
+
+            // ── Cap JSON vàlid ──
+            var nowUnix = Date.now() / 1000;
+            var estimatedWaitSec = null;
+            var blockEndUnix = bestInvalid ? bestInvalid.blockEndUnix : null;
+
+            if (blockEndUnix && blockEndUnix > nowUnix) {
+                estimatedWaitSec = Math.ceil(blockEndUnix - nowUnix);
+            }
+
+            log('\u23F0 [ER:IO] findLatestValid: Cap JSON suficientment recent per a ' + blockId + '. Espera estimada: ' + (estimatedWaitSec !== null ? estimatedWaitSec + 's' : 'N/D'));
+
+            return {
+                valid: false,
+                lastItemEndSec: bestInvalid ? bestInvalid.lastItemEndSec : null,
+                blockEndUnix: blockEndUnix,
+                estimatedWaitSec: estimatedWaitSec,
+                blockId: blockId,
+                bestFilename: bestInvalid ? bestInvalid.filename : null,
+                source: bestInvalid ? bestInvalid.source : null,
+                num: bestInvalid ? bestInvalid.num : null
+            };
+
+        } catch (e) {
+            log('\u274C [ER:IO] Error en findLatestValid: ' + e.message);
+            return { valid: false, lastItemEndSec: null, estimatedWaitSec: null, error: e.message };
         }
     };
 
