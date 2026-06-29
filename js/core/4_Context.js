@@ -187,13 +187,45 @@
                 // ── FIX A3 (2026-06-29): Validar JSON suficientment recent ──
                 // Si el bloc encara s'està emetent (cap JSON posterior al final del bloc),
                 // mostrar missatge d'espera en lloc de permetre NEW/LOAD amb dades obsoletes.
+                // Guarda de 22h: si avui no hi ha dades (programa futur), intentar ahir.
                 var jsonValid = true;
                 var waitingMsg = null;
                 try {
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader && reader.findLatestValid) {
                         var datePrefixA3 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+
+                        // Intent 1: datePrefix actual (avui)
                         var validResult = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixA3);
+
+                        // ── Guarda de 22h: si avui falla, intentar ahir ──
+                        // Quan falten >2h per a l'emissió del programa d'avui,
+                        // els JSONs són del dia anterior. Ex: obrint TNM a les 12:00,
+                        // l'emissió és a les 14:30 → dateDir=today però JSONs=today no tenen dades.
+                        if (!validResult || !validResult.valid) {
+                            var yesterday = new Date();
+                            yesterday.setDate(yesterday.getDate() - 1);
+                            var yyyy = yesterday.getFullYear();
+                            var mm = ('0' + (yesterday.getMonth() + 1)).slice(-2);
+                            var dd = ('0' + yesterday.getDate()).slice(-2);
+                            var datePrefixYesterday = '' + yyyy + mm + dd;
+
+                            if (datePrefixA3 !== datePrefixYesterday) {
+                                getUtils().log('🔁 [checkContext] FIX A3: intentant ahir (' + datePrefixYesterday + ') per guarda 22h...', 'DEBUG');
+                                var validResultYesterday = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixYesterday);
+                                if (validResultYesterday && validResultYesterday.valid) {
+                                    validResult = validResultYesterday;
+                                    // Corregir dateDir a ahir
+                                    var emissionDateYesterday = yyyy + '_' + mm + '_' + dd;
+                                    ctx.dateDir = emissionDateYesterday;
+                                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                                        window.FASTPASS_UI.State.dateDir = emissionDateYesterday;
+                                    }
+                                    getUtils().log('📅 [checkContext] dateDir corregit a ahir: ' + emissionDateYesterday, 'DEBUG');
+                                }
+                            }
+                        }
+
                         if (validResult && !validResult.valid) {
                             jsonValid = false;
                             if (validResult.estimatedWaitSec !== null && validResult.estimatedWaitSec > 0) {
