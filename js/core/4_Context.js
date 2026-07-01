@@ -13,10 +13,63 @@
 
     let _lastCheckAt = 0; // Guard de debounce
 
+    // ─── Hores d'inici de cada programa (hora del dia, ex: 14.5 = 14:30) ───
+    const PROGRAM_START_HOURS = {
+        TNV: 21.0,
+        TNM: 14.5,
+        TNC: 13.8333  // 13:50
+    };
+    const PRE_EMISSION_GUARD_HOURS = 2; // 2h abans de l'emissio, bloquejar
+
     FASTPASS_UI.Core.Context = {
         
         // Reporte de activos para UI "externa"
         missing: { wotts: false, media: false, srt: false, portada: false },
+
+        /**
+         * _getValidDateDir: Determina la data de treball segons l'hora actual
+         * i l'hora d'inici del programa.
+         *
+         * Retorna { dateDir, action, waitMsg }
+         *   action = "today" | "yesterday" | "block"
+         */
+        _getValidDateDir: function(progData, existingDateDir) {
+            var now = new Date();
+            var nowHour = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+            var shortProg = progData.wott || 'TNV';
+            var programStartHour = PROGRAM_START_HOURS[shortProg];
+            if (!programStartHour) {
+                return {
+                    dateDir: existingDateDir || getUtils().getFormattedDate().replace(/"/g, "").trim(),
+                    action: 'today',
+                    waitMsg: null
+                };
+            }
+
+            var todayFormatted = getUtils().getFormattedDate().replace(/"/g, "").trim();
+            var yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            var yy = yesterday.getFullYear();
+            var mm = ('0' + (yesterday.getMonth() + 1)).slice(-2);
+            var dd = ('0' + yesterday.getDate()).slice(-2);
+            var yesterdayFormatted = yy + '_' + mm + '_' + dd;
+
+            if (nowHour < programStartHour - PRE_EMISSION_GUARD_HOURS) {
+                getUtils().log('🕐 [TimeGuard] ' + shortProg + ': ' + nowHour.toFixed(1) + 'h < ' + (programStartHour - PRE_EMISSION_GUARD_HOURS).toFixed(1) + 'h → AHIER', 'DEBUG');
+                return { dateDir: existingDateDir || yesterdayFormatted, action: 'yesterday', waitMsg: null };
+            }
+
+            if (nowHour < programStartHour) {
+                var waitMin = Math.ceil((programStartHour - nowHour) * 60);
+                var startTimeStr = Math.floor(programStartHour) + ':' + ('0' + Math.round((programStartHour % 1) * 60)).slice(-2);
+                var waitMsg = 'ESPERANT EMISSIÓ ' + startTimeStr + '... ~' + waitMin + ' min';
+                getUtils().log('🚫 [TimeGuard] ' + shortProg + ': ' + nowHour.toFixed(1) + 'h < ' + programStartHour.toFixed(1) + 'h (inici). Bloqueig. ' + waitMsg, 'INFO');
+                return { dateDir: todayFormatted, action: 'block', waitMsg: waitMsg };
+            }
+
+            getUtils().log('🕐 [TimeGuard] ' + shortProg + ': ' + nowHour.toFixed(1) + 'h ≥ ' + programStartHour.toFixed(1) + 'h → AVUI', 'DEBUG');
+            return { dateDir: existingDateDir || todayFormatted, action: 'today', waitMsg: null };
+        },
 
         async checkContext() {
             if (!getUtils().isJsxReady) return; 
@@ -77,6 +130,24 @@
                     bloque: elBloc.value,
                     dateDir: existingDateDir || getUtils().getFormattedDate().replace(/"/g, "").trim()
                 };
+
+                // ── TimeGuard (2026-07-01): Determinar data de treball segons
+                // l'hora d'emissió del programa ──
+                var timeGuard = this._getValidDateDir(ctx.progData, existingDateDir);
+                ctx.dateDir = timeGuard.dateDir;
+
+                if (timeGuard.action === 'block') {
+                    this.updateButton('WAITING', {
+                        msg: timeGuard.waitMsg,
+                        config: config,
+                        progData: ctx.progData,
+                        bloque: ctx.bloque,
+                        dateDir: ctx.dateDir,
+                        name: 'WAITING'
+                    });
+                    return;
+                }
+
                 // Actualizar estado global
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                     Object.assign(window.FASTPASS_UI.State, ctx);
