@@ -287,21 +287,26 @@
         if (primaryResult !== null) return primaryResult;
         if (nextOnAirSameAgrupacio !== null) return nextOnAirSameAgrupacio;
 
-        // --- Phase 2 cross-agrupacio (BUG #19): només fallback absolut ---
-        // Si primaryResult i Phase 1 fallen, és l'últim recurs.
-        // No ha de competir, no és aquí.
+        // --- Fallback: Prevista+durada (més fiable que cross-agrupacio) ---
+        // BUG #16-B4 (2026-07-01): Quan l'ítem no té OnAir (primaryResult=null)
+        // i no hi ha següent OnAir al mateix agrupacio, horaEntradaPrevista+durada
+        // és més fiable que el següent OnAir d'un altre agrupacio.
+        // Ex: TNC V1 30/06: ítem "01" sense OnAir → Prevista+durada=13:58:03,
+        // però Phase2 cross-agrupacio agafava "02" (V4) a 13:58:29 (+26s).
+        h = item.horaEntradaPrevista;
+        if (h && h !== "00:00:00") {
+            var previstaSortida = this.tcToSeconds(h) + this.getItemDuradaSec(item);
+            log('   📋 [getItemSortidaSec] "' + item.num + '": Prevista+durada=' + previstaSortida.toFixed(2) + 's (fallback pre-cross-agrup).');
+            return previstaSortida;
+        }
+
+        // --- Phase 2 cross-agrupacio (BUG #19): últim recurs absolut ---
         if (allLines && allLines.length > 0) {
             var nextOnAirCross = this._deduceOnAirSortida(item, allLines, true);
             if (nextOnAirCross !== null) {
                 log('   🔗 [getItemSortidaSec] "' + item.num + '": Phase2 cross-agrup OnAir=' + nextOnAirCross.toFixed(2) + 's (últim recurs).');
                 return nextOnAirCross;
             }
-        }
-
-        // --- Últim fallback: Prevista ---
-        h = item.horaEntradaPrevista;
-        if (h && h !== "00:00:00") {
-            return this.tcToSeconds(h) + this.getItemDuradaSec(item);
         }
 
         return null;
