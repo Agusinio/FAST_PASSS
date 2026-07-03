@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ============================================================================
  * WORKFLOW: ASSEMBLY (Montatge Automàtic i Orquestració) - v2.6.0 literal
  * ============================================================================
@@ -67,7 +67,7 @@
             'p2', 'p21', 'p22', 'p23', 'p24', 'p3', 'p4', 'p5', 'p51', 'p52',
             'p5_01', 'p5_02', 'p7', 'p7_01', 'p7_02', 'p7_03', 'p7_0',
             'p71', 'p72', 'p73', 'p',
-            'td1', 'td2', 'td3', 'td4', 'td_01', 'td_02', 'td_at1',
+            'td', 'td1', 'td2', 'td3', 'td4', 'td_01', 'td_02', 'td_at1',
             'qr', 'rq',
             'at1', 'at2', 'at3', '_at1', '_at2', '_at3', 'ae', 't', 'teloc',
             '**********'
@@ -907,7 +907,7 @@
                         var firstTitol = (firstItem.titol || '').replace(/'/g, "\\'").substring(0, 60);
                         var firstComment = firstNum + ' - ' + firstTitol;
                         firstComment = firstComment.trim();
-                        var firstColorIdx = 5;  // Cyan (F2Â·Deducido) (D10)
+                        var firstColorIdx = 6;  // Cyan (F2Â·Deducido) (D10)
                         log('🟠 [F2·Deducido] Forçant marcador 1r ítem ' + firstNum + ' a 00:00 (no existia)');
                         placements.push({ prefix: firstNum, timeSec: 0, comment: firstComment, colorIdx: firstColorIdx });
                         itemPositions.set(firstNum, 0);
@@ -1012,6 +1012,20 @@
             var placements = [];
             var itemPositions = new Map();
 
+            // ── D10·F3: Protegir marcadors ja a 00:00 (col·locats per F2·D10) ──
+            var markersRawF3 = await callJSX('Markers.get()');
+            var allMarkersF3 = [];
+            try { allMarkersF3 = JSON.parse(markersRawF3); } catch(e) {}
+            var prefixesAtZero = {};
+            for (var mfi = 0; mfi < allMarkersF3.length; mfi++) {
+                if (Math.abs(allMarkersF3[mfi].time) < 0.02 && allMarkersF3[mfi].comments) {
+                    var spaceIdxF3 = allMarkersF3[mfi].comments.indexOf(' -');
+                    if (spaceIdxF3 > 0) {
+                        prefixesAtZero[allMarkersF3[mfi].comments.substring(0, spaceIdxF3).trim()] = true;
+                    }
+                }
+            }
+
             for (var si = 0; si < structuralItems.length; si++) {
                 var line = structuralItems[si];
                 var onAir = line.horaEntradaOnAir;
@@ -1020,6 +1034,13 @@
 
                 var deduced = reader._deduceOnAirEntrada(line, manifest.escaletaItems, null);
                 if (deduced !== null) continue;
+
+                // D10·F3: Si el marcador ja està a 00:00 (col·locat per F2), no moure'l
+                var num = line.num || '?';
+                if (num && prefixesAtZero[num]) {
+                    log('🟡 [F3·Prevista] ' + num + ': marcador ja a 00:00 (protegit per F2). Saltant.');
+                    continue;
+                }
 
                 var prevista = line.horaEntradaPrevista;
                 var hasPrevista = prevista && prevista !== '00:00:00';
@@ -1034,7 +1055,6 @@
                 var idealPosSec = anchorEfTimelineSec + (previstaSec - anchorEfectiva);
                 if (idealPosSec < 0) idealPosSec = 0;
 
-                var num = line.num || '?';
                 var safeT = idealPosSec.toFixed(2);
                 var titol = (line.titol || '').replace(/'/g, "\\'").substring(0, 60);
                 var comment = (num ? num + ' - ' : '') + titol;
@@ -1403,6 +1423,73 @@
                     remaining.push({ mk: mk1, prefix: prefix, suffix: suffix, time: mkTime, item: item });
                 }
             }
+
+            // ── CAPA 1d): dp snap — donapas al break més proper (±15s) ──
+            var remainingAfterDp = [];
+            for (var dr = 0; dr < remaining.length; dr++) {
+                var rp = remaining[dr];
+                if (rp.suffix === 'dp') {
+                    var bestBreakDp = _findBestBreak(rp.time, rp.time - 15, rp.time + 15);
+                    if (bestBreakDp !== null) {
+                        finalTimes[rp.prefix] = bestBreakDp;
+                        log('   🔵 [F4·CAPA1·DP] ' + rp.prefix + ': ' + rp.time.toFixed(2) + 's → break ' + bestBreakDp.toFixed(2) + 's (donapas)');
+                    } else {
+                        remainingAfterDp.push(rp);
+                    }
+                } else {
+                    remainingAfterDp.push(rp);
+                }
+            }
+            remaining = remainingAfterDp;
+
+            // ── CAPA 1e): dir→OFF — primer break > pos_dir + MIN_GAP_DIR ──
+            var MIN_GAP_DIR = 3.0;
+            var prefixesPlaced = {};
+            for (var k in finalTimes) prefixesPlaced[k] = true;
+            var candidateTimes = {};
+            for (var ci2 = 0; ci2 < candidates.length; ci2++) {
+                var cp = _extractPrefix(candidates[ci2].comments || '');
+                var ct = (typeof candidates[ci2].time === 'number') ? candidates[ci2].time : parseFloat(candidates[ci2].time);
+                candidateTimes[cp] = ct;
+            }
+            for (var dr2 = 0; dr2 < remaining.length; dr2++) {
+                var rp2 = remaining[dr2];
+                if (rp2.suffix !== 'dir') continue;
+                if (!(rp2.prefix in finalTimes)) continue;
+                var dirPos = finalTimes[rp2.prefix];
+                var dirBaseNum = parseInt(rp2.prefix.match(/^\d+/)[0]);
+                var nextOffItem = null;
+                for (var ns = 0; ns < structuralItems.length; ns++) {
+                    var siPrefix = String(structuralItems[ns].num || '');
+                    var siNum = parseInt(siPrefix);
+                    if (isNaN(siNum) || siNum <= dirBaseNum) continue;
+                    if (_getSuffix(siPrefix) !== '') continue;
+                    var siDurada = structuralItems[ns].durada || '0:00';
+                    var siParts = siDurada.split(':').map(Number);
+                    var siSec = (siParts.length === 2) ? siParts[0] * 60 + siParts[1] : 0;
+                    if (siSec === 0) continue;
+                    if (!(siPrefix in candidateTimes)) continue;
+                    if (siPrefix in prefixesPlaced) continue;
+                    nextOffItem = siPrefix;
+                    break;
+                }
+                if (nextOffItem) {
+                    var bestBreakDir = _findBestBreak(dirPos, dirPos + MIN_GAP_DIR, dirPos + 30);
+                    if (bestBreakDir !== null) {
+                        finalTimes[nextOffItem] = bestBreakDir;
+                        prefixesPlaced[nextOffItem] = true;
+                        log('   🔵 [F4·CAPA1·DIR_OFF] ' + nextOffItem + ': → break ' + bestBreakDir.toFixed(2) + 's (després de ' + rp2.prefix + ' a ' + dirPos.toFixed(2) + 's + ' + MIN_GAP_DIR.toFixed(0) + 's gap)');
+                    }
+                }
+            }
+            // Actualitzar remaining per eliminar els ja col·locats
+            var remainingAfterDir = [];
+            for (var dr3 = 0; dr3 < remaining.length; dr3++) {
+                if (!(remaining[dr3].prefix in finalTimes)) {
+                    remainingAfterDir.push(remaining[dr3]);
+                }
+            }
+            remaining = remainingAfterDir;
 
             // ── CAPA 2: Propagar restriccions (particionar timeline amb markers ja col·locats) ──
             var placedTimes = Object.values(finalTimes).sort(function(a,b) { return a - b; });
