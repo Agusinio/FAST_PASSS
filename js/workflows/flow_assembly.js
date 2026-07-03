@@ -1871,7 +1871,7 @@
                 markersByBaseNum[baseNum].push(mkTime);
             }
             // Resoldre cascada per a cada baseNum
-            var PRIORITY_SUFFIXES = ['i', 'lead'];
+            var PRIORITY_SUFFIXES = ['i', 'lead', 'dp', 'dir'];
             for (var bn in markersByBaseNum) {
                 var found = false;
                 // 1) Buscar per sufixos de prioritat
@@ -1888,10 +1888,22 @@
                     parentMarkerByPrefix[bn] = markersByExactPrefix[bn];
                     found = true;
                 }
-                // 3) Fallback: primer marcador amb aquest baseNum (més proper a 00:00)
+                // 3) Fallback: primer marcador amb aquest baseNum que sigui estructural (i, lead, dp, dir, f)
+                // Mai anclar a IPDs o videos (sufix no reconegut)
                 if (!found && markersByBaseNum[bn].length > 0) {
-                    markersByBaseNum[bn].sort(function(a,b) { return a - b; });
-                    parentMarkerByPrefix[bn] = markersByBaseNum[bn][0];
+                    var structuralTimes = markersByBaseNum[bn].filter(function(t) {
+                        for (var sk in markersByExactPrefix) {
+                            if (markersByExactPrefix[sk] === t) {
+                                var suff = sk.replace(/^\d+/, '').toLowerCase();
+                                return PRIORITY_SUFFIXES.indexOf(suff) >= 0 || suff === '' || suff === 'f';
+                            }
+                        }
+                        return false;
+                    });
+                    if (structuralTimes.length > 0) {
+                        structuralTimes.sort(function(a,b) { return a - b; });
+                        parentMarkerByPrefix[bn] = structuralTimes[0];
+                    }
                 }
             }
             log('   🟢 [F6·Gràfics] Marcadors pare disponibles: ' + Object.keys(parentMarkerByPrefix).length + ' (' + Object.keys(parentMarkerByPrefix).join(', ') + ')');
