@@ -1310,6 +1310,9 @@
                 if (mItem.num) prefixToItem[String(mItem.num)] = mItem;
             }
 
+            var classData = this._classifyItems(lines);
+            var structuralItems = classData.structuralItems;
+
             var _extractPrefix = function (comment) {
                 if (!comment) return '';
                 var idx = comment.indexOf(' -');
@@ -1419,12 +1422,21 @@
                     }
                 }
 
+                else if (suffix === '' && duradaSec > 0) {
+                    var bestBreakPre = _findBestBreak(mkTime, mkTime - 5, mkTime + 5);
+                    if (bestBreakPre !== null) {
+                        finalTimes[prefix] = bestBreakPre;
+                        placed = true;
+                        log('   🔵 [F4·CAPA1·PREVISTO] ' + prefix + ': ' + mkTime.toFixed(2) + 's → break ' + bestBreakPre.toFixed(2) + 's (previsto generic)');
+                    }
+                }
+
                 if (!placed) {
                     remaining.push({ mk: mk1, prefix: prefix, suffix: suffix, time: mkTime, item: item });
                 }
             }
 
-            // ── CAPA 1d): dp snap — donapas al break més proper (±15s) ──
+            // ── CAPA 1d2): dp snap — donapas al break més proper (±15s) ──
             var remainingAfterDp = [];
             for (var dr = 0; dr < remaining.length; dr++) {
                 var rp = remaining[dr];
@@ -1455,8 +1467,8 @@
             for (var dr2 = 0; dr2 < remaining.length; dr2++) {
                 var rp2 = remaining[dr2];
                 if (rp2.suffix !== 'dir') continue;
-                if (!(rp2.prefix in finalTimes)) continue;
-                var dirPos = finalTimes[rp2.prefix];
+                var dirPos = (rp2.prefix in finalTimes) ? finalTimes[rp2.prefix] : rp2.time;
+                if (typeof dirPos !== 'number' || isNaN(dirPos)) continue;
                 var dirBaseNum = parseInt(rp2.prefix.match(/^\d+/)[0]);
                 var nextOffItem = null;
                 for (var ns = 0; ns < structuralItems.length; ns++) {
@@ -1649,6 +1661,9 @@
                 var mItem = manifestItems[ii];
                 if (mItem.num) prefixToItem[String(mItem.num)] = mItem;
             }
+
+            var classData = this._classifyItems(lines);
+            var structuralItems = classData.structuralItems;
 
             var _extractPrefix = function (comment) {
                 if (!comment) return '';
