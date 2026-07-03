@@ -970,7 +970,7 @@
                         var ugComment = ugNum + ' - ' + ugTitol;
                         ugComment = ugComment.trim();
                         log('🔴 [F2·Deducido] UNGROUPED ' + ugNum + ': OnAirDeducido=' + ugDeduced.toFixed(1) + 's -> timeline ' + ugSafeT + 's');
-                        placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: this._getColorIdx(firstUngroupedItem) });
+                        placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: 6 });
                         itemPositions.set(firstUngroupedItem.num, ugIdealPos);
                     }
                 }
