@@ -1871,7 +1871,7 @@
                 markersByBaseNum[baseNum].push(mkTime);
             }
             // Resoldre cascada per a cada baseNum
-            var PRIORITY_SUFFIXES = ['i', 'lead', 'dp', 'dir'];
+            var PRIORITY_SUFFIXES = ['i', 'dp', 'dir'];
             for (var bn in markersByBaseNum) {
                 var found = false;
                 // 1) Buscar per sufixos de prioritat
