@@ -268,7 +268,23 @@
         if (primaryResult === null && allLines && allLines.length > 0) {
             var deducedEntrada = this._deduceOnAirEntrada(item, allLines, data);
             if (deducedEntrada !== null) {
-                primaryResult = deducedEntrada + this.getItemDuradaSec(item);
+                var deducedResult = deducedEntrada + this.getItemDuradaSec(item);
+                // BUG #16-B5 (2026-07-03): _deduceOnAirEntrada encadena OnAir
+                // d'ítems anteriors però NO té en compte els gaps entre ells
+                // (ex: DONA PAS + CONNEXIÓ entre "01" i "02" a TNV V1 02/07).
+                // Comparar amb Prevista+durada, que sí reflecteix l'espai real.
+                var hPrev = item.horaEntradaPrevista;
+                if (hPrev && hPrev !== "00:00:00") {
+                    var previstaResult = this.tcToSeconds(hPrev) + this.getItemDuradaSec(item);
+                    if (previstaResult > deducedResult) {
+                        log('   \uD83D\uDCCB [getItemSortidaSec] "' + (item.num || '?') + '": Prevista+durada=' + previstaResult.toFixed(2) + 's > deducedOnAir=' + deducedResult.toFixed(2) + 's. Guanya Prevista (gap entre \u00EDtems).');
+                        primaryResult = previstaResult;
+                    } else {
+                        primaryResult = deducedResult;
+                    }
+                } else {
+                    primaryResult = deducedResult;
+                }
             }
         }
 
