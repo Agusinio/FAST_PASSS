@@ -455,6 +455,13 @@
                 return null;
             }
             var data = JSON.parse(raw);
+            // ── Validar que el JSON és una escaleta real, no un error del servidor ──
+            // Ex: JSON V3 de TNC 06/07: {"missatge":"Error","debugInfo":"No s'ha localitzat..."}
+            if (data.missatge || !data.cleanFeed || !data.escaleta) {
+                log('\u26A0\uFE0F [ER:IO] JSON descartat (error del servidor o estructura invàlida): ' + jsonPath);
+                if (data.missatge) log('\u26A0\uFE0F [ER:IO]   Motiu: ' + data.missatge);
+                return null;
+            }
             var clipCount = data && data.cleanFeed && data.cleanFeed.clips ? data.cleanFeed.clips.length : 0;
             log('\u2705 [ER:IO] JSON parsejat. Blocs cleanFeed: ' + clipCount);
             var corrected = this.applyDurationOverrides(data);
