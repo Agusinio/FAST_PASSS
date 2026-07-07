@@ -834,7 +834,7 @@
                         var ugComment = ugNum + ' - ' + ugTitol;
                         ugComment = ugComment.trim();
                         log('🔴 [F1·OnAir] UNGROUPED ' + ugNum + ': OnAir=' + ugOnAirSec.toFixed(1) + 's -> timeline ' + ugSafeT + 's');
-                        placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: this._getColorIdx(firstUngroupedItem) });
+                        placements.push({ prefix: ugNum, timeSec: parseFloat(ugSafeT), comment: ugComment, colorIdx: 1 });
                         itemPositions.set(firstUngroupedItem.num, ugIdealPos);
                     }
                 }
@@ -1955,10 +1955,10 @@
                     var parentTime = parentMarkerByPrefix[gBaseNum];
                     var totalN = totalGraphicCount[gBaseNum] || 1;
                     var idx = graphicCountByPrefix[gBaseNum] || 0;
-                    // Calcular durada disponible: fins al següent marcador, o fallback 10s
-                    var parentEnd = nextMarkerTime[gBaseNum];
-                    if (typeof parentEnd !== 'number' || parentEnd <= parentTime) {
-                        parentEnd = parentTime + 10;  // fallback: 10s
+                    // Calcular durada disponible: fins al següent marcador (max 15s), o fallback 10s
+                    var parentEnd = parentTime + 10;
+                    if (nextMarkerTime[gBaseNum] && nextMarkerTime[gBaseNum] > parentTime && nextMarkerTime[gBaseNum] < parentEnd) {
+                        parentEnd = nextMarkerTime[gBaseNum];
                     }
                     var totalDur = parentEnd - parentTime;
                     // Espaiat asimètric: 1/3 entre pare i 1r gràfic, 2/3 repartits entre N gràfics
