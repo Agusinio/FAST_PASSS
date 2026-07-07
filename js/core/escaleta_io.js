@@ -364,7 +364,17 @@
                 }
             }
 
-            // ── Cap JSON vàlid ──
+            // ── Cap JSON vàlid (posterior al blockEnd) ──
+            // Fallback: si hi ha un JSON anterior amb ítems del bloc, usar-lo.
+            // Ex: TNC V3 06/07: V3 és error, V2 és anterior a V3 → usar V2.
+            if (bestInvalid && bestInvalid.path) {
+                var fallbackData = await this.load(bestInvalid.path, true);
+                if (fallbackData) {
+                    log('\u26A0\uFE0F [ER:IO] findLatestValid: Cap JSON posterior al bloc ' + blockId + '. Usant fallback anterior: ' + bestInvalid.filename + ' (JSON=' + bestInvalid.blockEndUnix + ' < blockEnd)');
+                    return { valid: true, path: bestInvalid.path, filename: bestInvalid.filename, data: fallbackData, _fallback: true };
+                }
+            }
+
             var nowUnix = Date.now() / 1000;
             var estimatedWaitSec = null;
             var blockEndUnix = bestInvalid ? bestInvalid.blockEndUnix : null;

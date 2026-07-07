@@ -23,12 +23,25 @@ FASTPASS.IO = (function () {
             for (var i = 0; i < allFiles.length; i++) {
                 var f = allFiles[i];
                 if (f instanceof File) {
+                    var sz = f.length;
+                    // Si length es 0 (fallo común con .mov en red UNC), usar eof
+                    if (!sz || sz === 0) {
+                        try {
+                            var opened = f.open("r");
+                            if (opened) {
+                                sz = f.eof;
+                                f.close();
+                            }
+                        } catch (e) {
+                            sz = 0;
+                        }
+                    }
                     result.push({
                         name: f.name,
                         path: f.fsName,
                         modified: f.modified.getTime(),
                         created: f.created ? f.created.getTime() : f.modified.getTime(),
-                        size: f.length
+                        size: sz
                     });
                 }
             }

@@ -101,9 +101,20 @@
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader) {
                         var datePrefixJson = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                        jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson);
-                        if (jsonMeta) {
-                            jsonData = await reader.load(jsonMeta.path);
+                        // Usar findLatestValid per evitar JSONs d'error del servidor
+                        // (ex: TNC V3 06/07 sense cleanFeed/escaleta)
+                        var validResult = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixJson);
+                        if (validResult && validResult.valid) {
+                            jsonMeta = { path: validResult.path, filename: validResult.filename };
+                            jsonData = validResult.data || await reader.load(validResult.path);
+                        } else {
+                            // Fallback: findLatest tradicional si findLatestValid falla
+                            jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson);
+                            if (jsonMeta) {
+                                jsonData = await reader.load(jsonMeta.path);
+                            }
+                        }
+                        if (jsonMeta && jsonData) {
                             if (jsonData) {
                                 var lines = reader.getLinesForBlock(jsonData, ctx.bloque);
                                 lines.sort(function (a, b) {
@@ -190,14 +201,24 @@
 
                         // jsonMeta i jsonData ja estan carregats (extrets abans per al tema)
                         // Si no es van carregar, tornar-ho a intentar
-                        if (!jsonMeta) {
+                        // També si jsonData és null (JSON descartat per load), usar findLatestValid
+                        if (!jsonMeta || !jsonData) {
                             var datePrefixJson2 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                            jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson2);
-                        }
-                        if (jsonMeta) {
-                            if (!jsonData) {
-                                jsonData = await reader.load(jsonMeta.path);
+                            var validResult2 = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixJson2);
+                            if (validResult2 && validResult2.valid) {
+                                jsonMeta = { path: validResult2.path, filename: validResult2.filename };
+                                jsonData = validResult2.data;
+                            } else {
+                                // Fallback a findLatest tradicional
+                                if (!jsonMeta) {
+                                    jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson2);
+                                }
+                                if (jsonMeta && !jsonData) {
+                                    jsonData = await reader.load(jsonMeta.path);
+                                }
                             }
+                        }
+                        if (jsonMeta && jsonData) {
                             if (jsonData) {
                                 // Tots els ítems de l'escaleta (per persistir al manifest)
                                 const allItems = jsonData.escaleta?.liniesEscaleta || [];

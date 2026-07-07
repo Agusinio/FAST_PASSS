@@ -171,7 +171,8 @@
                             return {
                                 name: item.name,
                                 mtime: item.modified || 0,
-                                created: item.created || item.modified || 0
+                                created: item.created || item.modified || 0,
+                                size: item.size || 0
                             };
                         });
                         return converted;

@@ -54,7 +54,6 @@ var isUserDraggingSlider = false;
     'use strict';
 
     function initPanel() {
-        //alert('initPanel ejecutado');
         FASTPASS_UI.Utils.log("🚀 Vinculando botones...");
 
         // --- WORKFLOW: CUT ---
@@ -151,9 +150,20 @@ var isUserDraggingSlider = false;
         // if (btnCapturaUsuarioInOut) btnCapturaUsuarioInOut.addEventListener('click', () => callWorkflow('Assembly', 'capturaUsuarioInOut'));
         // if (btnCapturaUsuarioMarks) btnCapturaUsuarioMarks.addEventListener('click', () => callWorkflow('Assembly', 'capturaUsuarioMarks'));
 
-        // --- BOTÓ CHYRONS (Tema-Titol via marcadors) ---
-        const btnChyrons = document.getElementById('btnPlaceChyrons');
-        if (btnChyrons) btnChyrons.addEventListener('click', () => callWorkflow('Retols', 'runPlaceChyrons'));
+        // --- BOTONS CHYRONS (6 tipus independents via marcadors) ---
+        const btnChyronTitol = document.getElementById('btnChyronTitol');
+        const btnChyronConductor = document.getElementById('btnChyronConductor');
+        const btnChyronLloc = document.getElementById('btnChyronLloc');
+        const btnChyronNom = document.getElementById('btnChyronNom');
+        const btnChyronTraduccio = document.getElementById('btnChyronTraduccio');
+        const btnChyronResto = document.getElementById('btnChyronResto');
+
+        if (btnChyronTitol) btnChyronTitol.addEventListener('click', () => callWorkflow('Retols', 'placeChyronTitol'));
+        if (btnChyronConductor) btnChyronConductor.addEventListener('click', () => callWorkflow('Retols', 'placeChyronConductor'));
+        if (btnChyronLloc) btnChyronLloc.addEventListener('click', () => callWorkflow('Retols', 'placeChyronLloc'));
+        if (btnChyronNom) btnChyronNom.addEventListener('click', () => callWorkflow('Retols', 'placeChyronNom'));
+        if (btnChyronTraduccio) btnChyronTraduccio.addEventListener('click', () => callWorkflow('Retols', 'placeChyronTraduccio'));
+        if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Retols', 'placeChyronResto'));
 
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');

@@ -231,70 +231,401 @@
         },
 
         /**
-         * FREEZE-TEMA-TITOL: Captura un frame de la pista V5, l'importa com a PNG
-         * i l'estira fins a stretchEnd (o fins al final del timeline si és null).
-         * Delega en Assembly.Logic.freeze() per a la captura, però controlem
-         * explícitament el punt d'estirament.
+         * FREEZE-TEMA-TITOL: Importa el Wott, l'insereix temporalment a V5,
+         * captura un frame PNG, elimina el Wott de V5, i insereix el PNG estirat.
          *
-         * @param {number} captureTime - Temps on capturar el frame
+         * @param {string} wottName   - Nom del fitxer Wott a importar i capturar
+         * @param {number} placeTime  - Temps on col·locar i capturar
          * @param {number|null} stretchEnd - Temps final d'estirament (null = final timeline)
-         * @param {string} label - Nom del Tema‑Titol per a logging
+         * @param {string} label      - Etiqueta per a logging
          * @returns {object} { success, duration }
          */
-        _freezeTemaTitol: async function (captureTime, stretchEnd, label) {
+        _freezeTemaTitol: async function (wottName, placeTime, stretchEnd, label) {
             const cfg = FASTPASS_UI.Config.get();
             const T_THEME = cfg.tracks.video.tematitol;
             const utils = getUtils();
+            const escapedWott = utils.escape(wottName);
+            const CUT_OFFSET = 6.15; // Segons d'animació d'entrada a conservar
 
-            // 1. Aïllar V5 (mute a totes les altres pistes de video)
+            log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+
+            // 1. Inserir el Wott llarg a V5 (durada completa, per tenir l'animació d'entrada)
+            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
+            await utils.delay(500);
+
+            // 2. Retallar el clip a placeTime + CUT_OFFSET (conserva animació d'entrada)
+            const cutTime = placeTime + CUT_OFFSET;
+            await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
+            log(`   ✂️ [_freeze] Clip retallat a end=${cutTime.toFixed(2)}s`);
+
+            // 3. Aïllar V5 per capturar només el frame a congelar
             await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
 
-            // 2. Posicionar el cabezal al punt de captura
-            await callJSX(`Timeline.set(${captureTime})`);
-
-            // 3. Capturar frame PNG
+            // 4. Posicionar cabezal al punt de tall i capturar snapshot
+            //    Render.frame() crea la carpeta automàticament i accepta path complet
+            await callJSX(`Timeline.set(${cutTime})`);
             const folder = await callJSX("Context.folder()");
             const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`;
-            const res = await FASTPASS_UI.Logic.Render.capture(snapPath, captureTime);
+            const snapResult = await callJSX(`Render.frame('${utils.escape(snapPath)}', ${cutTime})`);
 
-            // 4. Restaurar totes les pistes (unmute global)
+            // 5. Restaurar visibilitat de totes les pistes
             await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
 
-            if (!res || !res.success) {
-                throw new Error(`Captura fallida: ${res ? res.log : "desconegut"}`);
+            if (!snapResult || snapResult.indexOf('ERR') === 0) {
+                log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
+                throw new Error(`Snapshot fallit: ${snapResult}`);
             }
 
-            // 5. Importar el PNG capturat al projecte
+            // 6. Importar el PNG al projecte
             const fileName = snapPath.split("\\").pop();
             const importPayload = JSON.stringify([snapPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'root')`);
 
-            // 6. Determinar durada de l'estirament
+            // 7. Determinar durada de l'estirament del PNG
             let duration;
             if (stretchEnd !== null && stretchEnd !== undefined) {
-                duration = Math.max(stretchEnd - captureTime, 0.5);
+                duration = Math.max(stretchEnd - cutTime, 0.5);
             } else {
                 const timelineDur = parseFloat(await callJSX("Timeline.duration()") || "0");
-                duration = Math.max(timelineDur - captureTime, 0.5);
+                duration = Math.max(timelineDur - cutTime, 0.5);
             }
 
-            // 7. Inserir el freeze-frame a V5 amb la durada calculada
-            await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${captureTime}, ${captureTime + duration}, 'video')`);
+            // 8. Inserir el PNG estirat DESPRÉS del segment d'animació
+            await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
+            log(`   ✅ [_freeze] PNG "${fileName}" → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s`);
 
             return { success: true, duration };
         },
 
-        updateUIChunk: function() {
-            const state = FASTPASS_UI.State;
-            const input = document.getElementById('txt-retol-part');
-            if (!input) return;
+        /**
+         * _placeChyronsByType: Helper compartit per col·locar chyrons d'un tipus
+         * concret usant els marcadors de timeline com a àncores.
+         *
+         * @param {Function} filterFn     - (chyron) => boolean
+         * @param {Function} trackResolver - (chyron, cfg) => trackNumber
+         * @param {string}   label         - Etiqueta per a logging
+         */
+        _placeChyronsByType: async function (filterFn, trackResolver, label) {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
 
-            if (state.structure && state.structure[state.pieceIndex]) {
-                const p = state.structure[state.pieceIndex];
-                input.value = p.id + " (" + (p.theme || "???") + ")";
-            } else {
-                input.value = "FINALITZAT";
+            if (!struct || struct.length === 0) {
+                log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
+                return;
             }
+
+            try {
+                // 1. Llegir marcadors del timeline
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+                log(`📋 [${label}] ${allMarkers.length} marcadors llegits.`);
+
+                // 2. Filtrar marcadors estructurals (patró "XX - TIPO")
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => {
+                    const cmt = (m.comments || "").trim();
+                    return STRUCTURAL_COMMENTS_RE.test(cmt);
+                });
+
+                if (structuralMarkers.length === 0) {
+                    log(`⚠️ [${label}] No hi ha marcadors estructurals. Clica MARCADORS primer.`, "WARN");
+                    return;
+                }
+
+                // 3. Mapejar blockId → marker.time (primer marcador de cada bloc)
+                const blockTimeMap = {};
+                for (const m of structuralMarkers) {
+                    const parts = (m.comments || "").split("-");
+                    if (parts.length > 0) {
+                        const rawId = parts[0].trim();
+                        const numMatch = rawId.match(/^(\d+)/);
+                        if (numMatch) {
+                            const blockId = numMatch[1].padStart(2, "0");
+                            if (!(blockId in blockTimeMap) || m.time < blockTimeMap[blockId]) {
+                                blockTimeMap[blockId] = m.time;
+                            }
+                        }
+                    }
+                }
+                log(`🔗 [${label}] ${Object.keys(blockTimeMap).length} blocs amb marcador estructural.`);
+
+                // 4. Indexar state.structure per blockId normalitzat
+                const structureByBlock = {};
+                for (const entry of struct) {
+                    const rawId = entry.id;
+                    if (rawId) {
+                        const normId = rawId.toString().replace(/[a-z]/gi, "").padStart(2, "0");
+                        structureByBlock[normId] = entry;
+                    }
+                }
+
+                let placedCount = 0;
+
+                // 5. Per cada bloc, filtrar chyrons i col·locar
+                for (const [blockId, markerTime] of Object.entries(blockTimeMap)) {
+                    const entry = structureByBlock[blockId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
+
+                    const matching = entry.chyrons.filter(c => filterFn(c));
+                    if (matching.length === 0) continue;
+
+                    matching.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+
+                    log(`📌 [${label}] Bloc ${blockId}: ${matching.length} chyron(s)`);
+
+                    for (const chy of matching) {
+                        const tcSeconds = getUtils().timeToSeconds(chy.tc || "000000");
+                        const placeTime = markerTime + tcSeconds;
+                        const track = trackResolver(chy, cfg);
+                        const escapedName = getUtils().escape(chy.name);
+
+                        await callJSX(`Clips.insert('${escapedName}', ${track}, ${placeTime}, null, 'video')`);
+                        log(`   ✅ [${label}] ${chy.name} → V${track} @ ${placeTime.toFixed(2)}s`);
+                        placedCount++;
+                    }
+                }
+
+                if (placedCount === 0) {
+                    log(`⚠️ [${label}] Cap chyron per col·locar.`, "WARN");
+                } else {
+                    log(`🎬 [${label}] ${placedCount} chyron(s) col·locat(s).`, "INFO");
+                    getUtils().status(`${label}: ${placedCount} col·locat(s)`, "exito");
+                }
+
+            } catch (e) { getUtils().handleError(e, label); }
+        },
+
+        /**
+         * TITOL (Tema‑Titol): Col·loca Tema‑Títols a V5 amb freeze‑frame + estirament.
+         * Flux complet:
+         *   1. Inserir el clip original a V5 a marker.time + 0.4s
+         *   2. Capturar freeze‑frame PNG del frame insertat
+         *   3. Estirar el PNG fins al marcador del bloc següent (o final del timeline)
+         */
+        placeChyronTitol: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
+            const T_THEME = cfg.tracks.video.tematitol;
+
+            if (!struct || struct.length === 0) {
+                log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
+                return;
+            }
+
+            try {
+                // 1. Llegir marcadors del timeline
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => {
+                    const cmt = (m.comments || "").trim();
+                    return STRUCTURAL_COMMENTS_RE.test(cmt);
+                });
+
+                if (structuralMarkers.length === 0) {
+                    log("⚠️ [Titol] No hi ha marcadors estructurals. Clica MARCADORS primer.", "WARN");
+                    return;
+                }
+
+                // 2. Mapejar marcador (ID complet amb sufix) → marker.time
+                //    Ex: "11i - INTRO" → { fullId: "11i", time: ... }
+                const markersFull = []; // [{fullId, time, blockNum}]
+                for (const m of structuralMarkers) {
+                    const parts = (m.comments || "").split("-");
+                    if (parts.length > 0) {
+                        const rawId = parts[0].trim();
+                        const numMatch = rawId.match(/^(\d+)/);
+                        if (numMatch) {
+                            markersFull.push({
+                                fullId: rawId,
+                                blockNum: numMatch[1].padStart(2, "0"),
+                                time: m.time
+                            });
+                        }
+                    }
+                }
+                // Ordenar per temps
+                markersFull.sort((a, b) => a.time - b.time);
+
+                // 3. Indexar state.structure per id COMPLET (preservant sufix)
+                const structureById = {}; // key = id complet ("11", "11i", "11f"...)
+                for (const entry of struct) {
+                    const rawId = entry.id;
+                    if (rawId) {
+                        structureById[rawId] = entry;
+                    }
+                }
+                // Debug: mostrar IDs disponibles
+                log(`🔬 [Titol·DIAG] structureById keys: [${Object.keys(structureById).sort().join(", ")}]`);
+                log(`🔬 [Titol·DIAG] markersFull: ${markersFull.map(m => m.fullId + '@' + m.time.toFixed(1)).join(', ')}`);
+
+                let placedCount = 0;
+
+                // 4. Per cada marcador, buscar el seu structure entry per ID complet
+                for (let mi = 0; mi < markersFull.length; mi++) {
+                    const mk = markersFull[mi];
+                    const fullId = mk.fullId;
+                    const markerTime = mk.time;
+
+                    // Buscar entry per ID complet (SENSE fallback a blockNum — 11i ≠ 11)
+                    const entry = structureById[fullId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) {
+                        log(`🔬 [Titol·DIAG] Marcador ${fullId}@${markerTime.toFixed(1)}s: sense entry a structureById.`);
+                        continue;
+                    }
+
+                    // 🔬 LOG: Mostrar TOTS els chyrons del bloc amb els seus rols
+                    log(`🔬 [Titol·DIAG] Marcador ${fullId} (entry.id=${entry.id}): ${entry.chyrons.length} chyrons totals:`);
+                    entry.chyrons.forEach((c, idx) => {
+                        log(`   [${idx}] name="${c.name}" rol="${c.rol || '?'}" tc="${c.tc || '?'}"`);
+                    });
+
+                    const temaTitols = entry.chyrons.filter(c =>
+                        c.name.includes("Tema-Titol") || c.name.includes("TITOL")
+                    );
+                    if (temaTitols.length === 0) {
+                        log(`🔬 [Titol·DIAG] Marcador ${fullId}: cap Tema-Titol/TITOL trobat.`);
+                        continue;
+                    }
+
+                    log(`🔬 [Titol·DIAG] Marcador ${fullId}: ${temaTitols.length} candidats Tema-Titol:`);
+                    temaTitols.forEach((c, idx) => {
+                        log(`   [${idx}] name="${c.name}" rol="${c.rol || '?'}" tc="${c.tc || '?'}"`);
+                    });
+
+                    // FILTRE PER MIDA D'ARXIU REAL (via utils.readFolder + ruta chyrons del NAS)
+                    const MIN_SIZE = 200000; // 200 KB
+                    const longTemaTitols = [];
+                    const shortTemaTitols = [];
+                    temaTitols.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+
+                    // Obtenir mides reals des de la carpeta de chyrons al NAS
+                    const chyronFiles = await getUtils().readFolder(cfg.rutas.chyrons);
+                    const sizeByName = new Map();
+                    for (const f of chyronFiles) {
+                        sizeByName.set(f.name, f.size || 0);
+                    }
+                    log(`🔬 [Titol·DIAG] Carpeta chyrons: ${chyronFiles.length} fitxers, ${sizeByName.size} amb mida`);
+
+                    for (const c of temaTitols) {
+                        const fileSize = sizeByName.get(c.name) || 0;
+                        log(`   📏 [Titol·DIAG] "${c.name.substring(0, 50)}..." → ${fileSize} bytes (${(fileSize/1024).toFixed(0)} KB)`);
+                        if (fileSize >= MIN_SIZE) {
+                            longTemaTitols.push(c);
+                        } else {
+                            shortTemaTitols.push(c);
+                        }
+                    }
+                    if (longTemaTitols.length === 0) {
+                        log(`⚠️ [Titol] Marcador ${fullId}: cap Tema‑Titol amb mida >= ${(MIN_SIZE/1024).toFixed(0)}KB (${shortTemaTitols.length} descartats). S'esperarà al botó NOU.`);
+                        continue;
+                    }
+                    log(`🎯 [Titol·DIAG] ${longTemaTitols.length} Tema‑Titol(s) a col·locar (${shortTemaTitols.length} descartats per mida)`);
+
+                    for (let ti = 0; ti < longTemaTitols.length; ti++) {
+                        const tt = longTemaTitols[ti];
+                        const tcSeconds = getUtils().timeToSeconds(tt.tc || "000000");
+                        const placeTime = markerTime + tcSeconds;
+
+                        // Determinar stretchEnd:
+                        //   - Si hi ha un altre Tema‑Titol llarg després → el seu placeTime
+                        //   - Sinó → marcador següent (o final del timeline)
+                        let stretchEnd = null;
+                        if (ti < longTemaTitols.length - 1) {
+                            const nextTc = getUtils().timeToSeconds(longTemaTitols[ti + 1].tc || "000000");
+                            stretchEnd = markerTime + nextTc;
+                        } else if (mi < markersFull.length - 1) {
+                            stretchEnd = markersFull[mi + 1].time;
+                        }
+
+                        log(`📌 [Titol] Marcador ${fullId} #${ti+1}/${longTemaTitols.length}: "${tt.name}" → V5 @ ${placeTime.toFixed(2)}s (tc=${tt.tc}, stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})`);
+
+                        // Freeze‑frame + estirament
+                        try {
+                            const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
+                            if (freezeResult && freezeResult.success) {
+                                log(`   🖼️ [Titol] Freeze aplicat: ${tt.name} → ${freezeResult.duration.toFixed(1)}s`);
+                            }
+                        } catch (freezeErr) {
+                            log(`   ⚠️ [Titol] Freeze fallit per ${tt.name}: ${freezeErr.message}`, "WARN");
+                        }
+
+                        placedCount++;
+                    }
+                }
+
+                if (placedCount === 0) {
+                    log("⚠️ [Titol] Cap Tema‑Titol per col·locar.", "WARN");
+                } else {
+                    log(`🎬 [Titol] ${placedCount} Tema‑Títol(s) col·locat(s) amb freeze‑frame.`, "INFO");
+                    getUtils().status(`Titol: ${placedCount} col·locat(s)`, "exito");
+                }
+
+            } catch (e) { getUtils().handleError(e, "Titol"); }
+        },
+
+        /**
+         * CONDUCTOR: Col·loca chyrons de conductor a V6 (chyrons).
+         */
+        placeChyronConductor: async function () {
+            await this._placeChyronsByType(
+                c => (c.rol || '').toUpperCase() === "CONDUCTOR",
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Conductor"
+            );
+        },
+
+        /**
+         * LLOC: Col·loca chyrons de lloc/data/senyal a V7 (llocdata).
+         */
+        placeChyronLloc: async function () {
+            await this._placeChyronsByType(
+                c => c.name.includes("Lloc") || c.name.includes("Data") || (c.rol || '').toUpperCase() === "LLOCDATA",
+                (c, cfg) => cfg.tracks.video.llocdata,
+                "Lloc"
+            );
+        },
+
+        /**
+         * NOM: Col·loca chyrons NomCarrec a V6 (chyrons).
+         */
+        placeChyronNom: async function () {
+            await this._placeChyronsByType(
+                c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec"),
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Nom"
+            );
+        },
+
+        /**
+         * TRADUCCIÓ: Col·loca chyrons de traducció a V6 (chyrons, overlay).
+         */
+        placeChyronTraduccio: async function () {
+            await this._placeChyronsByType(
+                c => (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO"),
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Traducció"
+            );
+        },
+
+        /**
+         * RESTO: Col·loca la resta de chyrons no capturats pels altres 5 botons.
+         */
+        placeChyronResto: async function () {
+            const isTitol = c => c.name.includes("Tema-Titol") || c.name.includes("TITOL");
+            const isConductor = c => (c.rol || '').toUpperCase() === "CONDUCTOR";
+            const isLloc = c => c.name.includes("Lloc") || c.name.includes("Data") || (c.rol || '').toUpperCase() === "LLOCDATA";
+            const isNom = c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec");
+            const isTraduccio = c => (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO");
+
+            await this._placeChyronsByType(
+                c => !isTitol(c) && !isConductor(c) && !isLloc(c) && !isNom(c) && !isTraduccio(c),
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Resto"
+            );
         },
 
         /**

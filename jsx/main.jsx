@@ -297,6 +297,9 @@ $.global.Project = {
 
     biggestIn: function(bin) { 
         return (this._isReady()) ? FASTPASS.Project.biggestIn(bin) : null; 
+    },
+    itemDuration: function(name) {
+        return (this._isReady()) ? FASTPASS.Project.itemDuration(name) : 0;
     }
 };
 
@@ -421,6 +424,30 @@ $.global.Clips = {
 
 
 $.global.Project = {
+    open: function(path) {
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.open(path) : "ERR";
+    },
+    saveAs: function(path) {
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.saveAs(path) : "ERR";
+    },
+    save: function() {
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.save() : "ERR";
+    },
+    path: function() {
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.path() : "";
+    },
+    bin: function(name) {
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.bin(name) : "ERR";
+    },
+    items: function(bin) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.items(bin) : "[]"; 
+    },
+    biggestIn: function(bin) { 
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.biggestIn(bin) : null; 
+    },
+    itemDuration: function(name) {
+        return ($.global.FASTPASS.Project) ? FASTPASS.Project.itemDuration(name) : 0;
+    },
     hasItems: function(binName) {
         if (!$.global.FASTPASS.Project) return "false";
         var itemsRaw = FASTPASS.Project.items(binName || "");
@@ -518,4 +545,14 @@ function hasClips(trackIdx, type) {
         return $.global.Clips.hasClips(trackIdx, type);
     }
     return "false";
+}
+
+// Bridge global per evitar col·lisió amb la classe nativa "Project" d'ExtendScript
+function itemDuration(name) {
+    if (!$.global.FASTPASS || !$.global.FASTPASS.Project) return 0;
+    return FASTPASS.Project.itemDuration(name);
+}
+function getItems(binName) {
+    if (!$.global.FASTPASS || !$.global.FASTPASS.Project) return "[]";
+    return FASTPASS.Project.items(binName);
 }
