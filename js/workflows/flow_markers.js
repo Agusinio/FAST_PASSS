@@ -831,8 +831,13 @@
                 try { existingMarkers = JSON.parse(markersRaw); } catch (e) {}
             }
 
-            // Construir mapa de marcadors pare per baseNum (número sense sufix)
-            var parentMarkerByPrefix = {};
+            // Construir mapa de marcadors pare per baseNum
+            // Estrategia D11v2: prioriza sufixos estructurals (i > dp > dir)
+            // Sols items de plato (intro/donapas/directe) son pares validos
+            // Items de video (faros, sin sufixo) NUNCA son pares
+            var PRIORITY_SUFFIXES = ['i', 'dp', 'dir'];
+            var markersByExactPrefix = {};
+            var markersByBaseNum = {};
             for (var mi = 0; mi < existingMarkers.length; mi++) {
                 var mk = existingMarkers[mi];
                 var comment = mk.comments || '';
@@ -844,25 +849,45 @@
                 var bn = bnMatch[1];
                 var mkTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
                 if (isNaN(mkTime)) continue;
-                if (!parentMarkerByPrefix[bn] || mkTime < parentMarkerByPrefix[bn]) {
-                    parentMarkerByPrefix[bn] = mkTime;
+                if (!markersByExactPrefix[prefix] || mkTime < markersByExactPrefix[prefix]) {
+                    markersByExactPrefix[prefix] = mkTime;
                 }
+                if (!markersByBaseNum[bn]) markersByBaseNum[bn] = [];
+                markersByBaseNum[bn].push(mkTime);
             }
-
-            // ── També afegir temps dels ítems estructurals del bloc ──
-            for (var si = 0; si < structuralItems.length; si++) {
-                var sItem = structuralItems[si];
-                var sNum = String(sItem.num || '');
-                var sBnMatch = sNum.match(/^(\d+)/);
-                if (!sBnMatch) continue;
-                var sBn = sBnMatch[1];
-                var onAir = sItem.horaEntradaOnAir;
-                if (!onAir || onAir === '00:00:00' || onAir.trim() === '') continue;
-                var sSec = reader.tcToSeconds(onAir);
-                if (sSec === null || sSec === undefined) continue;
-                var sTime = anchorEfTimelineSec + (sSec - anchorEfectiva);
-                if (!parentMarkerByPrefix[sBn] || sTime < parentMarkerByPrefix[sBn]) {
-                    parentMarkerByPrefix[sBn] = sTime;
+            var parentMarkerByPrefix = {};
+            for (var bn in markersByBaseNum) {
+                if (!markersByBaseNum.hasOwnProperty(bn)) continue;
+                var found = false;
+                for (var pi = 0; pi < PRIORITY_SUFFIXES.length; pi++) {
+                    var candidateKey = bn + PRIORITY_SUFFIXES[pi];
+                    if (candidateKey in markersByExactPrefix) {
+                        parentMarkerByPrefix[bn] = markersByExactPrefix[candidateKey];
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && bn in markersByExactPrefix) {
+                    parentMarkerByPrefix[bn] = markersByExactPrefix[bn];
+                    found = true;
+                }
+                if (!found && markersByBaseNum[bn].length > 0) {
+                    var structuralTimes = [];
+                    for (var bi = 0; bi < markersByBaseNum[bn].length; bi++) {
+                        for (var sk in markersByExactPrefix) {
+                            if (markersByExactPrefix.hasOwnProperty(sk) && markersByExactPrefix[sk] === markersByBaseNum[bn][bi]) {
+                                var suff = sk.replace(/^\d+/, '').toLowerCase();
+                                if (PRIORITY_SUFFIXES.indexOf(suff) >= 0 || suff === '') {
+                                    structuralTimes.push(markersByBaseNum[bn][bi]);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (structuralTimes.length > 0) {
+                        structuralTimes.sort(function(a,b) { return a - b; });
+                        parentMarkerByPrefix[bn] = structuralTimes[0];
+                    }
                 }
             }
 
