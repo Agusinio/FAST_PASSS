@@ -302,6 +302,10 @@
         // _correlationSnap(markers, clips, densityData, manifestItems, reader)
         // D1·CorrelationSnap: Algoritme de Δ consensuat.
         // ═══════════════════════════════════════════════════════════════
+        _calcDensityFootprint: function (clips) {
+            return FASTPASS_UI.Logic.Assembly.calcDensityFootprintV2(clips);
+        },
+
         _correlationSnap: function (markers, clips, densityData, manifestItems, reader) {
             var BUCKET_SIZE = 0.04;
             var SEARCH_WINDOW = 2.0;
@@ -520,7 +524,7 @@
                 var comment = (line.num ? line.num + ' - ' : '') + titol;
                 comment = comment.trim();
 
-                var colorIdx = this._getColorIdx(line);
+                var colorIdx = 6;
 
                 log('   🟢 [F1·OnAir] ' + (line.num || '?') + ': → ' + safeT.toFixed(2) + 's');
                 itemPositions.set(line.num, safeT);
@@ -548,7 +552,7 @@
                                 prefix: firstUngroupedItem.num,
                                 timeSec: ugPosSec,
                                 comment: ugComment,
-                                colorIdx: this._getColorIdx(firstUngroupedItem)
+                                colorIdx: 1
                             });
                             log('   🔴 [F1·Ungrouped] ' + (firstUngroupedItem.num || '?') + ': → ' + ugPosSec.toFixed(2) + 's');
                         }
@@ -583,6 +587,35 @@
             const { anchorEfTimelineSec, anchorEfectiva } = anchors;
 
             var placements = [];
+            var itemPositions = new Map();
+
+            if (structuralItems.length > 0) {
+                var firstItem = structuralItems[0];
+                var firstNum = firstItem.num;
+                if (firstNum) {
+                    var markersRaw2 = await callJSX('Markers.get()');
+                    var allMarkers2 = [];
+                    try { allMarkers2 = JSON.parse(markersRaw2); } catch (e) {}
+                    var hasFirstItemMarker = false;
+                    for (var mi2 = 0; mi2 < allMarkers2.length; mi2++) {
+                        var mk2 = allMarkers2[mi2];
+                        if (typeof mk2.time === 'number' && Math.abs(mk2.time) < 0.02) {
+                            var mkPrefix2 = '';
+                            var mkComment2 = mk2.comments || '';
+                            var spaceDashIdx2 = mkComment2.indexOf(' -');
+                            if (spaceDashIdx2 > 0) mkPrefix2 = mkComment2.substring(0, spaceDashIdx2).trim();
+                            if (mkPrefix2 === String(firstNum)) { hasFirstItemMarker = true; break; }
+                        }
+                    }
+                    if (!hasFirstItemMarker) {
+                        var firstTitol = (firstItem.titol || '').substring(0, 60);
+                        var firstComment = firstNum + ' - ' + firstTitol;
+                        placements.push({ prefix: firstNum, timeSec: 0, comment: firstComment.trim(), colorIdx: 6 });
+                        itemPositions.set(firstNum, 0);
+                        log('🟠 [F2·Deducido] Forçant marcador 1r ítem ' + firstNum + ' a 00:00 (no existia)');
+                    }
+                }
+            }
 
             for (var si = 0; si < structuralItems.length; si++) {
                 var line = structuralItems[si];
@@ -648,7 +681,7 @@
             }
             log('   🟢 [F3·Coinc] Marcadors existents al timeline: ' + existingMarkers.length);
 
-            var densityData = getMP4()._calcDensityFootprint(clips);
+            var densityData = this._calcDensityFootprint(clips);
             var snapResult = this._correlationSnap(existingMarkers, clips, densityData, manifest.escaletaItems, reader);
             var snapDelta = (snapResult && snapResult.delta !== null) ? snapResult.delta : 0;
             log('   🟢 [F3·Coinc] Δ snap: ' + snapDelta.toFixed(3) + 's (confiança=' + (snapResult.confidence * 100).toFixed(0) + '%)');
