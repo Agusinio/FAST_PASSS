@@ -915,12 +915,23 @@
                         parentEnd = nextMarkerTime[gBaseNum];
                     }
                     var totalDur = parentEnd - parentTime;
-                    var firstGap = totalDur / 3;
-                    var remainingDur = totalDur - firstGap;
-                    var gap = remainingDur / totalN;
-                    idealPosSec = parentTime + firstGap + (gap * idx);
+                    // D13: N+2 segments. Marker i at parentTime + (i+2) × segmentDur.
+                    // Minimum: 10s first gap, 5s between markers if space permits.
+                    var MIN_FIRST_GAP = 10;
+                    var MIN_MARKER_GAP = 5;
+                    var needed = MIN_FIRST_GAP + totalN * MIN_MARKER_GAP;
+                    var firstGap, markerGap;
+                    if (totalDur >= needed) {
+                        firstGap = MIN_FIRST_GAP;
+                        markerGap = MIN_MARKER_GAP;
+                    } else {
+                        var segmentDur = totalDur / (totalN + 2);
+                        firstGap = 2 * segmentDur;
+                        markerGap = segmentDur;
+                    }
+                    idealPosSec = parentTime + firstGap + (markerGap * idx);
                     graphicCountByPrefix[gBaseNum] = idx + 1;
-                    log('   🟢 [F6·Gràfics] ' + gNum + ': anclat al marcador pare "' + gBaseNum + '" (' + parentTime.toFixed(2) + 's) → següent marker a ' + parentEnd.toFixed(2) + 's, gap=' + gap.toFixed(2) + 's [' + (idx+1) + '/' + totalN + ']');
+                    log('   🟢 [F6·Gràfics] ' + gNum + ': anclat al pare ' + gBaseNum + ' (' + parentTime.toFixed(2) + 's) → end=' + parentEnd.toFixed(2) + 's, gap=' + markerGap.toFixed(2) + 's [' + (idx+1) + '/' + totalN + ']');
                 } else {
                     var refSec = null;
                     var onAir3 = gItem.horaEntradaOnAir;
