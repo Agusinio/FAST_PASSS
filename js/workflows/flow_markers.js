@@ -935,9 +935,9 @@
                     var parentTime = parentMarkerByPrefix[gBaseNum];
                     var totalN = totalGraphicCount[gBaseNum] || 1;
                     var idx = graphicCountByPrefix[gBaseNum] || 0;
-                    var parentEnd = parentTime + 10;
-                    if (nextMarkerTime[gBaseNum] && nextMarkerTime[gBaseNum] > parentTime && nextMarkerTime[gBaseNum] < parentEnd) {
-                        parentEnd = nextMarkerTime[gBaseNum];
+                    var parentEnd = nextMarkerTime[gBaseNum];
+                    if (typeof parentEnd !== 'number' || parentEnd <= parentTime) {
+                        parentEnd = parentTime + 10;
                     }
                     var totalDur = parentEnd - parentTime;
                     // D13: N+2 segments. Marker i at parentTime + (i+2) × segmentDur.
