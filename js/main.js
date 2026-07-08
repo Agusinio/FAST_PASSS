@@ -115,13 +115,13 @@ var isUserDraggingSlider = false;
         const btnMarksF5 = document.getElementById('btnMarksF5');
         const btnMarksF6 = document.getElementById('btnMarksF6');
 
-        if (btnMarksF1) btnMarksF1.addEventListener('click', () => callWorkflow('Assembly', 'placeOnAirMarkers'));
-        if (btnMarksF2) btnMarksF2.addEventListener('click', () => callWorkflow('Assembly', 'placeDeducedOnAirMarkers'));
-        if (btnMarksF3) btnMarksF3.addEventListener('click', () => callWorkflow('Assembly', 'placeScheduledMarkers'));
+        if (btnMarksF1) btnMarksF1.addEventListener('click', () => callWorkflow('Markers', 'placeOnAirMarkers'));
+        if (btnMarksF2) btnMarksF2.addEventListener('click', () => callWorkflow('Markers', 'placeDeducedOnAirMarkers'));
+        if (btnMarksF3) btnMarksF3.addEventListener('click', () => callWorkflow('Markers', 'placeScheduledMarkers'));
         if (btnMarksF35) btnMarksF35.addEventListener('click', () => callWorkflow('Assembly', 'correlationSnapMarkers'));
         if (btnMarksF4) btnMarksF4.addEventListener('click', () => callWorkflow('Assembly', 'snapFaroMarkers'));
-        if (btnMarksF5) btnMarksF5.addEventListener('click', () => callWorkflow('Assembly', 'snapOrphanMarkers'));
-        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Assembly', 'placeGraphicMarkers'));
+        if (btnMarksF5) btnMarksF5.addEventListener('click', () => callWorkflow('Markers', 'snapOrphanMarkers'));
+        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Markers', 'placeGraphicMarkers'));
 
         // Botons ocults de moment (preservats per a ús futur):
         // const btnResetGrafs = document.getElementById('btnResetGrafs');
