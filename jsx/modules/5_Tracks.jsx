@@ -79,5 +79,26 @@ FASTPASS.Tracks = {
             }
             return "ERR_NO_TRACK";
         } catch(e) { return "EXC: " + e.message; }
+    },
+
+    /**
+     * ensure: Assegura que existeixi almenys `idx` pistes del tipus donat.
+     * Si no n'hi ha prou, crea les que faltin.
+     * @param {number} idx - Nombre mínim de pista (1-based)
+     * @param {string} type - "video", "audio" o "subtitle"
+     * @returns {string} "OK" o "ERR"
+     */
+    ensure: function(idx, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            type = type || "video";
+            var tracks = (type === "audio") ? seq.audioTracks : (type === "subtitle") ? seq.subtitleTracks : seq.videoTracks;
+            var needed = parseInt(idx);
+            while (tracks.numTracks < needed) {
+                tracks.addTrack();
+            }
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
     }
 };

@@ -363,6 +363,9 @@ $.global.Tracks = {
     },
     target: function(idx, t, type) { 
         return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.target(idx, t, type) : "ERR"; 
+    },
+    ensure: function(idx, type) {
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.ensure(idx, type) : "ERR";
     }
 };
 

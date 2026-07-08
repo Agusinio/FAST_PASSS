@@ -24,6 +24,7 @@
                 "v_tema": 5,
                 "v_chyrons": 6,
                 "v_lloc": 7,
+                "v_trad": 9,
                 "s_s1": 1,
                 "s_s2": 2
             },
@@ -59,6 +60,7 @@
                 "v_tema": 5,
                 "v_chyrons": 6,
                 "v_lloc": 7,
+                "v_trad": 8,
                 "s_s1": 1,
                 "s_s2": 2
             },
@@ -80,6 +82,7 @@
                 "v_tema": 5,
                 "v_chyrons": 6,
                 "v_lloc": 7,
+                "v_trad": 8,
                 "s_s1": 1,
                 "s_s2": 2
             },
@@ -93,6 +96,7 @@
                 "v_tema": 5,
                 "v_chyrons": 6,
                 "v_lloc": 7,
+                "v_trad": 8,
                 "s_s1": 1,
                 "s_s2": 2
             },

@@ -37,6 +37,7 @@
                     v_tema:   5,
                     v_chyrons: 6,
                     v_lloc:   7,
+                    v_trad:   9,
                     s_s1: 1,
                     s_s2: 2
                 },
@@ -48,7 +49,7 @@
             },
             "Sumari Matins": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7,
+                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, v_trad: 9,
                     s_s1: 1, s_s2: 2
                 },
                 programas: [
@@ -57,14 +58,14 @@
             },
             "Fotomató": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7,
+                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, v_trad: 9,
                     s_s1: 1, s_s2: 2
                 },
                 programas: []
             },
             "User Defined": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7,
+                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, v_trad: 9,
                     s_s1: 1, s_s2: 2
                 },
                 programas: []
@@ -92,7 +93,8 @@
                 tematitol: raw.v_tema,   // alias
                 chyrons:   raw.v_chyrons,
                 lloc:      raw.v_lloc,
-                llocdata:  raw.v_lloc    // alias
+                llocdata:  raw.v_lloc,   // alias
+                trad:      raw.v_trad    // V8 per a traduccions (no solapar amb V6)
             };
 
             if (cfg.general.debug) {

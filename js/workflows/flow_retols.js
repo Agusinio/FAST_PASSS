@@ -240,6 +240,22 @@
          * @param {string} label      - Etiqueta per a logging
          * @returns {object} { success, duration }
          */
+        _snapToNearestCut: async function(idealTimeSec) {
+            const clips = await getClipsLogic().getTrackClips(1, "video");
+            if (!clips || clips.length === 0) return idealTimeSec;
+            let bestClip = clips[0];
+            let bestDist = Math.abs(clips[0].start - idealTimeSec);
+            for (let i = 1; i < clips.length; i++) {
+                const dist = Math.abs(clips[i].start - idealTimeSec);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestClip = clips[i];
+                }
+            }
+            log(`   🎯 [_snap] ideal=${idealTimeSec.toFixed(2)}s → clip @ ${bestClip.start.toFixed(2)}s (Δ=${bestDist.toFixed(2)}s)`);
+            return bestClip.start;
+        },
+
         _freezeTemaTitol: async function (wottName, placeTime, stretchEnd, label) {
             const cfg = FASTPASS_UI.Config.get();
             const T_THEME = cfg.tracks.video.tematitol;
@@ -333,38 +349,42 @@
                     return;
                 }
 
-                // 3. Mapejar blockId → marker.time (primer marcador de cada bloc)
-                const blockTimeMap = {};
+                // 3. Mapejar marcador (ID complet amb sufix) → marker.time
+                //    Ex: "21i - INTRO" → fullId="21i", time=...
+                //    EX: "21 - OFF"    → fullId="21",  time=...
+                const markersFull = [];
                 for (const m of structuralMarkers) {
                     const parts = (m.comments || "").split("-");
                     if (parts.length > 0) {
                         const rawId = parts[0].trim();
                         const numMatch = rawId.match(/^(\d+)/);
                         if (numMatch) {
-                            const blockId = numMatch[1].padStart(2, "0");
-                            if (!(blockId in blockTimeMap) || m.time < blockTimeMap[blockId]) {
-                                blockTimeMap[blockId] = m.time;
-                            }
+                            markersFull.push({
+                                fullId: rawId,
+                                blockNum: numMatch[1].padStart(2, "0"),
+                                time: m.time
+                            });
                         }
                     }
                 }
-                log(`🔗 [${label}] ${Object.keys(blockTimeMap).length} blocs amb marcador estructural.`);
+                markersFull.sort((a, b) => a.time - b.time);
+                log(`🔗 [${label}] ${markersFull.length} marcadors estructurals: ${markersFull.map(m => m.fullId + '@' + m.time.toFixed(1)).join(', ')}`);
 
-                // 4. Indexar state.structure per blockId normalitzat
-                const structureByBlock = {};
+                // 4. Indexar state.structure per id COMPLET (preservant sufix: "21i", "21")
+                const structureById = {};
                 for (const entry of struct) {
                     const rawId = entry.id;
                     if (rawId) {
-                        const normId = rawId.toString().replace(/[a-z]/gi, "").padStart(2, "0");
-                        structureByBlock[normId] = entry;
+                        structureById[rawId] = entry;
                     }
                 }
+                log(`🔬 [${label}] structureById keys: [${Object.keys(structureById).sort().join(', ')}]`);
 
                 let placedCount = 0;
 
-                // 5. Per cada bloc, filtrar chyrons i col·locar
-                for (const [blockId, markerTime] of Object.entries(blockTimeMap)) {
-                    const entry = structureByBlock[blockId];
+                // 5. Per cada marcador, buscar chyrons del seu entry per ID complet
+                for (const mk of markersFull) {
+                    const entry = structureById[mk.fullId];
                     if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
 
                     const matching = entry.chyrons.filter(c => filterFn(c));
@@ -372,11 +392,12 @@
 
                     matching.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
 
-                    log(`📌 [${label}] Bloc ${blockId}: ${matching.length} chyron(s)`);
+                    log(`📌 [${label}] Marcador ${mk.fullId}: ${matching.length} chyron(s)`);
 
                     for (const chy of matching) {
                         const tcSeconds = getUtils().timeToSeconds(chy.tc || "000000");
-                        const placeTime = markerTime + tcSeconds;
+                        const idealTime = mk.time + tcSeconds;
+                        const placeTime = await this._snapToNearestCut(idealTime);
                         const track = trackResolver(chy, cfg);
                         const escapedName = getUtils().escape(chy.name);
 
@@ -604,11 +625,131 @@
          * TRADUCCIÓ: Col·loca chyrons de traducció a V6 (chyrons, overlay).
          */
         placeChyronTraduccio: async function () {
-            await this._placeChyronsByType(
-                c => (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO"),
-                (c, cfg) => cfg.tracks.video.chyrons,
-                "Traducció"
-            );
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
+            const T_TRAD = cfg.tracks.video.graf; // V3
+
+            if (!struct || struct.length === 0) {
+                log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
+                return;
+            }
+
+            try {
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => {
+                    const cmt = (m.comments || "").trim();
+                    return STRUCTURAL_COMMENTS_RE.test(cmt);
+                });
+
+                if (structuralMarkers.length === 0) {
+                    log("⚠️ [Traducció] No hi ha marcadors estructurals.", "WARN");
+                    return;
+                }
+
+                const markersFull = [];
+                for (const m of structuralMarkers) {
+                    const parts = (m.comments || "").split("-");
+                    if (parts.length > 0) {
+                        const rawId = parts[0].trim();
+                        const numMatch = rawId.match(/^(\d+)/);
+                        if (numMatch) {
+                            markersFull.push({
+                                fullId: rawId,
+                                blockNum: numMatch[1].padStart(2, "0"),
+                                time: m.time
+                            });
+                        }
+                    }
+                }
+                markersFull.sort((a, b) => a.time - b.time);
+
+                const structureById = {};
+                for (const entry of struct) {
+                    if (entry.id) structureById[entry.id] = entry;
+                }
+
+                let placedCount = 0;
+
+                for (const mk of markersFull) {
+                    const entry = structureById[mk.fullId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
+
+                    const traduccions = entry.chyrons.filter(c =>
+                        (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO")
+                    );
+                    if (traduccions.length === 0) continue;
+
+                    // Agrupar per TC (blocs de traducció simultània)
+                    const groups = new Map();
+                    for (const t of traduccions) {
+                        const tc = t.tc || "00.00";
+                        if (!groups.has(tc)) groups.set(tc, []);
+                        groups.get(tc).push(t);
+                    }
+
+                    log(`📌 [Traducció] Marcador ${mk.fullId}: ${traduccions.length} traduccions en ${groups.size} bloc(s)`);
+
+                    for (const [tc, group] of groups) {
+                        const tcSeconds = getUtils().timeToSeconds(tc);
+                        const idealTime = mk.time + tcSeconds;
+                        const clipStart = await this._snapToNearestCut(idealTime);
+
+                        // Obtenir clips V1 i estendre el "clip efectiu" saltant flash frames
+                        const clips = await getClipsLogic().getTrackClips(1, "video");
+                        let clipEnd = clipStart + 10; // fallback 10s
+                        let foundStart = false;
+                        for (let ci = 0; ci < clips.length; ci++) {
+                            const cl = clips[ci];
+                            if (Math.abs(cl.start - clipStart) < 0.05) {
+                                clipEnd = cl.end;
+                                foundStart = true;
+                                // Avançar recursivament mentre el següent clip sigui un flash (< 0.5s)
+                                let nextIdx = ci + 1;
+                                while (nextIdx < clips.length && (clips[nextIdx].end - clips[nextIdx].start) < 0.5) {
+                                    log(`   ⚡ [Traducció] Flash detectat a ${clips[nextIdx].start.toFixed(2)}s (dur=${(clips[nextIdx].end - clips[nextIdx].start).toFixed(2)}s) → estenent clip efectiu`);
+                                    nextIdx++;
+                                }
+                                if (nextIdx > ci + 1) {
+                                    // Hi havia flashes: el final real és l'inici del següent clip no-flash
+                                    if (nextIdx < clips.length) {
+                                        clipEnd = clips[nextIdx].start;
+                                    } else {
+                                        clipEnd = clips[nextIdx - 1].end + 1.0; // marge d'1s després de l'últim flash
+                                    }
+                                }
+                                // Sense flashes: clipEnd = cl.end (ja assignat)
+                                break;
+                            }
+                        }
+                        const clipDur = clipEnd - clipStart;
+
+                        group.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+                        const N = group.length;
+                        log(`   📦 [Traducció] Bloc TC=${tc}: ${N} clips → V1 clip @ ${clipStart.toFixed(2)}s (dur=${clipDur.toFixed(2)}s)`);
+
+                        for (let i = 0; i < N; i++) {
+                            const placeTime = (N === 1)
+                                ? clipStart + 0.5
+                                : clipStart + (clipDur / (N - 1)) * i;
+                            const escapedName = getUtils().escape(group[i].name);
+                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, null, 'video')`);
+                            log(`      ✅ [${i+1}/${N}] ${group[i].name.substring(0, 40)}... → V3 @ ${placeTime.toFixed(2)}s`);
+                            placedCount++;
+                        }
+                    }
+                }
+
+                if (placedCount === 0) {
+                    log("⚠️ [Traducció] Cap traducció per col·locar.", "WARN");
+                } else {
+                    log(`🎬 [Traducció] ${placedCount} traduccions col·locades.`, "INFO");
+                    getUtils().status(`Traducció: ${placedCount} col·locades`, "exito");
+                }
+
+            } catch (e) { getUtils().handleError(e, "Traducció"); }
         },
 
         /**
