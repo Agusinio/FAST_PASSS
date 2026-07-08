@@ -228,7 +228,121 @@ FASTPASS.Clips = {
     },
 
     /**
-     * insertWithBounds: Insereix un element del Bin amb inPoint i outPoint específics.
+     * trimBounds: Aplica inPoint/outPoint al clip inserit a una posició del timeline.
+     * Funció atòmica (S3): separada d'insertWithBounds per permetre
+     * control independent de la inserció i el trim des de JS.
+     *
+     * @param {number} startSec   - Posició al timeline on es va inserir el clip
+     * @param {number} inPtSec    - InPoint dins del source (en segons)
+     * @param {number} outPtSec   - OutPoint dins del source (en segons)
+     * @param {number} trackIdx   - Índex de la pista (1-based, V1 per defecte)
+     * @param {string} [type]     - "video" (per defecte) o "audio"
+     */
+    trimBounds: function(startSec, inPtSec, outPtSec, trackIdx, type) {
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq) return "ERR_NO_ACTIVE_SEQUENCE";
+
+            var isVideo = (type !== "audio");
+            var targetTrack = isVideo
+                ? seq.videoTracks[parseInt(trackIdx || 1) - 1]
+                : seq.audioTracks[parseInt(trackIdx || 1) - 1];
+            if (!targetTrack) return "ERR_TRACK_NOT_FOUND";
+
+            // Trobar el clip a la posició indicada
+            var clips = targetTrack.clips;
+            var targetClip = null;
+            var tStartSec = parseFloat(startSec || 0);
+            for (var i = 0; i < clips.numItems; i++) {
+                if (Math.abs(clips[i].start.seconds - tStartSec) < 0.1) {
+                    targetClip = clips[i];
+                    break;
+                }
+            }
+            if (!targetClip) targetClip = clips[clips.numItems - 1];
+            if (!targetClip) return "ERR_CLIP_NOT_FOUND_AFTER_INSERT";
+
+            // Aplicar inPoint i outPoint al clip
+            var tIn = new Time();
+            tIn.seconds = parseFloat(inPtSec);
+            targetClip.inPoint = tIn;
+
+            var tOut = new Time();
+            tOut.seconds = parseFloat(outPtSec);
+            targetClip.outPoint = tOut;
+
+            // 🎯 FIX OUT TRIM: Forçar explícitament el timeline end
+            var expectedDur = tOut.seconds - tIn.seconds;
+            if (expectedDur > 0) {
+                var tEnd = new Time();
+                tEnd.seconds = targetClip.start.seconds + expectedDur;
+                targetClip.end = tEnd;
+                $.writeln("✅ [JSX·trimBounds] OUT trim forçat via clip.end: start=" + targetClip.start.seconds.toFixed(3) + "s + dur=" + expectedDur.toFixed(3) + "s → end=" + tEnd.seconds.toFixed(3) + "s");
+
+                // Aplicar el mateix OUT trim al clip d'audio associat a A1
+                try {
+                    var audioTrackA1 = seq.audioTracks[0];
+                    if (audioTrackA1 && audioTrackA1.clips && audioTrackA1.clips.numItems > 0) {
+                        for (var aIdx = 0; aIdx < audioTrackA1.clips.numItems; aIdx++) {
+                            var aClip = audioTrackA1.clips[aIdx];
+                            if (Math.abs(aClip.start.seconds - targetClip.start.seconds) < 0.1) {
+                                var aEnd = new Time();
+                                aEnd.seconds = tEnd.seconds;
+                                aClip.end = aEnd;
+                                $.writeln("✅ [JSX·trimBounds] OUT trim forçat també a A1: start=" + aClip.start.seconds.toFixed(3) + "s → end=" + aEnd.seconds.toFixed(3) + "s");
+                                break;
+                            }
+                        }
+                    }
+                } catch (eAudio) {
+                    $.writeln("⚠️ [JSX·trimBounds] No s'ha pogut retallar l'audio a A1: " + eAudio.message);
+                }
+            } else {
+                $.writeln("⚠️ [JSX·trimBounds] expectedDur=" + expectedDur + " (no es pot forçar end)");
+            }
+
+            return "OK";
+        } catch (e) {
+            return "ERR: " + e.message;
+        }
+    },
+
+    /**
+     * trimAudioA2: Elimina tots els clips de la pista A2.
+     * Funció atòmica (S3): separada d'insertWithBounds.
+     */
+    trimAudioA2: function() {
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq) return "ERR_NO_ACTIVE_SEQUENCE";
+
+            var audioTrack2 = seq.audioTracks[1]; // A2
+            if (audioTrack2 && audioTrack2.clips.numItems > 0) {
+                var count = audioTrack2.clips.numItems;
+                $.writeln("🔍 [JSX·trimAudioA2] Eliminant clips de A2 (" + count + " clips).");
+                for (var i = count - 1; i >= 0; i--) {
+                    var clip = audioTrack2.clips[i];
+                    try {
+                        clip.remove(true, true);
+                        $.writeln("✅ [JSX·trimAudioA2] Clip eliminat de A2.");
+                    } catch (e) {
+                        $.writeln("❌ [JSX·trimAudioA2] Error eliminant clip de A2: " + e.message);
+                    }
+                }
+                return "OK:" + count;
+            } else {
+                $.writeln("ℹ️ [JSX·trimAudioA2] No hi ha clips a A2.");
+                return "OK:0";
+            }
+        } catch (e) {
+            return "ERR: " + e.message;
+        }
+    },
+
+    /**
+     * insertWithBounds: ALIAS DE COMPATIBILITAT.
+     * Delega a insert() + trimBounds() + trimAudioA2() en seqüència.
+     * Mantingut per compatibilitat amb 3_Project_Logic.js.
      * Usat per al cleanFeed MP4 del workflow d'escaleta.
      * Aplica inPoint/outPoint al clip insertat al timeline (no al ProjectItem).
      *

@@ -200,6 +200,71 @@
                 }
             }
             return null;  // Tots són el final
+        },
+
+        /**
+         * captureTimelineSnapshot()
+         * Captura una instantània IMMUTABLE del timeline actual:
+         * context, classificació d'ítems, àncores temporals i densitat.
+         * 
+         * S2 (Optimització Estructural): Cada operativa (Markers, MP4,
+         * Chyrons, Graphics) pot cridar aquesta funció UNA vegada al
+         * inici del seu flux i treballar amb la seva pròpia còpia
+         * congelada, sense risc que una altra operativa modifiqui
+         * l'estat compartit.
+         *
+         * @returns {Object|null} Snapshot congelat o null si falla
+         */
+        captureTimelineSnapshot: async function () {
+            const log = function (m, lvl) { return window.FASTPASS_UI.Utils.log(m, lvl || "DEBUG"); };
+
+            // 1. Carregar context base
+            const ctxData = await this.loadAssemblyContext();
+            if (!ctxData) {
+                log("⚠️ [Snapshot] loadAssemblyContext ha fallat.", "WARN");
+                return null;
+            }
+
+            // 2. Classificar ítems
+            const classData = window.FASTPASS_UI.Workflows.Markers._classifyItems(ctxData.lines);
+            if (!classData) {
+                log("⚠️ [Snapshot] _classifyItems ha fallat.", "WARN");
+                return null;
+            }
+
+            // 3. Calcular àncores temporals
+            const anchors = window.FASTPASS_UI.Workflows.Markers._calcTemporalAnchors(
+                ctxData.manifest, ctxData.reader, classData.structuralItems, ctxData.clips
+            );
+            if (!anchors) {
+                log("⚠️ [Snapshot] _calcTemporalAnchors ha fallat.", "WARN");
+                return null;
+            }
+
+            // 4. Calcular petjada de densitat
+            const densityData = window.FASTPASS_UI.Workflows.MP4._calcDensityFootprint(ctxData.clips);
+
+            // 5. Congelar i emmagatzemar
+            var snapshot = {
+                context: ctxData,
+                classification: classData,
+                anchors: anchors,
+                density: densityData,
+                capturedAt: new Date().toISOString()
+            };
+            this._snapshot = Object.freeze(snapshot);
+
+            log("📍 [Snapshot] Instantània capturada: " + ctxData.lines.length + " línies, " + classData.structuralItems.length + " estructurals, " + classData.graphicItems.length + " gràfics.");
+            return this._snapshot;
+        },
+
+        /**
+         * getSnapshot()
+         * Retorna la instantània actual sense recalcular.
+         * @returns {Object|null} Snapshot congelat o null si no se n'ha capturat cap
+         */
+        getSnapshot: function () {
+            return this._snapshot || null;
         }
     };
 
