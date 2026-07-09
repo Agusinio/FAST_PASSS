@@ -562,21 +562,20 @@ function getItems(binName) {
     return FASTPASS.Project.items(binName);
 }
 
-// Funció global autònoma per exportar un frame PNG via QE
-// (còpia exacta de 9_Render.exportFrameQE sense el bug del var FASTPASS local)
+// Funció global autònoma per exportar un frame PNG (API estàndard)
 function freezeFrame(path, timeSec) {
     try {
         $.writeln("[freezeFrame] path=" + path + " time=" + timeSec);
-        app.enableQE();
-        var qeSeq = qe.project.getActiveSequence();
-        if (!qeSeq) { $.writeln("[freezeFrame] ERR: qeSeq is null"); return "ERR_NO_QE_SEQ"; }
-        $.writeln("[freezeFrame] qeSeq.name=" + qeSeq.name);
-        var time = (timeSec && timeSec !== "-1") ? timeSec : qeSeq.getPlayerPosition();
-        $.writeln("[freezeFrame] time type=" + typeof time + " value=" + time);
-        var noExtPath = path.replace(/\.png$/i, '');
-        $.writeln("[freezeFrame] noExtPath=" + noExtPath);
-        qeSeq.exportFramePNG(time, noExtPath);
-        $.writeln("[freezeFrame] exportFramePNG OK — fitxer creat a " + path);
+        var seq = ($.global.FASTPASS && $.global.FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+        if (!seq) { $.writeln("[freezeFrame] ERR: no active sequence"); return "ERR_NO_SEQ"; }
+        $.writeln("[freezeFrame] seq.name=" + seq.name);
+        var t = new Time();
+        t.seconds = (timeSec && timeSec !== "-1") ? Number(timeSec) : seq.getPlayerPosition().seconds;
+        var outFile = new File(path);
+        if (!outFile.parent.exists) { outFile.parent.create(); }
+        $.writeln("[freezeFrame] exporting t=" + t.seconds + "s → " + outFile.fsName);
+        seq.exportFrame(t, outFile.fsName);
+        $.writeln("[freezeFrame] exportFrame OK");
         return "OK";
     } catch(e) { $.writeln("[freezeFrame] EXC: " + e.message); return "ERR: " + e.message; }
 }
