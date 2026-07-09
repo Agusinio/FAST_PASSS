@@ -185,7 +185,22 @@
                 await callJSX(`Tracks.target(${T_MP4}, true, 'video')`);
                 log(`🔍 [FLOW-CUT] Target OK. Llamando scenes...`);
                 await callJSX(`Clips.scenes(${T_MP4})`);
-                log(`🔍 [FLOW-CUT] Scenes OK. Guardant projecte...`);
+                log(`🔍 [FLOW-CUT] Scenes OK. Bolcant clips V1...`);
+
+                // ═══ VOLCAT DIAGNÒSTIC DE CLIPS V1 POST-TROSEJA ═══
+                const v1Clips = await getClipsLogic().getTrackClips(T_MP4, "video");
+                log(`📊 [V1·POST-TROSEJA] ${v1Clips.length} clips a V1:`);
+                v1Clips.forEach((c, idx) => {
+                    const dur = c.end - c.start;
+                    const flags = [];
+                    if (dur < 0.5) flags.push("FLASH");
+                    if (dur > 30) flags.push("LLARG");
+                    if (dur >= 0.5 && dur <= 2.0) flags.push("TALL·CURT");
+                    log(`  V1[${String(idx).padStart(2, '0')}] start=${c.start.toFixed(2).padStart(7)}s end=${c.end.toFixed(2).padStart(7)}s dur=${dur.toFixed(2).padStart(6)}s ${flags.length > 0 ? '[' + flags.join(', ') + ']' : ''}`);
+                });
+                log(`📊 [V1·POST-TROSEJA] Fi del bolcat.`);
+                // ═══════════════════════════════════════════════
+
                 await callJSX('Project.save()');
                 getUtils().status("Trossejat i Projecte guardat", "exito");
             } catch (e) { getUtils().handleError(e, "Troseja"); }

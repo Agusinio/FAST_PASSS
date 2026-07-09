@@ -5,7 +5,7 @@
  * =================================================================================
  */
 
-var FASTPASS = FASTPASS || {};
+var FASTPASS = $.global.FASTPASS;
 FASTPASS.Exportacio = {
 
     exportFrameQE: function(tempPathNoExt, timeSec) {

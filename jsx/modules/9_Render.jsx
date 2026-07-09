@@ -5,7 +5,8 @@
  * =================================================================================
  */
 
-var FASTPASS = FASTPASS || {};
+var FASTPASS = $.global.FASTPASS;
+$.writeln("✅ [9_Render.jsx] MODUL CARREGAT!");
 FASTPASS.Render = {
 
     /**
@@ -14,13 +15,18 @@ FASTPASS.Render = {
      */
     exportFrameQE: function(tempPathNoExt, timeSec) {
         try {
+            $.writeln("[9_Render.exportFrameQE] INICI: path=" + tempPathNoExt + " time=" + timeSec);
             app.enableQE();
+            $.writeln("[9_Render.exportFrameQE] QE enabled");
             var qeSeq = qe.project.getActiveSequence();
-            if (!qeSeq) return "ERR_NO_QE_SEQ";
+            if (!qeSeq) { $.writeln("[9_Render.exportFrameQE] ERR: qeSeq is null"); return "ERR_NO_QE_SEQ"; }
+            $.writeln("[9_Render.exportFrameQE] qeSeq.name=" + qeSeq.name);
             var time = (timeSec && timeSec !== "-1") ? timeSec : qeSeq.getPlayerPosition();
+            $.writeln("[9_Render.exportFrameQE] time=" + time);
             qeSeq.exportFramePNG(time, tempPathNoExt);
+            $.writeln("[9_Render.exportFrameQE] exportFramePNG OK");
             return "OK_EXEC";
-        } catch(e) { return "EXC: " + e.message; }
+        } catch(e) { $.writeln("[9_Render.exportFrameQE] EXC: " + e.message); return "EXC: " + e.message; }
     },
 
     /**
@@ -28,15 +34,24 @@ FASTPASS.Render = {
      */
     frame: function(path, timeSec) {
         try {
+            $.writeln("[9_Render.frame] INICI: path=" + path + " time=" + timeSec);
             var seq = FASTPASS.Context.getWorkSequence();
-            if (!seq) return "ERR_NO_SEQ";
+            if (!seq) { $.writeln("[9_Render.frame] ERR: seq is null"); return "ERR_NO_SEQ"; }
+            $.writeln("[9_Render.frame] seq.name=" + seq.name);
             var f = new File(path);
-            if (!f.parent.exists) f.parent.create();
+            $.writeln("[9_Render.frame] File.fsName=" + f.fsName + " parent.exists=" + f.parent.exists);
+            if (!f.parent.exists) {
+                $.writeln("[9_Render.frame] Creant carpeta parent...");
+                var created = f.parent.create();
+                $.writeln("[9_Render.frame] parent.create()=" + created);
+            }
             var time = (timeSec && timeSec !== "-1") ? timeSec : seq.getPlayerPosition().seconds;
             var t = new Time(); t.seconds = parseFloat(time);
+            $.writeln("[9_Render.frame] exportFrame time=" + t.seconds + " path=" + f.fsName);
             var res = seq.exportFrame(t, f.fsName);
+            $.writeln("[9_Render.frame] exportFrame result=" + res);
             return res ? "OK" : "ERR_API";
-        } catch(e) { return "ERR: " + e.message; }
+        } catch(e) { $.writeln("[9_Render.frame] EXC: " + e.message); return "ERR: " + e.message; }
     },
 
     /**

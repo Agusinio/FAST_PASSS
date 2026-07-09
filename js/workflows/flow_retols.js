@@ -261,43 +261,42 @@
             const T_THEME = cfg.tracks.video.tematitol;
             const utils = getUtils();
             const escapedWott = utils.escape(wottName);
-            const CUT_OFFSET = 6.15; // Segons d'animació d'entrada a conservar
+            const CUT_OFFSET = 8.0;
 
             log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
 
-            // 1. Inserir el Wott llarg a V5 (durada completa, per tenir l'animació d'entrada)
+            const cutTime = placeTime + CUT_OFFSET;
+
+            // 1. Inserir Wott complet
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
             await utils.delay(500);
 
-            // 2. Retallar el clip a placeTime + CUT_OFFSET (conserva animació d'entrada)
-            const cutTime = placeTime + CUT_OFFSET;
+            // 2. Snapshot a C:\temp (mateix que window.Render.capture, evita UNC amb Ó)
+            const tempPath = `C:\\temp\\freeze_${Date.now()}.png`;
+            await callJSX(`Timeline.set(${cutTime})`);
+            await utils.delay(500);
+            await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
+            
+            const snapResult = await callJSX(`freezeFrame('${utils.escape(tempPath)}', ${cutTime})`);
+            log(`   📸 [_freeze] freezeFrame → ${snapResult}`);
+            
+            await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
+
+            // 3. Recortar clip
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
             log(`   ✂️ [_freeze] Clip retallat a end=${cutTime.toFixed(2)}s`);
 
-            // 3. Aïllar V5 per capturar només el frame a congelar
-            await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
-
-            // 4. Posicionar cabezal al punt de tall i capturar snapshot
-            //    Render.frame() crea la carpeta automàticament i accepta path complet
-            await callJSX(`Timeline.set(${cutTime})`);
-            const folder = await callJSX("Context.folder()");
-            const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`;
-            const snapResult = await callJSX(`Render.frame('${utils.escape(snapPath)}', ${cutTime})`);
-
-            // 5. Restaurar visibilitat de totes les pistes
-            await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
-
-            if (!snapResult || snapResult.indexOf('ERR') === 0) {
+            if (!snapResult || snapResult.indexOf('OK') !== 0) {
                 log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
-                throw new Error(`Snapshot fallit: ${snapResult}`);
+                return { success: false, duration: 0 };
             }
 
-            // 6. Importar el PNG al projecte
-            const fileName = snapPath.split("\\").pop();
-            const importPayload = JSON.stringify([snapPath]);
+            // 4. Importar PNG desde C:\temp
+            const fileName = tempPath.split("\\").pop();
+            const importPayload = JSON.stringify([tempPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'root')`);
 
-            // 7. Determinar durada de l'estirament del PNG
+            // 5. Determinar durada
             let duration;
             if (stretchEnd !== null && stretchEnd !== undefined) {
                 duration = Math.max(stretchEnd - cutTime, 0.5);
@@ -306,7 +305,7 @@
                 duration = Math.max(timelineDur - cutTime, 0.5);
             }
 
-            // 8. Inserir el PNG estirat DESPRÉS del segment d'animació
+            // 6. Insertar PNG estirat
             await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
             log(`   ✅ [_freeze] PNG "${fileName}" → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s`);
 
@@ -517,34 +516,20 @@
                         log(`   [${idx}] name="${c.name}" rol="${c.rol || '?'}" tc="${c.tc || '?'}"`);
                     });
 
-                    // FILTRE PER MIDA D'ARXIU REAL (via utils.readFolder + ruta chyrons del NAS)
-                    const MIN_SIZE = 200000; // 200 KB
-                    const longTemaTitols = [];
-                    const shortTemaTitols = [];
-                    temaTitols.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
-
-                    // Obtenir mides reals des de la carpeta de chyrons al NAS
-                    const chyronFiles = await getUtils().readFolder(cfg.rutas.chyrons);
-                    const sizeByName = new Map();
-                    for (const f of chyronFiles) {
-                        sizeByName.set(f.name, f.size || 0);
-                    }
-                    log(`🔬 [Titol·DIAG] Carpeta chyrons: ${chyronFiles.length} fitxers, ${sizeByName.size} amb mida`);
-
-                    for (const c of temaTitols) {
-                        const fileSize = sizeByName.get(c.name) || 0;
-                        log(`   📏 [Titol·DIAG] "${c.name.substring(0, 50)}..." → ${fileSize} bytes (${(fileSize/1024).toFixed(0)} KB)`);
-                        if (fileSize >= MIN_SIZE) {
-                            longTemaTitols.push(c);
-                        } else {
-                            shortTemaTitols.push(c);
-                        }
-                    }
-                    if (longTemaTitols.length === 0) {
-                        log(`⚠️ [Titol] Marcador ${fullId}: cap Tema‑Titol amb mida >= ${(MIN_SIZE/1024).toFixed(0)}KB (${shortTemaTitols.length} descartats). S'esperarà al botó NOU.`);
+                    // FILTRE PER SUFIX DEL MARCADOR: només processar marcadors amb sufix (ex: 19i, 14dp)
+                    // Els Tema‑Titol llargs pertanyen als items amb sufix (intro, dp...)
+                    if (!/[a-z]/i.test(fullId)) {
+                        log(`🔬 [Titol·DIAG] Marcador ${fullId}: sense sufix → ignorat.`);
                         continue;
                     }
-                    log(`🎯 [Titol·DIAG] ${longTemaTitols.length} Tema‑Titol(s) a col·locar (${shortTemaTitols.length} descartats per mida)`);
+                    
+                    const longTemaTitols = temaTitols.filter(c => (c.rol || '') === 'Tema-Titol');
+                    if (longTemaTitols.length === 0) {
+                        log(`⚠️ [Titol] Marcador ${fullId}: cap Tema‑Titol amb rol='Tema-Titol' (${temaTitols.length} descartats). S'esperarà al botó NOU.`);
+                        continue;
+                    }
+                    longTemaTitols.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+                    log(`🎯 [Titol·DIAG] ${longTemaTitols.length} Tema‑Titol(s) a col·locar`);
 
                     for (let ti = 0; ti < longTemaTitols.length; ti++) {
                         const tt = longTemaTitols[ti];
@@ -726,17 +711,22 @@
                         }
                         const clipDur = clipEnd - clipStart;
 
-                        group.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+                        // Ordenar pel número de seqüència al rol: "TRADUCCIO [3-12]" → 3
+                        const extractSeq = (c) => {
+                            const match = (c.rol || '').match(/\[(\d+)-\d+\]/);
+                            return match ? parseInt(match[1], 10) : 999;
+                        };
+                        group.sort((a, b) => extractSeq(a) - extractSeq(b));
                         const N = group.length;
                         log(`   📦 [Traducció] Bloc TC=${tc}: ${N} clips → V1 clip @ ${clipStart.toFixed(2)}s (dur=${clipDur.toFixed(2)}s)`);
 
                         for (let i = 0; i < N; i++) {
-                            const placeTime = (N === 1)
-                                ? clipStart + 0.5
-                                : clipStart + (clipDur / (N - 1)) * i;
+                            const slotDur = clipDur / N;
+                            const placeTime = clipStart + slotDur * i;
+                            const placeEnd = (i === N - 1) ? clipStart + clipDur : clipStart + slotDur * (i + 1);
                             const escapedName = getUtils().escape(group[i].name);
-                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, null, 'video')`);
-                            log(`      ✅ [${i+1}/${N}] ${group[i].name.substring(0, 40)}... → V3 @ ${placeTime.toFixed(2)}s`);
+                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, ${placeEnd}, 'video')`);
+                            log(`      ✅ [${i+1}/${N}] ${group[i].name.substring(0, 40)}... → V3 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s (dur=${(placeEnd - placeTime).toFixed(2)}s)`);
                             placedCount++;
                         }
                     }
@@ -802,6 +792,152 @@
                 await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${info.start}, ${info.end}, 'video')`);
                 
             } catch (e) { getUtils().handleError(e, "Graph169"); }
+        },
+
+        /**
+         * REPARTIR TRADUCCIONS: Redistribueix les traduccions seleccionades a V3
+         * uniformement sobre els clips V1 seleccionats, ignorant flashes.
+         * 
+         * Flux:
+         *   1. Llegeix clips V3 (graf) i V1 (mp4) seleccionats
+         *   2. Agrupa traduccions per proximitat temporal (< 3s gap = mateix tram)
+         *   3. Per cada tram, fusiona clips V1 contigus (saltant flashes < 0.5s)
+         *   4. Reparteix N traduccions uniformement sobre el rang combinat V1
+         *   5. Retalla l'última traducció perquè coincideixi amb el final del tram
+         */
+        placeChyronRepartir: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const T_V1 = cfg.tracks.video.mp4;
+            const T_V3 = cfg.tracks.video.graf;
+
+            // Indexar state.structure per obtenir rol des del nom del clip
+            const struct = FASTPASS_UI.State.structure || [];
+            const rolByName = new Map();
+            for (const entry of struct) {
+                if (entry.chyrons) {
+                    for (const chy of entry.chyrons) {
+                        rolByName.set(chy.name, chy.rol || '');
+                    }
+                }
+            }
+
+            try {
+                // 1. Llegir clips seleccionats a V1 i V3
+                const v1Count = parseInt(await callJSX(`Clips.count(${T_V1}, 'video')`) || '0');
+                const v3Count = parseInt(await callJSX(`Clips.count(${T_V3}, 'video')`) || '0');
+
+                const selectedV1 = [];
+                for (let i = 0; i < v1Count; i++) {
+                    const raw = await callJSX(`Clips.get(${T_V1}, ${i}, 'video')`);
+                    if (!raw || raw === 'null') continue;
+                    const clip = JSON.parse(raw);
+                    if (clip.selected) selectedV1.push(clip);
+                }
+
+                const selectedV3 = [];
+                for (let i = 0; i < v3Count; i++) {
+                    const raw = await callJSX(`Clips.get(${T_V3}, ${i}, 'video')`);
+                    if (!raw || raw === 'null') continue;
+                    const clip = JSON.parse(raw);
+                    if (clip.selected) selectedV3.push(clip);
+                }
+
+                log(`🎯 [Repartir] V1 seleccionats: ${selectedV1.length}, V3 seleccionats: ${selectedV3.length}`);
+
+                if (selectedV3.length === 0) {
+                            log("⚠️ [Repartir] No hi ha traduccions seleccionades a V3. Selecciona les traduccions (V3) + clips V1 amb Ctrl+clic.", "WARN");
+                    getUtils().status("⚠️ Selecciona traduccions a V3", "warn");
+                    return;
+                }
+                if (selectedV1.length === 0) {
+                    log("⚠️ [Repartir] No hi ha clips V1 seleccionats. Selecciona els clips de video on repartir.", "WARN");
+                    getUtils().status("⚠️ Selecciona clips V1", "warn");
+                    return;
+                }
+
+                // 2. Ordenar per start
+                selectedV3.sort((a, b) => a.start - b.start);
+                selectedV1.sort((a, b) => a.start - b.start);
+
+                // 3. Agrupar traduccions per proximitat
+                const groups = [];
+                let currentGroup = [selectedV3[0]];
+                for (let i = 1; i < selectedV3.length; i++) {
+                    const gap = selectedV3[i].start - currentGroup[currentGroup.length - 1].end;
+                    if (gap < 3.0) {
+                        currentGroup.push(selectedV3[i]);
+                    } else {
+                        groups.push(currentGroup);
+                        currentGroup = [selectedV3[i]];
+                    }
+                }
+                groups.push(currentGroup);
+                log(`📦 [Repartir] ${groups.length} tram(s) de traducció detectats`);
+
+                let placedCount = 0;
+
+                // 4. Eliminar V3 complet abans de reinsertar res
+                await callJSX(`Clips.clearTrack(${T_V3}, 'video')`);
+                log(`   🧹 [Repartir] Tot el track V3 netejat`);
+
+                // Rang complet de TOTS els clips V1 seleccionats
+                const rangeStart = selectedV1[0].start;
+                const rangeEnd = selectedV1[selectedV1.length - 1].end;
+                const rangeDur = rangeEnd - rangeStart;
+
+                // 5. Per cada tram, calcular M i reinsertar traduccions als nous slots
+                for (let gi = 0; gi < groups.length; gi++) {
+                    const group = groups[gi];
+                    
+                    // Detectar total de slots (M de [N-M]) usant rolByName
+                    const extractTotal = (c) => {
+                        const rol = rolByName.get(c.name) || c.rol || '';
+                        const match = rol.match(/\[(\d+)-(\d+)\]/);
+                        return match ? parseInt(match[2], 10) : group.length;
+                    };
+                    const extractSeq = (c) => {
+                        const rol = rolByName.get(c.name) || c.rol || '';
+                        const match = rol.match(/\[(\d+)-(\d+)\]/);
+                        return match ? parseInt(match[1], 10) : 999;
+                    };
+                    
+                    const M = Math.max(...group.map(c => extractTotal(c)), group.length);
+                    const N = group.length;
+                    const slotDur = rangeDur / M;
+                    
+                    log(`   📐 [Repartir] Tram ${gi+1}/${groups.length}: ${N}/${M} traduccions (${M - N} buits), slotDur=${slotDur.toFixed(2)}s`);
+                    
+                    group.sort((a, b) => extractSeq(a) - extractSeq(b));
+                    const seqToChy = new Map();
+                    for (const chy of group) {
+                        seqToChy.set(extractSeq(chy), chy);
+                    }
+                    
+                    for (let s = 0; s < M; s++) {
+                        const seqNum = s + 1;
+                        const chy = seqToChy.get(seqNum) || null;
+                        
+                        if (chy) {
+                            const newStart = rangeStart + slotDur * s;
+                            const newEnd = (s === M - 1) ? rangeEnd : rangeStart + slotDur * (s + 1);
+                            const escapedName = getUtils().escape(chy.name);
+                            
+                            await callJSX(`Clips.insert('${escapedName}', ${T_V3}, ${newStart}, ${newEnd}, 'video')`);
+                            log(`      ✅ [${seqNum}/${M}] "${chy.name.substring(0, 30)}..." → V3 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s (dur=${(newEnd - newStart).toFixed(2)}s)`);
+                            placedCount++;
+                        } else {
+                            log(`      ⬜ [${seqNum}/${M}] buit (traducció absent)`);
+                        }
+                        
+                        if (s % 3 === 2) await getUtils().delay(100);
+                    }
+                }
+
+                getUtils().status(`Repartit: ${placedCount} traduccions`, "exito");
+                log(`🎬 [Repartir] ${placedCount} traduccions repartides en ${groups.length} trams.`, "INFO");
+
+            } catch (e) { getUtils().handleError(e, "Repartir"); }
         },
 
         runPlaceBackground: async function () {

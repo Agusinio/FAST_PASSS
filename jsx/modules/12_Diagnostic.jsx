@@ -2,7 +2,7 @@
 // 8_Diagnostic.jsx (MÓDULO DE INSPECCIÓN REFACTORIZADO)
 // ============================================================================
 
-var FASTPASS = FASTPASS || {};
+var FASTPASS = $.global.FASTPASS;
 
 FASTPASS.Diagnostic = (function() {
 

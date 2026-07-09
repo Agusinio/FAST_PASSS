@@ -39,6 +39,8 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         load("7_KF.jsx");
         load("8_Markers.jsx");
         load("9_Render.jsx");
+        $.writeln("   -> 9_Render loaded. FASTPASS.Render.exportFrameQE = " + (FASTPASS.Render && typeof FASTPASS.Render.exportFrameQE));
+        $.writeln("   -> 9_Render loaded. FASTPASS.Render.frame = " + (FASTPASS.Render && typeof FASTPASS.Render.frame));
         load("11_Context.jsx");
         load("12_Diagnostic.jsx");
 
@@ -558,4 +560,23 @@ function itemDuration(name) {
 function getItems(binName) {
     if (!$.global.FASTPASS || !$.global.FASTPASS.Project) return "[]";
     return FASTPASS.Project.items(binName);
+}
+
+// Funció global autònoma per exportar un frame PNG via QE
+// (còpia exacta de 9_Render.exportFrameQE sense el bug del var FASTPASS local)
+function freezeFrame(path, timeSec) {
+    try {
+        $.writeln("[freezeFrame] path=" + path + " time=" + timeSec);
+        app.enableQE();
+        var qeSeq = qe.project.getActiveSequence();
+        if (!qeSeq) { $.writeln("[freezeFrame] ERR: qeSeq is null"); return "ERR_NO_QE_SEQ"; }
+        $.writeln("[freezeFrame] qeSeq.name=" + qeSeq.name);
+        var time = (timeSec && timeSec !== "-1") ? timeSec : qeSeq.getPlayerPosition();
+        $.writeln("[freezeFrame] time type=" + typeof time + " value=" + time);
+        var noExtPath = path.replace(/\.png$/i, '');
+        $.writeln("[freezeFrame] noExtPath=" + noExtPath);
+        qeSeq.exportFramePNG(time, noExtPath);
+        $.writeln("[freezeFrame] exportFramePNG OK — fitxer creat a " + path);
+        return "OK";
+    } catch(e) { $.writeln("[freezeFrame] EXC: " + e.message); return "ERR: " + e.message; }
 }
