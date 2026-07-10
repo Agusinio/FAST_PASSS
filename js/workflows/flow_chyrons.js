@@ -306,24 +306,38 @@
             const CUT_OFFSET = 8.0;
             log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
             const cutTime = placeTime + CUT_OFFSET;
+
+            // 1. Inserir Wott complet
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
             await utils.delay(500);
-            const tempPath = `C:\\temp\\freeze_${Date.now()}.png`;
+
+            // 2. Aïllar V5 (només el Tema‑Titol visible), posicionar cabezal i fer snapshot
             await callJSX(`Timeline.set(${cutTime})`);
             await utils.delay(500);
             await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
-            const snapResult = await callJSX(`freezeFrame('${utils.escape(tempPath)}', ${cutTime})`);
-            log(`   📸 [_freeze] freezeFrame → ${snapResult}`);
+
+            const snapPath = `C:\\temp\\freeze_${Date.now()}.png`;
+            const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${cutTime})`);
+            log(`   📸 [_freeze] Render.snapshot → ${snapResult}`);
+
+            // 3. Restaurar visibilitat de totes les pistes
             await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
+
+            // 4. Retallar clip animació (després del snapshot, per tenir el frame complet)
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
             log(`   ✂️ [_freeze] Clip retallat a end=${cutTime.toFixed(2)}s`);
+
             if (!snapResult || snapResult.indexOf('OK') !== 0) {
                 log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
                 return { success: false, duration: 0 };
             }
-            const fileName = tempPath.split("\\").pop();
-            const importPayload = JSON.stringify([tempPath]);
-            await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'root')`);
+
+            // 5. Importar PNG al bin CHY
+            const fileName = snapPath.split("\\").pop();
+            const importPayload = JSON.stringify([snapPath]);
+            await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'CHY')`);
+
+            // 6. Determinar durada i inserir PNG estirat a V5 des de cutTime fins a stretchEnd
             let duration;
             if (stretchEnd !== null && stretchEnd !== undefined) {
                 duration = Math.max(stretchEnd - cutTime, 0.5);
@@ -332,7 +346,7 @@
                 duration = Math.max(timelineDur - cutTime, 0.5);
             }
             await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
-            log(`   ✅ [_freeze] PNG "${fileName}" → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s`);
+            log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
             return { success: true, duration };
         },
 

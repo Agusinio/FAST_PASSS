@@ -21,10 +21,19 @@ FASTPASS.Render = {
             var qeSeq = qe.project.getActiveSequence();
             if (!qeSeq) { $.writeln("[9_Render.exportFrameQE] ERR: qeSeq is null"); return "ERR_NO_QE_SEQ"; }
             $.writeln("[9_Render.exportFrameQE] qeSeq.name=" + qeSeq.name);
-            var time = (timeSec && timeSec !== "-1") ? timeSec : qeSeq.getPlayerPosition();
-            $.writeln("[9_Render.exportFrameQE] time=" + time);
-            qeSeq.exportFramePNG(time, tempPathNoExt);
-            $.writeln("[9_Render.exportFrameQE] exportFramePNG OK");
+            // Convertir segons a timecode HH:MM:SS:FF (25 fps) — QE espera string timecode
+            var sec = (timeSec && timeSec !== "-1") ? Number(timeSec) : 0;
+            var totalFrames = Math.round(sec * 25);
+            var ff = totalFrames % 25;
+            var totalS = Math.floor(totalFrames / 25);
+            var ss = totalS % 60;
+            var totalM = Math.floor(totalS / 60);
+            var mm = totalM % 60;
+            var hh = Math.floor(totalM / 60);
+            var tc = (hh < 10 ? '0' + hh : hh) + ':' + (mm < 10 ? '0' + mm : mm) + ':' + (ss < 10 ? '0' + ss : ss) + ':' + (ff < 10 ? '0' + ff : ff);
+            $.writeln("[9_Render.exportFrameQE] timecode=" + tc + " (sec=" + sec + ")");
+            qeSeq.exportFramePNG(tc, tempPathNoExt);
+            $.writeln("[9_Render.exportFrameQE] exportFramePNG OK → " + tempPathNoExt + ".png");
             return "OK_EXEC";
         } catch(e) { $.writeln("[9_Render.exportFrameQE] EXC: " + e.message); return "EXC: " + e.message; }
     },

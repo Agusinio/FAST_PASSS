@@ -562,20 +562,37 @@ function getItems(binName) {
     return FASTPASS.Project.items(binName);
 }
 
-// Funció global autònoma per exportar un frame PNG (API estàndard)
-function freezeFrame(path, timeSec) {
+// Funció global per exportar un frame PNG (API estàndard de Premiere)
+// Usa app.project.activeSequence DIRECTAMENT (no el Context wrapper)
+// Guarda a C:\temp\ i JS fa el move al destí final.
+function exportFramePNG(tempPathNoExt, timeSec) {
     try {
-        $.writeln("[freezeFrame] path=" + path + " time=" + timeSec);
-        var seq = ($.global.FASTPASS && $.global.FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-        if (!seq) { $.writeln("[freezeFrame] ERR: no active sequence"); return "ERR_NO_SEQ"; }
-        $.writeln("[freezeFrame] seq.name=" + seq.name);
+        // 1. Intentar via QE
+        app.enableQE();
+        var qeSeq = qe.project.getActiveSequence();
+        if (qeSeq && typeof qeSeq.exportFramePNG !== 'undefined') {
+            // timeSec arriba com a string des de JS (ex: "37.56")
+            // QE espera string o Time object — passar string directament
+            if (timeSec && timeSec !== "-1") {
+                $.writeln("[freeze] QE.exportFramePNG time=" + timeSec + " path=" + tempPathNoExt);
+                qeSeq.exportFramePNG(timeSec, tempPathNoExt);
+            } else {
+                var pos = qeSeq.getPlayerPosition();
+                $.writeln("[freeze] QE.exportFramePNG pos=" + pos + " path=" + tempPathNoExt);
+                qeSeq.exportFramePNG(pos, tempPathNoExt);
+            }
+            $.writeln("[freeze] QE OK → " + tempPathNoExt + ".png");
+            return "OK_EXEC";
+        }
+        // 2. Fallback: exportFrame (API estàndard — pot no estar disponible)
+        var seq = app.project.activeSequence;
+        if (!seq) return "ERR_NO_SEQ";
+        var outFile = new File(tempPathNoExt + ".png");
+        if (!outFile.parent.exists) { outFile.parent.create(); }
         var t = new Time();
         t.seconds = (timeSec && timeSec !== "-1") ? Number(timeSec) : seq.getPlayerPosition().seconds;
-        var outFile = new File(path);
-        if (!outFile.parent.exists) { outFile.parent.create(); }
-        $.writeln("[freezeFrame] exporting t=" + t.seconds + "s → " + outFile.fsName);
+        $.writeln("[freeze] seq.exportFrame t=" + t.seconds + "s → " + outFile.fsName);
         seq.exportFrame(t, outFile.fsName);
-        $.writeln("[freezeFrame] exportFrame OK");
-        return "OK";
-    } catch(e) { $.writeln("[freezeFrame] EXC: " + e.message); return "ERR: " + e.message; }
+        return "OK_EXEC";
+    } catch(e) { $.writeln("[freeze] EXC: " + e.message); return "EXC: " + e.message; }
 }
