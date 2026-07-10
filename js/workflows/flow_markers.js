@@ -693,18 +693,10 @@
                 var onAir = line.horaEntradaOnAir;
                 var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
 
-                var targetSec = null;
-                if (hasOnAir) {
-                    targetSec = reader.tcToSeconds(onAir);
-                } else {
-                    var deduced2 = reader._deduceOnAirEntrada(line, manifest.escaletaItems, null);
-                    if (deduced2 !== null) targetSec = deduced2;
-                    else {
-                        var prevista = line.horaEntradaPrevista;
-                        if (prevista && prevista !== '00:00:00') targetSec = reader.tcToSeconds(prevista);
-                    }
-                }
+                // F3·Coinc: només afina faros (OnAir real). Saltar deduïts i previstos.
+                if (!hasOnAir) continue;
 
+                var targetSec = reader.tcToSeconds(onAir);
                 if (targetSec === null || targetSec === undefined) continue;
 
                 var idealPosSec = anchorEfTimelineSec + (targetSec - anchorEfectiva) + snapDelta;
