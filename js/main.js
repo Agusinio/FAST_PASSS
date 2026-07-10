@@ -158,14 +158,14 @@ var isUserDraggingSlider = false;
         const btnChyronTraduccio = document.getElementById('btnChyronTraduccio');
         const btnChyronResto = document.getElementById('btnChyronResto');
 
-        if (btnChyronTitol) btnChyronTitol.addEventListener('click', () => callWorkflow('Retols', 'placeChyronTitol'));
-        if (btnChyronConductor) btnChyronConductor.addEventListener('click', () => callWorkflow('Retols', 'placeChyronConductor'));
-        if (btnChyronLloc) btnChyronLloc.addEventListener('click', () => callWorkflow('Retols', 'placeChyronLloc'));
-        if (btnChyronNom) btnChyronNom.addEventListener('click', () => callWorkflow('Retols', 'placeChyronNom'));
-        if (btnChyronTraduccio) btnChyronTraduccio.addEventListener('click', () => callWorkflow('Retols', 'placeChyronTraduccio'));
-        if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Retols', 'placeChyronResto'));
+        if (btnChyronTitol) btnChyronTitol.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronTitol'));
+        if (btnChyronConductor) btnChyronConductor.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronConductor'));
+        if (btnChyronLloc) btnChyronLloc.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronLloc'));
+        if (btnChyronNom) btnChyronNom.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronNom'));
+        if (btnChyronTraduccio) btnChyronTraduccio.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronTraduccio'));
+        if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronResto'));
         const btnChyronRepartir = document.getElementById('btnChyronRepartir');
-        if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Retols', 'placeChyronRepartir'));
+        if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronRepartir'));
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');
         const btnSrtIn = document.getElementById('btnSrtIn');

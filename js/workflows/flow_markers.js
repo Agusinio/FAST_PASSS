@@ -999,6 +999,145 @@
 
             var result = await this._safePlaceByPrefixes(placements, 'F6·Gràfics');
             log('🟢 [F6·Gràfics] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // ANÀLISI DE MARCADORS (migrats des de flow_graphics.js)
+        // ═══════════════════════════════════════════════════════════════
+
+        placeCookedMarkers: async function() {
+            if (!(await getUtils().validateActiveSequence())) return;
+            log("📍 [MARKS Cocinado] Col·locant marcadors amb snap a cortes...");
+            try {
+                await FASTPASS_UI.Workflows.Markers.placeOnAirMarkers();
+                await FASTPASS_UI.Workflows.Markers.placeDeducedOnAirMarkers();
+                await FASTPASS_UI.Workflows.Markers.placeScheduledMarkers();
+
+                const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+                const analysis = await FASTPASS_UI.Logic.Analysis._load(
+                    FASTPASS_UI.Logic.Analysis._getPath(ctx)
+                );
+                const marksCrudo = analysis.crudo || { markers: [] };
+
+                const markersRaw = await callJSX("Markers.get()");
+                var timelineMarkers = [];
+                if (markersRaw && markersRaw !== "[]") {
+                    try { timelineMarkers = JSON.parse(markersRaw); } catch (e) {}
+                }
+
+                var crudoMap = {};
+                for (var i = 0; i < marksCrudo.markers.length; i++) {
+                    var m = marksCrudo.markers[i];
+                    crudoMap[m.num] = m;
+                }
+
+                var cookedMarkers = [];
+                for (var j = 0; j < timelineMarkers.length; j++) {
+                    var tm = timelineMarkers[j];
+                    var comment = tm.comments || tm.comment || '';
+                    if (comment === 'VALID_IN' || comment === 'VALID_OUT') continue;
+                    var numMatch = comment.match(/^(\d+)/);
+                    var num = numMatch ? numMatch[1] : '';
+                    var titol = comment.replace(/^\d+\s*-\s*/, '').trim();
+                    var crudoRef = crudoMap[num] || null;
+                    cookedMarkers.push({
+                        num: num, titol: titol,
+                        posCocinado: tm.time,
+                        deltaVsCrudo: crudoRef ? (tm.time - crudoRef.additPosSec) : 0
+                    });
+                }
+
+                await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'cocinado', {
+                    markers: cookedMarkers, capturedAt: new Date().toISOString()
+                });
+                getUtils().status(cookedMarkers.length + " MARKS Cocinats", "exito");
+            } catch (e) { getUtils().handleError(e, "placeCookedMarkers"); }
+        },
+
+        capturaUsuarioInOut: async function() {
+            if (!(await getUtils().validateActiveSequence())) return;
+            log("📍 [CAPTURA INOUT] Llegint VALID_IN/VALID_OUT del timeline...");
+            try {
+                const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+                const analysis = await FASTPASS_UI.Logic.Analysis._load(
+                    FASTPASS_UI.Logic.Analysis._getPath(ctx)
+                );
+                const inoutCocinado = analysis.cocinado || {};
+                const markersRaw = await callJSX("Markers.get()");
+                var markers = [];
+                if (markersRaw && markersRaw !== "[]") {
+                    try { markers = JSON.parse(markersRaw); } catch (e) {}
+                }
+                var validInPos = null, validOutPos = null;
+                for (var i = 0; i < markers.length; i++) {
+                    var m = markers[i];
+                    var comment = (m.comments || m.comment || '').trim();
+                    if (comment === 'VALID_IN') validInPos = m.time;
+                    if (comment === 'VALID_OUT') validOutPos = m.time;
+                }
+                if (validInPos === null || validOutPos === null) {
+                    log("⚠️ No s'han trobat els marcadors VALID_IN/VALID_OUT al timeline.");
+                    getUtils().status("No hi ha marcadors de validació", "error");
+                    return;
+                }
+                var deltaIn = inoutCocinado.validInMarker !== undefined ? (validInPos - inoutCocinado.validInMarker) : 0;
+                var deltaOut = inoutCocinado.validOutMarker !== undefined ? (validOutPos - inoutCocinado.validOutMarker) : 0;
+                await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'usuario', {
+                    validInMarker: validInPos, validOutMarker: validOutPos,
+                    deltaVsCocinado_in: deltaIn, deltaVsCocinado_out: deltaOut,
+                    capturedAt: new Date().toISOString()
+                });
+                getUtils().status("IN/OUT Usuari capturat", "exito");
+            } catch (e) { getUtils().handleError(e, "capturaUsuarioInOut"); }
+        },
+
+        capturaUsuarioMarks: async function() {
+            if (!(await getUtils().validateActiveSequence())) return;
+            log("📍 [CAPTURA MARKS] Llegint marcadors del timeline...");
+            try {
+                const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
+                const analysis = await FASTPASS_UI.Logic.Analysis._load(
+                    FASTPASS_UI.Logic.Analysis._getPath(ctx)
+                );
+                const marksCrudo = analysis.crudo || { markers: [] };
+                const marksCocinado = analysis.cocinado || { markers: [] };
+
+                const markersRaw = await callJSX("Markers.get()");
+                var markers = [];
+                if (markersRaw && markersRaw !== "[]") {
+                    try { markers = JSON.parse(markersRaw); } catch (e) {}
+                }
+
+                var crudoMap = {};
+                for (var i = 0; i < marksCrudo.markers.length; i++) {
+                    var m = marksCrudo.markers[i]; crudoMap[m.num] = m;
+                }
+                var cocinadoMap = {};
+                for (var j = 0; j < marksCocinado.markers.length; j++) {
+                    var m = marksCocinado.markers[j]; cocinadoMap[m.num] = m;
+                }
+
+                var userMarkers = [];
+                for (var k = 0; k < markers.length; k++) {
+                    var tm = markers[k];
+                    var comment = tm.comments || tm.comment || '';
+                    if (comment === 'VALID_IN' || comment === 'VALID_OUT') continue;
+                    var numMatch = comment.match(/^(\d+)/);
+                    var num = numMatch ? numMatch[1] : '';
+                    var titol = comment.replace(/^\d+\s*-\s*/, '').trim();
+                    var crudoRef = crudoMap[num] || null;
+                    var cocinadoRef = cocinadoMap[num] || null;
+                    userMarkers.push({
+                        num: num, titol: titol, posUsuario: tm.time,
+                        deltaVsCocinado: cocinadoRef ? (tm.time - cocinadoRef.posColocada) : 0,
+                        deltaVsCrudo: crudoRef ? (tm.time - crudoRef.additPosSec) : 0
+                    });
+                }
+                await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'usuario', {
+                    markers: userMarkers, capturedAt: new Date().toISOString()
+                });
+                getUtils().status(userMarkers.length + " MARKS Usuari capturats", "exito");
+            } catch (e) { getUtils().handleError(e, "capturaUsuarioMarks"); }
         }
     };
 

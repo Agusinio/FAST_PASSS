@@ -1,10 +1,10 @@
 /**
  * ============================================================================
- * WORKFLOW: CHYRONS (Conductor, Tema-Titol, Ensamblatge Guiat)
+ * WORKFLOW: CHYRONS (Conductor, Tema-Titol, col·locació per tipus)
  * ============================================================================
- * Extret de flow_assembly.js durant la modularització v2.9.5 "LIPO-PRO".
- * Gestiona la inserció de conductor, chyrons i l'assemblatge automàtic
- * de rètols basat en marcadors de timeline.
+ * Gestiona la inserció de chyrons tipificats (Titol, Conductor, Lloc, Nom,
+ * Traducció, Resto) basada en marcadors de timeline.
+ * Conté també l'assemblatge automàtic de rètols (runAutoPlacement).
  * ============================================================================
  */
 
@@ -22,9 +22,10 @@
 
     FASTPASS_UI.Workflows.Chyrons = {
 
-        /**
-         * Realitza el posicionament automàtic de rètols després del scene Detection.
-         */
+        // ═══════════════════════════════════════════════════════════════
+        // ASSEMBLATGE AUTOMÀTIC (THE MAGIC)
+        // ═══════════════════════════════════════════════════════════════
+
         runAutoPlacement: async function (mainTrack = 1) {
             log("🎬 Iniciant Assemblatge Automàtic (THE MAGIC)...");
             const state = FASTPASS_UI.State;
@@ -32,7 +33,6 @@
 
             let structure = state.structure;
             if (!structure || structure.length === 0) {
-                // Intentar cargar estructura desde marcadores
                 structure = await this._getStructureFromMarkers();
                 if (!structure || structure.length === 0) {
                     log("⚠️ No hi ha estructura carregada ni marcadors. Avortant muntatge.");
@@ -42,14 +42,11 @@
             }
 
             try {
-                // 1. Obtenir clips de la línia de temps
                 const clips = await getClipsLogic().getTrackClips(mainTrack, "video");
-                // Netejar flash whites del timeline abans del processament de blocs
                 await getClipsLogic().cleanFlashWhites(clips, mainTrack);
                 log(`📊 Clips obtinguts: ${clips.length}`);
                 if (clips.length === 0) return;
 
-                // Obtenir conductor seleccionat a la UI (si existeix)
                 let conductorFile = null;
                 try {
                     const conductorSelect = document.getElementById('conductor');
@@ -65,10 +62,8 @@
                 let conductorPlaced = false;
 
                 const struct = structure;
-                // Fusionar bloques OFF (delega a Parse.mergeOffBlocks)
                 const mergedStruct = getParse().mergeOffBlocks(struct);
                 log(`📊 Estructura carregada: ${struct.length} blocs → fusionats a ${mergedStruct.length} blocs`);
-                // Obtener marcadores para ajustar tiempos de bloque
                 const markerStruct = await this._getStructureFromMarkers();
                 const markerMap = {};
                 if (markerStruct && markerStruct.length > 0) {
@@ -76,35 +71,26 @@
                     log(`📊 Marcadors disponibles: ${Object.keys(markerMap).length} marcadors`);
                 }
 
-                // Función auxiliar para encontrar el índice del clip más cercano a un tiempo
                 const findClipIndexAtTime = (time) => {
                     let bestIdx = 0;
                     let bestDiff = Math.abs(clips[0].start - time);
                     for (let i = 1; i < clips.length; i++) {
                         const diff = Math.abs(clips[i].start - time);
-                        if (diff < bestDiff) {
-                            bestDiff = diff;
-                            bestIdx = i;
-                        }
+                        if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
                     }
                     return bestIdx;
                 };
 
-                // Separar bloques con y sin marcador
                 const blocksWithMarker = [];
                 const blocksWithoutMarker = [];
                 for (const block of mergedStruct) {
                     if (markerMap[block.id] !== undefined) {
-                        blocksWithMarker.push({
-                            block: block,
-                            startTime: markerMap[block.id]
-                        });
+                        blocksWithMarker.push({ block: block, startTime: markerMap[block.id] });
                     } else {
                         blocksWithoutMarker.push(block);
                     }
                 }
 
-                // --- Procesar bloques CON marcador ---
                 for (const bwm of blocksWithMarker) {
                     const block = bwm.block;
                     const start = bwm.startTime;
@@ -113,28 +99,20 @@
                     if (!headClip) continue;
 
                     log(`🎬 Bloc ${block.id}: start=${start.toFixed(2)}s, clipIdx=${clipIdx}, clipDur=${(headClip.end - headClip.start).toFixed(2)}s`);
-
                     const cfgTracks = cfg.tracks.video;
-
-                    // Detectar si és OFF (id acaba en "f")
                     const blockId = block.id.toLowerCase();
                     const isOffF = (blockId.length >= 2 && blockId[blockId.length - 1] === 'f');
 
                     if (isOffF) {
                         const conductorStart = await this._placeOffGfx(block, headClip, cfgTracks, conductorFile);
-                        if (conductorStart !== null) {
-                            lastConductorTime = conductorStart;
-                            conductorPlaced = true;
-                        }
+                        if (conductorStart !== null) { lastConductorTime = conductorStart; conductorPlaced = true; }
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     } else {
-                        // INTRO / estàndard
                         await this._placeIntroGfx(block, headClip, cfgTracks);
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     }
                 }
 
-                // --- Procesar bloques SIN marcador (usar clips directamente) ---
                 let blockIndex = 0;
                 for (const block of blocksWithoutMarker) {
                     if (blockIndex >= clips.length) break;
@@ -144,17 +122,13 @@
 
                     const start = headClip.start;
                     log(`🎬 Bloc ${block.id} (sense marcador): start=${start.toFixed(2)}s, clipIdx=${blockIndex - 1}`);
-
                     const cfgTracks = cfg.tracks.video;
                     const blockId = block.id.toLowerCase();
                     const isOffF = (blockId.length >= 2 && blockId[blockId.length - 1] === 'f');
 
                     if (isOffF) {
                         const conductorStart = await this._placeOffGfx(block, headClip, cfgTracks, conductorFile);
-                        if (conductorStart !== null) {
-                            lastConductorTime = conductorStart;
-                            conductorPlaced = true;
-                        }
+                        if (conductorStart !== null) { lastConductorTime = conductorStart; conductorPlaced = true; }
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     } else {
                         await this._placeIntroGfx(block, headClip, cfgTracks);
@@ -162,7 +136,6 @@
                     }
                 }
 
-                // Inserir conductor seleccionat a la UI (només si no s'ha col·locat ja en un bloc OFF)
                 if (!conductorPlaced) {
                     try {
                         const conductorSelect = document.getElementById('conductor');
@@ -176,21 +149,14 @@
                         log(`⚠️ No s'ha pogut inserir el conductor: ${e.message}`);
                     }
                 }
-
                 log("✅ Assemblatge completat.");
-            } catch (e) {
-                log(`❌ Error en runAutoPlacement: ${e.message}`);
-            }
+            } catch (e) { log(`❌ Error en runAutoPlacement: ${e.message}`); }
         },
 
-        /**
-         * _placeIntroGfx: Col·loca gràfics d'INTRO (conductor + tema-titol).
-         */
         _placeIntroGfx: async function (block, clip, tracks) {
             const start = clip.start;
             const tematitol = block.chyrons.find(c => c.name.includes("Tema-Titol") || c.name.includes("TITOL"));
             const conductor = block.chyrons.find(c => (c.rol || '').toUpperCase() === "CONDUCTOR");
-
             if (conductor) {
                 if (tematitol) {
                     await callJSX(`Clips.insert('${getUtils().escape(conductor.name)}', ${tracks.chyrons}, ${start + 6.3}, null, 'video')`);
@@ -201,16 +167,11 @@
             }
         },
 
-        /**
-         * _placeOffGfx: Gràfics de OFF (conductor + Tema-Titol en blocs amb sufix "f").
-         */
         _placeOffGfx: async function (block, clip, tracks, conductorFile) {
             const start = clip.start;
-            // 10 frames després de l'inici (0.4 segons)
             const conductorStart = start + 0.4;
             const conductorTrack = tracks.chyrons || 5;
             log(`   🎬 OFF (${block.id}): inserint conductor a ${conductorStart.toFixed(2)}s`);
-            // Cercar conductor a conductorFile o als chirons del bloc
             let conductorName = conductorFile;
             if (!conductorName) {
                 const conductorChyron = block.chyrons.find(c => (c.rol || '').toUpperCase() === "CONDUCTOR");
@@ -218,70 +179,50 @@
             }
             if (conductorName) {
                 await callJSX(`Clips.insert('${getUtils().escape(conductorName)}', ${conductorTrack}, ${conductorStart}, null, 'video')`);
-                // Cercar Tema‑Titol als chirons del bloc (preferir els que continguin "Off")
                 const tematitol = block.chyrons.find(c => c.name.includes("Tema-Titol") || c.name.includes("TITOL"));
                 if (tematitol) {
-                    const tematitolStart = conductorStart + 4.10; // marca del conductor a 4.10s
+                    const tematitolStart = conductorStart + 4.10;
                     const tematitolTrack = tracks.tematitol || tracks.chyrons;
-                    log(`   🎬 OFF (${block.id}): inserint Tema‑Titol "${tematitol.name}" a ${tematitolStart.toFixed(2)}s (marca del conductor)`);
+                    log(`   🎬 OFF (${block.id}): inserint Tema‑Titol a ${tematitolStart.toFixed(2)}s`);
                     await callJSX(`Clips.insert('${getUtils().escape(tematitol.name)}', ${tematitolTrack}, ${tematitolStart}, null, 'video')`);
                 }
-                return conductorStart; // retornar temps d'inici del conductor
+                return conductorStart;
             }
             return null;
         },
 
-        /**
-         * _placeOffVideoGfx: Gràfics de OFF_VIDEO (Tema-Titol en blocs amb vídeo).
-         */
         _placeOffVideoGfx: async function (block, clip, tracks, conductorStart) {
-            const start = clip.start;
             const tematitol = block.chyrons.find(c => c.name.includes("Tema-Titol") || c.name.includes("TITOL"));
             if (!tematitol) return;
-            // Calcular posició relativa al conductor
-            const tematitolStart = conductorStart ? conductorStart + 4.10 : start + 4.5; // marca del conductor a 4.10s
+            const tematitolStart = conductorStart ? conductorStart + 4.10 : clip.start + 4.5;
             const tematitolTrack = tracks.tematitol || tracks.chyrons;
-            log(`   🎬 OFF_VIDEO (${block.id}): inserint Tema‑Titol a ${tematitolStart.toFixed(2)}s (marca del conductor)`);
+            log(`   🎬 OFF_VIDEO (${block.id}): inserint Tema‑Titol a ${tematitolStart.toFixed(2)}s`);
             await callJSX(`Clips.insert('${getUtils().escape(tematitol.name)}', ${tematitolTrack}, ${tematitolStart}, null, 'video')`);
         },
 
-        /**
-         * _placeMagicChyrons: Col·locació precisa de chyrons amb footprint, traduccions,
-         * NOMCARREC, FIRMA, Llocdata als tracks configurats.
-         */
         _placeMagicChyrons: async function (block, headClip, tracks, allClips, markerMap, conductorTime) {
             if (!block.chyrons || block.chyrons.length === 0) return;
-
             const clipStart = headClip.start;
             const clipEnd = headClip.end;
             const clipDur = clipEnd - clipStart;
-
-            // Filtrar chirons que ja s'han col·locat (conductor, tema-titol)
             const remaining = block.chyrons.filter(c => {
                 const rol = (c.rol || '').toUpperCase();
                 return rol !== "CONDUCTOR" && !c.name.includes("Tema-Titol") && !c.name.includes("TITOL");
             });
-
             if (remaining.length === 0) return;
-
             log(`   🔮 Magic chyrons (${block.id}): ${remaining.length} per col·locar a clip [${clipStart.toFixed(2)}s-${clipEnd.toFixed(2)}s]`);
-
-            // ── Distribució bàsica dins del clip ──
             const numChyrons = remaining.length;
             const marginStart = clipStart + 1.0;
             const marginEnd = clipEnd - 1.0;
             const availableSpace = Math.max(1.0, marginEnd - marginStart);
             const spacing = availableSpace / (numChyrons + 1);
-
             for (let ci = 0; ci < remaining.length; ci++) {
                 const chyron = remaining[ci];
                 const targetTime = marginStart + spacing * (ci + 1);
                 let targetTrack = tracks.chyrons;
-
-                // ── Rols especials ──
                 const rol = (chyron.rol || '').toUpperCase();
                 if (rol === "NOMCARREC" || chyron.name.includes("NOMCARREC") || chyron.name.includes("NC_")) {
-                    targetTrack = tracks.chyrons; // Mateix track que chyrons per defecte
+                    targetTrack = tracks.chyrons;
                 } else if (rol === "FIRMA" || chyron.name.includes("FIRMA") || chyron.name.includes("FIR_")) {
                     targetTrack = tracks.chyrons;
                 } else if (rol === "LLOC" || chyron.name.includes("LLOC") || chyron.name.includes("LL_")) {
@@ -289,45 +230,28 @@
                 } else if (rol === "TEMA" || rol === "TEMATITOL") {
                     targetTrack = tracks.tematitol || tracks.chyrons;
                 }
-
                 const safeName = getUtils().escape(chyron.name);
-                log(`   🎯 [${block.id}] Chyron ${ci+1}/${numChyrons}: "${chyron.name}" a track ${targetTrack} @ ${targetTime.toFixed(2)}s (rol=${rol})`);
+                log(`   🎯 [${block.id}] Chyron ${ci+1}/${numChyrons}: a track ${targetTrack} @ ${targetTime.toFixed(2)}s`);
                 await callJSX(`Clips.insert('${safeName}', ${targetTrack}, ${targetTime.toFixed(4)}, null, 'video')`);
             }
         },
 
-        /**
-         * runGuidedAssembly: Dispara la lògica de posicionament de rètols basat en markers.
-         */
         runGuidedAssembly: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             try {
                 const ctx = FASTPASS_UI.State;
-                
-                // Actualitzar manifest: marquem que l'anàlisi de clip està fet (ja que ESTRUCTURA ha tallat)
                 await FASTPASS_UI.SessionManifest.save(ctx, { phases: { clipAnalysisDone: true } });
-
-                // Executar ensamblatge de rètols original
                 const res = await window.FASTPASS_UI.Logic.Assembly.runGuidedAssembly();
-                if (res && res.indexOf("OK") !== -1) {
-                    getUtils().status("Rètols col·locats OK", "exito");
-                }
+                if (res && res.indexOf("OK") !== -1) getUtils().status("Rètols col·locats OK", "exito");
             } catch (e) { getUtils().handleError(e, "runGuidedAssembly"); }
         },
 
-        /**
-         * _getStructureFromMarkers: Deriva una estructura de blocs a partir dels marcadors del timeline.
-         */
         _getStructureFromMarkers: async function () {
             const markersRaw = await callJSX("Markers.get()");
             var markers = [];
-            if (markersRaw && markersRaw !== "[]") {
-                try { markers = JSON.parse(markersRaw); } catch (e) {}
-            }
+            if (markersRaw && markersRaw !== "[]") { try { markers = JSON.parse(markersRaw); } catch (e) {} }
             if (markers.length === 0) return [];
-
             var structure = [];
-            // Filtrar marcadors estructurals (tenen " - " al comentari)
             for (var i = 0; i < markers.length; i++) {
                 var m = markers[i];
                 var comment = m.comments || '';
@@ -338,73 +262,478 @@
                 if (!numMatch) continue;
                 var num = numMatch[1];
                 var suffix = prefix.substring(num.length).toLowerCase();
-
-                // Determinar tipus de bloc segons sufix
                 var type = "video";
                 if (suffix === "f" || suffix === "off") type = "off";
                 else if (suffix === "i" || suffix === "intro") type = "intro";
-
-                structure.push({
-                    id: num + (suffix || ''),
-                    type: type,
-                    startTime: m.time,
-                    chyrons: [] // sin chyrons, se inferirán más adelante
-                });
+                structure.push({ id: num + (suffix || ''), type: type, startTime: m.time, chyrons: [] });
             }
-            log(`📊 Estructura generada a partir de ${structure.length} marcadors estructurals (ignorats ${markers.length - structure.length} no estructurals).`);
+            log(`📊 Estructura de ${structure.length} marcadors.`);
             return structure;
         },
 
-        /**
-         * _logLearning: Helper per guardar el log d'aprenentatge
-         */
-        _logLearning: async function(ctx, aiIn, humanIn, aiOut, humanOut) {
-            try {
-                const config = FASTPASS_UI.Config.get();
-                const logData = {
-                    timestamp: new Date().toISOString(),
-                    program: ctx.progData?.wott || "TNV",
-                    blockId: ctx.bloque || "V1",
-                    ai: { in: aiIn, out: aiOut },
-                    human: { in: humanIn, out: humanOut },
-                    delta: { in: humanIn - aiIn, out: humanOut - aiOut }
-                };
-                const extPath = await callJSX("System.getExtPath()");
-                const logPath = extPath + "/FASTPASS_LEARNING_LOG.json";
-                
-                await callJSX(`
-                    var f = new File('${getUtils().escape(logPath)}');
-                    var list = [];
-                    if (f.exists) {
-                        f.open('r');
-                        var txt = f.read();
-                        f.close();
-                        try { list = JSON.parse(txt); } catch(e) {}
-                    }
-                    list.push(${JSON.stringify(logData)});
-                    f.open('w');
-                    f.encoding = 'UTF-8';
-                    f.write(JSON.stringify(list, null, 2));
-                    f.close();
-                `);
-            } catch(e) { console.log("Learning log error", e); }
-        },
-
-        /**
-         * verifyTcRefFootprint: Verifica que el footprint del TC de referència coincideixi amb els talls V1.
-         */
         verifyTcRefFootprint: async function (refTime, tolerance = 0.5) {
             const clips = await getClipsLogic().getTrackClips(1, 'video');
             if (!clips || clips.length === 0) return false;
-
             for (var i = 0; i < clips.length; i++) {
-                var gap = Math.abs(clips[i].start - refTime);
-                if (gap < tolerance) return true;
-                gap = Math.abs(clips[i].end - refTime);
-                if (gap < tolerance) return true;
+                if (Math.abs(clips[i].start - refTime) < tolerance) return true;
+                if (Math.abs(clips[i].end - refTime) < tolerance) return true;
             }
             return false;
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // COL·LOCACIÓ PER TIPUS (Botons CHYRONS)
+        // ═══════════════════════════════════════════════════════════════
+
+        _snapToNearestCut: async function(idealTimeSec) {
+            const clips = await getClipsLogic().getTrackClips(1, "video");
+            if (!clips || clips.length === 0) return idealTimeSec;
+            let bestClip = clips[0];
+            let bestDist = Math.abs(clips[0].start - idealTimeSec);
+            for (let i = 1; i < clips.length; i++) {
+                const dist = Math.abs(clips[i].start - idealTimeSec);
+                if (dist < bestDist) { bestDist = dist; bestClip = clips[i]; }
+            }
+            log(`   🎯 [_snap] ideal=${idealTimeSec.toFixed(2)}s → clip @ ${bestClip.start.toFixed(2)}s (Δ=${bestDist.toFixed(2)}s)`);
+            return bestClip.start;
+        },
+
+        _freezeTemaTitol: async function (wottName, placeTime, stretchEnd, label) {
+            const cfg = FASTPASS_UI.Config.get();
+            const T_THEME = cfg.tracks.video.tematitol;
+            const utils = getUtils();
+            const escapedWott = utils.escape(wottName);
+            const CUT_OFFSET = 8.0;
+            log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+            const cutTime = placeTime + CUT_OFFSET;
+            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
+            await utils.delay(500);
+            const tempPath = `C:\\temp\\freeze_${Date.now()}.png`;
+            await callJSX(`Timeline.set(${cutTime})`);
+            await utils.delay(500);
+            await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
+            const snapResult = await callJSX(`freezeFrame('${utils.escape(tempPath)}', ${cutTime})`);
+            log(`   📸 [_freeze] freezeFrame → ${snapResult}`);
+            await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
+            await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
+            log(`   ✂️ [_freeze] Clip retallat a end=${cutTime.toFixed(2)}s`);
+            if (!snapResult || snapResult.indexOf('OK') !== 0) {
+                log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
+                return { success: false, duration: 0 };
+            }
+            const fileName = tempPath.split("\\").pop();
+            const importPayload = JSON.stringify([tempPath]);
+            await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'root')`);
+            let duration;
+            if (stretchEnd !== null && stretchEnd !== undefined) {
+                duration = Math.max(stretchEnd - cutTime, 0.5);
+            } else {
+                const timelineDur = parseFloat(await callJSX("Timeline.duration()") || "0");
+                duration = Math.max(timelineDur - cutTime, 0.5);
+            }
+            await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
+            log(`   ✅ [_freeze] PNG "${fileName}" → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s`);
+            return { success: true, duration };
+        },
+
+        _placeChyronsByType: async function (filterFn, trackResolver, label) {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
+            if (!struct || struct.length === 0) {
+                log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
+                return;
+            }
+            try {
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => {
+                    const cmt = (m.comments || "").trim();
+                    return STRUCTURAL_COMMENTS_RE.test(cmt);
+                });
+                if (structuralMarkers.length === 0) {
+                    log(`⚠️ [${label}] No hi ha marcadors estructurals. Clica MARCADORS primer.`, "WARN");
+                    return;
+                }
+                const markersFull = [];
+                for (const m of structuralMarkers) {
+                    const parts = (m.comments || "").split("-");
+                    if (parts.length > 0) {
+                        const rawId = parts[0].trim();
+                        const numMatch = rawId.match(/^(\d+)/);
+                        if (numMatch) {
+                            markersFull.push({ fullId: rawId, blockNum: numMatch[1].padStart(2, "0"), time: m.time });
+                        }
+                    }
+                }
+                markersFull.sort((a, b) => a.time - b.time);
+                log(`🔗 [${label}] ${markersFull.length} marcadors: ${markersFull.map(m => m.fullId + '@' + m.time.toFixed(1)).join(', ')}`);
+
+                const structureById = {};
+                for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
+
+                let placedCount = 0;
+                for (const mk of markersFull) {
+                    const entry = structureById[mk.fullId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
+                    const matching = entry.chyrons.filter(c => filterFn(c));
+                    if (matching.length === 0) continue;
+                    matching.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+                    log(`📌 [${label}] Marcador ${mk.fullId}: ${matching.length} chyron(s)`);
+                    for (const chy of matching) {
+                        const tcSeconds = getUtils().timeToSeconds(chy.tc || "000000");
+                        const idealTime = mk.time + tcSeconds;
+                        const placeTime = await this._snapToNearestCut(idealTime);
+                        const track = trackResolver(chy, cfg);
+                        const escapedName = getUtils().escape(chy.name);
+                        await callJSX(`Clips.insert('${escapedName}', ${track}, ${placeTime}, null, 'video')`);
+                        log(`   ✅ [${label}] ${chy.name} → V${track} @ ${placeTime.toFixed(2)}s`);
+                        placedCount++;
+                    }
+                }
+                if (placedCount === 0) {
+                    log(`⚠️ [${label}] Cap chyron per col·locar.`, "WARN");
+                } else {
+                    log(`🎬 [${label}] ${placedCount} chyron(s) col·locat(s).`, "INFO");
+                    getUtils().status(`${label}: ${placedCount} col·locat(s)`, "exito");
+                }
+            } catch (e) { getUtils().handleError(e, label); }
+        },
+
+        placeChyronTitol: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
+            const T_THEME = cfg.tracks.video.tematitol;
+            if (!struct || struct.length === 0) {
+                log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
+                return;
+            }
+            try {
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => {
+                    const cmt = (m.comments || "").trim();
+                    return STRUCTURAL_COMMENTS_RE.test(cmt);
+                });
+                if (structuralMarkers.length === 0) {
+                    log("⚠️ [Titol] No hi ha marcadors estructurals. Clica MARCADORS primer.", "WARN");
+                    return;
+                }
+                const markersFull = [];
+                for (const m of structuralMarkers) {
+                    const parts = (m.comments || "").split("-");
+                    if (parts.length > 0) {
+                        const rawId = parts[0].trim();
+                        const numMatch = rawId.match(/^(\d+)/);
+                        if (numMatch) {
+                            markersFull.push({ fullId: rawId, blockNum: numMatch[1].padStart(2, "0"), time: m.time });
+                        }
+                    }
+                }
+                markersFull.sort((a, b) => a.time - b.time);
+                const structureById = {};
+                for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
+                log(`🔬 [Titol·DIAG] structureById keys: [${Object.keys(structureById).sort().join(", ")}]`);
+                log(`🔬 [Titol·DIAG] markersFull: ${markersFull.map(m => m.fullId + '@' + m.time.toFixed(1)).join(', ')}`);
+
+                let placedCount = 0;
+                for (let mi = 0; mi < markersFull.length; mi++) {
+                    const mk = markersFull[mi];
+                    const fullId = mk.fullId;
+                    const markerTime = mk.time;
+                    const entry = structureById[fullId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) {
+                        log(`🔬 [Titol·DIAG] Marcador ${fullId}@${markerTime.toFixed(1)}s: sense entry.`);
+                        continue;
+                    }
+                    log(`🔬 [Titol·DIAG] Marcador ${fullId}: ${entry.chyrons.length} chyrons`);
+                    const temaTitols = entry.chyrons.filter(c =>
+                        c.name.includes("Tema-Titol") || c.name.includes("TITOL")
+                    );
+                    if (temaTitols.length === 0) continue;
+                    if (!/[a-z]/i.test(fullId)) {
+                        log(`🔬 [Titol·DIAG] Marcador ${fullId}: sense sufix → ignorat.`);
+                        continue;
+                    }
+                    const longTemaTitols = temaTitols.filter(c => (c.rol || '') === 'Tema-Titol');
+                    if (longTemaTitols.length === 0) {
+                        log(`⚠️ [Titol] Marcador ${fullId}: cap Tema‑Titol amb rol='Tema-Titol'.`);
+                        continue;
+                    }
+                    longTemaTitols.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+                    for (let ti = 0; ti < longTemaTitols.length; ti++) {
+                        const tt = longTemaTitols[ti];
+                        const tcSeconds = getUtils().timeToSeconds(tt.tc || "000000");
+                        const placeTime = markerTime + tcSeconds;
+                        let stretchEnd = null;
+                        if (ti < longTemaTitols.length - 1) {
+                            const nextTc = getUtils().timeToSeconds(longTemaTitols[ti + 1].tc || "000000");
+                            stretchEnd = markerTime + nextTc;
+                        } else if (mi < markersFull.length - 1) {
+                            stretchEnd = markersFull[mi + 1].time;
+                        }
+                        log(`📌 [Titol] Marcador ${fullId} #${ti+1}/${longTemaTitols.length}: V5 @ ${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+                        try {
+                            const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
+                            if (freezeResult && freezeResult.success) {
+                                log(`   🖼️ [Titol] Freeze: ${tt.name} → ${freezeResult.duration.toFixed(1)}s`);
+                            }
+                        } catch (freezeErr) {
+                            log(`   ⚠️ [Titol] Freeze fallit: ${freezeErr.message}`, "WARN");
+                        }
+                        placedCount++;
+                    }
+                }
+                if (placedCount === 0) {
+                    log("⚠️ [Titol] Cap Tema‑Titol per col·locar.", "WARN");
+                } else {
+                    log(`🎬 [Titol] ${placedCount} Tema‑Títol(s) col·locat(s).`, "INFO");
+                    getUtils().status(`Titol: ${placedCount} col·locat(s)`, "exito");
+                }
+            } catch (e) { getUtils().handleError(e, "Titol"); }
+        },
+
+        placeChyronConductor: async function () {
+            await this._placeChyronsByType(
+                c => (c.rol || '').toUpperCase() === "CONDUCTOR",
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Conductor"
+            );
+        },
+
+        placeChyronLloc: async function () {
+            await this._placeChyronsByType(
+                c => c.name.includes("Lloc") || c.name.includes("Data") || (c.rol || '').toUpperCase() === "LLOCDATA",
+                (c, cfg) => cfg.tracks.video.llocdata,
+                "Lloc"
+            );
+        },
+
+        placeChyronNom: async function () {
+            await this._placeChyronsByType(
+                c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec"),
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Nom"
+            );
+        },
+
+        placeChyronTraduccio: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
+            const T_TRAD = cfg.tracks.video.graf;
+            if (!struct || struct.length === 0) {
+                log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
+                return;
+            }
+            try {
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => {
+                    const cmt = (m.comments || "").trim();
+                    return STRUCTURAL_COMMENTS_RE.test(cmt);
+                });
+                if (structuralMarkers.length === 0) {
+                    log("⚠️ [Traducció] No hi ha marcadors estructurals.", "WARN");
+                    return;
+                }
+                const markersFull = [];
+                for (const m of structuralMarkers) {
+                    const parts = (m.comments || "").split("-");
+                    if (parts.length > 0) {
+                        const rawId = parts[0].trim();
+                        const numMatch = rawId.match(/^(\d+)/);
+                        if (numMatch) {
+                            markersFull.push({ fullId: rawId, blockNum: numMatch[1].padStart(2, "0"), time: m.time });
+                        }
+                    }
+                }
+                markersFull.sort((a, b) => a.time - b.time);
+                const structureById = {};
+                for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
+
+                let placedCount = 0;
+                for (const mk of markersFull) {
+                    const entry = structureById[mk.fullId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
+                    const traduccions = entry.chyrons.filter(c =>
+                        (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO")
+                    );
+                    if (traduccions.length === 0) continue;
+
+                    const groups = new Map();
+                    for (const t of traduccions) {
+                        const tc = t.tc || "00.00";
+                        if (!groups.has(tc)) groups.set(tc, []);
+                        groups.get(tc).push(t);
+                    }
+                    log(`📌 [Traducció] Marcador ${mk.fullId}: ${traduccions.length} trad. en ${groups.size} grup(s)`);
+
+                    for (const [tc, group] of groups) {
+                        const tcSeconds = getUtils().timeToSeconds(tc);
+                        const idealTime = mk.time + tcSeconds;
+                        const clipStart = await this._snapToNearestCut(idealTime);
+
+                        const clips = await getClipsLogic().getTrackClips(1, "video");
+                        let clipEnd = clipStart + 10;
+                        let foundStart = false;
+                        for (let ci = 0; ci < clips.length; ci++) {
+                            const cl = clips[ci];
+                            if (Math.abs(cl.start - clipStart) < 0.05) {
+                                clipEnd = cl.end; foundStart = true;
+                                let nextIdx = ci + 1;
+                                while (nextIdx < clips.length && (clips[nextIdx].end - clips[nextIdx].start) < 0.5) {
+                                    log(`   ⚡ [Traducció] Flash a ${clips[nextIdx].start.toFixed(2)}s`);
+                                    nextIdx++;
+                                }
+                                if (nextIdx > ci + 1) {
+                                    if (nextIdx < clips.length) clipEnd = clips[nextIdx].start;
+                                    else clipEnd = clips[nextIdx - 1].end + 1.0;
+                                }
+                                break;
+                            }
+                        }
+                        const clipDur = clipEnd - clipStart;
+                        const extractSeq = (c) => {
+                            const match = (c.rol || '').match(/\[(\d+)-\d+\]/);
+                            return match ? parseInt(match[1], 10) : 999;
+                        };
+                        group.sort((a, b) => extractSeq(a) - extractSeq(b));
+                        const N = group.length;
+                        log(`   📦 [Traducció] TC=${tc}: ${N} clips @ ${clipStart.toFixed(2)}s (dur=${clipDur.toFixed(2)}s)`);
+                        for (let i = 0; i < N; i++) {
+                            const slotDur = clipDur / N;
+                            const placeTime = clipStart + slotDur * i;
+                            const placeEnd = (i === N - 1) ? clipStart + clipDur : clipStart + slotDur * (i + 1);
+                            const escapedName = getUtils().escape(group[i].name);
+                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, ${placeEnd}, 'video')`);
+                            log(`      ✅ [${i+1}/${N}] → V3 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s`);
+                            placedCount++;
+                        }
+                    }
+                }
+                if (placedCount === 0) {
+                    log("⚠️ [Traducció] Cap traducció.", "WARN");
+                } else {
+                    log(`🎬 [Traducció] ${placedCount} trad. col·locades.`, "INFO");
+                    getUtils().status(`Traducció: ${placedCount}`, "exito");
+                }
+            } catch (e) { getUtils().handleError(e, "Traducció"); }
+        },
+
+        placeChyronResto: async function () {
+            const isTitol = c => c.name.includes("Tema-Titol") || c.name.includes("TITOL");
+            const isConductor = c => (c.rol || '').toUpperCase() === "CONDUCTOR";
+            const isLloc = c => c.name.includes("Lloc") || c.name.includes("Data") || (c.rol || '').toUpperCase() === "LLOCDATA";
+            const isNom = c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec");
+            const isTraduccio = c => (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO");
+            await this._placeChyronsByType(
+                c => !isTitol(c) && !isConductor(c) && !isLloc(c) && !isNom(c) && !isTraduccio(c),
+                (c, cfg) => cfg.tracks.video.chyrons,
+                "Resto"
+            );
+        },
+
+        placeChyronRepartir: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const T_V1 = cfg.tracks.video.mp4;
+            const T_V3 = cfg.tracks.video.graf;
+            const struct = FASTPASS_UI.State.structure || [];
+            const rolByName = new Map();
+            for (const entry of struct) {
+                if (entry.chyrons) {
+                    for (const chy of entry.chyrons) rolByName.set(chy.name, chy.rol || '');
+                }
+            }
+            try {
+                const v1Count = parseInt(await callJSX(`Clips.count(${T_V1}, 'video')`) || '0');
+                const v3Count = parseInt(await callJSX(`Clips.count(${T_V3}, 'video')`) || '0');
+                const selectedV1 = [];
+                for (let i = 0; i < v1Count; i++) {
+                    const raw = await callJSX(`Clips.get(${T_V1}, ${i}, 'video')`);
+                    if (!raw || raw === 'null') continue;
+                    const clip = JSON.parse(raw);
+                    if (clip.selected) selectedV1.push(clip);
+                }
+                const selectedV3 = [];
+                for (let i = 0; i < v3Count; i++) {
+                    const raw = await callJSX(`Clips.get(${T_V3}, ${i}, 'video')`);
+                    if (!raw || raw === 'null') continue;
+                    const clip = JSON.parse(raw);
+                    if (clip.selected) selectedV3.push(clip);
+                }
+                log(`🎯 [Repartir] V1: ${selectedV1.length}, V3: ${selectedV3.length}`);
+                if (selectedV3.length === 0 || selectedV1.length === 0) {
+                    log("⚠️ [Repartir] Selecciona V3 + V1 amb Ctrl+clic.", "WARN");
+                    getUtils().status("Selecciona V3 + V1", "warn");
+                    return;
+                }
+                selectedV3.sort((a, b) => a.start - b.start);
+                selectedV1.sort((a, b) => a.start - b.start);
+
+                const groups = [];
+                let currentGroup = [selectedV3[0]];
+                for (let i = 1; i < selectedV3.length; i++) {
+                    const gap = selectedV3[i].start - currentGroup[currentGroup.length - 1].end;
+                    if (gap < 3.0) currentGroup.push(selectedV3[i]);
+                    else { groups.push(currentGroup); currentGroup = [selectedV3[i]]; }
+                }
+                groups.push(currentGroup);
+                log(`📦 [Repartir] ${groups.length} tram(s)`);
+
+                let placedCount = 0;
+                await callJSX(`Clips.clearTrack(${T_V3}, 'video')`);
+                log(`   🧹 [Repartir] V3 netejat`);
+
+                const rangeStart = selectedV1[0].start;
+                const rangeEnd = selectedV1[selectedV1.length - 1].end;
+                const rangeDur = rangeEnd - rangeStart;
+
+                for (let gi = 0; gi < groups.length; gi++) {
+                    const group = groups[gi];
+                    const extractTotal = (c) => {
+                        const rol = rolByName.get(c.name) || c.rol || '';
+                        const match = rol.match(/\[(\d+)-(\d+)\]/);
+                        return match ? parseInt(match[2], 10) : group.length;
+                    };
+                    const extractSeq = (c) => {
+                        const rol = rolByName.get(c.name) || c.rol || '';
+                        const match = rol.match(/\[(\d+)-(\d+)\]/);
+                        return match ? parseInt(match[1], 10) : 999;
+                    };
+                    const M = Math.max(...group.map(c => extractTotal(c)), group.length);
+                    const N = group.length;
+                    const slotDur = rangeDur / M;
+                    log(`   📐 [Repartir] Tram ${gi+1}/${groups.length}: ${N}/${M} trad. slotDur=${slotDur.toFixed(2)}s`);
+
+                    group.sort((a, b) => extractSeq(a) - extractSeq(b));
+                    const seqToChy = new Map();
+                    for (const chy of group) seqToChy.set(extractSeq(chy), chy);
+
+                    for (let s = 0; s < M; s++) {
+                        const seqNum = s + 1;
+                        const chy = seqToChy.get(seqNum) || null;
+                        if (chy) {
+                            const newStart = rangeStart + slotDur * s;
+                            const newEnd = (s === M - 1) ? rangeEnd : rangeStart + slotDur * (s + 1);
+                            const escapedName = getUtils().escape(chy.name);
+                            await callJSX(`Clips.insert('${escapedName}', ${T_V3}, ${newStart}, ${newEnd}, 'video')`);
+                            log(`      ✅ [${seqNum}/${M}] → V3 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s`);
+                            placedCount++;
+                        } else log(`      ⬜ [${seqNum}/${M}] buit`);
+                        if (s % 3 === 2) await getUtils().delay(100);
+                    }
+                }
+                getUtils().status(`Repartit: ${placedCount} trad.`, "exito");
+                log(`🎬 [Repartir] ${placedCount} trad. repartides.`, "INFO");
+            } catch (e) { getUtils().handleError(e, "Repartir"); }
         }
+
     };
 
     window.FASTPASS_UI.Workflows.Chyrons = FASTPASS_UI.Workflows.Chyrons;
