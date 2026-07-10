@@ -165,7 +165,7 @@ var isUserDraggingSlider = false;
         if (btnChyronTraduccio) btnChyronTraduccio.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronTraduccio'));
         if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronResto'));
         const btnChyronRepartir = document.getElementById('btnChyronRepartir');
-        if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronRepartir'));
+        if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'repartirChyronTraduccio'));
         // --- WORKFLOW: SRT (SUBTÍTULOS) ---
         const btnSrtWork = document.getElementById('btnSrtWork');
         const btnSrtIn = document.getElementById('btnSrtIn');

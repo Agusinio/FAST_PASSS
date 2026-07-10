@@ -104,11 +104,11 @@
                     const isOffF = (blockId.length >= 2 && blockId[blockId.length - 1] === 'f');
 
                     if (isOffF) {
-                        const conductorStart = await this._placeOffGfx(block, headClip, cfgTracks, conductorFile);
+                        const conductorStart = await this._placeOffBlockChyrons(block, headClip, cfgTracks, conductorFile);
                         if (conductorStart !== null) { lastConductorTime = conductorStart; conductorPlaced = true; }
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     } else {
-                        await this._placeIntroGfx(block, headClip, cfgTracks);
+                        await this._placeIntroBlockChyrons(block, headClip, cfgTracks);
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     }
                 }
@@ -127,11 +127,11 @@
                     const isOffF = (blockId.length >= 2 && blockId[blockId.length - 1] === 'f');
 
                     if (isOffF) {
-                        const conductorStart = await this._placeOffGfx(block, headClip, cfgTracks, conductorFile);
+                        const conductorStart = await this._placeOffBlockChyrons(block, headClip, cfgTracks, conductorFile);
                         if (conductorStart !== null) { lastConductorTime = conductorStart; conductorPlaced = true; }
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     } else {
-                        await this._placeIntroGfx(block, headClip, cfgTracks);
+                        await this._placeIntroBlockChyrons(block, headClip, cfgTracks);
                         await this._placeMagicChyrons(block, headClip, cfgTracks, clips, markerMap, lastConductorTime);
                     }
                 }
@@ -153,7 +153,7 @@
             } catch (e) { log(`❌ Error en runAutoPlacement: ${e.message}`); }
         },
 
-        _placeIntroGfx: async function (block, clip, tracks) {
+        _placeIntroBlockChyrons: async function (block, clip, tracks) {
             const start = clip.start;
             const tematitol = block.chyrons.find(c => c.name.includes("Tema-Titol") || c.name.includes("TITOL"));
             const conductor = block.chyrons.find(c => (c.rol || '').toUpperCase() === "CONDUCTOR");
@@ -167,7 +167,7 @@
             }
         },
 
-        _placeOffGfx: async function (block, clip, tracks, conductorFile) {
+        _placeOffBlockChyrons: async function (block, clip, tracks, conductorFile) {
             const start = clip.start;
             const conductorStart = start + 0.4;
             const conductorTrack = tracks.chyrons || 5;
@@ -191,7 +191,7 @@
             return null;
         },
 
-        _placeOffVideoGfx: async function (block, clip, tracks, conductorStart) {
+        _placeOffVideoChyrons: async function (block, clip, tracks, conductorStart) {
             const tematitol = block.chyrons.find(c => c.name.includes("Tema-Titol") || c.name.includes("TITOL"));
             if (!tematitol) return;
             const tematitolStart = conductorStart ? conductorStart + 4.10 : clip.start + 4.5;
@@ -638,7 +638,7 @@
             );
         },
 
-        placeChyronRepartir: async function () {
+        repartirChyronTraduccio: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const T_V1 = cfg.tracks.video.mp4;
