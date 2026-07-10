@@ -311,14 +311,16 @@
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
             await utils.delay(500);
 
-            // 2. Aïllar V5 (només el Tema‑Titol visible), posicionar cabezal i fer snapshot
+            // 2. Aïllar V5 (només el Tema‑Titol visible), després posicionar cabezal i fer snapshot
+            await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
             await callJSX(`Timeline.set(${cutTime})`);
             await utils.delay(500);
-            await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
 
-            const snapPath = `C:\\temp\\freeze_${Date.now()}.png`;
+            // Guardar PNG al directori del projecte (Snapshots)
+            const folder = await callJSX("Context.folder()");
+            const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`;
             const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${cutTime})`);
-            log(`   📸 [_freeze] Render.snapshot → ${snapResult}`);
+            log(`   📸 [_freeze] Render.snapshot → ${snapResult} (path=${snapPath})`);
 
             // 3. Restaurar visibilitat de totes les pistes
             await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
@@ -332,12 +334,19 @@
                 return { success: false, duration: 0 };
             }
 
-            // 5. Importar PNG al bin CHY
+            // 5. Movem el PNG de C:\temp\ al destí final (Render.snapshot escriu a C:\temp\ per defecte)
+            try {
+                window.cep.fs.deleteFile(snapPath);
+            } catch (e) {}
+            const tempPng = `C:\\temp\\${snapPath.split("\\").pop()}`;
+            window.cep.fs.rename(tempPng, snapPath);
+
+            // 6. Importar PNG al bin CHY
             const fileName = snapPath.split("\\").pop();
             const importPayload = JSON.stringify([snapPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'CHY')`);
 
-            // 6. Determinar durada i inserir PNG estirat a V5 des de cutTime fins a stretchEnd
+            // 7. Determinar durada i inserir PNG estirat a V5 des de cutTime fins a stretchEnd
             let duration;
             if (stretchEnd !== null && stretchEnd !== undefined) {
                 duration = Math.max(stretchEnd - cutTime, 0.5);
