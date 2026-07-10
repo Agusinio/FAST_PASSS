@@ -786,11 +786,27 @@
                 return;
             }
 
-            var movesJson = JSON.stringify(moves);
-            var resultRaw = await callJSX('Markers.moveByPrefixes(\'' + movesJson + '\')');
-            var result = { moved: 0 };
-            try { result = JSON.parse(resultRaw); } catch (e) {}
-
+            // BUG#F5: moveByPrefixes usa start.seconds = que NO refresca visualment.
+            // Usar _safePlaceByPrefixes (delete+create) en lloc de moveByPrefixes.
+            var placements = [];
+            for (var mv = 0; mv < moves.length; mv++) {
+                var mvPrefix = moves[mv].prefix;
+                var foundMk = null;
+                for (var fi = 0; fi < existingMarkers.length; fi++) {
+                    if (_extractPrefix(existingMarkers[fi].comments || '') === mvPrefix) {
+                        foundMk = existingMarkers[fi];
+                        break;
+                    }
+                }
+                var mkColor = (foundMk && typeof foundMk.color === 'number' && foundMk.color >= 0) ? foundMk.color : 6;
+                placements.push({
+                    prefix: mvPrefix,
+                    timeSec: moves[mv].newTimeSec,
+                    comment: foundMk ? (foundMk.comments || '') : '',
+                    colorIdx: mkColor
+                });
+            }
+            var result = await this._safePlaceByPrefixes(placements, 'F5·Orphans');
             log('🟢 [F5·Orphans] Moguts: ' + (result.moved || 0) + '. ✓ FINALITZAT.');
         },
 
