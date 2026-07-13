@@ -588,6 +588,7 @@
 
             var placements = [];
             var itemPositions = new Map();
+            var placedByD10 = {}; // Evita duplicar el mateix ítem per D10 + bucle
 
             if (structuralItems.length > 0) {
                 var firstItem = structuralItems[0];
@@ -612,6 +613,7 @@
                         var firstComment = firstNum + ' - ' + firstTitol;
                         placements.push({ prefix: firstNum, timeSec: 0, comment: firstComment.trim(), colorIdx: 6 });
                         itemPositions.set(firstNum, 0);
+                        placedByD10[firstNum] = true;
                         log('🟠 [F2·Deducido] Forçant marcador 1r ítem ' + firstNum + ' a 00:00 (no existia)');
                     }
                 }
@@ -619,8 +621,15 @@
 
             for (var si = 0; si < structuralItems.length; si++) {
                 var line = structuralItems[si];
+                var lineNum = line.num;
                 var onAir = line.horaEntradaOnAir;
                 var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
+
+                // Saltar ítems ja col·locats per D10 (evita duplicat)
+                if (lineNum && placedByD10[lineNum]) {
+                    log('   ⏭️ [F2·Deduced] ' + lineNum + ': ja col·locat per D10 a 00:00. Saltant.');
+                    continue;
+                }
 
                 if (hasOnAir) continue; // F1 ja l'ha col·locat
 

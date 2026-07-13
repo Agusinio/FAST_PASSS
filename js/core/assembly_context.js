@@ -189,14 +189,37 @@
 
             // D12: Excloure l'últim item no agrupat del bloc (és el final, l'usuari ja l'ha trimeat)
             // Només retornar items intercalats (ex: un 02DP entre 01 i 02)
+            // Però si l'últim té OnAir real, NO és el final trimeat → és un faro, l'inclourem.
             if (ungroupedCandidates.length === 1) return null;  // Només hi ha el final
 
-            // Ordenar per temps i retornar el primer que NO sigui l'últim
+            // Ordenar per temps
             ungroupedCandidates.sort(function(a, b) { return a.timeSec - b.timeSec; });
             var lastCandidate = ungroupedCandidates[ungroupedCandidates.length - 1];
+
+            // Si l'últim candidat té OnAir real, NO és el final trimeat → retornar-lo
+            var lastItem = lastCandidate.item;
+            var lastHasOnAir = lastItem && lastItem.horaEntradaOnAir
+                && lastItem.horaEntradaOnAir !== '00:00:00'
+                && lastItem.horaEntradaOnAir.trim() !== '';
+
+            // Buscar el primer que NO sigui gràfic i que tingui OnAir (faro) o sigui final trimeat
             for (var u = 0; u < ungroupedCandidates.length; u++) {
-                if (ungroupedCandidates[u].item !== lastCandidate.item) {
-                    return ungroupedCandidates[u].item;  // Primer no-final
+                var cand = ungroupedCandidates[u];
+                var candItem = cand.item;
+                // Saltar gràfics
+                if (candItem && window.FASTPASS_UI.Workflows.Markers._isGraphicByNum(candItem.num)) {
+                    continue;
+                }
+                // Si té OnAir real, és un faro → retornar-lo
+                var candHasOnAir = candItem && candItem.horaEntradaOnAir
+                    && candItem.horaEntradaOnAir !== '00:00:00'
+                    && candItem.horaEntradaOnAir.trim() !== '';
+                if (candHasOnAir) {
+                    return candItem;
+                }
+                // Si és el final trimeat (no OnAir) i NO és l'últim → retornar-lo
+                if (cand.item !== lastItem) {
+                    return cand.item;
                 }
             }
             return null;  // Tots són el final
