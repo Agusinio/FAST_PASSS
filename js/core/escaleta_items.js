@@ -119,7 +119,20 @@
             if (prevOnAir && prevOnAir !== "00:00:00") {
                 var anchorSec = this.tcToSeconds(prevOnAir);
                 var anchorDur = this.parseDurada(prevItem.duradaOnAir || prevItem.durada);
-                return anchorSec + anchorDur + accumulatedDur;
+                var result = anchorSec + anchorDur + accumulatedDur;
+                // BUG #21: Si l'ítem objectiu té horaEntradaPrevista i aquesta és
+                // ANTERIOR al resultat deduït, usar la Prevista. Això passa quan
+                // l'àncora trobada (OnAir real) pertany a un ítem que a la escaleta
+                // va DESPRÉS de l'ítem actual (ex: 01dir va abans que 01).
+                var itemPrevista = item.horaEntradaPrevista;
+                if (itemPrevista && itemPrevista !== "00:00:00") {
+                    var previstaSec = this.tcToSeconds(itemPrevista);
+                    if (previstaSec !== null && previstaSec < result) {
+                        log('   📋 [deduceOnAirEntrada] "' + (item.num || '?') + '": Prevista=' + previstaSec.toFixed(1) + 's < deduced=' + result.toFixed(1) + 's. Guanya Prevista (ítem anterior a l\'àncora).');
+                        return previstaSec;
+                    }
+                }
+                return result;
             }
 
             if (this.isItemEstructural(prevItem)) {
