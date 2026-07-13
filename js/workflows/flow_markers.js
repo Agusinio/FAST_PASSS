@@ -590,21 +590,31 @@
             var itemPositions = new Map();
             var placedByD10 = {}; // Evita duplicar el mateix ítem per D10 + bucle
 
+            // ── Carregar marcadors existents (faros de F1) per anclar deduïts ──
+            var markersRaw2 = await callJSX('Markers.get()');
+            var allMarkersF2 = [];
+            try { allMarkersF2 = JSON.parse(markersRaw2); } catch (e) {}
+            // Indexar faros per prefix
+            var faroPositions = {};  // "01" → timelineSec, "03" → ...
+            var _extractPrefixF2 = function(c) {
+                if (!c) return '';
+                var idx = c.indexOf(' -');
+                return idx > 0 ? c.substring(0, idx).trim() : '';
+            };
+            for (var fi = 0; fi < allMarkersF2.length; fi++) {
+                var pfx = _extractPrefixF2(allMarkersF2[fi].comments || '');
+                if (pfx) faroPositions[pfx] = (typeof allMarkersF2[fi].time === 'number') ? allMarkersF2[fi].time : parseFloat(allMarkersF2[fi].time);
+            }
+
             if (structuralItems.length > 0) {
                 var firstItem = structuralItems[0];
                 var firstNum = firstItem.num;
                 if (firstNum) {
-                    var markersRaw2 = await callJSX('Markers.get()');
-                    var allMarkers2 = [];
-                    try { allMarkers2 = JSON.parse(markersRaw2); } catch (e) {}
                     var hasFirstItemMarker = false;
-                    for (var mi2 = 0; mi2 < allMarkers2.length; mi2++) {
-                        var mk2 = allMarkers2[mi2];
+                    for (var mi2 = 0; mi2 < allMarkersF2.length; mi2++) {
+                        var mk2 = allMarkersF2[mi2];
                         if (typeof mk2.time === 'number' && Math.abs(mk2.time) < 0.02) {
-                            var mkPrefix2 = '';
-                            var mkComment2 = mk2.comments || '';
-                            var spaceDashIdx2 = mkComment2.indexOf(' -');
-                            if (spaceDashIdx2 > 0) mkPrefix2 = mkComment2.substring(0, spaceDashIdx2).trim();
+                            var mkPrefix2 = _extractPrefixF2(mk2.comments || '');
                             if (mkPrefix2 === String(firstNum)) { hasFirstItemMarker = true; break; }
                         }
                     }
@@ -616,6 +626,31 @@
                         placedByD10[firstNum] = true;
                         log('🟠 [F2·Deducido] Forçant marcador 1r ítem ' + firstNum + ' a 00:00 (no existia)');
                     }
+                }
+            }
+
+            // ── Construir mapa auxiliar: per a cada ítem deduït, trobar límits faro ──
+            // Ordenar structuralItems per deduir l'ordre (ja ho estan per hora)
+            var faroLimitMap = {};  // num → {leftFaroTime, rightFaroTime, leftNum}
+            var prevFaroNum = null;
+            var prevFaroTime = 0;
+            for (var si = 0; si < structuralItems.length; si++) {
+                var lineSi = structuralItems[si];
+                var numSi = lineSi.num;
+                var hasFaro = (faroPositions[numSi] !== undefined);
+                if (hasFaro) {
+                    // Assignar faro com a right limit als items pendents entre prevFaro i aquest
+                    for (var li in faroLimitMap) {
+                        if (faroLimitMap[li].rightFaroTime === null) {
+                            faroLimitMap[li].rightFaroTime = faroPositions[numSi];
+                            faroLimitMap[li].rightNum = numSi;
+                        }
+                    }
+                    prevFaroNum = numSi;
+                    prevFaroTime = faroPositions[numSi];
+                } else {
+                    // Item sense faro (deduït): assignar left limit
+                    faroLimitMap[numSi] = { leftFaroTime: prevFaroTime, leftNum: prevFaroNum, rightFaroTime: null, rightNum: null };
                 }
             }
 
@@ -631,13 +666,26 @@
                     continue;
                 }
 
-                if (hasOnAir) continue; // F1 ja l'ha col·locat
+                if (hasOnAir || faroPositions[lineNum] !== undefined) continue; // F1 ja l'ha col·locat
 
                 var deduced = reader._deduceOnAirEntrada(line, manifest.escaletaItems, null);
                 if (deduced === null) continue;
 
                 var idealPosSec = anchorEfTimelineSec + (deduced - anchorEfectiva);
                 if (idealPosSec < 0) idealPosSec = 0;
+
+                // Anclar entre faros adyacents per preservar l'ordre de l'escaleta
+                var limits = faroLimitMap[lineNum];
+                if (limits) {
+                    if (limits.rightFaroTime !== null && idealPosSec >= limits.rightFaroTime) {
+                        idealPosSec = limits.rightFaroTime - 0.5;  // 0.5s abans del faro
+                        log('   ⏪ [F2·Clamp] ' + lineNum + ': deduced=' + deduced.toFixed(1) + 's → clampat a ' + idealPosSec.toFixed(2) + 's (límit dret: ' + limits.rightNum + '@' + limits.rightFaroTime.toFixed(2) + 's)');
+                    }
+                    if (limits.leftFaroTime > 0 && idealPosSec < limits.leftFaroTime + 0.5) {
+                        idealPosSec = limits.leftFaroTime + 0.5;  // 0.5s després del faro anterior
+                        log('   ⏩ [F2·Clamp] ' + lineNum + ': clampat a ' + idealPosSec.toFixed(2) + 's (límit esquerre: ' + limits.leftNum + '@' + limits.leftFaroTime.toFixed(2) + 's)');
+                    }
+                }
 
                 var safeT = idealPosSec;
                 var titol = (line.titol || '').substring(0, 60);
