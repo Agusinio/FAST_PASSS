@@ -104,7 +104,16 @@
             // d'items que pertanyen a un bloc.
             // ignoreAgrupacio=true permet creuar fronteres d'agrupacio
             // (útil per a Tier0-IN quan no hi ha video previ al mateix agrupacio).
-            if (!ignoreAgrupacio && item.agrupacio && prevItem.agrupacio !== item.agrupacio) continue;
+            // BUG #20: Si prevItem té OnAir real (faro), usar-lo com a àncora
+            // encara que el seu agrupacio no coincideixi. Els faros són ítems
+            // reals d'emissió i la seva hora és la font de veritat.
+            if (!ignoreAgrupacio && item.agrupacio && prevItem.agrupacio !== item.agrupacio) {
+                var prevOnAirCheck = prevItem.horaEntradaOnAir;
+                if (!prevOnAirCheck || prevOnAirCheck === "00:00:00" || prevOnAirCheck.trim() === '') {
+                    continue;  // Saltar items no agrupats sense OnAir (logo final)
+                }
+                // Si té OnAir real, usar-lo com a àncora (faros)
+            }
 
             var prevOnAir = prevItem.horaEntradaOnAir;
             if (prevOnAir && prevOnAir !== "00:00:00") {
