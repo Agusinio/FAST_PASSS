@@ -439,15 +439,48 @@
                 const structureById = {};
                 for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
 
-                // Buscar primer marcador base (sense sufix) per saber el clipStart del bloc
+                // Buscar primer marcador per saber el clipStart del bloc
                 const firstMarker = structuralMarkers[0];
-                const firstBase = (firstMarker.comments || "").split("-")[0].trim().match(/^(\d+)/);
                 const clipV1 = await this._findClipAtTime(firstMarker.time);
                 const clipStart = clipV1 ? clipV1.start : firstMarker.time;
-                const placeTime = clipStart + 0.40; // 0:10
-                log(`📌 [Titol] Al principi del bloc @ clipStart+0:10 = ${placeTime.toFixed(2)}s`);
 
-                // Buscar el Tema‑Titol al primer element del bloc amb sufix (dp, i, f, lead) que en tingui
+                // Detectar si hi ha conductor a V6 dins del mateix clip V1
+                let hayConductor = false;
+                let conductPos = 0;
+                const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
+                try {
+                    const v6Count = parseInt(await callJSX(`Clips.count(${cfg.tracks.video.chyrons}, 'video')`) || '0');
+                    if (v6Count > 0) {
+                        const firstV6 = JSON.parse(await callJSX(`Clips.get(${cfg.tracks.video.chyrons}, 0, 'video')`));
+                        if (firstV6 && firstV6.name && firstV6.name.toUpperCase().includes("CONDUCT")) {
+                            hayConductor = true;
+                            conductPos = firstV6.start;
+                            log(`🔬 [Titol] Conductor detectat a V6 @ ${conductPos.toFixed(2)}s`);
+                        }
+                    }
+                } catch (e) {}
+
+                // Decidir posició: si hi ha conductor al mateix clip, calcular marge
+                let placeTime = clipStart + 0.40; // per defecte 0:10
+                if (hayConductor && clipV1 && Math.abs(conductPos - clipStart) < 0.5) {
+                    allMarkers.sort((a, b) => a.time - b.time);
+                    let nextMarkerTime = clipV1.end;
+                    for (const m of allMarkers) {
+                        if (m.time > firstMarker.time + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
+                    }
+                    const margenDisponible = nextMarkerTime - clipStart;
+                    if (margenDisponible >= MIN_MARGEN_CASA) {
+                        placeTime = clipStart + 0.40; // Cas A: Tema‑Titol 1r
+                        log(`📌 [Titol·CasA] Tema‑Titol 1r @ 0:10 = ${placeTime.toFixed(2)}s`);
+                    } else {
+                        placeTime = clipStart + 0.40 + 4.40; // Cas B: Tema‑Titol després a 4:20
+                        log(`📌 [Titol·CasB] Tema‑Titol @ 0:10+4:10 = ${placeTime.toFixed(2)}s`);
+                    }
+                } else {
+                    log(`📌 [Titol] Al principi @ 0:10 = ${placeTime.toFixed(2)}s`);
+                }
+
+                // Buscar el Tema‑Titol al primer element amb sufix (dp, i, f, lead) que en tingui
                 const SUFFIX_PRIORITY = ['dp', 'i', 'lead', 'f'];
                 let temaTitolChy = null;
                 for (const mk of structuralMarkers) {
@@ -456,7 +489,6 @@
                     if (!baseMatch) continue;
                     const base = baseMatch[1];
                     let entry = structureById[rawId] || null;
-                    // Provar per sufix si no directe
                     if (!entry) {
                         for (const suf of SUFFIX_PRIORITY) {
                             if (structureById[base + suf]) { entry = structureById[base + suf]; break; }
@@ -469,7 +501,7 @@
                     if (tt) { temaTitolChy = tt; break; }
                 }
                 if (!temaTitolChy) {
-                    log("⚠️ [Titol] Cap Tema‑Titol trobat a l'entrada del bloc.", "WARN");
+                    log("⚠️ [Titol] Cap Tema‑Titol trobat.", "WARN");
                     return;
                 }
 
@@ -490,8 +522,7 @@
                             if (entry && entry.chyrons && entry.chyrons.some(c =>
                                 (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
                             )) {
-                                nextTemaTitolTime = m.time;
-                                break;
+                                nextTemaTitolTime = m.time; break;
                             }
                         }
                     }
@@ -501,7 +532,6 @@
                 const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : null);
                 log(`📌 [Titol] stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
 
-                // Col·locar Tema‑Titol amb freeze
                 try {
                     const freezeResult = await this._freezeTemaTitol(temaTitolChy.name, placeTime, stretchEnd, temaTitolChy.name);
                     if (freezeResult && freezeResult.success) {
@@ -513,7 +543,7 @@
                 }
             } catch (e) { getUtils().handleError(e, "Titol"); }
         },
-        
+
         _findClipAtTime: async function(timeSec) {
             const clips = await getClipsLogic().getTrackClips(1, "video");
             for (const cl of clips) {
