@@ -473,12 +473,31 @@
                     }
                 } catch (e) {}
 
+                // Per a Titol: si el marcador no té entry directe, provar per base numèrica (01 → 01dp)
+                const SUFFIX_ORDER = ['dp', 'i', 'dir', 'lead', 'f'];
+                const SUFFIX_GRAFIC = ['Chy', 'GF1', 'TE2', 'GF3', 'TD1', 'P7']; // gràfics a ignorar
+
                 let placedCount = 0;
                 for (let mi = 0; mi < markersFull.length; mi++) {
                     const mk = markersFull[mi];
                     const fullId = mk.fullId;
                     const markerTime = mk.time;
-                    const entry = structureById[fullId];
+                    let entry = structureById[fullId];
+                    
+                    // Si no hi ha entry directe, provar per base numèrica + sufixos prioritaris
+                    if (!entry) {
+                        const baseMatch = fullId.match(/^(\d+)/);
+                        if (baseMatch) {
+                            const base = baseMatch[1];
+                            for (const suf of SUFFIX_ORDER) {
+                                if (structureById[base + suf]) {
+                                    entry = structureById[base + suf];
+                                    log(`🔬 [Titol·DIAG] Marcador ${fullId} aparellat amb ${base + suf}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     if (!entry || !entry.chyrons || entry.chyrons.length === 0) {
                         log(`🔬 [Titol·DIAG] Marcador ${fullId}@${markerTime.toFixed(1)}s: sense entry.`);
                         continue;
@@ -488,10 +507,8 @@
                         c.name.includes("Tema-Titol") || c.name.includes("TITOL")
                     );
                     if (temaTitols.length === 0) continue;
-                    if (!/[a-z]/i.test(fullId)) {
-                        log(`🔬 [Titol·DIAG] Marcador ${fullId}: sense sufix → ignorat.`);
-                        continue;
-                    }
+                    // Ja no filtreu per sufix al fullId — si el marcador base té Tema‑Titol, es col·loca
+                    // (el que importa és que l'entrada aparellada tingui els chyrons correctes)
                     const longTemaTitols = temaTitols.filter(c => (c.rol || '') === 'Tema-Titol');
                     if (longTemaTitols.length === 0) {
                         log(`⚠️ [Titol] Marcador ${fullId}: cap Tema‑Titol amb rol='Tema-Titol'.`);
