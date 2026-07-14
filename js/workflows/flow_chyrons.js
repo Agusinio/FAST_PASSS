@@ -433,6 +433,9 @@
                 log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
                 return;
             }
+
+            const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s (per decidir Cas A/B)
+
             try {
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
@@ -462,6 +465,21 @@
                 log(`🔬 [Titol·DIAG] structureById keys: [${Object.keys(structureById).sort().join(", ")}]`);
                 log(`🔬 [Titol·DIAG] markersFull: ${markersFull.map(m => m.fullId + '@' + m.time.toFixed(1)).join(', ')}`);
 
+                // Detectar si hi ha un conductor col·locat (buscar clips a V6 propers al primer marcador)
+                let hayConductor = false;
+                let conductPos = 0;
+                try {
+                    const v6Count = parseInt(await callJSX(`Clips.count(${cfg.tracks.video.chyrons}, 'video')`) || '0');
+                    if (v6Count > 0) {
+                        const firstV6 = JSON.parse(await callJSX(`Clips.get(${cfg.tracks.video.chyrons}, 0, 'video')`));
+                        if (firstV6 && firstV6.name && firstV6.name.toUpperCase().includes("CONDUCT")) {
+                            hayConductor = true;
+                            conductPos = firstV6.start;
+                            log(`🔬 [Titol·DIAG] Conductor detectat a V6 @ ${conductPos.toFixed(2)}s`);
+                        }
+                    }
+                } catch (e) {}
+
                 let placedCount = 0;
                 for (let mi = 0; mi < markersFull.length; mi++) {
                     const mk = markersFull[mi];
@@ -487,10 +505,50 @@
                         continue;
                     }
                     longTemaTitols.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
+
+                    // Calcular el clip V1 on cau aquest marcador
+                    const clips = await getClipsLogic().getTrackClips(1, "video");
+                    let clipV1 = null;
+                    for (const cl of clips) {
+                        if (cl.start <= markerTime && cl.end > markerTime) {
+                            clipV1 = cl;
+                            break;
+                        }
+                    }
+                    const clipStart = clipV1 ? clipV1.start : markerTime;
+
+                    // Decidir posició del Tema‑Titol
+                    let placeTimeBase = markerTime; // per defecte
+                    const tcSeconds = getUtils().timeToSeconds(longTemaTitols[0].tc || "000000");
+                    
+                    // Si hi ha conductor i està dins del mateix clip V1, determinar si Cas A o B
+                    if (hayConductor && clipV1 && Math.abs(conductPos - clipStart) < 0.5) {
+                        // Calcular margen fins al proper marcador
+                        let nextMarkerTime = clipV1.end;
+                        for (const m of structuralMarkers) {
+                            if (m.time > markerTime + 0.5) {
+                                nextMarkerTime = Math.min(nextMarkerTime, m.time);
+                                break;
+                            }
+                        }
+                        const margenDisponible = nextMarkerTime - clipStart;
+                        
+                        if (margenDisponible >= MIN_MARGEN_CASA) {
+                            // Cas A: Tema‑Titol primer (0:10), Conductor després
+                            placeTimeBase = clipStart + 0.40 + tcSeconds;
+                            log(`📌 [Titol·CasA] Tema‑Titol 1r @ clipStart+0:10+${(tcSeconds).toFixed(2)}s = ${placeTimeBase.toFixed(2)}s`);
+                        } else {
+                            // Cas B: Conductor primer (0:10), Tema‑Titol després (0:10+4:10=4:20)
+                            placeTimeBase = clipStart + 0.40 + 4.40 + tcSeconds;
+                            log(`📌 [Titol·CasB] Conductor 1r, Tema‑Titol @ 0:10+4:10+${(tcSeconds).toFixed(2)}s = ${placeTimeBase.toFixed(2)}s`);
+                        }
+                    } else {
+                        placeTimeBase = markerTime + tcSeconds;
+                    }
+
                     for (let ti = 0; ti < longTemaTitols.length; ti++) {
                         const tt = longTemaTitols[ti];
-                        const tcSeconds = getUtils().timeToSeconds(tt.tc || "000000");
-                        const placeTime = markerTime + tcSeconds;
+                        const placeTime = placeTimeBase;
                         let stretchEnd = null;
                         if (ti < longTemaTitols.length - 1) {
                             const nextTc = getUtils().timeToSeconds(longTemaTitols[ti + 1].tc || "000000");
@@ -524,7 +582,6 @@
             const cfg = FASTPASS_UI.Config.get();
             const T_CHY = cfg.tracks.video.chyrons;
 
-            // Llegir el conductor SELECCIONAT al desplegable de SETUP
             const conductorSelect = document.getElementById('conductor');
             const conductorFile = conductorSelect ? conductorSelect.value : null;
             if (!conductorFile) {
@@ -532,15 +589,15 @@
                 getUtils().status("Selecciona un conductor", "warn");
                 return;
             }
-            log(`👤 [Conductor] Fitxer seleccionat: ${conductorFile}`);
+            log(`👤 [Conductor] Fitxer: ${conductorFile}`);
 
-            // Constants d'animació (segons)
-            const MARGEN_INICIO = 0.40;      // 10 frames
-            const DUR_TEMA_TITOL = 6.24;     // 6:06
-            const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + 4.40; // ~11.04s
+            // Constants (30 fps → correcte)
+            const MARGEN_INICIO = 0.40;         // 0:10
+            const DUR_CONDUCTOR = 4.40;         // 4:10
+            const DUR_TEMA_TITOL = 6.24;        // 6:06
+            const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
 
             try {
-                // 1. Llegir marcadors del timeline per trobar el primer intro/dp
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
                 const STRUCTURAL_RE = /^\d+[a-z]?\s*-\s*.+$/i;
@@ -551,21 +608,24 @@
                 }
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // Trobar el primer marcador amb sufix (i, dp, dir) — el primer intro/dp
+                // Buscar PRIMER marcador amb sufix (i, dp, dir, f, lead...)
                 let targetTime = null;
+                let targetId = null;
                 for (const m of structuralMarkers) {
                     const rawId = (m.comments || "").split("-")[0].trim();
                     if (/^\d+[a-z]+$/i.test(rawId)) {
                         targetTime = m.time;
+                        targetId = rawId;
                         break;
                     }
                 }
                 if (targetTime === null) {
-                    log("⚠️ [Conductor] No s'ha trobat cap marcador amb sufix (intro/dp).", "WARN");
+                    log("⚠️ [Conductor] Cap marcador amb sufix (incloent OFF).", "WARN");
                     return;
                 }
+                log(`🔬 [Conductor] Marcador guia: ${targetId} @ ${targetTime.toFixed(2)}s`);
 
-                // 2. Trobar el clip V1 on cau aquest marcador
+                // Clip V1 on cau aquest marcador
                 const clips = await getClipsLogic().getTrackClips(1, "video");
                 let clipV1 = null;
                 for (const cl of clips) {
@@ -575,12 +635,12 @@
                     }
                 }
                 if (!clipV1) {
-                    log("⚠️ [Conductor] El marcador intro/dp no cau sobre cap clip V1.");
+                    log("⚠️ [Conductor] Marcador no cau sobre cap clip V1.");
                     return;
                 }
                 const clipStart = clipV1.start;
 
-                // 3. Calcular margen fins al proper marcador
+                // Calcular margen fins al proper marcador estructural
                 let nextMarkerTime = clipV1.end;
                 for (const m of structuralMarkers) {
                     if (m.time > targetTime + 0.5) {
@@ -591,17 +651,21 @@
                 const margenDisponible = nextMarkerTime - clipStart;
                 log(`🔬 [Conductor] Clip V1: ${clipStart.toFixed(2)}s, proper marcador @ ${nextMarkerTime.toFixed(2)}s, marge=${margenDisponible.toFixed(2)}s`);
 
-                // 4. Decidir posició
+                // Decidir posició del CONDUCTOR
                 let conductTime;
-                if (margenDisponible >= MIN_MARGEN) {
+                let isCasoA = false;
+                if (margenDisponible >= MIN_MARGEN_CASA) {
+                    // Cas A: TemaTitol 1r (0:10→6:16), Conductor després (0:10+6:06=6:16)
+                    isCasoA = true;
                     conductTime = clipStart + MARGEN_INICIO + DUR_TEMA_TITOL;
-                    log(`📌 [Conductor] Cas A (marge ≥ ${MIN_MARGEN.toFixed(2)}s): → V6 @ ${conductTime.toFixed(2)}s`);
+                    log(`📌 [Conductor] Cas A (marge ≥ ${MIN_MARGEN_CASA.toFixed(2)}s): TemaTitol 1r, Conductor @ ${conductTime.toFixed(2)}s`);
                 } else {
+                    // Cas B: Conductor 1r (0:10), TemaTitol després (0:10+4:10=4:20)
                     conductTime = clipStart + MARGEN_INICIO;
-                    log(`📌 [Conductor] Cas B (marge < ${MIN_MARGEN.toFixed(2)}s): → V6 @ ${conductTime.toFixed(2)}s`);
+                    log(`📌 [Conductor] Cas B (marge < ${MIN_MARGEN_CASA.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s, TemaTitol anirA 0:10+4:10=4:20`);
                 }
 
-                // 5. Col·locar el conductor
+                // Col·locar conductor
                 const escapedName = getUtils().escape(conductorFile);
                 await callJSX(`Clips.insert('${escapedName}', ${T_CHY}, ${conductTime}, null, 'video')`);
                 log(`   ✅ [Conductor] "${conductorFile}" → V6 @ ${conductTime.toFixed(2)}s`);
