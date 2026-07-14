@@ -16,6 +16,12 @@ FASTPASS.Render = {
     exportFrameQE: function(tempPathNoExt, timeSec) {
         try {
             $.writeln("[9_Render.exportFrameQE] INICI: path=" + tempPathNoExt + " time=" + timeSec);
+            // Assegurar que la carpeta destí existeix (Snapshots/ del projecte)
+            var f = new File(tempPathNoExt);
+            if (!f.parent.exists) {
+                f.parent.create();
+                $.writeln("[9_Render.exportFrameQE] Created parent: " + f.parent.fsName);
+            }
             app.enableQE();
             $.writeln("[9_Render.exportFrameQE] QE enabled");
             var qeSeq = qe.project.getActiveSequence();
@@ -31,9 +37,9 @@ FASTPASS.Render = {
             var mm = totalM % 60;
             var hh = Math.floor(totalM / 60);
             var tc = (hh < 10 ? '0' + hh : hh) + ':' + (mm < 10 ? '0' + mm : mm) + ':' + (ss < 10 ? '0' + ss : ss) + ':' + (ff < 10 ? '0' + ff : ff);
-            $.writeln("[9_Render.exportFrameQE] timecode=" + tc + " (sec=" + sec + ")");
-            qeSeq.exportFramePNG(tc, tempPathNoExt);
-            $.writeln("[9_Render.exportFrameQE] exportFramePNG OK → " + tempPathNoExt + ".png");
+            $.writeln("[9_Render.exportFrameQE] timecode=" + tc + " (sec=" + sec + ") path=" + f.fsName);
+            qeSeq.exportFramePNG(tc, f.fsName);
+            $.writeln("[9_Render.exportFrameQE] exportFramePNG OK → " + f.fsName + ".png");
             return "OK_EXEC";
         } catch(e) { $.writeln("[9_Render.exportFrameQE] EXC: " + e.message); return "EXC: " + e.message; }
     },

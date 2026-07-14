@@ -334,14 +334,7 @@
                 return { success: false, duration: 0 };
             }
 
-            // 5. Movem el PNG de C:\temp\ al destí final (Render.snapshot escriu a C:\temp\ per defecte)
-            try {
-                window.cep.fs.deleteFile(snapPath);
-            } catch (e) {}
-            const tempPng = `C:\\temp\\${snapPath.split("\\").pop()}`;
-            window.cep.fs.rename(tempPng, snapPath);
-
-            // 6. Importar PNG al bin CHY
+            // 5. Importar PNG al bin CHY (Render.snapshot ja escriu directament a snapPath)
             const fileName = snapPath.split("\\").pop();
             const importPayload = JSON.stringify([snapPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'CHY')`);
