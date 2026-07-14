@@ -426,197 +426,100 @@
                 log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
                 return;
             }
-
-            const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s (per decidir Cas A/B)
-
             try {
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
-                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
-                const structuralMarkers = allMarkers.filter(m => {
-                    const cmt = (m.comments || "").trim();
-                    return STRUCTURAL_COMMENTS_RE.test(cmt);
-                });
+                const STRUCTURAL_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => STRUCTURAL_RE.test((m.comments || "").trim()));
                 if (structuralMarkers.length === 0) {
-                    log("⚠️ [Titol] No hi ha marcadors estructurals. Clica MARCADORS primer.", "WARN");
+                    log("⚠️ [Titol] No hi ha marcadors estructurals.", "WARN");
                     return;
                 }
-                const markersFull = [];
-                for (const m of structuralMarkers) {
-                    const parts = (m.comments || "").split("-");
-                    if (parts.length > 0) {
-                        const rawId = parts[0].trim();
-                        const numMatch = rawId.match(/^(\d+)/);
-                        if (numMatch) {
-                            markersFull.push({ fullId: rawId, blockNum: numMatch[1].padStart(2, "0"), time: m.time });
-                        }
-                    }
-                }
-                markersFull.sort((a, b) => a.time - b.time);
+                structuralMarkers.sort((a, b) => a.time - b.time);
                 const structureById = {};
                 for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
-                log(`🔬 [Titol·DIAG] structureById keys: [${Object.keys(structureById).sort().join(", ")}]`);
-                log(`🔬 [Titol·DIAG] markersFull: ${markersFull.map(m => m.fullId + '@' + m.time.toFixed(1)).join(', ')}`);
 
-                // Detectar si hi ha un conductor col·locat (buscar clips a V6 propers al primer marcador)
-                let hayConductor = false;
-                let conductPos = 0;
-                try {
-                    const v6Count = parseInt(await callJSX(`Clips.count(${cfg.tracks.video.chyrons}, 'video')`) || '0');
-                    if (v6Count > 0) {
-                        const firstV6 = JSON.parse(await callJSX(`Clips.get(${cfg.tracks.video.chyrons}, 0, 'video')`));
-                        if (firstV6 && firstV6.name && firstV6.name.toUpperCase().includes("CONDUCT")) {
-                            hayConductor = true;
-                            conductPos = firstV6.start;
-                            log(`🔬 [Titol·DIAG] Conductor detectat a V6 @ ${conductPos.toFixed(2)}s`);
+                // Buscar primer marcador base (sense sufix) per saber el clipStart del bloc
+                const firstMarker = structuralMarkers[0];
+                const firstBase = (firstMarker.comments || "").split("-")[0].trim().match(/^(\d+)/);
+                const clipV1 = await this._findClipAtTime(firstMarker.time);
+                const clipStart = clipV1 ? clipV1.start : firstMarker.time;
+                const placeTime = clipStart + 0.40; // 0:10
+                log(`📌 [Titol] Al principi del bloc @ clipStart+0:10 = ${placeTime.toFixed(2)}s`);
+
+                // Buscar el Tema‑Titol al primer element del bloc amb sufix (dp, i, f, lead) que en tingui
+                const SUFFIX_PRIORITY = ['dp', 'i', 'lead', 'f'];
+                let temaTitolChy = null;
+                for (const mk of structuralMarkers) {
+                    const rawId = (mk.comments || "").split("-")[0].trim();
+                    const baseMatch = rawId.match(/^(\d+)/);
+                    if (!baseMatch) continue;
+                    const base = baseMatch[1];
+                    let entry = structureById[rawId] || null;
+                    // Provar per sufix si no directe
+                    if (!entry) {
+                        for (const suf of SUFFIX_PRIORITY) {
+                            if (structureById[base + suf]) { entry = structureById[base + suf]; break; }
                         }
                     }
-                } catch (e) {}
+                    if (!entry || !entry.chyrons) continue;
+                    const tt = entry.chyrons.find(c =>
+                        (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
+                    );
+                    if (tt) { temaTitolChy = tt; break; }
+                }
+                if (!temaTitolChy) {
+                    log("⚠️ [Titol] Cap Tema‑Titol trobat a l'entrada del bloc.", "WARN");
+                    return;
+                }
 
-                // Per a Titol: si el marcador no té entry directe, provar per base numèrica (01 → 01dp)
-                const SUFFIX_ORDER = ['dp', 'i', 'dir', 'lead', 'f'];
-                const SUFFIX_GRAFIC = ['Chy', 'GF1', 'TE2', 'GF3', 'TD1', 'P7']; // gràfics a ignorar
-
-                let placedCount = 0;
-                for (let mi = 0; mi < markersFull.length; mi++) {
-                    const mk = markersFull[mi];
-                    const fullId = mk.fullId;
-                    const markerTime = mk.time;
-                    let entry = structureById[fullId];
-                    
-                    // Si no hi ha entry directe, provar per base numèrica + sufixos prioritaris
-                    if (!entry) {
-                        const baseMatch = fullId.match(/^(\d+)/);
+                // Calcular stretchEnd: següent Tema‑Titol o Out Point
+                let nextTemaTitolTime = null;
+                for (let i = 0; i < structuralMarkers.length; i++) {
+                    const m = structuralMarkers[i];
+                    if (m.time > firstMarker.time + 0.5) {
+                        const rawId = (m.comments || "").split("-")[0].trim();
+                        const baseMatch = rawId.match(/^(\d+)/);
                         if (baseMatch) {
-                            const base = baseMatch[1];
-                            for (const suf of SUFFIX_ORDER) {
-                                if (structureById[base + suf]) {
-                                    entry = structureById[base + suf];
-                                    log(`🔬 [Titol·DIAG] Marcador ${fullId} aparellat amb ${base + suf}`);
-                                    break;
+                            let entry = structureById[rawId] || null;
+                            if (!entry) {
+                                for (const suf of SUFFIX_PRIORITY) {
+                                    if (structureById[baseMatch[1] + suf]) { entry = structureById[baseMatch[1] + suf]; break; }
                                 }
                             }
-                        }
-                    }
-                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) {
-                        log(`🔬 [Titol·DIAG] Marcador ${fullId}@${markerTime.toFixed(1)}s: sense entry.`);
-                        continue;
-                    }
-                    log(`🔬 [Titol·DIAG] Marcador ${fullId}: ${entry.chyrons.length} chyrons`);
-                    const temaTitols = entry.chyrons.filter(c =>
-                        c.name.includes("Tema-Titol") || c.name.includes("TITOL")
-                    );
-                    if (temaTitols.length === 0) continue;
-                    // Ja no filtreu per sufix al fullId — si el marcador base té Tema‑Titol, es col·loca
-                    // (el que importa és que l'entrada aparellada tingui els chyrons correctes)
-                    const longTemaTitols = temaTitols.filter(c => (c.rol || '') === 'Tema-Titol');
-                    if (longTemaTitols.length === 0) {
-                        log(`⚠️ [Titol] Marcador ${fullId}: cap Tema‑Titol amb rol='Tema-Titol'.`);
-                        continue;
-                    }
-                    longTemaTitols.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
-
-                    // Calcular el clip V1 on cau aquest marcador
-                    const clips = await getClipsLogic().getTrackClips(1, "video");
-                    let clipV1 = null;
-                    for (const cl of clips) {
-                        if (cl.start <= markerTime && cl.end > markerTime) {
-                            clipV1 = cl;
-                            break;
-                        }
-                    }
-                    const clipStart = clipV1 ? clipV1.start : markerTime;
-
-                    // Decidir posició del Tema‑Titol (sense sumar tcSeconds — la posició és absoluta)
-                    let placeTimeBase = clipStart + 0.40; // per defecte 0:10
-                    
-                    // Si hi ha conductor i està dins del mateix clip V1, determinar si Cas A o B
-                    if (hayConductor && clipV1 && Math.abs(conductPos - clipStart) < 0.5) {
-                        allMarkers.sort((a, b) => a.time - b.time);
-                        let nextMarkerTime = clipV1.end;
-                        for (const m of allMarkers) {
-                            if (m.time > markerTime + 0.5) {
-                                nextMarkerTime = Math.min(nextMarkerTime, m.time);
-                                break;
-                            }
-                        }
-                        const margenDisponible = nextMarkerTime - clipStart;
-                        
-                        if (margenDisponible >= MIN_MARGEN_CASA) {
-                            // Cas A: Tema‑Titol primer (0:10)
-                            placeTimeBase = clipStart + 0.40; // 0:10
-                            log(`📌 [Titol·CasA] Tema‑Titol 1r @ clipStart+0:10 = ${placeTimeBase.toFixed(2)}s`);
-                        } else {
-                            // Cas B: Conductor primer (0:10), Tema‑Titol després (0:10+4:10=4:20)
-                            placeTimeBase = clipStart + 0.40 + 4.40; // 4:20
-                            log(`📌 [Titol·CasB] Conductor 1r, Tema‑Titol @ 0:10+4:10 = ${placeTimeBase.toFixed(2)}s`);
-                        }
-                    } else {
-                        placeTimeBase = clipStart + 0.40;
-                    }
-
-                    // Buscar el proper Tema‑Titol en marcadors posteriors
-                    let nextTemaTitolTime = null;
-                    for (let mmi = mi + 1; mmi < markersFull.length; mmi++) {
-                        const nextMk = markersFull[mmi];
-                        const nextEntry = structureById[nextMk.fullId];
-                        if (nextEntry && nextEntry.chyrons) {
-                            const hasTemaTitol = nextEntry.chyrons.some(c =>
+                            if (entry && entry.chyrons && entry.chyrons.some(c =>
                                 (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
-                            );
-                            if (hasTemaTitol) {
-                                nextTemaTitolTime = nextMk.time;
+                            )) {
+                                nextTemaTitolTime = m.time;
                                 break;
                             }
                         }
-                    }
-                    // Estirar fins al següent Tema‑Titol o fins al final de la seqüència (Out Point)
-                    let seqOutTime = null;
-                    try { seqOutTime = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
-                    const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : null);
-
-                    for (let ti = 0; ti < longTemaTitols.length; ti++) {
-                        const tt = longTemaTitols[ti];
-                        const placeTime = placeTimeBase;
-                        log(`📌 [Titol] Marcador ${fullId} #${ti+1}/${longTemaTitols.length}: V5 @ ${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
-                        
-                        // Si no hi ha espai suficient per al freeze (cutTime = placeTime+8s > stretchEnd),
-                        // inserir el Wott directament sense snapshot
-                        const CUT_OFFSET = 8.0;
-                        const cutTime = placeTime + CUT_OFFSET;
-                        const needFreeze = stretchEnd === null || stretchEnd > cutTime + 0.5;
-                        
-                        if (!needFreeze) {
-                            log(`   ⚠️ [Titol] Espai insuficient per freeze (need ${CUT_OFFSET.toFixed(1)}s, disponible ${(stretchEnd - placeTime).toFixed(1)}s). Inserint Wott directament.`);
-                            const escapedWott = getUtils().escape(tt.name);
-                            try {
-                                await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, ${stretchEnd}, 'video')`);
-                                log(`   ✅ [Titol·noFreeze] "${tt.name}" → V5 @ ${placeTime.toFixed(2)}s→${stretchEnd.toFixed(2)}s`);
-                                placedCount++;
-                            } catch (e) {
-                                log(`   ❌ [Titol·noFreeze] Error: ${e.message}`, "ERROR");
-                            }
-                            continue;
-                        }
-                        
-                        try {
-                            const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
-                            if (freezeResult && freezeResult.success) {
-                                log(`   🖼️ [Titol] Freeze: ${tt.name} → ${freezeResult.duration.toFixed(1)}s`);
-                            }
-                        } catch (freezeErr) {
-                            log(`   ⚠️ [Titol] Freeze fallit: ${freezeErr.message}`, "WARN");
-                        }
-                        placedCount++;
                     }
                 }
-                if (placedCount === 0) {
-                    log("⚠️ [Titol] Cap Tema‑Titol per col·locar.", "WARN");
-                } else {
-                    log(`🎬 [Titol] ${placedCount} Tema‑Títol(s) col·locat(s).`, "INFO");
-                    getUtils().status(`Titol: ${placedCount} col·locat(s)`, "exito");
+                let seqOutTime = null;
+                try { seqOutTime = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
+                const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : null);
+                log(`📌 [Titol] stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+
+                // Col·locar Tema‑Titol amb freeze
+                try {
+                    const freezeResult = await this._freezeTemaTitol(temaTitolChy.name, placeTime, stretchEnd, temaTitolChy.name);
+                    if (freezeResult && freezeResult.success) {
+                        log(`   🖼️ [Titol] Tema‑Titol col·locat: ${freezeResult.duration.toFixed(1)}s`);
+                        getUtils().status("Tema‑Titol col·locat", "exito");
+                    }
+                } catch (freezeErr) {
+                    log(`   ❌ [Titol] Freeze fallit: ${freezeErr.message}`, "ERROR");
                 }
             } catch (e) { getUtils().handleError(e, "Titol"); }
+        },
+        
+        _findClipAtTime: async function(timeSec) {
+            const clips = await getClipsLogic().getTrackClips(1, "video");
+            for (const cl of clips) {
+                if (cl.start <= timeSec && cl.end > timeSec) return cl;
+            }
+            return null;
         },
 
         placeChyronConductor: async function () {
