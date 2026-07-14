@@ -544,7 +544,7 @@
                         placeTimeBase = clipStart + 0.40;
                     }
 
-                    // Buscar el proper Tema‑Titol en marcadors posteriors o el final del clip V1
+                    // Buscar el proper Tema‑Titol en marcadors posteriors
                     let nextTemaTitolTime = null;
                     for (let mmi = mi + 1; mmi < markersFull.length; mmi++) {
                         const nextMk = markersFull[mmi];
@@ -559,9 +559,12 @@
                             }
                         }
                     }
-                    // Si no hi ha següent Tema‑Titol, usar final del clip V1
-                    let clipEndTime = clipV1 ? clipV1.end : null;
-                    const stretchEnd = nextTemaTitolTime || clipEndTime;
+                    // Si no hi ha següent Tema‑Titol, usar l'Out Point de la seqüència
+                    let seqOutTime = null;
+                    try {
+                        seqOutTime = parseFloat(await callJSX("Timeline.getOut()") || "0");
+                    } catch (e) {}
+                    const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : null);
 
                     for (let ti = 0; ti < longTemaTitols.length; ti++) {
                         const tt = longTemaTitols[ti];
