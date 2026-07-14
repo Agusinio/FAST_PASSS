@@ -517,13 +517,11 @@
                     }
                     const clipStart = clipV1 ? clipV1.start : markerTime;
 
-                    // Decidir posició del Tema‑Titol
-                    let placeTimeBase = markerTime; // per defecte
-                    const tcSeconds = getUtils().timeToSeconds(longTemaTitols[0].tc || "000000");
+                    // Decidir posició del Tema‑Titol (sense sumar tcSeconds — la posició és absoluta)
+                    let placeTimeBase = clipStart + 0.40; // per defecte 0:10
                     
                     // Si hi ha conductor i està dins del mateix clip V1, determinar si Cas A o B
                     if (hayConductor && clipV1 && Math.abs(conductPos - clipStart) < 0.5) {
-                        // Calcular margen fins al proper marcador
                         let nextMarkerTime = clipV1.end;
                         for (const m of structuralMarkers) {
                             if (m.time > markerTime + 0.5) {
@@ -534,16 +532,16 @@
                         const margenDisponible = nextMarkerTime - clipStart;
                         
                         if (margenDisponible >= MIN_MARGEN_CASA) {
-                            // Cas A: Tema‑Titol primer (0:10), Conductor després
-                            placeTimeBase = clipStart + 0.40 + tcSeconds;
-                            log(`📌 [Titol·CasA] Tema‑Titol 1r @ clipStart+0:10+${(tcSeconds).toFixed(2)}s = ${placeTimeBase.toFixed(2)}s`);
+                            // Cas A: Tema‑Titol primer (0:10)
+                            placeTimeBase = clipStart + 0.40; // 0:10
+                            log(`📌 [Titol·CasA] Tema‑Titol 1r @ clipStart+0:10 = ${placeTimeBase.toFixed(2)}s`);
                         } else {
                             // Cas B: Conductor primer (0:10), Tema‑Titol després (0:10+4:10=4:20)
-                            placeTimeBase = clipStart + 0.40 + 4.40 + tcSeconds;
-                            log(`📌 [Titol·CasB] Conductor 1r, Tema‑Titol @ 0:10+4:10+${(tcSeconds).toFixed(2)}s = ${placeTimeBase.toFixed(2)}s`);
+                            placeTimeBase = clipStart + 0.40 + 4.40; // 4:20
+                            log(`📌 [Titol·CasB] Conductor 1r, Tema‑Titol @ 0:10+4:10 = ${placeTimeBase.toFixed(2)}s`);
                         }
                     } else {
-                        placeTimeBase = markerTime + tcSeconds;
+                        placeTimeBase = clipStart + 0.40;
                     }
 
                     for (let ti = 0; ti < longTemaTitols.length; ti++) {
