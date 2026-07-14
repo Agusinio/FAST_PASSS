@@ -630,27 +630,35 @@
             }
 
             // ── Construir mapa auxiliar: per a cada ítem deduït, trobar límits faro ──
-            // Ordenar structuralItems per deduir l'ordre (ja ho estan per hora)
+            // Usar l'ordre de la escaleta (lines), NO l'ordre per TC (structuralItems),
+            // per preservar la seqüència lògica (ex: 01dir va abans que 01 a l'escaleta).
             var faroLimitMap = {};  // num → {leftFaroTime, rightFaroTime, leftNum}
             var prevFaroNum = null;
             var prevFaroTime = 0;
+            var structuralItemsSet = {};
             for (var si = 0; si < structuralItems.length; si++) {
-                var lineSi = structuralItems[si];
+                if (structuralItems[si].num) structuralItemsSet[structuralItems[si].num] = true;
+            }
+            for (var li = 0; li < lines.length; li++) {
+                var lineSi = lines[li];
                 var numSi = lineSi.num;
+                if (!numSi || !structuralItemsSet[numSi]) continue;  // només items estructurals
                 var hasFaro = (faroPositions[numSi] !== undefined);
                 if (hasFaro) {
                     // Assignar faro com a right limit als items pendents entre prevFaro i aquest
-                    for (var li in faroLimitMap) {
-                        if (faroLimitMap[li].rightFaroTime === null) {
-                            faroLimitMap[li].rightFaroTime = faroPositions[numSi];
-                            faroLimitMap[li].rightNum = numSi;
+                    for (var li2 in faroLimitMap) {
+                        if (faroLimitMap[li2].rightFaroTime === null) {
+                            faroLimitMap[li2].rightFaroTime = faroPositions[numSi];
+                            faroLimitMap[li2].rightNum = numSi;
                         }
                     }
                     prevFaroNum = numSi;
                     prevFaroTime = faroPositions[numSi];
                 } else {
                     // Item sense faro (deduït): assignar left limit
-                    faroLimitMap[numSi] = { leftFaroTime: prevFaroTime, leftNum: prevFaroNum, rightFaroTime: null, rightNum: null };
+                    if (!faroLimitMap[numSi]) {
+                        faroLimitMap[numSi] = { leftFaroTime: prevFaroTime, leftNum: prevFaroNum, rightFaroTime: null, rightNum: null };
+                    }
                 }
             }
 
