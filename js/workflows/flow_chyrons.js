@@ -553,11 +553,10 @@
                             }
                         }
                     }
-                    // Si no hi ha següent Tema‑Titol, usar l'Out Point de la seqüència o el final del clip V1
+                    // Estirar fins al següent Tema‑Titol o fins al final de la seqüència (Out Point)
                     let seqOutTime = null;
                     try { seqOutTime = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
-                    const clipEndTime = clipV1 ? clipV1.end : null;
-                    const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : clipEndTime);
+                    const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : null);
 
                     for (let ti = 0; ti < longTemaTitols.length; ti++) {
                         const tt = longTemaTitols[ti];
