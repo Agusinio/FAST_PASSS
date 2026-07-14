@@ -522,8 +522,9 @@
                     
                     // Si hi ha conductor i està dins del mateix clip V1, determinar si Cas A o B
                     if (hayConductor && clipV1 && Math.abs(conductPos - clipStart) < 0.5) {
+                        allMarkers.sort((a, b) => a.time - b.time);
                         let nextMarkerTime = clipV1.end;
-                        for (const m of structuralMarkers) {
+                        for (const m of allMarkers) {
                             if (m.time > markerTime + 0.5) {
                                 nextMarkerTime = Math.min(nextMarkerTime, m.time);
                                 break;
@@ -673,7 +674,8 @@
                 }
                 const clipStart = clipV1.start;
 
-                // Calcular margen fins al proper marcador (estructural O gràfic — TOTS)
+                // Calcular margen fins al proper marcador (TOTS, ordenats per temps)
+                allMarkers.sort((a, b) => a.time - b.time);
                 let nextMarkerTime = clipV1.end;
                 for (const m of allMarkers) {
                     if (m.time > targetTime + 0.5) {
