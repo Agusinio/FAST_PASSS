@@ -544,17 +544,49 @@
                         placeTimeBase = clipStart + 0.40;
                     }
 
+                    // Buscar el proper Tema‑Titol en marcadors posteriors o el final del clip V1
+                    let nextTemaTitolTime = null;
+                    for (let mmi = mi + 1; mmi < markersFull.length; mmi++) {
+                        const nextMk = markersFull[mmi];
+                        const nextEntry = structureById[nextMk.fullId];
+                        if (nextEntry && nextEntry.chyrons) {
+                            const hasTemaTitol = nextEntry.chyrons.some(c =>
+                                (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
+                            );
+                            if (hasTemaTitol) {
+                                nextTemaTitolTime = nextMk.time;
+                                break;
+                            }
+                        }
+                    }
+                    // Si no hi ha següent Tema‑Titol, usar final del clip V1
+                    let clipEndTime = clipV1 ? clipV1.end : null;
+                    const stretchEnd = nextTemaTitolTime || clipEndTime;
+
                     for (let ti = 0; ti < longTemaTitols.length; ti++) {
                         const tt = longTemaTitols[ti];
                         const placeTime = placeTimeBase;
-                        let stretchEnd = null;
-                        if (ti < longTemaTitols.length - 1) {
-                            const nextTc = getUtils().timeToSeconds(longTemaTitols[ti + 1].tc || "000000");
-                            stretchEnd = markerTime + nextTc;
-                        } else if (mi < markersFull.length - 1) {
-                            stretchEnd = markersFull[mi + 1].time;
-                        }
                         log(`📌 [Titol] Marcador ${fullId} #${ti+1}/${longTemaTitols.length}: V5 @ ${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+                        
+                        // Si no hi ha espai suficient per al freeze (cutTime = placeTime+8s > stretchEnd),
+                        // inserir el Wott directament sense snapshot
+                        const CUT_OFFSET = 8.0;
+                        const cutTime = placeTime + CUT_OFFSET;
+                        const needFreeze = stretchEnd === null || stretchEnd > cutTime + 0.5;
+                        
+                        if (!needFreeze) {
+                            log(`   ⚠️ [Titol] Espai insuficient per freeze (need ${CUT_OFFSET.toFixed(1)}s, disponible ${(stretchEnd - placeTime).toFixed(1)}s). Inserint Wott directament.`);
+                            const escapedWott = getUtils().escape(tt.name);
+                            try {
+                                await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, ${stretchEnd}, 'video')`);
+                                log(`   ✅ [Titol·noFreeze] "${tt.name}" → V5 @ ${placeTime.toFixed(2)}s→${stretchEnd.toFixed(2)}s`);
+                                placedCount++;
+                            } catch (e) {
+                                log(`   ❌ [Titol·noFreeze] Error: ${e.message}`, "ERROR");
+                            }
+                            continue;
+                        }
+                        
                         try {
                             const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
                             if (freezeResult && freezeResult.success) {
