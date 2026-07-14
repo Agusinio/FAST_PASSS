@@ -673,9 +673,9 @@
                 }
                 const clipStart = clipV1.start;
 
-                // Calcular margen fins al proper marcador estructural
+                // Calcular margen fins al proper marcador (estructural O gràfic — TOTS)
                 let nextMarkerTime = clipV1.end;
-                for (const m of structuralMarkers) {
+                for (const m of allMarkers) {
                     if (m.time > targetTime + 0.5) {
                         nextMarkerTime = Math.min(nextMarkerTime, m.time);
                         break;
