@@ -520,11 +520,121 @@
         },
 
         placeChyronConductor: async function () {
-            await this._placeChyronsByType(
-                c => (c.rol || '').toUpperCase() === "CONDUCTOR",
-                (c, cfg) => cfg.tracks.video.chyrons,
-                "Conductor"
-            );
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            const struct = FASTPASS_UI.State.structure;
+            if (!struct || struct.length === 0) {
+                log("⚠️ [Conductor] No hi ha estructura carregada. Escaneja primer.", "WARN");
+                return;
+            }
+
+            // Constants d'animació (segons)
+            const MARGEN_INICIO = 0.40;      // 10 frames
+            const DUR_TEMA_TITOL = 6.24;     // 6:06
+            const DUR_CONDUCTOR = 4.40;      // 4:10
+            const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + DUR_CONDUCTOR; // ~11.04s
+
+            try {
+                // 1. Llegir marcadors del timeline per trobar el primer intro/dp/lead amb conductor
+                const markersRaw = await callJSX('Markers.get()');
+                const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
+                const STRUCTURAL_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const structuralMarkers = allMarkers.filter(m => STRUCTURAL_RE.test((m.comments || "").trim()));
+                if (structuralMarkers.length === 0) {
+                    log("⚠️ [Conductor] No hi ha marcadors estructurals.", "WARN");
+                    return;
+                }
+
+                // Ordenar per temps
+                structuralMarkers.sort((a, b) => a.time - b.time);
+
+                // Trobar els marcadors amb sufix (i, dp, dir, lead) i els normals
+                const markersWithSuffix = []; // {fullId, time, suffix}
+                const markersBase = [];
+                for (const m of structuralMarkers) {
+                    const rawId = (m.comments || "").split("-")[0].trim();
+                    const match = rawId.match(/^(\d+)([a-z]+)?$/i);
+                    if (match) {
+                        const num = match[1];
+                        const suffix = match[2] ? match[2].toLowerCase() : '';
+                        if (suffix) {
+                            markersWithSuffix.push({ fullId: rawId, num, suffix, time: m.time });
+                        } else {
+                            markersBase.push({ fullId: rawId, num, time: m.time });
+                        }
+                    }
+                }
+
+                // 2. Buscar estructura per ID (incloent sufixos)
+                const structureById = {};
+                for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
+
+                // 3. Trobar el primer marcador amb sufix (i, dp, dir) que tingui un chyron CONDUCTOR
+                let conductorChy = null;
+                let targetTime = null;
+                let clipEnd = null;
+
+                for (const mSuf of markersWithSuffix) {
+                    const entry = structureById[mSuf.fullId];
+                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
+                    const conduc = entry.chyrons.find(c => (c.rol || '').toUpperCase() === "CONDUCTOR" || c.name.toUpperCase().includes("CONDUCT"));
+                    if (conduc) {
+                        conductorChy = conduc;
+                        targetTime = mSuf.time;
+                        log(`🔬 [Conductor] Trobat a marcador ${mSuf.fullId} @ ${mSuf.time.toFixed(2)}s: ${conduc.name}`);
+
+                        // Trobar el clip V1 on cau aquest marcador
+                        const clips = await getClipsLogic().getTrackClips(1, "video");
+                        let clipV1 = null;
+                        for (const cl of clips) {
+                            if (cl.start <= mSuf.time && cl.end > mSuf.time) {
+                                clipV1 = cl;
+                                clipEnd = cl.end;
+                                break;
+                            }
+                        }
+                        if (!clipV1) {
+                            log(`⚠️ [Conductor] Marcador ${mSuf.fullId} no cau sobre cap clip V1.`);
+                            continue;
+                        }
+
+                        // 4. Calcular margen fins al proper marcador (qualsevol tipus)
+                        const clipStart = clipV1.start;
+                        let nextMarkerTime = clipV1.end; // per defecte, final del clip
+                        for (const m of structuralMarkers) {
+                            if (m.time > targetTime + 0.5) {
+                                nextMarkerTime = Math.min(nextMarkerTime, m.time);
+                            }
+                        }
+
+                        const margenDisponible = nextMarkerTime - clipStart;
+                        log(`🔬 [Conductor] Clip V1: ${clipStart.toFixed(2)}s → ${clipEnd.toFixed(2)}s, proper marcador @ ${nextMarkerTime.toFixed(2)}s, marge=${margenDisponible.toFixed(2)}s`);
+
+                        // 5. Decidir posició del Conductor
+                        let conductTime;
+                        if (margenDisponible >= MIN_MARGEN) {
+                            // Cas A: Tema-Titol primer, Conductor després
+                            conductTime = clipStart + MARGEN_INICIO + DUR_TEMA_TITOL;
+                            log(`📌 [Conductor] Cas A (marge suficient): Tema‑Titol + Conductor → V6 @ ${conductTime.toFixed(2)}s`);
+                        } else {
+                            // Cas B: Conductor primer (al márgen d'inici), Tema‑Titol després
+                            conductTime = clipStart + MARGEN_INICIO;
+                            log(`📌 [Conductor] Cas B (marge insuficient): Conductor primer → V6 @ ${conductTime.toFixed(2)}s`);
+                        }
+
+                        // 6. Col·locar el conductor
+                        const escapedName = getUtils().escape(conductorChy.name);
+                        const T_CHY = cfg.tracks.video.chyrons;
+                        await callJSX(`Clips.insert('${escapedName}', ${T_CHY}, ${conductTime}, null, 'video')`);
+                        log(`   ✅ [Conductor] ${conductorChy.name} → V6 @ ${conductTime.toFixed(2)}s`);
+                        getUtils().status("Conductor col·locat", "exito");
+                        return; // només un conductor
+                    }
+                }
+
+                log("⚠️ [Conductor] Cap chyron CONDUCTOR trobat al primer intro/dp del bloc.", "WARN");
+
+            } catch (e) { getUtils().handleError(e, "Conductor"); }
         },
 
         placeChyronLloc: async function () {
