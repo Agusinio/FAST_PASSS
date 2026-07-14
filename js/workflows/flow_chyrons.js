@@ -633,19 +633,25 @@
                 }
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // Buscar PRIMER marcador amb sufix (i, dp, dir, f, lead...)
+                // Buscar PRIMER marcador que es pugui aparellar amb l'estructura (per ID directe o base numèrica)
+                const SUFFIX_ORDER = ['dp', 'i', 'dir', 'lead', 'f', 'Chy', 'GF1', 'TE2'];
                 let targetTime = null;
                 let targetId = null;
                 for (const m of structuralMarkers) {
                     const rawId = (m.comments || "").split("-")[0].trim();
-                    if (/^\d+[a-z]+$/i.test(rawId)) {
-                        targetTime = m.time;
-                        targetId = rawId;
-                        break;
+                    const baseMatch = rawId.match(/^(\d+)/);
+                    if (!baseMatch) continue;
+                    const base = baseMatch[1];
+                    // Provar coincidència directa primer
+                    if (structureById[rawId]) { targetTime = m.time; targetId = rawId; break; }
+                    // Provar per sufixos
+                    for (const suf of SUFFIX_ORDER) {
+                        if (structureById[base + suf]) { targetTime = m.time; targetId = base + suf; break; }
                     }
+                    if (targetTime !== null) break;
                 }
                 if (targetTime === null) {
-                    log("⚠️ [Conductor] Cap marcador amb sufix (incloent OFF).", "WARN");
+                    log("⚠️ [Conductor] Cap marcador aparellable amb l'estructura.", "WARN");
                     return;
                 }
                 log(`🔬 [Conductor] Marcador guia: ${targetId} @ ${targetTime.toFixed(2)}s`);
