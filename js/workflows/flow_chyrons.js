@@ -439,12 +439,12 @@
                 const structureById = {};
                 for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
 
-                // Buscar primer marcador per saber el clipStart del bloc
+                // El bloc sempre comença a 0.0s (clip V1 inicial)
+                const clips = await getClipsLogic().getTrackClips(1, "video");
+                const clipStart = clips.length > 0 ? clips[0].start : 0;
                 const firstMarker = structuralMarkers[0];
-                const clipV1 = await this._findClipAtTime(firstMarker.time);
-                const clipStart = clipV1 ? clipV1.start : firstMarker.time;
 
-                // Detectar si hi ha conductor a V6 dins del mateix clip V1
+                // Detectar si hi ha conductor a V6 dins del primer clip V1
                 let hayConductor = false;
                 let conductPos = 0;
                 const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
@@ -460,24 +460,23 @@
                     }
                 } catch (e) {}
 
-                // Decidir posició: si hi ha conductor al mateix clip, calcular marge
+                // Decidir posició: si hi ha conductor al principi, calcular marge
                 let placeTime = clipStart + 0.40; // per defecte 0:10
-                if (hayConductor && clipV1 && Math.abs(conductPos - clipStart) < 0.5) {
-                    allMarkers.sort((a, b) => a.time - b.time);
-                    let nextMarkerTime = clipV1.end;
+                if (hayConductor && Math.abs(conductPos - clipStart) < 0.5) {
+                    let nextMarkerTime = clips[0] ? clips[0].end : clipStart + 30;
                     for (const m of allMarkers) {
-                        if (m.time > firstMarker.time + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
+                        if (m.time > clipStart + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
                     }
                     const margenDisponible = nextMarkerTime - clipStart;
                     if (margenDisponible >= MIN_MARGEN_CASA) {
-                        placeTime = clipStart + 0.40; // Cas A: Tema‑Titol 1r
-                        log(`📌 [Titol·CasA] Tema‑Titol 1r @ 0:10 = ${placeTime.toFixed(2)}s`);
+                        placeTime = clipStart + 0.40; // Cas A
+                        log(`📌 [Titol·CasA] Tema‑Titol 1r @ ${placeTime.toFixed(2)}s`);
                     } else {
-                        placeTime = clipStart + 0.40 + 4.40; // Cas B: Tema‑Titol després a 4:20
-                        log(`📌 [Titol·CasB] Tema‑Titol @ 0:10+4:10 = ${placeTime.toFixed(2)}s`);
+                        placeTime = clipStart + 0.40 + 4.40; // Cas B: 4:20
+                        log(`📌 [Titol·CasB] Tema‑Titol @ ${placeTime.toFixed(2)}s`);
                     }
                 } else {
-                    log(`📌 [Titol] Al principi @ 0:10 = ${placeTime.toFixed(2)}s`);
+                    log(`📌 [Titol] Al principi @ ${placeTime.toFixed(2)}s`);
                 }
 
                 // Buscar el Tema‑Titol al primer element amb sufix (dp, i, f, lead) que en tingui
