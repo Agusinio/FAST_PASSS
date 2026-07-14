@@ -504,31 +504,10 @@
                     return;
                 }
 
-                // Calcular stretchEnd: següent Tema‑Titol o Out Point
-                let nextTemaTitolTime = null;
-                for (let i = 0; i < structuralMarkers.length; i++) {
-                    const m = structuralMarkers[i];
-                    if (m.time > firstMarker.time + 0.5) {
-                        const rawId = (m.comments || "").split("-")[0].trim();
-                        const baseMatch = rawId.match(/^(\d+)/);
-                        if (baseMatch) {
-                            let entry = structureById[rawId] || null;
-                            if (!entry) {
-                                for (const suf of SUFFIX_PRIORITY) {
-                                    if (structureById[baseMatch[1] + suf]) { entry = structureById[baseMatch[1] + suf]; break; }
-                                }
-                            }
-                            if (entry && entry.chyrons && entry.chyrons.some(c =>
-                                (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
-                            )) {
-                                nextTemaTitolTime = m.time; break;
-                            }
-                        }
-                    }
-                }
+                // Estirar fins al final del bloc (Out Point de la seqüència)
                 let seqOutTime = null;
                 try { seqOutTime = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
-                const stretchEnd = nextTemaTitolTime || (seqOutTime > 0 ? seqOutTime : null);
+                const stretchEnd = seqOutTime > 0 ? seqOutTime : null;
                 log(`📌 [Titol] stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
 
                 try {
