@@ -504,10 +504,18 @@
                     return;
                 }
 
-                // Estirar fins al final del bloc (Out Point de la seqüència)
-                let seqOutTime = null;
-                try { seqOutTime = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
-                const stretchEnd = seqOutTime > 0 ? seqOutTime : null;
+                // Estirar fins al final del bloc (Out Point, durada, o final del darrer clip V1)
+                let seqEnd = null;
+                try { seqEnd = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
+                if (!seqEnd || seqEnd <= 0) {
+                    try { seqEnd = parseFloat(await callJSX("Timeline.duration()") || "0"); } catch (e) {}
+                }
+                if (!seqEnd || seqEnd <= 0) {
+                    // Fallback: final de l'últim clip V1
+                    const lastClip = clips[clips.length - 1];
+                    seqEnd = lastClip ? lastClip.end : null;
+                }
+                const stretchEnd = (seqEnd && seqEnd > 0) ? seqEnd : null;
                 log(`📌 [Titol] stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
 
                 try {
@@ -534,6 +542,9 @@
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const T_CHY = cfg.tracks.video.chyrons;
+            const struct = FASTPASS_UI.State.structure;
+            const structureById = {};
+            for (const entry of struct || []) { if (entry.id) structureById[entry.id] = entry; }
 
             const conductorSelect = document.getElementById('conductor');
             const conductorFile = conductorSelect ? conductorSelect.value : null;
