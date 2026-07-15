@@ -46,15 +46,10 @@ FASTPASS.Tracks = {
         try {
             $.writeln("[Tracks.mute] idx=" + idx + " state=" + state + " type=" + type);
             var track = this._get(idx, type);
-            $.writeln("[Tracks.mute] track=" + track + " typeof track.setMute=" + typeof track.setMute);
             if (track) {
-                if (typeof track.setMute !== 'undefined') {
-                    track.setMute(state);
-                    $.writeln("[Tracks.mute] setMute OK");
-                } else {
-                    track.mute = state;
-                    $.writeln("[Tracks.mute] mute=" + state + " via property");
-                }
+                // setMute falla amb booleà via bridge. Usar propietat directa.
+                track.mute = state;
+                $.writeln("[Tracks.mute] OK via track.mute=" + state);
                 return "OK";
             }
             return "ERR_NO_TRACK";
