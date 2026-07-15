@@ -44,13 +44,21 @@ FASTPASS.Tracks = {
      */
     mute: function(idx, state, type) {
         try {
+            $.writeln("[Tracks.mute] idx=" + idx + " state=" + state + " type=" + type);
             var track = this._get(idx, type);
+            $.writeln("[Tracks.mute] track=" + track + " typeof track.setMute=" + typeof track.setMute);
             if (track) {
-                track.setMute(state);
+                if (typeof track.setMute !== 'undefined') {
+                    track.setMute(state);
+                    $.writeln("[Tracks.mute] setMute OK");
+                } else {
+                    track.mute = state;
+                    $.writeln("[Tracks.mute] mute=" + state + " via property");
+                }
                 return "OK";
             }
             return "ERR_NO_TRACK";
-        } catch(e) { return "EXC: " + e.message; }
+        } catch(e) { $.writeln("[Tracks.mute] EXC: " + e.message); return "EXC: " + e.message; }
     },
 
     /**
