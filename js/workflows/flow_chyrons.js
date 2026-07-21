@@ -305,23 +305,18 @@
             const escapedWott = utils.escape(wottName);
             const CUT_OFFSET = 8.0;
             log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
-            const MOVE_TO_TC = 600; // 10:00:00
+            const TEMP_TC = 600; // 10:00:00
             const cutTime = placeTime + CUT_OFFSET;
 
-            // 1. Inserir Wott complet i retallar-lo a 8s (animació)
-            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
+            // 1. Inserir Wott TEMPORALMENT a TC 10:00 (clip sol, sense ripple)
+            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${TEMP_TC}, null, 'video')`);
             await utils.delay(300);
-            await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
-            log(`   ✂️ [_freeze] Clip retallat a end=${cutTime.toFixed(2)}s`);
+            // Retallar-lo a 8s allà mateix
+            await callJSX(`Clips.endAt(${T_THEME}, ${TEMP_TC}, ${TEMP_TC + CUT_OFFSET}, 'video')`);
+            log(`   📦 [_freeze] Wott inserit temporalment a V5 @ ${TEMP_TC}s`);
 
-            // 2. Moure el clip retallat a TC 10:00:00 (fora de la zona de treball)
-            const clipInfo = JSON.parse(await callJSX(`Clips.at(${T_THEME}, ${placeTime + 0.04}, 'video')`));
-            const clipIdx = clipInfo ? clipInfo.index : 0;
-            await callJSX(`Clips.start(${T_THEME}, ${clipIdx}, ${MOVE_TO_TC}, 'video')`);
-            log(`   📦 [_freeze] Clip mogut a V5 @ ${MOVE_TO_TC}s (clipIdx=${clipIdx})`);
-
-            // 3. Posicionar cabezal al final del clip mogut i fer snapshot
-            const snapCTI = MOVE_TO_TC + CUT_OFFSET;
+            // 2. Snapshot a 10:08 (només el Wott, sense res al voltant)
+            const snapCTI = TEMP_TC + CUT_OFFSET;
             await callJSX(`Timeline.set(${snapCTI})`);
             await utils.delay(500);
 
@@ -330,9 +325,9 @@
             const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapCTI})`);
             log(`   📸 [_freeze] Render.snapshot → ${snapResult} (path=${snapPath})`);
 
-            // 4. Eliminar el clip mogut de V5
-            await callJSX(`Clips.remove(${T_THEME}, ${clipIdx}, 'video')`);
-            log(`   🗑️ [_freeze] Clip mogut eliminat de V5`);
+            // 3. Eliminar el Wott temporal de V5
+            await callJSX(`Clips.remove(${T_THEME}, 0, 'video')`);
+            log(`   🗑️ [_freeze] Wott temporal eliminat de V5`);
 
             if (!snapResult || snapResult.indexOf('OK') !== 0) {
                 log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
