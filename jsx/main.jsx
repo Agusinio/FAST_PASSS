@@ -368,6 +368,10 @@ $.global.Tracks = {
     },
     ensure: function(idx, type) {
         return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.ensure(idx, type) : "ERR";
+    },
+    videoOut: function(idx, state, type) {
+        $.writeln("[Tracks.videoOut·BRIDGE] idx=" + idx + " state=" + state);
+        return ($.global.FASTPASS.Tracks) ? FASTPASS.Tracks.videoOut(idx, state, type || "video") : "ERR_NO_MODULE";
     }
 };
 
