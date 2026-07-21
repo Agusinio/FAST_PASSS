@@ -321,6 +321,10 @@
             const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`;
             const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapTC})`);
             log(`   📸 [_freeze] Render.snapshot → ${snapResult} (path=${snapPath})`);
+            
+            // Tornar el cabezal a la posició original per restaurar la vista
+            await callJSX(`Timeline.set(${cutTime})`);
+            log(`   📍 [_freeze] Cabezal retornat a ${cutTime.toFixed(2)}s`);
 
             // 3. Eliminar el Wott temporal de V5
             await callJSX(`Clips.remove(${T_THEME}, 0, 'video')`);
@@ -355,10 +359,6 @@
             }
             await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
             log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
-            
-            // Tornar el cabezal a la posició del freeze per restaurar la vista
-            await callJSX(`Timeline.set(${cutTime})`);
-            log(`   📍 [_freeze] Cabezal retornat a ${cutTime.toFixed(2)}s`);
             
             return { success: true, duration };
         },
