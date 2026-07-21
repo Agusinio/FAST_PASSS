@@ -308,26 +308,32 @@
             const TEMP_TC = 600; // 10:00:00
             const cutTime = placeTime + CUT_OFFSET;
 
-            // 1. Inserir Wott TEMPORALMENT a TC 10:00 (clip sol, sense ripple)
+            // 1. Inserir Wott TEMPORALMENT a TC 10:00 (clip sol, sense cap altre clip)
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${TEMP_TC}, null, 'video')`);
             await utils.delay(300);
-            // Retallar-lo a 8s allà mateix
-            await callJSX(`Clips.endAt(${T_THEME}, ${TEMP_TC}, ${TEMP_TC + CUT_OFFSET}, 'video')`);
-            log(`   📦 [_freeze] Wott inserit temporalment a V5 @ ${TEMP_TC}s`);
 
             // 2. Snapshot a 10:08 (només el Wott, sense res al voltant)
-            const snapCTI = TEMP_TC + CUT_OFFSET;
-            await callJSX(`Timeline.set(${snapCTI})`);
+            const snapTC = TEMP_TC + CUT_OFFSET;
+            await callJSX(`Timeline.set(${snapTC})`);
             await utils.delay(500);
 
             const folder = await callJSX("Context.folder()");
             const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`;
-            const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapCTI})`);
+            const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapTC})`);
             log(`   📸 [_freeze] Render.snapshot → ${snapResult} (path=${snapPath})`);
 
             // 3. Eliminar el Wott temporal de V5
             await callJSX(`Clips.remove(${T_THEME}, 0, 'video')`);
             log(`   🗑️ [_freeze] Wott temporal eliminat de V5`);
+
+            if (!snapResult || snapResult.indexOf('OK') !== 0) {
+                log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
+                return { success: false, duration: 0 };
+            }
+
+            // 4. Inserir ara el Wott d'animació a placeTime (0→8s)
+            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
+            log(`   🎞️ [_freeze] Clip animació inserit a V5 @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s`);
 
             if (!snapResult || snapResult.indexOf('OK') !== 0) {
                 log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
