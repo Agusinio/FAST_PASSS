@@ -85,6 +85,23 @@ FASTPASS.Tracks = {
     },
 
     /**
+     * videoOut: Desactiva/activa la sortida de vídeo d'una pista (icono de l'ull).
+     */
+    videoOut: function(idx, state, type) {
+        try {
+            $.writeln("[Tracks.videoOut·DIAG] idx=" + idx + " state=" + state + " type=" + (type || "video"));
+            var track = this._get(idx, type || "video");
+            if (track) {
+                track.displayState = state;
+                var afterState = track.displayState;
+                $.writeln("[Tracks.videoOut·DIAG] after assign: track.displayState=" + afterState + " (expected=" + state + ")");
+                return "OK:displayState=" + afterState;
+            }
+            return "ERR_NO_TRACK";
+        } catch(e) { $.writeln("[Tracks.videoOut·DIAG] EXC: " + e.message); return "EXC: " + e.message; }
+    },
+
+    /**
      * ensure: Assegura que existeixi almenys `idx` pistes del tipus donat.
      * Si no n'hi ha prou, crea les que faltin.
      * @param {number} idx - Nombre mínim de pista (1-based)

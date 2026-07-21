@@ -311,8 +311,14 @@
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
             await utils.delay(500);
 
-            // 2. Aïllar V5 (només el Tema‑Titol visible), després posicionar cabezal i fer snapshot
-            await FASTPASS_UI.Logic.Tracks.isolate(T_THEME, 'video');
+            // 2. Apagar visualment totes les pistes excepte V5 (displayState afecta QE)
+            const vCount = parseInt(await callJSX("Tracks.count('video')") || "0");
+            log(`   🔬 [_freeze] Video tracks count: ${vCount}`);
+            for (let ti = 1; ti <= vCount; ti++) {
+                const newState = (ti === T_THEME) ? 'true' : 'false';
+                const res = await callJSX(`Tracks.videoOut(${ti}, ${newState}, 'video')`);
+                log(`      🎛️ [_freeze] videoOut V${ti} → ${res}`);
+            }
             await callJSX(`Timeline.set(${cutTime})`);
             await utils.delay(500);
 
@@ -322,8 +328,10 @@
             const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${cutTime})`);
             log(`   📸 [_freeze] Render.snapshot → ${snapResult} (path=${snapPath})`);
 
-            // 3. Restaurar visibilitat de totes les pistes
-            await FASTPASS_UI.Logic.Tracks.all('video', 'mute', false);
+            // 3. Restaurar visibilitat de totes les pistes (tots els tracks visibles)
+            for (let ti = 1; ti <= vCount; ti++) {
+                await callJSX(`Tracks.videoOut(${ti}, true, 'video')`);
+            }
 
             // 4. Retallar clip animació (després del snapshot, per tenir el frame complet)
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
