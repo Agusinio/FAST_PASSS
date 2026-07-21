@@ -355,6 +355,11 @@
             }
             await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
             log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
+            
+            // Tornar el cabezal a la posició del freeze per restaurar la vista
+            await callJSX(`Timeline.set(${cutTime})`);
+            log(`   📍 [_freeze] Cabezal retornat a ${cutTime.toFixed(2)}s`);
+            
             return { success: true, duration };
         },
 
