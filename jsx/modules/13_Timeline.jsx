@@ -147,6 +147,20 @@ FASTPASS.Timeline = {
         }
     },
 
+    /**
+     * exportFcpXml: Exporta la seqüència activa a FCP XML (per a processament extern).
+     * @param {string} outputPath - Ruta completa de destí (.xml)
+     * @returns {string} "OK" o "ERR:... "
+     */
+    exportFcpXml: function(outputPath) {
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            seq.exportAsFinalCutProXML(outputPath, 1); // 1 = suppressUI
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
     // --- HELPER INTERNO (BAJO NIVEL) ---
     _sec: function(s) {
         var t = new Time();

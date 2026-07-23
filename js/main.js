@@ -1,4 +1,4 @@
-﻿/*
+/*
  * =================================================================================
  * PROJECTE: FAST >>> PASS
  * ARXIU: main.js (ENTRY POINT & UI CONTROLLER - v2.6.0 literal)
@@ -172,11 +172,9 @@ var isUserDraggingSlider = false;
         const btnSrtOut = document.getElementById('btnSrtOut');
         const btnTimeAdjust = document.getElementById('btnTimeAdjust');
 
-        if (btnSrtWork) btnSrtWork.addEventListener('click', (e) => {
-            if (FASTPASS_UI.Workflows.Srt) FASTPASS_UI.Workflows.Srt.toggleSrtWork(e.ctrlKey);
-        });
+        if (btnSrtWork) btnSrtWork.addEventListener('click', () => callWorkflow('Srt', 'runPreparar'));
         if (btnSrtIn) btnSrtIn.addEventListener('click', () => callWorkflow('Srt', 'runSrtIn'));
-        if (btnSrtOut) btnSrtOut.addEventListener('click', () => callWorkflow('Srt', 'runSrtOut'));
+        if (btnSrtOut) btnSrtOut.addEventListener('click', () => callWorkflow('Srt', 'exploreSubtitleTracks'));
         if (btnTimeAdjust) btnTimeAdjust.addEventListener('click', () => callWorkflow('Srt', 'runTimeAdjust'));
 
         // --- WORKFLOW: RENDER ---

@@ -746,5 +746,32 @@ FASTPASS.Clips = {
             }
             return JSON.stringify(results);
         } catch(e) { return "[]"; }
-    }
-};
+    },
+    /**
+     * createCaptionFromProjectItem: Crea una nova caption track i hi col·loca un SRT.
+     * És l'única API disponible per treballar amb subtítols des d'ExtendScript.
+     * @param {string} itemName - Nom del .srt al projecte (URI-encoded)
+     * @param {number} startSec - Segon d'inici al timeline (normalment 0)
+     * @returns {string} "OK" o "ERR:... "
+     */
+    createCaptionFromProjectItem: function(itemName, startSec) {
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var nameToFind = decodeURIComponent(itemName);
+            var item = FASTPASS.Project.find(nameToFind);
+            if (!item) {
+                var lastDot = nameToFind.lastIndexOf(".");
+                if (lastDot > 0) {
+                    item = FASTPASS.Project.find(nameToFind.substring(0, lastDot));
+                }
+            }
+            if (!item) return "ERR_ITEM_NOT_FOUND";
+            if (typeof seq.createCaptionTrack !== "function") return "ERR_NO_CREATE_CAPTION_API";
+            var tStart = parseFloat(startSec || 0);
+            var result = seq.createCaptionTrack(item, tStart);
+            if (result) return "OK";
+            return "ERR_CREATE_CAPTION_FAILED";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+}
