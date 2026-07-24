@@ -166,16 +166,44 @@ var isUserDraggingSlider = false;
         if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronResto'));
         const btnChyronRepartir = document.getElementById('btnChyronRepartir');
         if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'repartirChyronTraduccio'));
-        // --- WORKFLOW: SRT (SUBTÍTULOS) ---
-        const btnSrtWork = document.getElementById('btnSrtWork');
+        // --- WORKFLOW: SRT EDITOR (SUBTÍTULOS) ---
+        const btnSrtLoad = document.getElementById('btnSrtLoad');
         const btnSrtIn = document.getElementById('btnSrtIn');
         const btnSrtOut = document.getElementById('btnSrtOut');
-        const btnTimeAdjust = document.getElementById('btnTimeAdjust');
+        const btnSrtAdjust = document.getElementById('btnSrtAdjust');
+        const btnSrtExport = document.getElementById('btnSrtExport');
 
-        if (btnSrtWork) btnSrtWork.addEventListener('click', () => callWorkflow('Srt', 'runPreparar'));
-        if (btnSrtIn) btnSrtIn.addEventListener('click', () => callWorkflow('Srt', 'runSrtIn'));
-        if (btnSrtOut) btnSrtOut.addEventListener('click', () => callWorkflow('Srt', 'exploreSubtitleTracks'));
-        if (btnTimeAdjust) btnTimeAdjust.addEventListener('click', () => callWorkflow('Srt', 'runTimeAdjust'));
+        if (btnSrtLoad) {
+            btnSrtLoad.addEventListener('click', async function () {
+                // Buscar .srt al projecte i carregar-lo a l'editor
+                const itemsRaw = await callJSX("FASTPASS.Project.items('')");
+                let items = [];
+                try { items = JSON.parse(itemsRaw || "[]"); } catch(e) { items = []; }
+                const srtItem = items.find(i => i && i.name && i.name.toUpperCase().endsWith('.SRT'));
+                if (!srtItem) {
+                    FASTPASS_UI.Utils.status("No s'ha trobat .srt al projecte", "warn");
+                    return;
+                }
+                // Obtenir mediaPath real
+                const srtPathRaw = await callJSX('(function(){try{var p=app.project.rootItem;for(var i=0;i<p.children.numItems;i++){var c=p.children[i];if(c.name&&c.name.toUpperCase().indexOf(\'.SRT\')>=0&&(c.type===1||c.type===2)){return c.name+\'|\'+c.getMediaPath()}}return\'\'}catch(e){return\'ERR:\'+e.message}})()');
+                if (srtPathRaw && srtPathRaw.indexOf('|') > 0) {
+                    var parts = srtPathRaw.split('|');
+                    await window.SrtEditor.loadSrt(parts[1]);
+                }
+            });
+        }
+        if (btnSrtIn) btnSrtIn.addEventListener('click', function () {
+            if (window.SrtEditor) window.SrtEditor.applyIn();
+        });
+        if (btnSrtOut) btnSrtOut.addEventListener('click', function () {
+            if (window.SrtEditor) window.SrtEditor.applyOut();
+        });
+        if (btnSrtAdjust) btnSrtAdjust.addEventListener('click', function () {
+            if (window.SrtEditor) window.SrtEditor.applyAdjust();
+        });
+        if (btnSrtExport) btnSrtExport.addEventListener('click', function () {
+            if (window.SrtEditor) window.SrtEditor.exportToPremiere();
+        });
 
         // --- WORKFLOW: RENDER ---
         const btnRenderVideo = document.getElementById('btnRenderVideo');
@@ -202,6 +230,12 @@ var isUserDraggingSlider = false;
         const progInicial = document.getElementById('programa').value;
         if (progInicial && FASTPASS_UI.Core.Context.syncConductorUI) {
             FASTPASS_UI.Core.Context.syncConductorUI(progInicial);
+        }
+
+        // Inicialitzar SRT Editor
+        if (window.SrtEditor) {
+            window.SrtEditor.init();
+            FASTPASS_UI.Utils.log("✅ SRT Editor inicialitzat");
         }
 
         callContextAudit();
