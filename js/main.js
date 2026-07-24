@@ -175,20 +175,31 @@ var isUserDraggingSlider = false;
 
         if (btnSrtLoad) {
             btnSrtLoad.addEventListener('click', async function () {
-                // Buscar .srt al projecte i carregar-lo a l'editor
-                const itemsRaw = await callJSX("FASTPASS.Project.items('')");
-                let items = [];
-                try { items = JSON.parse(itemsRaw || "[]"); } catch(e) { items = []; }
-                const srtItem = items.find(i => i && i.name && i.name.toUpperCase().endsWith('.SRT'));
-                if (!srtItem) {
-                    FASTPASS_UI.Utils.status("No s'ha trobat .srt al projecte", "warn");
-                    return;
-                }
-                // Obtenir mediaPath real
-                const srtPathRaw = await callJSX('(function(){try{var p=app.project.rootItem;for(var i=0;i<p.children.numItems;i++){var c=p.children[i];if(c.name&&c.name.toUpperCase().indexOf(\'.SRT\')>=0&&(c.type===1||c.type===2)){return c.name+\'|\'+c.getMediaPath()}}return\'\'}catch(e){return\'ERR:\'+e.message}})()');
-                if (srtPathRaw && srtPathRaw.indexOf('|') > 0) {
-                    var parts = srtPathRaw.split('|');
-                    await window.SrtEditor.loadSrt(parts[1]);
+                const u = FASTPASS_UI.Utils;
+                u.log("📝 SRT_CARREGAR: Buscant .srt al projecte...");
+                try {
+                    const itemsRaw = await u.callJSX("FASTPASS.Project.items('')");
+                    let items = [];
+                    try { items = JSON.parse(itemsRaw || "[]"); } catch(e) { items = []; }
+                    const srtItem = items.find(i => i && i.name && i.name.toUpperCase().endsWith('.SRT'));
+                    if (!srtItem) {
+                        u.status("No s'ha trobat .srt al projecte", "warn");
+                        return;
+                    }
+                    u.log("📝 SRT_CARREGAR: Trobat " + srtItem.name);
+                    const srtPathRaw = await u.callJSX('(function(){try{var p=app.project.rootItem;for(var i=0;i<p.children.numItems;i++){var c=p.children[i];if(c.name&&c.name.toUpperCase().indexOf(\'.SRT\')>=0&&(c.type===1||c.type===2)){return c.name+\'|\'+c.getMediaPath()}}return\'\'}catch(e){return\'ERR:\'+e.message}})()');
+                    if (srtPathRaw && srtPathRaw.indexOf('|') > 0) {
+                        var parts = srtPathRaw.split('|');
+                        u.log("📝 SRT_CARREGAR: Path = " + parts[1]);
+                        if (window.SrtEditor) {
+                            await window.SrtEditor.loadSrt(parts[1]);
+                        } else {
+                            u.status("Error: SrtEditor no disponible", "error");
+                        }
+                    }
+                } catch(e) {
+                    u.log("💥 SRT_CARREGAR: " + e.message);
+                    u.status("Error carregant .srt", "error");
                 }
             });
         }

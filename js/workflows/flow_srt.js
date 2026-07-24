@@ -222,7 +222,10 @@
          * i l'insereix a una caption track.
          */
         runPreparar: async function () {
-            console.log("🔴🔴 SRT: runPreparar EXECUTAT 🔴🔴🔴");
+            console.log("🔴🔴 SRT: runPreparar EXECUTAT (DESACTIVAT - usau l'editor SRT) 🔴🔴🔴");
+            // DESACTIVAT: la càrrega de .srt al timeline es fa via l'editor SRT (botó CARREGAR + EXPORTAR)
+            getUtils().status("Usa CARREGAR i EXPORTAR al panell SRT", "warn");
+            return;
             try {
                 // 1. Buscar el fitxer .srt entre els items del projecte (root)
                 const itemsRaw = await callJSX("FASTPASS.Project.items('')");

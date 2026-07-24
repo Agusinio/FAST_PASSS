@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="6.0" ExtensionBundleId="com.test.debug" ExtensionBundleVersion="9.1.0" ExtensionBundleName="FAST_PASSS">
+<ExtensionManifest Version="6.0" ExtensionBundleId="com.test.debug" ExtensionBundleVersion="9.2.0" ExtensionBundleName="FAST_PASSS">
     
     <ExtensionList>
         <Extension Id="com.test.debug.panel" Version="8.5.0"/>
