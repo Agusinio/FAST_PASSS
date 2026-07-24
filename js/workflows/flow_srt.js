@@ -95,32 +95,25 @@
             return false;
         }
 
-        // 5. Buscar i reinserir
+        // 5. Esborrar items .srt anteriors del projecte (però no pot esborrar caption tracks anteriors per API)
+        await callJSX("(function(){try{var root=app.project.rootItem;for(var i=root.children.numItems-1;i>=0;i--){var c=root.children[i];if(c&&c.name&&c.name.toUpperCase().indexOf('.SRT')>=0){try{c.delete()}catch(e){}}}}catch(e){}})()");
+
+        // 6. Reimportar _MOD.srt
+        var importAgainResult = await callJSX("(function(){try{app.project.importFiles(['" + normalizedPath.replace(/\\/g, '/') + "'],true,app.project.rootItem,false);return'OK'}catch(e){return'ERR:'+e.message}})()");
+
+        // 7. Buscar i reinserir
         var escapedModName = encodeURIComponent(modName);
         var findResult = await callJSX("FASTPASS.Project.find(decodeURIComponent('" + escapedModName + "'))");
-        log("📝 SRT: find _MOD.srt result: " + (findResult ? findResult.substring(0, 100) : "null"));
-
         if (!findResult || findResult === 'null' || findResult.indexOf('null') >= 0) {
             getUtils().status("No es troba _MOD.srt al projecte", "error");
             return false;
         }
 
-        // 6. Crear caption track
+        // 8. Crear caption track (NOTA: sempre crea un track nou, cal esborrar els anteriors manualment)
         var captionResult = await callJSX("(function(){var s=app.project.activeSequence;if(!s)return'ERR_NO_SEQ';var i=FASTPASS.Project.find(decodeURIComponent('" + encodeURIComponent(modName) + "'));if(!i)return'ERR_ITEM_NOT_FOUND';if(typeof s.createCaptionTrack!=='function')return'ERR_NO_CAPTION_API';return s.createCaptionTrack(i,0)?'OK':'ERR_FAILED'})()");
         log("📝 SRT: createCaptionTrack result: " + captionResult);
 
         if (captionResult === "OK") {
-            // 7. Esborrar pistes de subtítols anteriors via Sequence API (clearCaptionTrack)
-            try {
-                var removeResult = await callJSX("(function(){try{var s=app.project.activeSequence;if(!s)return'NO_SEQ';if(typeof s.clearCaptionTrack==='function'){var idx=0;while(s.subtitleTracks&&s.subtitleTracks.numTracks>1){s.clearCaptionTrack(0);idx++}return'OK_CLEARED_'+idx}return'NO_CLEAR_API'}catch(e){return'ERR:'+e.message}})()");
-                log("📝 SRT: Neteja: " + removeResult);
-            } catch(e) {
-                log("⚠️ SRT: Error neteja: " + e.message);
-                // Fallback: netejar la pista anterior eliminant el projectItem
-                try {
-                    await callJSX("(function(){try{var s=app.project.activeSequence;if(!s)return;var n=s.subtitleTracks? s.subtitleTracks.numTracks:0;for(var i=0;i<n-1;i++){try{s.subtitleTracks[i].clips.removeAll()}catch(e){}}}catch(e){}})()");
-                } catch(e2) {}
-            }
             // Guardar a state
             var state = FASTPASS_UI.State;
             state.srt = state.srt || {};
