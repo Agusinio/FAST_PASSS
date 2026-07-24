@@ -95,7 +95,7 @@
             return false;
         }
 
-        // 5. Esborrar items .srt anteriors del projecte (però no pot esborrar caption tracks anteriors per API)
+        // 5. Esborrar items .srt anteriors del projecte
         await callJSX("(function(){try{var root=app.project.rootItem;for(var i=root.children.numItems-1;i>=0;i--){var c=root.children[i];if(c&&c.name&&c.name.toUpperCase().indexOf('.SRT')>=0){try{c.delete()}catch(e){}}}}catch(e){}})()");
 
         // 6. Reimportar _MOD.srt
@@ -109,7 +109,18 @@
             return false;
         }
 
-        // 8. Crear caption track (NOTA: sempre crea un track nou, cal esborrar els anteriors manualment)
+        // 8. Netejar caption tracks antics via PrProjCleaner (JS pur → PowerShell)
+        try {
+            var cleaner = window.FASTPASS_UI.Logic.PrProjCleaner;
+            if (cleaner) {
+                var cleanResult = await cleaner.removeOldCaptionTracks();
+                log("📝 SRT: Neteja tracks: " + cleanResult.message + " (removed=" + cleanResult.removedTracks + ")");
+            }
+        } catch(e) {
+            log("⚠️ SRT: Error netejant tracks: " + e.message);
+        }
+
+        // 9. Crear caption track
         var captionResult = await callJSX("(function(){var s=app.project.activeSequence;if(!s)return'ERR_NO_SEQ';var i=FASTPASS.Project.find(decodeURIComponent('" + encodeURIComponent(modName) + "'));if(!i)return'ERR_ITEM_NOT_FOUND';if(typeof s.createCaptionTrack!=='function')return'ERR_NO_CAPTION_API';return s.createCaptionTrack(i,0)?'OK':'ERR_FAILED'})()");
         log("📝 SRT: createCaptionTrack result: " + captionResult);
 

@@ -289,17 +289,118 @@
         }
     };
 
-    // Mantenir retrocompatibilitat amb cleanIn/cleanOut existents
-    FASTPASS_UI.Logic.Sub = {
-        cleanIn: async function (ctiSec, searchText) {
-            return "DEPRECATED: Use SrtParser instead";
+    /**
+     * PrProjCleaner: Neteja de caption tracks antics del .prproj
+     * Tota la lògica és en JS, crida PowerShell via cep.process per GZip.
+     */
+    FASTPASS_UI.Logic.PrProjCleaner = {
+
+        /**
+         * getProjectPath: Obté el path del .prproj actiu via JSX atòmic
+         * @returns {Promise<string>} Path complet del .prproj
+         */
+        getProjectPath: async function () {
+            // Utilitzem app.project.path directament (JSX inline atòmic)
+            return await window.FASTPASS_UI.Utils.callJSX("(function(){try{return app.project.path}catch(e){return''}})()");
         },
-        cleanOut: async function (ctiSec, searchText) {
-            return "DEPRECATED: Use SrtParser instead";
+
+        /**
+         * saveProject: Força desar el projecte via JSX atòmic
+         * @returns {Promise<boolean>} true si OK
+         */
+        saveProject: async function () {
+            var result = await window.FASTPASS_UI.Utils.callJSX("(function(){try{app.project.save();return'OK'}catch(e){return'ERR:'+e.message}})()");
+            return result === "OK";
+        },
+
+        /**
+         * removeOldCaptionTracks: Elimina tracks de captions antics del .prproj
+         * Descomprimeix → elimina CaptionDataClipTrack antics → re-comprimeix
+         * via PowerShell script extern (ja que JS no té GZip natiu).
+         * 
+         * @returns {Promise<object>} { success, message, removedTracks }
+         */
+        removeOldCaptionTracks: async function () {
+            var startTime = Date.now();
+            
+            // 1. Desar projecte
+            var saved = await this.saveProject();
+            if (!saved) return { success: false, message: "No s'ha pogut desar el projecte", removedTracks: 0 };
+
+            // 2. Obtenir path del projecte
+            var projPath = await this.getProjectPath();
+            if (!projPath || projPath.indexOf('ERR') === 0 || projPath === "") {
+                return { success: false, message: "No s'ha pogut obtenir el path del projecte", removedTracks: 0 };
+            }
+
+            // 3. Executar PowerShell via cep.process
+            // Usem cep.process.createProcess (API CEP nativa, no requereix Node)
+            return new Promise(function(resolve) {
+                try {
+                    var cep = window.cep || window.__adobe_cep__;
+                    if (!cep || !cep.process) {
+                        // Fallback: no cep.process disponible
+                        resolve({ success: false, message: "cep.process no disponible", removedTracks: 0 });
+                        return;
+                    }
+
+                    var scriptPath = "C:\\temp\\manage_prproj.ps1";
+                    var psArgs = "-ExecutionPolicy Bypass -File \"" + scriptPath + "\" -prprojPath \"" + projPath + "\" -action remove_old_tracks";
+                    
+                    // cep.process.createProcess retorna un objecte process
+                    var processObj = cep.process.createProcess("powershell.exe", psArgs);
+                    
+                    if (processObj) {
+                        // Esperar 10s i resoldre (no tenim callback, és asíncron)
+                        setTimeout(function() {
+                            resolve({ success: true, message: "PowerShell executat", removedTracks: -1 });
+                        }, 10000); // Donem 10s per completar
+                    } else {
+                        resolve({ success: false, message: "Error creant procés PowerShell", removedTracks: 0 });
+                    }
+                } catch(e) {
+                    resolve({ success: false, message: "Excepció: " + e.message, removedTracks: 0 });
+                }
+            });
+        },
+
+        /**
+         * removeOldCaptionTracksSync: Versió síncrona via child_process (si Node està disponible)
+         * @returns {object} { success, message, removedTracks }
+         */
+        removeOldCaptionTracksSync: function () {
+            try {
+                var execSync = require('child_process').execSync;
+                var projPath = window.FASTPASS_UI.State.projPath || "";
+                if (!projPath) return { success: false, message: "No project path", removedTracks: 0 };
+                
+                var cmd = "powershell -ExecutionPolicy Bypass -File \"C:\\temp\\manage_prproj.ps1\" -prprojPath \"" + projPath + "\" -action remove_old_tracks";
+                var output = execSync(cmd, { timeout: 30000 }).toString().trim();
+                
+                // Parsejar sortida: "TRACKS:10" i "OK:Removed 9 old tracks, kept 1"
+                var trackMatch = output.match(/TRACKS:(\d+)/);
+                var removedMatch = output.match(/Removed (\d+)/);
+                
+                return {
+                    success: output.indexOf("OK") >= 0,
+                    message: output,
+                    removedTracks: removedMatch ? parseInt(removedMatch[1]) : (trackMatch ? parseInt(trackMatch[1]) - 1 : -1)
+                };
+            } catch(e) {
+                return { success: false, message: e.message, removedTracks: 0 };
+            }
         }
+    };
+
+    // Mantenir retrocompatibilitat
+    FASTPASS_UI.Logic.Sub = {
+        cleanIn: async function () { return "DEPRECATED: Use SrtParser instead"; },
+        cleanOut: async function () { return "DEPRECATED: Use SrtParser instead"; }
     };
 
     window.FASTPASS_UI.Logic.SrtParser = FASTPASS_UI.Logic.SrtParser;
     window.SrtParser = FASTPASS_UI.Logic.SrtParser;
+    window.FASTPASS_UI.Logic.PrProjCleaner = FASTPASS_UI.Logic.PrProjCleaner;
+    window.PrProjCleaner = FASTPASS_UI.Logic.PrProjCleaner;
     window.FASTPASS_UI = FASTPASS_UI;
 })();
