@@ -840,7 +840,7 @@
                 // Desar path del SRT a State per a IN/OUT
                 const srtNameEsc = encodeURIComponent(assets.media.srt.name);
                 const srtPathRaw2 = await callJSX(`(function(){try{var p=app.project.rootItem;for(var i=0;i<p.children.numItems;i++){var c=p.children[i];if(c.name&&c.name.toUpperCase().indexOf('.SRT')>=0&&(c.type===1||c.type===2)){return c.name+'|'+c.getMediaPath()}}return''}catch(e){return'ERR:'+e.message}})()`);
-                if (srtPathRaw2 && srtPathRaw2.indexOf('|') > 0) {
+                /*if (srtPathRaw2 && srtPathRaw2.indexOf('|') > 0) {
                     var parts2 = srtPathRaw2.split('|');
                     if (window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.srt = window.FASTPASS_UI.State.srt || {};
@@ -848,7 +848,7 @@
                         window.FASTPASS_UI.State.srt.name = parts2[0];
                         log("🎞️ SRT mediaPath desat a State: " + parts2[1]);
                     }
-                }
+                }*/
                 // Habilitar botons IN/OUT
                 const btnIn = document.getElementById('btnSrtIn');
                 const btnOut = document.getElementById('btnSrtOut');
