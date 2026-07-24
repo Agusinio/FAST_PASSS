@@ -70,14 +70,12 @@
             <div class="section-label"><span>VÍDEO</span></div>
             <div class="section-content">
                 <div class="video-tactical-layout">
-                    <!-- Fila 1: IN, TROSEJA, OUT -->
                     <div class="video-row-top">
                         <button id="btnIn" class="secondary btn-sq-std">IN</button>
                         <button id="btnScene" class="secondary btn-wide-flex">TROSEJA</button>
                         <button id="btnOut" class="secondary btn-sq-std">OUT</button>
                         <button id="btnCenter" class="secondary btn-sq-double-high" title="Toggle Auto Reframe">REFRAME</button>
                     </div>
-                    <!-- Fila 2: PREV, SLIDER, NEXT -->
                     <div class="video-row-bottom">
                         <button id="btnPrevClip" class="secondary btn-sq-std">◀</button>
                         <div class="slider-container">
@@ -102,14 +100,6 @@
                     <button id="btnMarksF4" class="secondary btn-sq-double-high">Density</button>
                     <button id="btnMarksF5" class="secondary btn-sq-double-high">OrphanSnap</button>
                     <button id="btnMarksF6" class="secondary btn-sq-double-high">Gràfics</button>
-                    <!-- Botons ocults de moment:
-                    <button id="btnResetGrafs" class="secondary btn-sq-std reset-text" title="Limpiar Gráficos">RESET</button>
-                    <button id="btnPlaceStructure" class="secondary">ESTRUCTURA</button>
-                    <button id="btnSetBlocOut" class="secondary btn-sq-std" title="Fixar Out del Bloc al cabezal">O</button>
-                    <button id="btnPlaceGrafic" class="secondary btn-sq-std">GRAFIC</button>
-                    <button id="btnPlaceGraph169" class="secondary btn-sq-std">16:9</button>
-                    <button id="btnBg" class="secondary btn-sq-std">FONS</button>
-                    -->
                  </div>
             </div>
         </div>
@@ -168,7 +158,6 @@
             </div>
         </div>
 
-
     </div>
 
     <!-- OVERLAY: SETUP -->
@@ -176,51 +165,49 @@
         <iframe id="setup-iframe" src="about:blank"></iframe>
     </div>
 
-
-    <!-- SCRIPTS -->
+    <!-- SCRIPTS with version cachebuster -->
     <script src="js/lib/CSInterface.js"></script>
-    <script src="js/core/utils.js"></script>
-    <script src="js/core/11_Configuracio.js"></script>
-    <!-- EscaletaReader: sub-mòduls en ordre de dependència -->
-    <script src="js/core/escaleta_timecode.js"></script>
-    <script src="js/core/escaleta_config.js"></script>
-    <script src="js/core/escaleta_io.js"></script>
-    <script src="js/core/escaleta_items.js"></script>
-    <script src="js/core/escaleta_bounds.js"></script>
-    <script src="js/core/escaleta_fallback.js"></script>
-    <script src="js/core/escaleta_reader.js"></script>
-    <script src="js/core/session_manifest.js"></script>
-    <script src="js/core/state.js"></script>
-    <script src="js/inspectors/1_SourceAssets.js"></script>
-    <script src="js/logic/Scanner.js"></script>
-    <script src="js/inspectors/2_App.js"></script>
-    <script src="js/inspectors/3_Session.js"></script>
-    <script src="js/core/4_Context.js"></script>
-    <script src="js/logic/3_Project_Logic.js"></script>
-    <script src="js/logic/5_Tracks_Logic.js"></script>
-    <script src="js/logic/6_Clips_Logic.js"></script>
-    <script src="js/logic/7_KF_Logic.js"></script>
-    <script src="js/logic/9_Render_Logic.js"></script>
-    <script src="js/logic/10_Srt_Logic.js"></script>
-    <script src="js/logic/13_Parse.js"></script>
-    <script src="js/logic/14_Assembly_Logic.js"></script>
-    <script src="js/logic/15_FFmpeg_Logic.js"></script>
-    <script src="js/logic/16_Analysis_Logic.js"></script>
-    <script src="js/core/assembly_context.js"></script>
-    <script src="js/workflows/flow_mp4.js"></script>
-    <script src="js/workflows/flow_markers.js"></script>
-    <script src="js/workflows/flow_chyrons.js"></script>
-    <script src="js/workflows/flow_graphics.js"></script>
-    <script src="js/workflows/flow_mainButton.js"></script>
-    <script src="js/workflows/flow_cut.js"></script>
-    <script src="js/workflows/flow_retols.js"></script>
-    <script src="js/workflows/flow_srt.js"></script>
-    <script src="js/workflows/flow_render.js"></script>
-    <script src="js/workflows/flow_KF.js"></script>
-    <script src="js/workflows/flow_config.js"></script>
-    <script src="js/workflows/flow_assembly.js"></script>
-    <script src="js/core/project_registry.js"></script>
-    <script src="js/editor/srt_editor.js"></script>
-    <script src="js/main.js"></script>
+    <script src="js/core/utils.js?v=2"></script>
+    <script src="js/core/11_Configuracio.js?v=2"></script>
+    <script src="js/core/escaleta_timecode.js?v=2"></script>
+    <script src="js/core/escaleta_config.js?v=2"></script>
+    <script src="js/core/escaleta_io.js?v=2"></script>
+    <script src="js/core/escaleta_items.js?v=2"></script>
+    <script src="js/core/escaleta_bounds.js?v=2"></script>
+    <script src="js/core/escaleta_fallback.js?v=2"></script>
+    <script src="js/core/escaleta_reader.js?v=2"></script>
+    <script src="js/core/session_manifest.js?v=2"></script>
+    <script src="js/core/state.js?v=2"></script>
+    <script src="js/inspectors/1_SourceAssets.js?v=2"></script>
+    <script src="js/logic/Scanner.js?v=2"></script>
+    <script src="js/inspectors/2_App.js?v=2"></script>
+    <script src="js/inspectors/3_Session.js?v=2"></script>
+    <script src="js/core/4_Context.js?v=2"></script>
+    <script src="js/logic/3_Project_Logic.js?v=2"></script>
+    <script src="js/logic/5_Tracks_Logic.js?v=2"></script>
+    <script src="js/logic/6_Clips_Logic.js?v=2"></script>
+    <script src="js/logic/7_KF_Logic.js?v=2"></script>
+    <script src="js/logic/9_Render_Logic.js?v=2"></script>
+    <script src="js/logic/10_Srt_Logic.js?v=2"></script>
+    <script src="js/logic/13_Parse.js?v=2"></script>
+    <script src="js/logic/14_Assembly_Logic.js?v=2"></script>
+    <script src="js/logic/15_FFmpeg_Logic.js?v=2"></script>
+    <script src="js/logic/16_Analysis_Logic.js?v=2"></script>
+    <script src="js/core/assembly_context.js?v=2"></script>
+    <script src="js/workflows/flow_mp4.js?v=2"></script>
+    <script src="js/workflows/flow_markers.js?v=2"></script>
+    <script src="js/workflows/flow_chyrons.js?v=2"></script>
+    <script src="js/workflows/flow_graphics.js?v=2"></script>
+    <script src="js/workflows/flow_mainButton.js?v=2"></script>
+    <script src="js/workflows/flow_cut.js?v=2"></script>
+    <script src="js/workflows/flow_retols.js?v=2"></script>
+    <script src="js/workflows/flow_srt.js?v=2"></script>
+    <script src="js/workflows/flow_render.js?v=2"></script>
+    <script src="js/workflows/flow_KF.js?v=2"></script>
+    <script src="js/workflows/flow_config.js?v=2"></script>
+    <script src="js/workflows/flow_assembly.js?v=2"></script>
+    <script src="js/core/project_registry.js?v=2"></script>
+    <script src="js/editor/srt_editor.js?v=2"></script>
+    <script src="js/main.js?v=2"></script>
 </body>
 </html>
