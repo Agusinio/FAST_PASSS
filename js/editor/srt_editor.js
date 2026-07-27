@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * SRT EDITOR: Pseudotimeline dins l'extensió
- * Renderitza: regle de temps + waveform + 1 track (captions)
+ * Renderitza: regle de temps + 1 track (captions) + waveform (baix)
  * Permet: IN, OUT, AJUSTAR, zoom, PLAY/PAUSA, preview text net
  * Exporta: PROJECTE_MOD.srt → import → createCaptionTrack
  * ============================================================================
@@ -99,13 +99,12 @@
                         var wavPath = await wg.generateWaveform(audioPath, this._maxSec, canvasW, 60);
                         if (wavPath) {
                             log("📝 SRT_EDIT: Waveform generat a " + wavPath);
-                            // Carregar la imatge PNG al canvas
                             var self = this;
                             var img = new Image();
                             img.onload = function () {
                                 self._waveformImg = img;
                                 self.render();
-                                log("📝 SRT_EDIT: Waveform carregada al canvas");
+                                log("📝 SRT_EDIT: Waveform PNG carregada");
                             };
                             img.onerror = function () {
                                 log("⚠️ SRT_EDIT: Error carregant waveform PNG");
@@ -114,8 +113,6 @@
                         } else {
                             log("⚠️ SRT_EDIT: generateWaveform no va generar fitxer");
                         }
-                    } else {
-                        log("⚠️ SRT_EDIT: No s'ha pogut obtenir el path de l'audio");
                     }
                 }
             } catch(e) {
@@ -176,19 +173,14 @@
                     log("📝 SRT: PLAY result: " + result);
                 });
                 if (btn) btn.innerHTML = '⏸ PAUSA';
-                // Polling més ràpid mentre reprodueix
-                if (this._pollInterval) {
-                    clearInterval(this._pollInterval);
-                }
+                if (this._pollInterval) clearInterval(this._pollInterval);
                 this._pollInterval = setInterval(async function () {
                     try {
                         var cti = await callJSX("Timeline.get()");
                         if (cti && cti !== "null" && cti !== "") {
                             var sec = parseFloat(cti);
                             if (!isNaN(sec)) {
-                                self._playheadSec = sec;
-                                self.render();
-                                self._updatePreview(sec);
+                                self._playheadSec = sec; self.render(); self._updatePreview(sec);
                             }
                         }
                     } catch(e) { }
@@ -198,20 +190,13 @@
                     log("📝 SRT: STOP result: " + result);
                 });
                 if (btn) btn.innerHTML = '▶ PLAY';
-                // Tornar a polling normal
-                if (this._pollInterval) {
-                    clearInterval(this._pollInterval);
-                }
+                if (this._pollInterval) clearInterval(this._pollInterval);
                 this._pollInterval = setInterval(async function () {
                     try {
                         var cti = await callJSX("Timeline.get()");
                         if (cti && cti !== "null" && cti !== "") {
                             var sec = parseFloat(cti);
-                            if (!isNaN(sec)) {
-                                self._playheadSec = sec;
-                                self.render();
-                                self._updatePreview(sec);
-                            }
+                            if (!isNaN(sec)) { self._playheadSec = sec; self.render(); self._updatePreview(sec); }
                         }
                     } catch(e) { }
                 }, 400);
@@ -222,14 +207,19 @@
             if (!this._ctx || !this._canvas) return;
             var ctx = this._ctx;
             var canvasW = Math.max(1800, this._maxSec * this._pixelsPerSec + 100);
-            var canvasH = this._rulerHeight + this._waveformHeight + 5 + this._trackHeight + 8;
+            // Orde: regle (24) + gap(4) + track(30) + gap(4) + waveform(40) + gap(4)
+            var trackY = this._rulerHeight + 4;
+            var waveformY = trackY + this._trackHeight + 4;
+            var canvasH = waveformY + this._waveformHeight + 4;
             this._canvas.width = canvasW;
             this._canvas.height = canvasH;
+            
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvasW, canvasH);
+            
             this._drawRuler(ctx);
-            this._drawWaveform(ctx);
-            this._drawTrack(ctx);
+            this._drawTrack(ctx, trackY);
+            this._drawWaveform(ctx, waveformY);
             this._drawPlayhead();
         },
 
@@ -248,32 +238,17 @@
                 ctx.stroke();
                 var mm = Math.floor(s / 60);
                 var ss = Math.floor(s % 60);
-                var t = (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
-                ctx.fillText(t, x + 2, this._rulerHeight - 2);
+                ctx.fillText((mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss, x + 2, this._rulerHeight - 2);
             }
         },
 
-        _drawWaveform: function (ctx) {
-            var y = this._rulerHeight + 2;
-            var wh = this._waveformHeight;
-            ctx.fillStyle = '#0d2818';
-            ctx.fillRect(0, y, this._canvas.width, wh);
-            // Placeholder verd on hi ha captions
-            ctx.fillStyle = '#1a4a2a';
-            for (var i = 0; i < this._entries.length; i++) {
-                var e = this._entries[i];
-                var x = e.startSec * this._pixelsPerSec;
-                var w = (e.endSec - e.startSec) * this._pixelsPerSec;
-                if (w < 3) w = 3;
-                ctx.fillRect(x, y + 3, w, wh - 6);
-            }
-        },
-
-        _drawTrack: function (ctx) {
-            var y = this._rulerHeight + this._waveformHeight + 6;
+        _drawTrack: function (ctx, y) {
             var blockH = this._trackHeight - 4;
             ctx.fillStyle = '#2a1e4f';
             ctx.fillRect(0, y, this._canvas.width, this._trackHeight);
+            ctx.fillStyle = '#8877aa';
+            ctx.font = '9px sans-serif';
+            ctx.fillText('Captions', 3, y + 10);
             for (var i = 0; i < this._entries.length; i++) {
                 var e = this._entries[i];
                 var x = e.startSec * this._pixelsPerSec;
@@ -283,6 +258,31 @@
                 ctx.fillRect(x + 1, y + 2 + 1, w, blockH);
                 ctx.fillStyle = '#8f4ad4';
                 ctx.fillRect(x, y + 2, w, blockH);
+            }
+        },
+
+        _drawWaveform: function (ctx, y) {
+            var wh = this._waveformHeight;
+            ctx.fillStyle = '#0d2818';
+            ctx.fillRect(0, y, this._canvas.width, wh);
+            if (this._waveformPeaks && this._waveformPeaks.length > 0) {
+                var midY = y + wh / 2;
+                var step = Math.max(1, Math.floor(this._waveformPeaks.length / this._canvas.width));
+                ctx.strokeStyle = '#22cc66';
+                ctx.lineWidth = 1;
+                for (var px = 0; px < this._canvas.width; px++) {
+                    var idx = Math.floor(px * step);
+                    if (idx >= this._waveformPeaks.length) break;
+                    var h = Math.min(Math.abs(this._waveformPeaks[idx]) * (wh / 2), wh / 2);
+                    ctx.beginPath();
+                    ctx.moveTo(px, midY - h);
+                    ctx.lineTo(px, midY + h);
+                    ctx.stroke();
+                }
+            } else {
+                // Sense dades: fons verd fosc buit
+                ctx.fillStyle = '#0a1a0a';
+                ctx.fillRect(0, y + 2, this._canvas.width, wh - 4);
             }
         },
 
@@ -298,9 +298,7 @@
             ctx.stroke();
             ctx.fillStyle = '#ff3333';
             ctx.beginPath();
-            ctx.moveTo(x - 5, 0);
-            ctx.lineTo(x + 5, 0);
-            ctx.lineTo(x, 7);
+            ctx.moveTo(x - 5, 0); ctx.lineTo(x + 5, 0); ctx.lineTo(x, 7);
             ctx.closePath();
             ctx.fill();
         },
@@ -308,18 +306,11 @@
         _updatePreview: function (ctiSec) {
             var entry = null;
             for (var i = 0; i < this._entries.length; i++) {
-                if (ctiSec >= this._entries[i].startSec && ctiSec < this._entries[i].endSec) {
-                    entry = this._entries[i];
-                    break;
-                }
+                if (ctiSec >= this._entries[i].startSec && ctiSec < this._entries[i].endSec) { entry = this._entries[i]; break; }
             }
             var div = document.getElementById('srtPreview');
             if (!div) return;
-            if (entry) {
-                div.innerHTML = entry.texts.join('<br>');
-            } else {
-                div.innerHTML = '';
-            }
+            if (entry) { div.innerHTML = entry.texts.join('<br>'); } else { div.innerHTML = ''; }
         },
 
         setPlayhead: function (sec) {
@@ -335,8 +326,7 @@
             var targetIdx = window.FASTPASS_UI.Logic.SrtParser.findTargetByTime(this._entries, cti);
             if (targetIdx < 0) { getUtils().status("CTI no sobre cap caption", "warn"); return; }
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTrimIn(this._entries, targetIdx, 0.4);
-            this._isDirty = true;
-            this.render();
+            this._isDirty = true; this.render();
             getUtils().status("IN: " + this._entries.length + " entrades", "exito");
         },
 
@@ -345,24 +335,19 @@
             var targetIdx = window.FASTPASS_UI.Logic.SrtParser.findTargetByTime(this._entries, cti);
             if (targetIdx < 0) { getUtils().status("CTI no sobre cap caption", "warn"); return; }
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTrimOut(this._entries, targetIdx);
-            this._isDirty = true;
-            this.render();
+            this._isDirty = true; this.render();
             getUtils().status("OUT: " + this._entries.length + " entrades", "exito");
         },
 
         applyAdjust: function () {
             var cti = this._playheadSec;
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTimeAdjust(this._entries, cti, 0.04);
-            this._isDirty = true;
-            this.render();
+            this._isDirty = true; this.render();
             getUtils().status("AJUSTAT: " + this._entries.length + " entrades", "exito");
         },
 
         exportToPremiere: async function () {
-            if (this._entries.length === 0) {
-                getUtils().status("No hi ha entrades per exportar", "warn");
-                return;
-            }
+            if (this._entries.length === 0) { getUtils().status("No hi ha entrades per exportar", "warn"); return; }
             this._hideEditor();
             var projectFolder = await callJSX("Context.folder()");
             if (!projectFolder || projectFolder.indexOf('ERR') === 0) projectFolder = "C:\\temp";
@@ -376,9 +361,7 @@
             var escapedContent = srtContent.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '');
             var writeResult = await callJSX("IO.writeTxt('" + escapedPath + "','" + escapedContent + "')");
             if (writeResult !== "OK") {
-                try { window.cep.fs.writeFile(modPath, srtContent); } catch(e) {
-                    getUtils().status("Error escrivint _MOD.srt", "error"); return;
-                }
+                try { window.cep.fs.writeFile(modPath, srtContent); } catch(e) { getUtils().status("Error escrivint _MOD.srt", "error"); return; }
             }
             var importResult = await callJSX("(function(){try{app.project.importFiles(['" + modPath.replace(/\\/g, '/') + "'],true,app.project.rootItem,false);return'OK'}catch(e){return'ERR:'+e.message}})()");
             if (importResult !== "OK") { getUtils().status("Error important _MOD.srt", "error"); return; }
@@ -389,20 +372,13 @@
             if (captionResult === "OK") {
                 getUtils().status("Exportat: " + this._entries.length + " entrades", "exito");
                 log("✅ SRT_EDIT: Export OK " + modName);
-            } else {
-                getUtils().status("Error createCaptionTrack: " + captionResult, "error");
-            }
+            } else { getUtils().status("Error createCaptionTrack: " + captionResult, "error"); }
         },
 
         reset: function () {
             this.stop();
-            this._entries = [];
-            this._playheadSec = 0;
-            this._isDirty = false;
-            this._srtPath = "";
-            this._srtName = "";
-            this._waveformPeaks = null;
-            this._isPlaying = false;
+            this._entries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
+            this._waveformPeaks = null; this._isPlaying = false;
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
             this._hideEditor();
         }
