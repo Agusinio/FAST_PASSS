@@ -168,6 +168,7 @@ var isUserDraggingSlider = false;
         if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'repartirChyronTraduccio'));
         // --- WORKFLOW: SRT EDITOR (SUBTÍTULOS) ---
         const btnSrtLoad = document.getElementById('btnSrtLoad');
+        const btnSrtPlay = document.getElementById('btnSrtPlay');
         const btnSrtIn = document.getElementById('btnSrtIn');
         const btnSrtOut = document.getElementById('btnSrtOut');
         const btnSrtAdjust = document.getElementById('btnSrtAdjust');
@@ -203,6 +204,9 @@ var isUserDraggingSlider = false;
                 }
             });
         }
+        if (btnSrtPlay) btnSrtPlay.addEventListener('click', function () {
+            if (window.SrtEditor) window.SrtEditor.togglePlay();
+        });
         if (btnSrtIn) btnSrtIn.addEventListener('click', function () {
             if (window.SrtEditor) window.SrtEditor.applyIn();
         });
