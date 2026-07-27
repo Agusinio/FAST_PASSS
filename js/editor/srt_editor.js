@@ -136,12 +136,51 @@
         togglePlay: function () {
             this._isPlaying = !this._isPlaying;
             var btn = document.getElementById('btnSrtPlay');
+            var self = this;
             if (this._isPlaying) {
-                callJSX("(function(){try{var s=app.project.activeSequence;s?app.enableQE():null;qe.project.getActiveSequence().play()}catch(e){}})()");
+                callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().play();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
+                    log("📝 SRT: PLAY result: " + result);
+                });
                 if (btn) btn.innerHTML = '⏸ PAUSA';
+                // Polling més ràpid mentre reprodueix
+                if (this._pollInterval) {
+                    clearInterval(this._pollInterval);
+                }
+                this._pollInterval = setInterval(async function () {
+                    try {
+                        var cti = await callJSX("Timeline.get()");
+                        if (cti && cti !== "null" && cti !== "") {
+                            var sec = parseFloat(cti);
+                            if (!isNaN(sec)) {
+                                self._playheadSec = sec;
+                                self.render();
+                                self._updatePreview(sec);
+                            }
+                        }
+                    } catch(e) { }
+                }, 200);
             } else {
-                callJSX("(function(){try{var s=app.project.activeSequence;s?app.enableQE():null;qe.project.getActiveSequence().stop()}catch(e){}})()");
+                callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
+                    log("📝 SRT: STOP result: " + result);
+                });
                 if (btn) btn.innerHTML = '▶ PLAY';
+                // Tornar a polling normal
+                if (this._pollInterval) {
+                    clearInterval(this._pollInterval);
+                }
+                this._pollInterval = setInterval(async function () {
+                    try {
+                        var cti = await callJSX("Timeline.get()");
+                        if (cti && cti !== "null" && cti !== "") {
+                            var sec = parseFloat(cti);
+                            if (!isNaN(sec)) {
+                                self._playheadSec = sec;
+                                self.render();
+                                self._updatePreview(sec);
+                            }
+                        }
+                    } catch(e) { }
+                }, 400);
             }
         },
 
