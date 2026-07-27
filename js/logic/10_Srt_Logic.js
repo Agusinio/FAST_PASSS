@@ -146,39 +146,38 @@
 
             // ffmpeg: extrau 1s segons a 1000 Hz, f32le, 1 canal
             var cmd = "\"" + this.ffmpegPath + "\" -i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"";
-            log("📝 WF: ffmpeg cmd: " + cmd.substring(0, 120) + "...");
 
             try {
                 // Executar ffmpeg via child_process
-                var execSync = require('child_process').execSync;
-                execSync(cmd, { timeout: 30000 });
-            } catch(e) {
-                // Fallback: cep.process.createProcess (asíncron, esperar)
-                try {
-                    window.cep.process.createProcess(this.ffmpegPath, "-i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"");
-                    // Esperar 5s perquè ffmpeg acabi
-                    await new Promise(function(resolve) { setTimeout(resolve, 5000); });
-                } catch(e2) {
-                    log("⚠️ WF: ffmpeg execution failed: " + e2.message);
-                    return null;
+                var childProc = require('child_process');
+                if (childProc && childProc.execSync) {
+                    childProc.execSync(cmd, { timeout: 60000 });
+                } else {
+                    // Fallback: cep.process.createProcess (asíncron, esperar)
+                    var cep = window.cep || window.__adobe_cep__;
+                    if (cep && cep.process && cep.process.createProcess) {
+                        cep.process.createProcess(this.ffmpegPath, "-i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"");
+                        await new Promise(function(resolve) { setTimeout(resolve, 5000); });
+                    } else {
+                        return null;
+                    }
                 }
+            } catch(e) {
+                return null;
             }
 
             // Llegir el fitxer RAW via cep.fs
             try {
                 var cepFs = window.cep.fs;
                 if (!cepFs || !cepFs.readFile) {
-                    log("⚠️ WF: cep.fs.readFile no disponible");
                     return null;
                 }
                 var result = cepFs.readFile(rawPath);
                 if (result.err !== 0) {
-                    log("⚠️ WF: cep.fs.readFile error: " + result.err);
                     return null;
                 }
                 var data = result.data;
                 if (!data || data.length < 4) {
-                    log("⚠️ WF: RAW file too small: " + (data ? data.length : 0));
                     return null;
                 }
 
@@ -192,7 +191,6 @@
                 }
 
                 if (rawPeaks.length === 0) {
-                    log("⚠️ WF: No peaks parsed from RAW");
                     return null;
                 }
 
@@ -204,14 +202,12 @@
                     for (var si = 0; si < step && pi * step + si < rawPeaks.length; si++) {
                         if (rawPeaks[pi * step + si] > maxVal) maxVal = rawPeaks[pi * step + si];
                     }
-                    peaks.push(Math.min(maxVal * 2, 1)); // Normalitzar
+                    peaks.push(Math.min(maxVal * 2, 1));
                 }
 
-                log("📝 WF: " + peaks.length + " peaks generats (" + rawPeaks.length + " raw, step=" + step + ")");
                 return peaks;
 
             } catch(e) {
-                log("⚠️ WF: Error parsing RAW: " + e.message);
                 return null;
             }
         }
