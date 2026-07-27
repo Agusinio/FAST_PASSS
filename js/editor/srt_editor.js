@@ -86,6 +86,42 @@
             this._isDirty = false;
             this._showEditor();
             this._startPolling();
+            this._waveformPeaks = null;
+            
+            // Generar waveform via ffmpeg
+            try {
+                var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
+                if (wg) {
+                    var audioPath = await wg.getAudioPath();
+                    if (audioPath) {
+                        log("📝 SRT_EDIT: Audio path = " + audioPath);
+                        var canvasW = Math.max(1800, this._maxSec * this._pixelsPerSec + 100);
+                        var wavPath = await wg.generateWaveform(audioPath, this._maxSec, canvasW, 60);
+                        if (wavPath) {
+                            log("📝 SRT_EDIT: Waveform generat a " + wavPath);
+                            // Carregar la imatge PNG al canvas
+                            var self = this;
+                            var img = new Image();
+                            img.onload = function () {
+                                self._waveformImg = img;
+                                self.render();
+                                log("📝 SRT_EDIT: Waveform carregada al canvas");
+                            };
+                            img.onerror = function () {
+                                log("⚠️ SRT_EDIT: Error carregant waveform PNG");
+                            };
+                            img.src = "file:///" + wavPath.replace(/\\/g, '/');
+                        } else {
+                            log("⚠️ SRT_EDIT: generateWaveform no va generar fitxer");
+                        }
+                    } else {
+                        log("⚠️ SRT_EDIT: No s'ha pogut obtenir el path de l'audio");
+                    }
+                }
+            } catch(e) {
+                log("⚠️ SRT_EDIT: Error generant waveform: " + e.message);
+            }
+            
             this.render();
             getUtils().status("SRT carregat: " + this._entries.length + " entrades", "exito");
             return true;
