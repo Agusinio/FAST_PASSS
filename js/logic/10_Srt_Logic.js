@@ -1,59 +1,32 @@
 /**
  * ============================================================================
  * LOGIC: SUB (Subtítols) - v3.0.0
- * Funcions de parseig i processament SRT (pures, sense crides JSX)
+ * Funcions de parseig i processament SRT + WaveformGenerator
  * ============================================================================
- * 
- * Aquest mòdul conté funcions pures per treballar amb fitxers SRT:
- * - srtToEntries: Parseja contingut SRT a array d'entrades
- * - entriesToSrt: Converteix array d'entrades a string SRT
- * - srtTimeToSec / secToSrtTime: Conversió de timings
- * - applyTrimIn / applyTrimOut / applyTimeAdjust: Processament
- * 
- * Les funcions NO fan crides JSX, només treballen amb dades.
  */
 
 (function () {
     var FASTPASS_UI = window.FASTPASS_UI || {};
     FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
 
-    /**
-     * SrtParser: Funcions de parseig i processament SRT
-     */
     FASTPASS_UI.Logic.SrtParser = {
 
-        /**
-         * srtToEntries: Converteix contingut SRT en array d'entrades.
-         * Cada entrada: { index, timeStr, texts:[], startSec, endSec }
-         */
         srtToEntries: function (srtContent) {
             if (!srtContent || typeof srtContent !== 'string') return [];
             var lines = srtContent.split('\n');
             var entries = [];
             var current = null;
-
             for (var li = 0; li < lines.length; li++) {
                 var trimmed = lines[li].trim();
-                if (!trimmed) {
-                    if (current) { entries.push(current); current = null; }
-                    continue;
-                }
-
+                if (!trimmed) { if (current) { entries.push(current); current = null; } continue; }
                 var numMatch = trimmed.match(/^\d+$/);
                 if (numMatch) {
                     if (current) entries.push(current);
                     current = { index: parseInt(trimmed, 10), timeStr: '', texts: [], startSec: 0, endSec: 0 };
                     continue;
                 }
-
                 var timeMatch = trimmed.match(/^(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})/);
-                if (timeMatch && current) {
-                    current.timeStr = trimmed;
-                    current.startSec = this.srtTimeToSec(timeMatch[1]);
-                    current.endSec = this.srtTimeToSec(timeMatch[2]);
-                    continue;
-                }
-
+                if (timeMatch && current) { current.timeStr = trimmed; current.startSec = this.srtTimeToSec(timeMatch[1]); current.endSec = this.srtTimeToSec(timeMatch[2]); continue; }
                 if (current) current.texts.push(trimmed);
             }
             if (current) entries.push(current);
@@ -84,10 +57,7 @@
         secToSrtTime: function (sec) {
             if (typeof sec !== 'number' || isNaN(sec)) sec = 0;
             if (sec < 0) sec = 0;
-            var hh = Math.floor(sec / 3600);
-            var mm = Math.floor((sec % 3600) / 60);
-            var ss = Math.floor(sec % 60);
-            var ms = Math.round((sec - Math.floor(sec)) * 1000);
+            var hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = Math.floor(sec % 60), ms = Math.round((sec - Math.floor(sec)) * 1000);
             var pad2 = function (v) { return v < 10 ? '0' + v : String(v); };
             var pad3 = function (v) { return v < 100 ? (v < 10 ? '00' + v : '0' + v) : String(v); };
             return pad2(hh) + ':' + pad2(mm) + ':' + pad2(ss) + ',' + pad3(ms);
@@ -95,14 +65,9 @@
 
         findTargetByTime: function (entries, ctiSec) {
             if (!entries || entries.length === 0) return -1;
-            for (var i = 0; i < entries.length; i++) {
-                if (ctiSec >= entries[i].startSec && ctiSec < entries[i].endSec) return i;
-            }
+            for (var i = 0; i < entries.length; i++) { if (ctiSec >= entries[i].startSec && ctiSec < entries[i].endSec) return i; }
             var best = -1, bestDist = Infinity;
-            for (var j = 0; j < entries.length; j++) {
-                var dist = ctiSec - entries[j].startSec;
-                if (dist >= 0 && dist < bestDist) { bestDist = dist; best = j; }
-            }
+            for (var j = 0; j < entries.length; j++) { var dist = ctiSec - entries[j].startSec; if (dist >= 0 && dist < bestDist) { bestDist = dist; best = j; } }
             return best;
         },
 
@@ -111,9 +76,7 @@
             if (targetIdx < 0 || targetIdx >= entries.length) return entries.slice();
             var result = entries.slice(targetIdx);
             if (result.length === 0) return [];
-            var first = result[0];
-            var firstDur = first.endSec - first.startSec;
-            var originalStart = first.startSec;
+            var first = result[0], firstDur = first.endSec - first.startSec, originalStart = first.startSec;
             result[0] = { index: 1, timeStr: '', texts: first.texts.slice(), startSec: frame10Sec, endSec: frame10Sec + firstDur };
             var offset = frame10Sec - originalStart;
             for (var i = 1; i < result.length; i++) {
@@ -127,27 +90,20 @@
             if (!entries || entries.length === 0) return [];
             if (targetIdx < 0 || targetIdx >= entries.length) return [];
             var result = entries.slice(0, targetIdx + 1);
-            for (var i = 0; i < result.length; i++) {
-                result[i] = { index: i + 1, timeStr: '', texts: result[i].texts.slice(), startSec: result[i].startSec, endSec: result[i].endSec };
-            }
+            for (var i = 0; i < result.length; i++) result[i] = { index: i + 1, timeStr: '', texts: result[i].texts.slice(), startSec: result[i].startSec, endSec: result[i].endSec };
             return result;
         },
 
         applyTimeAdjust: function (entries, ctiSec, paddingSec) {
             if (!entries || entries.length === 0) return [];
             paddingSec = paddingSec || 0.04;
-            var firstIn = entries[0].startSec;
-            var lastOut = entries[entries.length - 1].endSec;
-            var currentDur = lastOut - firstIn;
+            var firstIn = entries[0].startSec, lastOut = entries[entries.length - 1].endSec, currentDur = lastOut - firstIn;
             if (currentDur <= 0) return entries.slice();
             var durIdeal = ctiSec - firstIn;
             if (durIdeal <= 0) return entries.slice();
-            var ratio = durIdeal / currentDur;
-            var result = [];
+            var ratio = durIdeal / currentDur, result = [];
             for (var i = 0; i < entries.length; i++) {
-                var e = entries[i];
-                var oldDur = e.endSec - e.startSec;
-                var newStart = firstIn + (e.startSec - firstIn) * ratio;
+                var e = entries[i], oldDur = e.endSec - e.startSec, newStart = firstIn + (e.startSec - firstIn) * ratio;
                 result.push({ index: i + 1, timeStr: '', texts: e.texts.slice(), startSec: newStart, endSec: newStart + oldDur * ratio });
             }
             return result;
@@ -162,81 +118,105 @@
     };
 
     /**
-     * WaveformGenerator: Genera forma d'ona via ffmpeg
+     * WaveformGenerator: Genera forma d'ona via ffmpeg RAW + cep.fs.readFile
      */
     FASTPASS_UI.Logic.WaveformGenerator = {
 
-        ffmpegPath: "E:\\AAA_Python Projects\\OTTO_Matic\\ffmpeg_local_win\\bin\\ffmpeg.exe",
+        ffmpegPath: "E:\\ffmpeg\\bin\\ffmpeg.exe",
 
-        /**
-         * Obtenir el path del clip d'àudio del track 1 del timeline
-         */
         getAudioPath: async function () {
-            var result = await window.FASTPASS_UI.Utils.callJSX(
+            return await window.FASTPASS_UI.Utils.callJSX(
                 "(function(){try{var s=app.project.activeSequence;if(!s)return'';var aud=s.audioTracks[0];if(!aud)return'';var clip=aud.clips[0];if(!clip)return'';var pi=clip.projectItem;if(!pi)return'';return pi.getMediaPath()}catch(e){return''}})()"
             );
-            return result;
         },
 
         /**
-         * Genera waveform PNG a C:\temp\waveform_{hash}.png
-         * @param {string} audioPath - Path complet al fitxer d'àudio
-         * @param {number} durationSec - Durada total en segons
-         * @param {number} widthPx - Amplada desitjada del PNG
-         * @param {number} heightPx - Alçada desitjada
-         * @returns {Promise<string>} Path del PNG generat, o '' si error
+         * Genera peaks via ffmpeg RAW i els llegeix via cep.fs
+         * @param {string} audioPath - Path al fitxer d'àudio
+         * @param {number} totalSec - Durada total en segons
+         * @param {number} targets - Nombre de punts de mostra desitjat (píxels d'amplada)
+         * @returns {Promise<number[]|null>} Array de peaks 0..1, o null
          */
-        generateWaveform: async function (audioPath, durationSec, widthPx, heightPx) {
-            if (!audioPath) return '';
-            widthPx = widthPx || 1800;
-            heightPx = heightPx || 60;
+        generatePeaks: async function (audioPath, totalSec, targets) {
+            if (!audioPath) return null;
+            targets = targets || 1800;
+            // Sample rate baixa per reduir dades: 1000 Hz
+            var sampleRate = 1000;
+            var rawPath = "C:\\temp\\waveform_raw_" + Date.now() + ".raw";
 
-            var outPath = "C:\\temp\\waveform_" + Date.now() + ".png";
-            // Esborrar si existeix
-            try { window.cep.fs.writeFile(outPath, ""); } catch(e) {}
-
-            // Comanda ffmpeg per generar waveform PNG:
-            // ffmpeg -i audio -filter_complex "showwavespic=s=WxH:colors=#22cc66|#22cc66:scale=lin" -frames:v 1 out.png
-            var cmd = "\"" + this.ffmpegPath + "\" -i \"" + audioPath + "\" -filter_complex \"showwavespic=s=" + widthPx + "x" + heightPx + ":colors=#000000|#22cc66:scale=lin\" -frames:v 1 -y \"" + outPath + "\"";
+            // ffmpeg: extrau 1s segons a 1000 Hz, f32le, 1 canal
+            var cmd = "\"" + this.ffmpegPath + "\" -i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"";
+            log("📝 WF: ffmpeg cmd: " + cmd.substring(0, 120) + "...");
 
             try {
+                // Executar ffmpeg via child_process
                 var execSync = require('child_process').execSync;
                 execSync(cmd, { timeout: 30000 });
-                return outPath;
             } catch(e) {
-                // Fallback: cep.process
+                // Fallback: cep.process.createProcess (asíncron, esperar)
                 try {
-                    window.cep.process.createProcess(this.ffmpegPath, 
-                        " -i \"" + audioPath + "\" -filter_complex \"showwavespic=s=" + widthPx + "x" + heightPx + ":colors=#000000|#22cc66:scale=lin\" -frames:v 1 -y \"" + outPath + "\"");
-                    return outPath;
+                    window.cep.process.createProcess(this.ffmpegPath, "-i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"");
+                    // Esperar 5s perquè ffmpeg acabi
+                    await new Promise(function(resolve) { setTimeout(resolve, 5000); });
                 } catch(e2) {
-                    return '';
+                    log("⚠️ WF: ffmpeg execution failed: " + e2.message);
+                    return null;
                 }
             }
-        },
 
-        /**
-         * Carrega un PNG de waveform i el converteix a peaks (valors 0-1)
-         * @param {string} pngPath - Path al PNG generat
-         * @returns {Promise<number[]|null>} Array de peaks (0-1)
-         */
-        loadWaveformPeaks: async function (pngPath) {
-            // Intentar llegir el PNG via cep.fs.readFile (binari)
+            // Llegir el fitxer RAW via cep.fs
             try {
                 var cepFs = window.cep.fs;
-                if (cepFs && cepFs.readFile) {
-                    var result = cepFs.readFile(pngPath);
-                    // Si funciona, extreiem dades - però és complex
-                    // Millor carregar com a Image al canvas
+                if (!cepFs || !cepFs.readFile) {
+                    log("⚠️ WF: cep.fs.readFile no disponible");
+                    return null;
                 }
-            } catch(e) {}
-            return null;
+                var result = cepFs.readFile(rawPath);
+                if (result.err !== 0) {
+                    log("⚠️ WF: cep.fs.readFile error: " + result.err);
+                    return null;
+                }
+                var data = result.data;
+                if (!data || data.length < 4) {
+                    log("⚠️ WF: RAW file too small: " + (data ? data.length : 0));
+                    return null;
+                }
+
+                // Parsejar floats (f32le, 4 bytes per mostra)
+                var rawPeaks = [];
+                var view = new DataView(new ArrayBuffer(data.length));
+                for (var i = 0; i < data.length; i++) view.setUint8(i, data.charCodeAt(i) & 0xFF);
+                for (var off = 0; off + 4 <= data.length; off += 4) {
+                    var peak = Math.abs(view.getFloat32(off, true));
+                    rawPeaks.push(peak);
+                }
+
+                if (rawPeaks.length === 0) {
+                    log("⚠️ WF: No peaks parsed from RAW");
+                    return null;
+                }
+
+                // Reduir als targets desitjats agafant el màxim de cada grup
+                var step = Math.max(1, Math.floor(rawPeaks.length / targets));
+                var peaks = [];
+                for (var pi = 0; pi < targets && pi * step < rawPeaks.length; pi++) {
+                    var maxVal = 0;
+                    for (var si = 0; si < step && pi * step + si < rawPeaks.length; si++) {
+                        if (rawPeaks[pi * step + si] > maxVal) maxVal = rawPeaks[pi * step + si];
+                    }
+                    peaks.push(Math.min(maxVal * 2, 1)); // Normalitzar
+                }
+
+                log("📝 WF: " + peaks.length + " peaks generats (" + rawPeaks.length + " raw, step=" + step + ")");
+                return peaks;
+
+            } catch(e) {
+                log("⚠️ WF: Error parsing RAW: " + e.message);
+                return null;
+            }
         }
     };
 
-    /**
-     * PrProjCleaner: Neteja de caption tracks antics del .prproj
-     */
     FASTPASS_UI.Logic.PrProjCleaner = {
         getProjectPath: async function () {
             return await window.FASTPASS_UI.Utils.callJSX("(function(){try{return app.project.path}catch(e){return''}})()");
@@ -254,12 +234,9 @@
                 try {
                     var cep = window.cep || window.__adobe_cep__;
                     if (!cep || !cep.process) { resolve({ success: false, message: "cep.process no disponible", removedTracks: 0 }); return; }
-                    var scriptPath = "C:\\temp\\manage_prproj.ps1";
-                    var psArgs = "-ExecutionPolicy Bypass -File \"" + scriptPath + "\" -prprojPath \"" + projPath + "\" -action remove_old_tracks";
-                    var processObj = cep.process.createProcess("powershell.exe", psArgs);
-                    if (processObj) {
-                        setTimeout(function() { resolve({ success: true, message: "PowerShell executat", removedTracks: -1 }); }, 10000);
-                    } else { resolve({ success: false, message: "Error creant procés PowerShell", removedTracks: 0 }); }
+                    var psArgs = "-ExecutionPolicy Bypass -File \"C:\\temp\\manage_prproj.ps1\" -prprojPath \"" + projPath + "\" -action remove_old_tracks";
+                    cep.process.createProcess("powershell.exe", psArgs);
+                    setTimeout(function() { resolve({ success: true, message: "PowerShell executat", removedTracks: -1 }); }, 10000);
                 } catch(e) { resolve({ success: false, message: "Excepció: " + e.message, removedTracks: 0 }); }
             });
         }

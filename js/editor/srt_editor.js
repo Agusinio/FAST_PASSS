@@ -88,7 +88,7 @@
             this._startPolling();
             this._waveformPeaks = null;
             
-            // Generar waveform via ffmpeg
+            // Generar peaks de waveform via ffmpeg RAW + cep.fs
             try {
                 var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
                 if (wg) {
@@ -96,23 +96,15 @@
                     if (audioPath) {
                         log("📝 SRT_EDIT: Audio path = " + audioPath);
                         var canvasW = Math.max(1800, this._maxSec * this._pixelsPerSec + 100);
-                        var wavPath = await wg.generateWaveform(audioPath, this._maxSec, canvasW, 60);
-                        if (wavPath) {
-                            log("📝 SRT_EDIT: Waveform generat a " + wavPath);
-                            var self = this;
-                            var img = new Image();
-                            img.onload = function () {
-                                self._waveformImg = img;
-                                self.render();
-                                log("📝 SRT_EDIT: Waveform PNG carregada");
-                            };
-                            img.onerror = function () {
-                                log("⚠️ SRT_EDIT: Error carregant waveform PNG");
-                            };
-                            img.src = "file:///" + wavPath.replace(/\\/g, '/');
+                        var peaks = await wg.generatePeaks(audioPath, this._maxSec, canvasW);
+                        if (peaks && peaks.length > 0) {
+                            this._waveformPeaks = peaks;
+                            log("📝 SRT_EDIT: " + peaks.length + " peaks carregats");
                         } else {
-                            log("⚠️ SRT_EDIT: generateWaveform no va generar fitxer");
+                            log("⚠️ SRT_EDIT: No s'han pogut generar peaks");
                         }
+                    } else {
+                        log("⚠️ SRT_EDIT: No s'ha pogut obtenir path d'audio");
                     }
                 }
             } catch(e) {
