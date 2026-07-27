@@ -87,8 +87,6 @@
             this._showEditor();
             this._startPolling();
             this.render();
-            document.getElementById('srtEditorStatus').textContent = "Carregat: " + this._srtName;
-            document.getElementById('srtEntryCount').textContent = this._entries.length + " entrades";
             getUtils().status("SRT carregat: " + this._entries.length + " entrades", "exito");
             return true;
         },
@@ -303,7 +301,6 @@
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTrimIn(this._entries, targetIdx, 0.4);
             this._isDirty = true;
             this.render();
-            document.getElementById('srtEntryCount').textContent = this._entries.length + " entrades";
             getUtils().status("IN: " + this._entries.length + " entrades", "exito");
         },
 
@@ -314,7 +311,6 @@
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTrimOut(this._entries, targetIdx);
             this._isDirty = true;
             this.render();
-            document.getElementById('srtEntryCount').textContent = this._entries.length + " entrades";
             getUtils().status("OUT: " + this._entries.length + " entrades", "exito");
         },
 
@@ -323,7 +319,6 @@
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTimeAdjust(this._entries, cti, 0.04);
             this._isDirty = true;
             this.render();
-            document.getElementById('srtEntryCount').textContent = this._entries.length + " entrades";
             getUtils().status("AJUSTAT: " + this._entries.length + " entrades", "exito");
         },
 
