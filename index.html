@@ -124,32 +124,26 @@
         <div class="section-container">
             <div class="section-label"><span>SUBTÍTOLS</span></div>
             <div class="section-content">
-                <!-- Part superior: botons a esquerra + preview a dreta -->
+                <!-- Fila superior: botons + preview -->
                 <div style="display:flex; gap:4px; align-items:stretch; min-height:60px;">
                     <div style="display:flex; gap:3px; flex-wrap:wrap; align-content:flex-start; flex:1;">
                         <button id="btnSrtLoad" class="secondary btn-sq-double-high">CARREGAR</button>
-                        <button id="btnSrtPlay" class="secondary btn-sq-double-high" style="background:#2a5a2a; color:#8f8;">▶ PLAY</button>
                         <button id="btnSrtIn" class="secondary btn-sq-double-high">IN</button>
                         <button id="btnSrtOut" class="secondary btn-sq-double-high">OUT</button>
                         <button id="btnSrtAdjust" class="secondary btn-sq-double-high">AJUSTAR</button>
                         <button id="btnSrtExport" class="secondary btn-sq-double-high">EXPORTAR</button>
+                        <div style="width:100%;"></div>
+                        <button id="btnSrtPlay" class="secondary btn-sq-double-high" style="background:#2a5a2a; color:#8f8;">▶ PLAY</button>
+                        <button id="btnZoomIn" class="secondary btn-sq-std" style="font-size:16px; width:32px;">+</button>
+                        <button id="btnZoomOut" class="secondary btn-sq-std" style="font-size:16px; width:32px;">−</button>
+                        <span id="zoomLabel" style="font:11px sans-serif; color:#888; align-self:center; margin-left:4px;">20px/s</span>
                     </div>
-                    <div id="srtPreview" style="width:200px; min-width:150px; background:#2a2a2a; border-radius:4px; padding:8px; color:#ddd; font:14px/1.4 sans-serif; display:none; overflow-y:auto;"></div>
-                </div>
-                <!-- Slider zoom -->
-                <div style="display:flex; align-items:center; gap:6px; margin-top:4px; font:10px sans-serif; color:#888;">
-                    <span>🔍</span>
-                    <input type="range" id="srtZoom" min="5" max="150" value="20" style="flex:1;">
-                    <span id="zoomLabel">20px/s</span>
+                    <div id="srtPreview" style="width:210px; min-width:160px; background:#2a2a2a; border-radius:4px; padding:10px; color:#eee; font:18px/1.5 sans-serif; display:none; overflow-y:auto;"></div>
                 </div>
                 <!-- Timeline (canvas) -->
                 <div id="srtEditorContainer" style="margin-top:4px; display:none;">
                     <div style="overflow-x:auto; overflow-y:hidden;">
                         <canvas id="srtCanvas" width="1800" height="150" style="cursor:pointer; background:#1a1a1a;"></canvas>
-                    </div>
-                    <div style="display:flex; gap:4px; margin-top:2px; font:11px sans-serif; color:#888;">
-                        <span id="srtEditorStatus">Sense dades</span>
-                        <span style="margin-left:auto;" id="srtEntryCount">0 entrades</span>
                     </div>
                 </div>
             </div>

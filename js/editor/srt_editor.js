@@ -47,12 +47,21 @@
                 self.setPlayhead(sec);
             });
 
-            var zoomSlider = document.getElementById('srtZoom');
-            if (zoomSlider) {
-                zoomSlider.addEventListener('input', function () {
-                    self._pixelsPerSec = parseInt(this.value);
+            var btnIn = document.getElementById('btnZoomIn');
+            var btnOut = document.getElementById('btnZoomOut');
+            if (btnIn) {
+                btnIn.addEventListener('click', function () {
+                    self._pixelsPerSec = Math.min(150, self._pixelsPerSec + 10);
                     var label = document.getElementById('zoomLabel');
-                    if (label) label.textContent = this.value + 'px/s';
+                    if (label) label.textContent = self._pixelsPerSec + 'px/s';
+                    self.render();
+                });
+            }
+            if (btnOut) {
+                btnOut.addEventListener('click', function () {
+                    self._pixelsPerSec = Math.max(5, self._pixelsPerSec - 10);
+                    var label = document.getElementById('zoomLabel');
+                    if (label) label.textContent = self._pixelsPerSec + 'px/s';
                     self.render();
                 });
             }
