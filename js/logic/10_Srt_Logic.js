@@ -148,19 +148,16 @@
             var cmd = "\"" + this.ffmpegPath + "\" -i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"";
 
             try {
-                // Executar ffmpeg via child_process
-                var childProc = require('child_process');
-                if (childProc && childProc.execSync) {
-                    childProc.execSync(cmd, { timeout: 60000 });
+                // Executar ffmpeg via PowerShell script (més fiable que escapes inline)
+                var cep = window.cep || window.__adobe_cep__;
+                if (cep && cep.process && cep.process.createProcess) {
+                    var psScript = "C:\\temp\\run_ffmpeg_waveform.ps1";
+                    var psArgs = "-ExecutionPolicy Bypass -File \"" + psScript + "\" -ffmpegExe \"" + this.ffmpegPath + "\" -inputFile \"" + audioPath + "\" -outputRaw \"" + rawPath + "\"";
+                    cep.process.createProcess("powershell.exe", psArgs);
+                    // Esperar que ffmpeg acabi (fins a 30s per fitxers grans)
+                    await new Promise(function(resolve) { setTimeout(resolve, 30000); });
                 } else {
-                    // Fallback: cep.process.createProcess (asíncron, esperar)
-                    var cep = window.cep || window.__adobe_cep__;
-                    if (cep && cep.process && cep.process.createProcess) {
-                        cep.process.createProcess(this.ffmpegPath, "-i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"");
-                        await new Promise(function(resolve) { setTimeout(resolve, 5000); });
-                    } else {
-                        return null;
-                    }
+                    return null;
                 }
             } catch(e) {
                 return null;
