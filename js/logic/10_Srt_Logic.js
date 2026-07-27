@@ -148,13 +148,16 @@
             var cmd = "\"" + this.ffmpegPath + "\" -i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"";
 
             try {
-                // Executar ffmpeg via PowerShell script (més fiable que escapes inline)
+                // Executar ffmpeg via PowerShell script (amb Start-Process -Wait per ser síncron)
                 var cep = window.cep || window.__adobe_cep__;
                 if (cep && cep.process && cep.process.createProcess) {
                     var psScript = "C:\\temp\\run_ffmpeg_waveform.ps1";
-                    var psArgs = "-ExecutionPolicy Bypass -File \"" + psScript + "\" -ffmpegExe \"" + this.ffmpegPath + "\" -inputFile \"" + audioPath + "\" -outputRaw \"" + rawPath + "\"";
-                    cep.process.createProcess("powershell.exe", psArgs);
-                    // Esperar que ffmpeg acabi (fins a 30s per fitxers grans)
+                    var totalSecInt = Math.ceil(totalSec || 120);
+                    var psArgs = "-ExecutionPolicy Bypass -File \"" + psScript + "\" -ffmpegExe \"" + this.ffmpegPath + "\" -inputFile \"" + audioPath + "\" -outputRaw \"" + rawPath + "\" -durationSec " + totalSecInt;
+                    // Usar Start-Process -Wait per forçar sincronia
+                    var wrapperCmd = "powershell -Command \"Start-Process powershell.exe -ArgumentList '-ExecutionPolicy Bypass -File \\\"" + psScript + "\\\" -ffmpegExe \\\"" + this.ffmpegPath + "\\\" -inputFile \\\"" + audioPath + "\\\" -outputRaw \\\"" + rawPath + "\\\" -durationSec " + totalSecInt + "' -Wait -NoNewWindow\"";
+                    cep.process.createProcess("powershell.exe", "-Command \"Start-Process powershell.exe -ArgumentList '-ExecutionPolicy Bypass -File \\\"" + psScript + "\\\" -ffmpegExe \\\"" + this.ffmpegPath + "\\\" -inputFile \\\"" + audioPath + "\\\" -outputRaw \\\"" + rawPath + "\\\" -durationSec " + totalSecInt + "' -Wait -NoNewWindow\"");
+                    // Esperar que ffmpeg acabi (30s hauria de ser suficient per 120s d'audio a 1000Hz)
                     await new Promise(function(resolve) { setTimeout(resolve, 30000); });
                 } else {
                     return null;
