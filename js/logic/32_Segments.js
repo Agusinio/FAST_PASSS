@@ -1,0 +1,112 @@
+/** 
+ * ============================================================================
+ * 32_Segments.js (Orquestració de Segments i Ripple Editing)
+ * ============================================================================
+ */
+
+(function () {
+    var FASTPASS_UI = window.FASTPASS_UI || {};
+    FASTPASS_UI.Logic = FASTPASS_UI.Logic || {};
+
+    const Eines = {
+        callJSX: (s) => window.FASTPASS_UI.Eines.callJSX(s),
+        log: (m) => window.FASTPASS_UI.Eines.log(m, "DEBUG")
+    };
+
+    FASTPASS_UI.Logic.Segments = {
+
+        at: async function (trackIdx, timeSec, type) {
+            // Esta línea envía la orden al motor de Premiere
+            const dataRaw = await Eines.callJSX(`Segments.at(${trackIdx}, ${timeSec}, '${type || "video"}')`);
+            return JSON.parse(dataRaw);
+        },
+
+        /**
+         * rippleIn: Ajusta l'entrada d'un clip (inPoint) i el mou a zero.
+         */
+        rippleIn: async function (trackIdx, clipIdx, cutTime, clipData) {
+            const diff = parseFloat(cutTime) - clipData.start;
+            if (diff <= 0.01) return "NO_DIFF";
+
+            const newIn = clipData.inPoint + diff;
+
+            // 1. Ajustar Clip Principal (Video)
+            await Eines.callJSX(`Segments.inPoint(${trackIdx}, ${clipIdx}, ${newIn}, 'video')`);
+            await Eines.callJSX(`Segments.start(${trackIdx}, ${clipIdx}, 0, 'video')`);
+
+            // 2. Ajustar Audio sincronitzat (A1)
+            const audioClip = await this.at(trackIdx, cutTime, "audio");
+            if (audioClip) {
+                const audioDiff = parseFloat(cutTime) - audioClip.start;
+                const newAudioIn = audioClip.inPoint + audioDiff;
+                await Eines.callJSX(`Segments.inPoint(${trackIdx}, ${audioClip.index}, ${newAudioIn}, 'audio')`);
+                await Eines.callJSX(`Segments.start(${trackIdx}, ${audioClip.index}, 0, 'audio')`);
+            }
+
+            return "OK_RIPPLE_IN";
+        },
+
+        /**
+         * rippleOut: Neteja un track eliminant clips a partir d'un temps (Outer trim).
+         */
+        rippleOut: async function (trackIdx, timeSec, type, extendToTarget = false) {
+            const countStr = await Eines.callJSX(`Segments.count(${trackIdx}, '${type || "video"}')`);
+            const count = parseInt(countStr || 0);
+            if (count === 0) return "EMPTY";
+
+            let removed = 0;
+            const target = parseFloat(timeSec);
+            let lastClipValid = null;
+
+            for (let i = count - 1; i >= 0; i--) {
+                const dataRaw = await Eines.callJSX(`Segments.get(${trackIdx}, ${i}, '${type}')`);
+                if (!dataRaw || dataRaw === "null") continue;
+
+                const clip = JSON.parse(dataRaw);
+
+                // 1. Clips que s'han de treure (Post-target)
+                if (clip.start >= target - 0.01) {
+                    await Eines.callJSX(`Segments.remove(${trackIdx}, ${i}, '${type}')`);
+                    removed++;
+                }
+                // 2. Clips que s'han de retallar (Straddling target)
+                else if (clip.start < target && clip.end > target + 0.01) {
+                    await Eines.callJSX(`Segments.end(${trackIdx}, ${i}, ${target}, '${type}')`);
+                }
+                // 3. Captura per extreure si cal
+                else if (extendToTarget && clip.end < target - 0.01) {
+                    if (!lastClipValid || clip.end > lastClipValid.end) {
+                        lastClipValid = { index: i, end: clip.end };
+                    }
+                }
+            }
+
+            if (extendToTarget && lastClipValid) {
+                await Eines.callJSX(`Segments.end(${trackIdx}, ${lastClipValid.index}, ${target}, '${type}')`);
+            }
+
+            return "OK_RIPPLE_OUT_" + removed;
+        },
+
+        /**
+         * rippleAllOut: Purga massiva de pistes després d'un tall.
+         */
+        rippleAllOut: async function (timeSec, videoTracks = [1], audioTracks = [], extend = false) {
+            let total = 0;
+            for (let v of videoTracks) {
+                const res = await this.rippleOut(v, timeSec, "video", extend);
+                total += parseInt(res.replace("OK_RIPPLE_OUT_", "") || 0);
+            }
+            for (let a of audioTracks) {
+                const res = await this.rippleOut(a, timeSec, "audio", extend);
+                total += parseInt(res.replace("OK_RIPPLE_OUT_", "") || 0);
+            }
+            return total;
+        }
+    };
+
+    // Alias literal global window.Clips
+    window.Segments = FASTPASS_UI.Logic.Segments;
+
+    window.FASTPASS_UI = FASTPASS_UI;
+})();

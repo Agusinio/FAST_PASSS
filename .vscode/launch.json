@@ -14,7 +14,7 @@
             "type": "extendscript-debug",
             "request": "launch",
             "name": "Lanzar Script Atómico (script.jsx)",
-            "hostAppSpecifier": "premierepro-25.0",
+            "hostAppSpecifier": "premierepro",
             "engineName": "NewWorld"
         }
     ]

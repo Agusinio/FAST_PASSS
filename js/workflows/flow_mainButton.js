@@ -16,7 +16,10 @@
 
         runMainAction: async function (action, data) {
             getUtils().clearLogFile();
-            log("⏯️ Iniciant workflow: [" + action + "]");
+            log(`⏯️ Iniciant workflow: [${action}]`);
+            log(`🔧 [DIAG] FASTEPASS v2.6.0+EXTRACT | FlowMainButton carregat | Versió de codi: EXTRACT_2026-07-27`);
+            log(`🔧 [DIAG] window.FASTPASS_UI.Logic.FFmpeg existeix? ${!!(window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.FFmpeg)}`);
+            log(`🔧 [DIAG] FFmpeg.extractClip existeix? ${!!(window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.FFmpeg && typeof window.FASTPASS_UI.Logic.FFmpeg.extractClip === 'function')}`);
             getUtils().updateUIState('BUSY');
 
             try {
@@ -398,6 +401,127 @@
                                     }));
 
                                     log(`📡 [PrecisionTrim] cleanFeed: in=${bounds.mp4ExpandedInPoint.toFixed(1)}s out=${bounds.mp4ExpandedOutPoint.toFixed(1)}s (InTier=${bounds.InTier}, OutTier=${bounds.OutTier})`);
+
+                                    // ─── FASE 0: Extracció de clip via ffmpeg (si possible) ──
+                                    try {
+                                        const ffmpeg = window.FASTPASS_UI.Logic.FFmpeg;
+                                        if (ffmpeg && ffmpeg.extractClip) {
+                                            const clipName = `${ctx.progData.wott || "TNV"}_${ctx.bloque}_CLIP.mp4`;
+                                            // NOTA: El clip va a un path UNC de Windows. ffmpeg i PowerShell necessiten
+                                            // backslashes. El .replace de folderPath converteix a forward slashes per a
+                                            // Premiere, però per al clip local necessitem backslashes.
+                                            const clipPath = (ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + clipName).replace(/\//g, "\\");
+                                            log(`🎬 [EXTRACT] Intentant extracció de clip: ${clipPath}`);
+
+                                            // mp4Duration es necessita per a l'extracció i el recàlcul de bounds
+                                            const mp4Duration = bounds.mp4Duration;
+                                            let useExtractedClip = false;
+
+                                            // Estratègia: EXTREURE SEMPRE. Si el clip ja existeix, ffmpeg -y el sobreescriu.
+                                            // Si el cleanFeed és massa petit, l'extracció fallarà (timeout a waitForFile).
+                                            // Evitem checkSourceDuration perquè IO.executeShell amb pipes/fitxers temporals
+                                            // no funciona correctament a ExtendScript (afegeix cometes extra als paths).
+                                            log(`🎬 [EXTRACT] Extraient clip: input=${effectiveMediaPath}, start=${bounds.mp4ExpandedInPoint.toFixed(2)}s, dur=${mp4Duration.toFixed(2)}s, output=${clipPath}`);
+                                            getUtils().status("🎬 Extraient clip via ffmpeg...", "info");
+                                            const extractResult = await ffmpeg.extractClip(
+                                                effectiveMediaPath,
+                                                bounds.mp4ExpandedInPoint,
+                                                mp4Duration,
+                                                clipPath
+                                            );
+                                            if (extractResult.ok) {
+                                                useExtractedClip = true;
+                                                log(`✅ [EXTRACT] Clip extret correctament: ${clipPath}`);
+                                            } else {
+                                                // NO FALLBACK: si l'extracció falla, error fatal
+                                                const errMsg = `Error extraient clip: ${extractResult.error}`;
+                                                log(`❌ [EXTRACT] ${errMsg}`);
+                                                getUtils().status(errMsg, "error");
+                                                throw new Error(errMsg);
+                                            }
+
+                                            if (useExtractedClip) {
+                                                // ─── RECALCULAR BOUNDS PER AL CLIP EXTRET ────────
+                                                // El clip extret comença a 0 (gràcies a -avoid_negative_ts make_zero).
+                                                // Per tant, els bounds relatius al clip són:
+                                                //   clipExpandedInPoint  = handleSecs   (el contingut real comença a handleSecs)
+                                                //   clipExpandedOutPoint = mp4Duration - handleSecs
+                                                //   clipDuration         = mp4Duration (el segment extret té exactament mp4Duration)
+                                                const h = ctx.config.handles || 0;
+                                                const clipExpandedInPoint  = h;
+                                                const clipExpandedOutPoint = mp4Duration - h;
+                                                const clipDuration         = mp4Duration;
+
+                                                // worldSecMediaStart s'ajusta per al clip extret:
+                                                // El clip extret comença a mp4ExpandedInPoint del cleanFeed.
+                                                // worldBlockStartSec - handleSecs = punt d'inici del clip al món real.
+                                                // Com que el clip comença a 0, worldSecMediaStart = worldBlockStartSec - handleSecs.
+                                                const fbWorldSecMediaStart = (bounds.ref.worldBlockStartSec != null)
+                                                    ? bounds.ref.worldBlockStartSec - h
+                                                    : bounds.ref.worldSecMediaStart;
+
+                                                log(`📐 [EXTRACT] Bounds recalculats per al clip extret: IN=${clipExpandedInPoint.toFixed(1)}s OUT=${clipExpandedOutPoint.toFixed(1)}s dur=${clipDuration.toFixed(1)}s | worldSecMediaStart ajustat a ${fbWorldSecMediaStart.toFixed(1)}s | handleSecs=${h}s`);
+                                                log(`🔍 [EXTRACT] cleanFeedData PRE-extracció: mediaPath=${cleanFeedData.mediaPath}, mp4ExpandedInPoint=${cleanFeedData.mp4ExpandedInPoint.toFixed(1)}s, mp4ExpandedOutPoint=${cleanFeedData.mp4ExpandedOutPoint.toFixed(1)}s`);
+
+                                                // Actualitzar cleanFeedData amb el clip local i els nous bounds
+                                                // NOTA: clipPath té backslashes (per a ffmpeg/PowerShell/Windows UNC).
+                                                // Premiere necessita forward slashes per obrir el fitxer correctament.
+                                                const premClipPath = clipPath.replace(/\\/g, "/");
+                                                cleanFeedData.mediaPath           = premClipPath;
+                                                log(`🔍 [EXTRACT] clipPath (backslash, per a ffmpeg)=${clipPath}`);
+                                                log(`🔍 [EXTRACT] premClipPath (forward slash, per a Premiere)=${premClipPath}`);
+                                                cleanFeedData.mp4ExpandedInPoint  = clipExpandedInPoint;   // ara relativament al clip (comença a 0)
+                                                cleanFeedData.mp4ExpandedOutPoint = clipExpandedOutPoint;
+                                                cleanFeedData.mp4Duration         = clipDuration;
+                                                cleanFeedData._isExtractedClip    = true;  // flag per a diagnòstic
+                                                // Actualitzar ref.worldSecMediaStart per a marcadors
+                                                cleanFeedData._extractedWorldSecMediaStart = fbWorldSecMediaStart;
+                                                // ⚠️ CRÍTIC: Actualitzar mp4SweetInPointRaw per al càlcul d'offsetSec posterior.
+                                                // El clip extret comença a 0, per tant el "sweet point" sense offset = handleSecs.
+                                                // Això és necessari perquè la fórmula offsetSec = tlClipStartSec - tlBlockInPointSec
+                                                // faci servir el valor correcte (handleSecs) en lloc del valor original del cleanFeed.
+                                                cleanFeedData.mp4SweetInPointRaw = h;
+                                                log(`📐 [EXTRACT] mp4SweetInPointRaw actualitzat a ${h.toFixed(2)}s (handleSecs) per al clip extret`);
+
+                                                // Actualitzar també les referències del manifest (en memòria)
+                                                if (manifest && manifest.ref) {
+                                                    manifest.ref.worldSecMediaStart = fbWorldSecMediaStart;
+                                                    log(`📐 [EXTRACT] manifest.ref.worldSecMediaStart actualitzat a ${fbWorldSecMediaStart.toFixed(2)}s`);
+                                                }
+
+                                                log(`✅ [EXTRACT] cleanFeedData actualitzat: mediaPath=${cleanFeedData.mediaPath}, mp4ExpandedInPoint=${clipExpandedInPoint.toFixed(1)}s, mp4ExpandedOutPoint=${clipExpandedOutPoint.toFixed(1)}s, dur=${clipDuration.toFixed(1)}s`);
+                                                getUtils().status(`✅ Clip extret: ${clipName}`, "exito");
+
+                                                // Guardar al manifest: clipPath + ref actualitzat del clip extret
+                                                try {
+                                                    await FASTPASS_UI.SessionManifest.save(ctx, {
+                                                        extractedClip: {
+                                                            path: clipPath,
+                                                            name: clipName,
+                                                            isExtracted: true,
+                                                            extractedWorldSecMediaStart: fbWorldSecMediaStart
+                                                        },
+                                                        ref: {
+                                                            worldSecMediaStart: fbWorldSecMediaStart,
+                                                            mp4ExpandedInPoint: clipExpandedInPoint,
+                                                            mp4ExpandedOutPoint: clipExpandedOutPoint,
+                                                            mp4Duration: clipDuration
+                                                        }
+                                                    });
+                                                    log(`✅ [EXTRACT] Manifest actualitzat amb ref del clip extret: worldSecMediaStart=${fbWorldSecMediaStart.toFixed(2)}s, mp4ExpandedInPoint=${clipExpandedInPoint.toFixed(2)}s`);
+                                                } catch(eManifest) {
+                                                    log(`⚠️ [EXTRACT] Error guardant dades del clip al manifest: ${eManifest.message}`);
+                                                }
+                                            } else {
+                                                log(`ℹ️ [EXTRACT] No s'usa clip extret. Es manté el comportament actual (MP4 complet).`);
+                                            }
+                                        } else {
+                                            log(`ℹ️ [EXTRACT] FFmpegLogic.extractClip no disponible. Usant MP4 complet (fallback).`);
+                                        }
+                                    } catch (eExtract) {
+                                        log(`⚠️ [EXTRACT] Error durant extracció de clip: ${eExtract.message}. Continuant sense clip extret.`);
+                                    }
+                                    // ─── FI FASE 0 ───────────────────────────────────────────
 
                                     // ─── FASE 1: Volcado de escaleta al JSON de análisis ──────
                                     try {

@@ -43,6 +43,7 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         $.writeln("   -> 9_Render loaded. FASTPASS.Render.frame = " + (FASTPASS.Render && typeof FASTPASS.Render.frame));
         load("11_Context.jsx");
         load("12_Diagnostic.jsx");
+        load("14_FFmpeg.jsx");
 
         return "OK_BOOT";
     } catch (e) { 
@@ -539,9 +540,11 @@ $.global.Markers = {
     }
 };
 
-$.global.Diagnostic = {
-    report: function() {
-        return ($.global.FASTPASS.Diagnostic) ? FASTPASS.Diagnostic.runFullReport() : "ERR_NO_MODULE";
+$.global.FfmpegExt = {
+    extractClip: function(ffmpegPath, sourcePath, startSec, duration, outputPath) {
+        return ($.global.FASTPASS.FFmpeg && $.global.FASTPASS.FFmpeg.extractClip)
+            ? FASTPASS.FFmpeg.extractClip(ffmpegPath, sourcePath, startSec, duration, outputPath)
+            : "ERR:FFmpeg module not loaded";
     }
 };
 

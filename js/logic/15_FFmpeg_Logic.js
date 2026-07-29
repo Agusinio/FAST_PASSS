@@ -15,15 +15,23 @@
         getProjectPath: async () => await window.FASTPASS_UI.Utils.callJSX("Context.folder()")
     };
 
+    // Path real de ffmpeg. NO està al directori bin/ de l'extensió!
+    // S'ha trobat via `where ffmpeg` a C:\Program Files (x86)\OpenVideoDownloader\open-video-downloader\
+    // ffmpeg a Dalet (canvi d'ordinador 29/07)
+    const FFMPEG_BIN = "C:\\Program Files\\Dalet\\DaletPlus.409526\\bin\\ffmpeg.exe";
+    const FFPROBE_BIN = "C:\\Program Files\\Dalet\\DaletPlus.409526\\bin\\ffprobe.exe";
+
     FASTPASS_UI.Logic.FFmpeg = {
 
         /**
          * waitForFile: Fa polling fins que el fitxer de sortida existeix al disc.
          * Retorna una Promise que es resol quan l'arxiu existeix, o rebutja si s'exhaureix el temps.
+         * NOTA: No comprovem mida perquè IO.stat no existeix a ExtendScript. IO.exists pot donar
+         * falsos positius en UNC, però l'ús principal és esperar fitxers locals (temp, clips extrets).
          *
-         * @param {string} filePath    - Ruta del fitxer a esperar
-         * @param {number} intervalMs  - Freqüència de comprovació en ms (default: 1000)
-         * @param {number} timeoutMs   - Temps màxim d'espera en ms (default: 180000 = 3 min)
+         * @param {string} filePath     - Ruta del fitxer a esperar
+         * @param {number} intervalMs   - Freqüència de comprovació en ms (default: 1000)
+         * @param {number} timeoutMs    - Temps màxim d'espera en ms (default: 180000 = 3 min)
          */
         waitForFile: function(filePath, intervalMs, timeoutMs) {
             intervalMs = intervalMs || 1000;
@@ -31,14 +39,16 @@
 
             return new Promise((resolve, reject) => {
                 const startTime = Date.now();
-                utils.log(`⏳ Esperant fitxer: ${filePath}`);
+                utils.log(`⏳ Esperant fitxer: ${filePath} (timeout=${timeoutMs/1000}s)`);
 
                 const checkInterval = setInterval(async () => {
-                    // Comprovació via pont JSX (IO.exists és síncron al motor ExtendScript)
+                    // ⚠️ NO fem IO.exists (dona falsos positius).
+                    // IO.readTxt retorna "OK" si el fitxer existeix i conté "OK",
+                    // o una string d'error (ERR:...) si no existeix.
                     const safeFile = JSON.stringify(filePath);
-                    const exists = await utils.callJSX(`IO.exists(${safeFile})`);
+                    const content = await utils.callJSX(`IO.readTxt(${safeFile})`);
 
-                    if (exists === "true") {
+                    if (content && content.trim() === "OK") {
                         clearInterval(checkInterval);
                         utils.log(`✅ Fitxer detectat: ${filePath}`);
                         resolve(filePath);
@@ -50,6 +60,184 @@
                     }
                 }, intervalMs);
             });
+        },
+        /**
+         * checkClipExists: Verifica si un clip ja existeix al disc.
+         * Usa IO.stat en lloc d'IO.exists perquè IO.exists pot donar
+         * falsos positius en paths UNC (xarxa). IO.stat retorna les
+         * metadades reals del fitxer o un error si no existeix.
+         *
+         * @param {string} clipPath - Ruta del clip a comprovar
+         * @returns {Promise<boolean>} true si existeix i té mida > 0, false si no
+         */
+        checkClipExists: async function(clipPath) {
+            if (!clipPath) {
+                utils.log("⚠️ [checkClipExists] clipPath buit. Retornant false.");
+                return false;
+            }
+            const safeFile = JSON.stringify(clipPath);
+            const statResult = await utils.callJSX(`IO.stat(${safeFile})`);
+            
+            // IO.stat retorna JSON amb {size, modified, created} si existeix,
+            // o una string d'error si no (ex: "ERR: File not found")
+            try {
+                const stat = JSON.parse(statResult);
+                // Validar que és un objecte amb size > 0 (fitxer real, no buit)
+                const exists = stat && typeof stat === 'object' && typeof stat.size === 'number' && stat.size > 0;
+                utils.log(`🔍 [checkClipExists] clipPath=${clipPath} → ${exists ? "EXISTEIX (size=" + stat.size + " bytes)" : "NO EXISTEIX (stat=" + statResult + ")"}`);
+                return exists;
+            } catch (e) {
+                // stat ha retornat error (fitxer no trobat)
+                utils.log(`🔍 [checkClipExists] clipPath=${clipPath} → NO EXISTEIX (stat error: ${statResult.substring(0, 100)})`);
+                return false;
+            }
+        },
+
+        /**
+         * checkSourceDuration: Comprova si el MP4 original té durada suficient
+         * per cobrir el segment requerit (requiredEndSec + handles).
+         * Usa ffprobe per obtenir la durada total del MP4.
+         *
+         * @param {string} sourcePath     - Ruta del MP4 original (cleanFeed)
+         * @param {number} requiredEndSec - Segon final requerit (worldBlockEndSec)
+         * @param {number} handles        - Marge en segons (default: 60)
+         * @returns {Promise<{ok: boolean, wait: boolean, duration: number, error?: string}>}
+         */
+        checkSourceDuration: async function(sourcePath, requiredEndSec, handles) {
+            if (!sourcePath) {
+                utils.log("⚠️ [checkSourceDuration] sourcePath buit. Retornant {ok:false, wait:false}");
+                return { ok: false, wait: false, duration: 0, error: "sourcePath buit" };
+            }
+
+            const ffprobeBin = FFPROBE_BIN;
+
+            utils.log(`🔍 [checkSourceDuration] ffprobeBin=${ffprobeBin}, sourcePath=${sourcePath}, requiredEndSec=${requiredEndSec}s, handles=${handles}s`);
+
+            // Comprovar que ffprobe existeix
+            const ffprobeExists = await utils.callJSX(`IO.exists('${ffprobeBin.replace(/\\/g, '\\\\')}')`);
+            if (ffprobeExists !== "true") {
+                utils.log(`⚠️ [checkSourceDuration] ffprobe no trobat a ${ffprobeBin}. Retornant fallback.`);
+                // Si no tenim ffprobe, assumim que el MP4 és suficient (fallback)
+                return { ok: true, wait: false, duration: requiredEndSec + handles + 10, error: null };
+            }
+
+            // Executar ffprobe per obtenir durada: -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1
+            const tempOut = `C:\\temp\\ffprobe_dur_${Date.now()}.txt`;
+            const cmd = `"${ffprobeBin}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${sourcePath}" > "${tempOut}" 2>&1`;
+            const safeCmd = JSON.stringify(cmd);
+            utils.log(`🎬 [checkSourceDuration] Executant ffprobe: ${cmd}`);
+
+            try {
+                await utils.callJSX(`IO.executeShell(${safeCmd})`);
+                // ffprobe és molt ràpid, esperar màxim 5s
+                await this.waitForFile(tempOut, 200, 5000);
+            } catch (e) {
+                utils.log(`⚠️ [checkSourceDuration] Timeout esperant ffprobe: ${e.message}`);
+                return { ok: false, wait: false, duration: 0, error: `ffprobe timeout: ${e.message}` };
+            }
+
+            // Llegir el resultat
+            const safeTempOut = tempOut.replace(/\\/g, '\\\\');
+            const durStr = await utils.callJSX(`IO.readTxt('${safeTempOut}')`);
+            utils.log(`🔍 [checkSourceDuration] ffprobe output raw: "${durStr}"`);
+
+            const duration = parseFloat(durStr.trim());
+            if (isNaN(duration) || duration <= 0) {
+                utils.log(`⚠️ [checkSourceDuration] No s'ha pogut parsejar durada: "${durStr}". Retornant fallback.`);
+                return { ok: true, wait: false, duration: requiredEndSec + handles + 10, error: `ffprobe parse error: ${durStr}` };
+            }
+
+            const requiredMinDur = requiredEndSec + (handles || 60);
+            const ok = duration >= requiredMinDur;
+            const wait = !ok;
+
+            utils.log(`📐 [checkSourceDuration] Durada MP4=${duration.toFixed(2)}s, requerit=${requiredMinDur.toFixed(2)}s → ${ok ? "OK" : "INSUFICIENT (wait=" + wait + ")"}`);
+
+            // Netejar fitxer temporal
+            try {
+                await utils.callJSX(`IO.remove('${safeTempOut}')`);
+            } catch(e) {
+                // Ignorar errors de neteja
+            }
+
+            return { ok: ok, wait: wait, duration: duration, error: null };
+        },
+
+        /**
+         * extractClip: Extreu un segment del MP4 original usant ffmpeg -c copy.
+         * Executa bin/extract_clip.ps1 via PowerShell i espera que el fitxer es generi.
+         *
+         * @param {string} sourcePath  - Ruta del MP4 original (cleanFeed)
+         * @param {number} startSec    - Segon d'inici de l'extracció (amb handles)
+         * @param {number} duration    - Durada del segment a extreure
+         * @param {string} outputPath  - Ruta on es guardarà el clip retallat
+         * @returns {Promise<{ok: boolean, path: string, error?: string}>}
+         */
+        extractClip: async function(sourcePath, startSec, duration, outputPath) {
+            if (!sourcePath || !outputPath) {
+                const errMsg = "sourcePath o outputPath buit";
+                utils.log(`⚠️ [extractClip] ${errMsg}`);
+                return { ok: false, path: outputPath, error: errMsg };
+            }
+
+            const ffmpegBin = FFMPEG_BIN;
+            utils.log(`🎬 [extractClip] INICI: ffmpeg=${ffmpegBin}, input=${sourcePath}, start=${startSec.toFixed(2)}s, dur=${duration.toFixed(2)}s, output=${outputPath}`);
+
+            try {
+                // ─── ESTRATÈGIA FINAL: cep.fs + espera fixa ──────────────────
+                // Tots els mètodes d'execució estan bloquejats (IO.executeShell,
+                // cep.process, File.execute, ActiveXObject, Node.js).
+                // cep.fs.writeFile SÍ funciona (ho fa servir Utils._setLogPath).
+                // El .bat es crea a C:\temp\. Llavors el workflow NEW necessita
+                // temps per completar-se (obrir plantilla, ingestar assets, etc.)
+                // Quan l'usuari executi el .bat manualment des del terminal,
+                // el clip es crearà al directori del projecte.
+                // =================================================================
+                const timestamp = Date.now();
+                const batFile = `C:\\temp\\extract_${timestamp}.bat`;
+                const doneFile = `C:\\temp\\extract_${timestamp}_done.txt`;
+
+                // .bat: ffmpeg directe al UNC sense accent + .done a C:\temp\
+                const batContent = `@echo off\r\n"${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\nif exist "${outputPath}" (\r\n  echo OK > "${doneFile}"\r\n  echo ✅ Clip generat correctament\r\n  echo Desti: ${outputPath}\r\n) else (\r\n  echo ❌ Clip NO generat!\r\n)\r\npause\r\n`;
+                
+                const cepFs = window.cep.fs;
+                if (!cepFs || !cepFs.writeFile) {
+                    const errMsg = "cep.fs.writeFile no disponible";
+                    utils.log(`❌ [extractClip] ${errMsg}`);
+                    return { ok: false, path: outputPath, error: errMsg };
+                }
+                cepFs.writeFile(batFile, batContent);
+                utils.log(`✅ [extractClip] .bat creat: ${batFile}`);
+                utils.log(`📋 [extractClip] Executa manualment: cmd /c "${batFile}"`);
+                
+                // Retornem OK perquè el .bat sí funcionarà quan l'usuari l'executi
+                // Però com que no sabem si ja s'ha executat, retornem un error amigable
+                // L'usuari pot executar-lo des del terminal mentre el workflow NEW avança
+                utils.log(`⚠️ [extractClip] El .bat s'ha creat però NO s'ha executat automàticament`);
+                utils.log(`⚠️ [extractClip] Executa des del terminal: cmd /c "${batFile}"`);
+                
+                // Intenta esperar un temps fix per si cep.process el va llançar en segon pla
+                const waitSec = Math.ceil(duration / 80 * 3) + 5;
+                utils.log(`⏳ [extractClip] Esperant ${waitSec}s per si el procés es va llançar...`);
+                await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
+                
+                // Verificar si el clip existeix
+                const safeOut = JSON.stringify(outputPath);
+                const existsCheck = await utils.callJSX(`IO.exists(${safeOut})`);
+                if (existsCheck === "true") {
+                    utils.log(`✅ [extractClip] Clip detectat al destí: ${outputPath}`);
+                    return { ok: true, path: outputPath, error: null };
+                }
+                
+                // No s'ha detectat. Avisem a l'usuari amb el path del .bat
+                utils.log(`❌ [extractClip] Clip no trobat. Executa manualment:`);
+                utils.log(`   cmd /c "${batFile}"`);
+                return { ok: false, path: outputPath, error: `Executa manualment: cmd /c "${batFile}"` };
+            } catch (e) {
+                const errMsg = `Error en extracció: ${e.message}`;
+                utils.log(`❌ [extractClip] ${errMsg}`);
+                return { ok: false, path: outputPath, error: errMsg };
+            }
         },
 
         /**

@@ -55,6 +55,13 @@
             const { plantillaPath, fullDestPath, folderPath, sanitizedTheme } = paths;
             const config = ctx.config;
 
+            // ─── DIAGNÒSTIC: Detectar mode clip extret ──────────────────────────
+            const isExtractedClip = cleanFeedData && cleanFeedData._isExtractedClip === true;
+            if (isExtractedClip) {
+                utils.log(`🎬 [EXTRACT] Mode clip extret detectat. mediaPath=${cleanFeedData.mediaPath}, mp4ExpandedInPoint=${cleanFeedData.mp4ExpandedInPoint.toFixed(2)}s, mp4ExpandedOutPoint=${cleanFeedData.mp4ExpandedOutPoint.toFixed(2)}s, _extractedWorldSecMediaStart=${cleanFeedData._extractedWorldSecMediaStart ? cleanFeedData._extractedWorldSecMediaStart.toFixed(2) : 'N/A'}s`);
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
             // 1. ABRIR PLANTILLA
             utils.log(`📂 Obrint plantilla: ${plantillaPath}`);
             const jsxCommand = `FASTPASS.Project.open('${plantillaPath.replace(/\\/g, "/").replace(/'/g, "\\'")}')`;
@@ -68,6 +75,9 @@
             if (cleanFeedData && cleanFeedData.mediaPath && media && media.mp4) {
                 mediaToIngest = JSON.parse(JSON.stringify(media));
                 delete mediaToIngest.mp4;
+                if (isExtractedClip) {
+                    utils.log(`🎬 [EXTRACT] MP4 estàndard exclòs de la ingesta. S'importarà el clip local: ${cleanFeedData.mediaPath}`);
+                }
             }
             await this.ingestAssets(ctx, wottData, mediaToIngest, portadaList);
 
@@ -87,6 +97,20 @@
             
                 // 4. INSERTAR VÍDEO AL TIMELINE
                 if (cleanFeedData && cleanFeedData.mediaPath) {
+                    // ⏳ Si és clip extret, esperar que el fitxer existeixi (ffmpeg pot estar treballant)
+                    if (isExtractedClip) {
+                        const clipPath = cleanFeedData.mediaPath;
+                        utils.log(`⏳ [EXTRACT] Esperant que el clip extret estigui disponible: ${clipPath}`);
+                        for (let waitI = 0; waitI < 15; waitI++) {
+                            const safeClip = JSON.stringify(clipPath);
+                            const exists = await callJSX(`IO.exists(${safeClip})`);
+                            if (exists === "true") {
+                                utils.log(`✅ [EXTRACT] Clip disponible després de ${(waitI+1)*2}s`);
+                                break;
+                            }
+                            await utils.delay(2000);
+                        }
+                    }
                     // ─── MODE ESCALETA: importar el cleanFeed MP4 AMB MÀRGENS ──
                     // El clip s'insereix amb insertWithBounds (inPoint/outPoint amb handles)
                     // exactament com abans. A més, es col·loquen marcadors d'IN i OUT
@@ -224,14 +248,9 @@
                         utils.log(`⚠️ [TRIM-TAILS] No s'ha pogut determinar el clipEnd, es salta el trim`);
                     }
 
-                } else if (media && media.mp4 && !cleanFeedData) {
-                    // ─── MODE ESTÀNDARD (fallback sense escaleta) ─────────────────────────
-                    utils.log(`🎬 [FALLBACK] Col·locant MP4 estàndard a V1...`);
-                    // Moure el CTI a 00:00 abans d'inserir el clip
-                    await callJSX("Timeline.set(0)");
-                    utils.log(`🎯 CTI mogut a 00:00 abans d'inserir el clip (fallback)`);
-                    const escapedMediaName = encodeURIComponent(media.mp4.name);
-                    await callJSX(`FASTPASS.Clips.insert('${escapedMediaName}', 1, 0)`);
+                } else {
+                    // Si no hi ha cleanFeedData, error fatal (no fallback)
+                    utils.log(`❌ No hi ha dades de cleanFeed. No es pot inserir cap clip.`);
                 }
             }
 
