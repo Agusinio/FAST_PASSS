@@ -195,8 +195,18 @@
                 const psFile = `C:\\temp\\extract_${timestamp}.ps1`;
                 const doneFile = `C:\\temp\\extract_${timestamp}_done.txt`;
 
-                // .ps1: ffmpeg directe al UNC + .done a C:\temp\
-                const psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\nif (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
+                // Determinar path del fitxer d'audio de referencia (mono, 200Hz, text pla)
+                const outputBaseName = outputPath.replace(/\.mp4$/i, '');
+                const audioRefPath = `${outputBaseName}_AUDIO_REF.txt`;
+
+                // .ps1: ffmpeg al UNC + audio ref + .done
+                // Primer: mp4
+                // Segon: audio mono 200Hz text pla
+                // Tercer: .done
+                // NOTA: PowerShell 5.1 usa $null per suprimir stderr, NO 2>$null
+                let psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
+                psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -ac 1 -ar 200 -f txt "${audioRefPath}" -y 2>$null\r\n`;
+                psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
                 const cepFs = window.cep.fs;
                 if (!cepFs || !cepFs.writeFile) {
