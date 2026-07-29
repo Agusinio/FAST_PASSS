@@ -15,7 +15,7 @@
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     // Tracks alineats amb Profile.json (v_mp4:1, v_fondos:2, v_graf:3, v_tema:5, v_chyrons:6, v_lloc:7)
     let _activeConfig = {
-        general: { autor: "AGUS", guarda: 22, debug: false, handles: 9, tcOffset: 0 },
+        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0 },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",

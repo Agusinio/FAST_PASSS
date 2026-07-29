@@ -195,17 +195,20 @@
                 const psFile = `C:\\temp\\extract_${timestamp}.ps1`;
                 const doneFile = `C:\\temp\\extract_${timestamp}_done.txt`;
 
-                // Determinar path del fitxer d'audio de referencia (mono, 200Hz, text pla)
+                // Paths: audio ref binari (bytes crus en hex, 2 hex per mostra)
+                // Format: binari pur, JS pot llegir amb cep.fs.readFile
                 const outputBaseName = outputPath.replace(/\.mp4$/i, '');
-                const audioRefPath = `${outputBaseName}_AUDIO_REF.txt`;
+                const audioRefPath = `${outputBaseName}_AUDIO_REF.bin`;
+                const rawTemp = `C:\\temp\\audio_ref_raw_${timestamp}.raw`;
 
-                // .ps1: ffmpeg al UNC + audio ref + .done
-                // Primer: mp4
-                // Segon: audio mono 200Hz text pla
-                // Tercer: .done
-                // NOTA: PowerShell 5.1 usa $null per suprimir stderr, NO 2>$null
+                // .ps1: 
+                // 1. ffmpeg mp4 al UNC
+                // 2. ffmpeg audio mono 8000Hz raw unsigned 8-bit a C:\temp\
+                //    Despres copia al projecte via PowerShell Copy-Item (evita Unicode)
+                // 3. .done
                 let psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
-                psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -ac 1 -ar 200 -f txt "${audioRefPath}" -y 2>$null\r\n`;
+                psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -map 0:a:0 -ac 1 -ar 8000 -c:a pcm_u8 "${rawTemp}" -y\r\n`;
+                psContent += `if (Test-Path "${rawTemp}") { Copy-Item "${rawTemp}" "${audioRefPath}" -Force; Remove-Item "${rawTemp}" -Force }\r\n`;
                 psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
                 const cepFs = window.cep.fs;
