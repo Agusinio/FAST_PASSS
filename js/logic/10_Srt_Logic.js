@@ -151,11 +151,11 @@
         },
 
         /**
-         * Llegeix fitxer WAV .bin i retorna peaks normalitzats (0..1)
-         * Parseja header WAV + mostra de 8 bits
+         * Llegeix fitxer .bin RAW (8-bit signed) i retorna peaks normalitzats (0..1)
+         * El fitxer és RAW sense capçalera: bytes signed, 0 = silenci, ±127 = màxim
          * @param {string} binPath - Path complet al .bin
-         * @param {number} widthPx - Amplada en píxels per reductr
-         * @returns {Promise<number[]|null>} Array de peaks
+         * @param {number} widthPx - Amplada en píxels per reduir
+         * @returns {Promise<number[]|null>} Array de peaks (0..1)
          */
         loadPeaksFromBin: async function (binPath, widthPx) {
             if (!binPath) return null;
@@ -166,33 +166,18 @@
                 if (!cepFs || !cepFs.readFile) return null;
                 
                 var result = cepFs.readFile(binPath);
-                if (result.err !== 0 || !result.data || result.data.length < 44) return null;
+                if (result.err !== 0 || !result.data || result.data.length < 4) return null;
                 
                 var data = result.data;
-                
-                // Trobar el chunk "data" (després del header WAV)
-                // El WAV pot tenir chunks INFO entre fmt i data
-                var dataOffset = 12; // Saltar RIFF header
-                
-                // Cercar "data" chunk
-                for (var off = 12; off < data.length - 8; off++) {
-                    if (data.charCodeAt(off) === 100 && // 'd'
-                        data.charCodeAt(off+1) === 97 && // 'a'
-                        data.charCodeAt(off+2) === 116 && // 't'
-                        data.charCodeAt(off+3) === 97) { // 'a'
-                        // data chunk trobat: 4 bytes 'data', 4 bytes size, després les mostres
-                        dataOffset = off + 8; // +8 per saltar 'data' + size
-                        break;
-                    }
-                }
-                
-                // Llegir mostres de 8 bits (unsigned)
                 var rawPeaks = [];
-                for (var b = dataOffset; b < data.length; b++) {
-                    var byteVal = data.charCodeAt(b) & 0xFF;
-                    // 8-bit unsigned: 128 = silenci, 0..255
-                    // Normalitzar a 0..1
-                    var normalized = Math.abs(byteVal - 128) / 128;
+                
+                // RAW signed 8-bit: cada byte és un valor signed (-128..127)
+                for (var b = 0; b < data.length; b++) {
+                    var code = data.charCodeAt(b);
+                    // Convertir a signed 8-bit: si > 127, restar 256
+                    var signed = (code > 127) ? code - 256 : code;
+                    // Normalitzar a 0..1: |signed| / 127
+                    var normalized = Math.min(Math.abs(signed) / 127, 1);
                     rawPeaks.push(normalized);
                 }
                 
