@@ -184,21 +184,19 @@
             utils.log(`🎬 [extractClip] INICI: ffmpeg=${ffmpegBin}, input=${sourcePath}, start=${startSec.toFixed(2)}s, dur=${duration.toFixed(2)}s, output=${outputPath}`);
 
             try {
-                // ─── ESTRATÈGIA FINAL: cep.fs + espera fixa ──────────────────
-                // Tots els mètodes d'execució estan bloquejats (IO.executeShell,
-                // cep.process, File.execute, ActiveXObject, Node.js).
-                // cep.fs.writeFile SÍ funciona (ho fa servir Utils._setLogPath).
-                // El .bat es crea a C:\temp\. Llavors el workflow NEW necessita
-                // temps per completar-se (obrir plantilla, ingestar assets, etc.)
-                // Quan l'usuari executi el .bat manualment des del terminal,
-                // el clip es crearà al directori del projecte.
+                // ─── POWERSHELL INLINE: ffmpeg directe al UNC ─────────────────
+                // TESTS AL TERMINAL (11:28 29/07/2026):
+                //   TEST 1 ✅ PowerShell .ps1
+                //   TEST 2 ✅ PowerShell inline
+                //   TEST 3 ✅ ffmpeg directe al UNC via PowerShell (OK DIRECTE)
+                // PowerShell gestiona Unicode (Ó) correctament, a diferència de .bat
                 // =================================================================
                 const timestamp = Date.now();
-                const batFile = `C:\\temp\\extract_${timestamp}.bat`;
+                const psFile = `C:\\temp\\extract_${timestamp}.ps1`;
                 const doneFile = `C:\\temp\\extract_${timestamp}_done.txt`;
 
-                // .bat: ffmpeg directe al UNC sense accent + .done a C:\temp\
-                const batContent = `@echo off\r\n"${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\nif exist "${outputPath}" (\r\n  echo OK > "${doneFile}"\r\n  echo ✅ Clip generat correctament\r\n  echo Desti: ${outputPath}\r\n) else (\r\n  echo ❌ Clip NO generat!\r\n)\r\npause\r\n`;
+                // .ps1: ffmpeg directe al UNC + .done a C:\temp\
+                const psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\nif (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
                 const cepFs = window.cep.fs;
                 if (!cepFs || !cepFs.writeFile) {
@@ -206,33 +204,27 @@
                     utils.log(`❌ [extractClip] ${errMsg}`);
                     return { ok: false, path: outputPath, error: errMsg };
                 }
-                cepFs.writeFile(batFile, batContent);
-                utils.log(`✅ [extractClip] .bat creat: ${batFile}`);
-                utils.log(`📋 [extractClip] Executa manualment: cmd /c "${batFile}"`);
-                
-                // Retornem OK perquè el .bat sí funcionarà quan l'usuari l'executi
-                // Però com que no sabem si ja s'ha executat, retornem un error amigable
-                // L'usuari pot executar-lo des del terminal mentre el workflow NEW avança
-                utils.log(`⚠️ [extractClip] El .bat s'ha creat però NO s'ha executat automàticament`);
-                utils.log(`⚠️ [extractClip] Executa des del terminal: cmd /c "${batFile}"`);
-                
-                // Intenta esperar un temps fix per si cep.process el va llançar en segon pla
-                const waitSec = Math.ceil(duration / 80 * 3) + 5;
-                utils.log(`⏳ [extractClip] Esperant ${waitSec}s per si el procés es va llançar...`);
-                await new Promise(resolve => setTimeout(resolve, waitSec * 1000));
-                
-                // Verificar si el clip existeix
-                const safeOut = JSON.stringify(outputPath);
-                const existsCheck = await utils.callJSX(`IO.exists(${safeOut})`);
-                if (existsCheck === "true") {
-                    utils.log(`✅ [extractClip] Clip detectat al destí: ${outputPath}`);
+                cepFs.writeFile(psFile, psContent);
+                utils.log(`✅ [extractClip] .ps1 creat: ${psFile}`);
+
+                // Executar .ps1 via PowerShell
+                const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`;
+                const safeCmd = JSON.stringify(psCmd);
+                utils.log(`🎬 [extractClip] Executant: ${psCmd}`);
+                await utils.callJSX(`IO.executeShell(${safeCmd})`);
+                utils.log(`⏳ [extractClip] PowerShell llançat. Polling .done: ${doneFile}`);
+
+                // Polling .done amb IO.readTxt (FIABLE)
+                try {
+                    await this.waitForFile(doneFile, 2000, 300000);
+                    await utils.callJSX(`IO.remove(${JSON.stringify(doneFile)})`).catch(() => {});
+                    await utils.callJSX(`IO.remove(${JSON.stringify(psFile)})`).catch(() => {});
+                    utils.log(`✅ [extractClip] Clip extret correctament: ${outputPath}`);
                     return { ok: true, path: outputPath, error: null };
+                } catch(e) {
+                    utils.log(`❌ [extractClip] Timeout .done: ${doneFile}`);
+                    return { ok: false, path: outputPath, error: `Timeout extracció` };
                 }
-                
-                // No s'ha detectat. Avisem a l'usuari amb el path del .bat
-                utils.log(`❌ [extractClip] Clip no trobat. Executa manualment:`);
-                utils.log(`   cmd /c "${batFile}"`);
-                return { ok: false, path: outputPath, error: `Executa manualment: cmd /c "${batFile}"` };
             } catch (e) {
                 const errMsg = `Error en extracció: ${e.message}`;
                 utils.log(`❌ [extractClip] ${errMsg}`);
