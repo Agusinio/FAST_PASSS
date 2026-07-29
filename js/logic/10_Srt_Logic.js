@@ -1,7 +1,7 @@
 /**
  * ============================================================================
- * LOGIC: SUB (Subtítols) - v3.0.0
- * Funcions de parseig i processament SRT + WaveformGenerator
+ * LOGIC: SUB (Subtítols) - v3.1.0
+ * SrtParser + WaveformGenerator (WAV .bin) + PrProjCleaner
  * ============================================================================
  */
 
@@ -118,95 +118,99 @@
     };
 
     /**
-     * WaveformGenerator: Genera forma d'ona via ffmpeg RAW + cep.fs.readFile
+     * WaveformGenerator: Llegeix fitxer WAV (.bin) amb mostra d'àudio de referència
+     * Format: WAV, 8000Hz, 8-bit, mono
      */
     FASTPASS_UI.Logic.WaveformGenerator = {
 
-        ffmpegPath: "E:\\ffmpeg\\bin\\ffmpeg.exe",
-
-        getAudioPath: async function () {
-            return await window.FASTPASS_UI.Utils.callJSX(
-                "(function(){try{var s=app.project.activeSequence;if(!s)return'';var aud=s.audioTracks[0];if(!aud)return'';var clip=aud.clips[0];if(!clip)return'';var pi=clip.projectItem;if(!pi)return'';return pi.getMediaPath()}catch(e){return''}})()"
-            );
+        /**
+         * Obté el path del fitxer .bin al directori del projecte
+         * @param {string} projectFolder - Directori del projecte
+         * @returns {string} Path complet al .bin o ''
+         */
+        getBinPath: async function (projectFolder) {
+            // Busca un fitxer que acabi en _AUDIO_REF.bin o .bin al directori del projecte
+            if (!projectFolder || projectFolder.indexOf('ERR') === 0) return '';
+            
+            // Intentar per noms coneguts
+            var possibleNames = [
+                "TNV_V1_CLIP_AUDIO_REF.bin",
+                "TNV_V2_CLIP_AUDIO_REF.bin",
+                "TNV_V3_CLIP_AUDIO_REF.bin",
+                "CLIP_AUDIO_REF.bin"
+            ];
+            
+            for (var i = 0; i < possibleNames.length; i++) {
+                var testPath = projectFolder + "\\" + possibleNames[i];
+                var exists = await window.FASTPASS_UI.Utils.callJSX("IO.exists('" + testPath.replace(/\\/g, '\\\\') + "')");
+                if (exists === "true") return testPath;
+            }
+            
+            // Fallback: buscar qualsevol .bin
+            return '';
         },
 
         /**
-         * Genera peaks via ffmpeg RAW i els llegeix via cep.fs
-         * @param {string} audioPath - Path al fitxer d'àudio
-         * @param {number} totalSec - Durada total en segons
-         * @param {number} targets - Nombre de punts de mostra desitjat (píxels d'amplada)
-         * @returns {Promise<number[]|null>} Array de peaks 0..1, o null
+         * Llegeix fitxer WAV .bin i retorna peaks normalitzats (0..1)
+         * Parseja header WAV + mostra de 8 bits
+         * @param {string} binPath - Path complet al .bin
+         * @param {number} widthPx - Amplada en píxels per reductr
+         * @returns {Promise<number[]|null>} Array de peaks
          */
-        generatePeaks: async function (audioPath, totalSec, targets) {
-            if (!audioPath) return null;
-            targets = targets || 1800;
-            // Sample rate baixa per reduir dades: 1000 Hz
-            var sampleRate = 1000;
-            var rawPath = "C:\\temp\\waveform_raw_" + Date.now() + ".raw";
-
-            // ffmpeg: extrau 1s segons a 1000 Hz, f32le, 1 canal
-            var cmd = "\"" + this.ffmpegPath + "\" -i \"" + audioPath + "\" -ac 1 -ar " + sampleRate + " -f f32le -y \"" + rawPath + "\"";
-
-            try {
-                // Executar ffmpeg via PowerShell script (amb Start-Process -Wait per ser síncron)
-                var cep = window.cep || window.__adobe_cep__;
-                if (cep && cep.process && cep.process.createProcess) {
-                    var psScript = "C:\\temp\\run_ffmpeg_waveform.ps1";
-                    var totalSecInt = Math.ceil(totalSec || 120);
-                    var psArgs = "-ExecutionPolicy Bypass -File \"" + psScript + "\" -ffmpegExe \"" + this.ffmpegPath + "\" -inputFile \"" + audioPath + "\" -outputRaw \"" + rawPath + "\" -durationSec " + totalSecInt;
-                    // Usar Start-Process -Wait per forçar sincronia
-                    var wrapperCmd = "powershell -Command \"Start-Process powershell.exe -ArgumentList '-ExecutionPolicy Bypass -File \\\"" + psScript + "\\\" -ffmpegExe \\\"" + this.ffmpegPath + "\\\" -inputFile \\\"" + audioPath + "\\\" -outputRaw \\\"" + rawPath + "\\\" -durationSec " + totalSecInt + "' -Wait -NoNewWindow\"";
-                    cep.process.createProcess("powershell.exe", "-Command \"Start-Process powershell.exe -ArgumentList '-ExecutionPolicy Bypass -File \\\"" + psScript + "\\\" -ffmpegExe \\\"" + this.ffmpegPath + "\\\" -inputFile \\\"" + audioPath + "\\\" -outputRaw \\\"" + rawPath + "\\\" -durationSec " + totalSecInt + "' -Wait -NoNewWindow\"");
-                    // Esperar que ffmpeg acabi (30s hauria de ser suficient per 120s d'audio a 1000Hz)
-                    await new Promise(function(resolve) { setTimeout(resolve, 30000); });
-                } else {
-                    return null;
-                }
-            } catch(e) {
-                return null;
-            }
-
-            // Llegir el fitxer RAW via cep.fs
+        loadPeaksFromBin: async function (binPath, widthPx) {
+            if (!binPath) return null;
+            widthPx = widthPx || 1800;
+            
             try {
                 var cepFs = window.cep.fs;
-                if (!cepFs || !cepFs.readFile) {
-                    return null;
-                }
-                var result = cepFs.readFile(rawPath);
-                if (result.err !== 0) {
-                    return null;
-                }
+                if (!cepFs || !cepFs.readFile) return null;
+                
+                var result = cepFs.readFile(binPath);
+                if (result.err !== 0 || !result.data || result.data.length < 44) return null;
+                
                 var data = result.data;
-                if (!data || data.length < 4) {
-                    return null;
+                
+                // Trobar el chunk "data" (després del header WAV)
+                // El WAV pot tenir chunks INFO entre fmt i data
+                var dataOffset = 12; // Saltar RIFF header
+                
+                // Cercar "data" chunk
+                for (var off = 12; off < data.length - 8; off++) {
+                    if (data.charCodeAt(off) === 100 && // 'd'
+                        data.charCodeAt(off+1) === 97 && // 'a'
+                        data.charCodeAt(off+2) === 116 && // 't'
+                        data.charCodeAt(off+3) === 97) { // 'a'
+                        // data chunk trobat: 4 bytes 'data', 4 bytes size, després les mostres
+                        dataOffset = off + 8; // +8 per saltar 'data' + size
+                        break;
+                    }
                 }
-
-                // Parsejar floats (f32le, 4 bytes per mostra)
+                
+                // Llegir mostres de 8 bits (unsigned)
                 var rawPeaks = [];
-                var view = new DataView(new ArrayBuffer(data.length));
-                for (var i = 0; i < data.length; i++) view.setUint8(i, data.charCodeAt(i) & 0xFF);
-                for (var off = 0; off + 4 <= data.length; off += 4) {
-                    var peak = Math.abs(view.getFloat32(off, true));
-                    rawPeaks.push(peak);
+                for (var b = dataOffset; b < data.length; b++) {
+                    var byteVal = data.charCodeAt(b) & 0xFF;
+                    // 8-bit unsigned: 128 = silenci, 0..255
+                    // Normalitzar a 0..1
+                    var normalized = Math.abs(byteVal - 128) / 128;
+                    rawPeaks.push(normalized);
                 }
-
-                if (rawPeaks.length === 0) {
-                    return null;
-                }
-
-                // Reduir als targets desitjats agafant el màxim de cada grup
-                var step = Math.max(1, Math.floor(rawPeaks.length / targets));
+                
+                if (rawPeaks.length === 0) return null;
+                
+                // Reduir als píxels desitjats (agafar el màxim de cada grup)
+                var step = Math.max(1, Math.floor(rawPeaks.length / widthPx));
                 var peaks = [];
-                for (var pi = 0; pi < targets && pi * step < rawPeaks.length; pi++) {
+                for (var pi = 0; pi < widthPx && pi * step < rawPeaks.length; pi++) {
                     var maxVal = 0;
                     for (var si = 0; si < step && pi * step + si < rawPeaks.length; si++) {
                         if (rawPeaks[pi * step + si] > maxVal) maxVal = rawPeaks[pi * step + si];
                     }
-                    peaks.push(Math.min(maxVal * 2, 1));
+                    peaks.push(maxVal);
                 }
-
+                
                 return peaks;
-
+                
             } catch(e) {
                 return null;
             }

@@ -700,7 +700,12 @@ FASTPASS.Clips = {
     },
 
     /**
-     * scenes: Executa el Scene Edit Detection.
+     * scenes: Executa el Scene Edit Detection NOMÉS a V1 (vídeo sense àudio).
+     * Abans de trocejar, desvincula l'àudio del clip de V1 amb unlink().
+     * D'aquesta manera, en seleccionar només el clip de V1, el scene
+     * detection només troceja el vídeo.
+     * L'àudio desvinculat es queda com a clip independent a A1 sense trocejar.
+     * NO s'elimina res de les pistes d'àudio.
      */
     scenes: function(trackIdx) {
         try {
@@ -712,10 +717,36 @@ FASTPASS.Clips = {
             for (var i = 0; i < track.clips.numItems; i++) {
                 track.clips[i].setSelected(false, false);
             }
-            // Seleccionar solo el primer clip (MP4)
-            track.clips[0].setSelected(true, true);
             
+            // Seleccionar solo el primer clip (MP4)
+            var clipV1 = track.clips[0];
+            
+            // ── DESVINCULAR ÀUDIO del clip de V1 ──
+            // Això separa el component d'audio del vídeo.
+            // L'audio es queda com a clip independent a A1.
+            // Així performSceneEditDetectionOnSelection només troceja
+            // el vídeo a V1, sense afectar l'àudio d'A1.
+            $.writeln("🔇 [scenes] Desvinculant àudio del clip V1...");
+            try {
+                clipV1.unlink();
+                $.writeln("✅ [scenes] Àudio desvinculat correctament. Es manté a A1 sense trocejar.");
+            } catch (eUnlink) {
+                $.writeln("⚠️ [scenes] No s'ha pogut desvincular l'àudio: " + eUnlink.message);
+            }
+            
+            // Seleccionar només el clip de V1 (l'audio ja està separat)
+            clipV1.setSelected(true, true);
+            
+            // ── EXECUTAR SCENE DETECTION ──
+            // Com que el clip d'audio està desvinculat, el scene detection
+            // només veu el clip de vídeo seleccionat i només troceja V1.
+            // L'àudio a A1 es queda com un sol clip sense trocejar.
             var success = app.project.activeSequence.performSceneEditDetectionOnSelection('applyCuts');
+            
+            // ✅ L'àudio original es manté a A1 com a clip independent
+            //    (no es troceja, no s'elimina)
+            $.writeln("✅ [scenes] Scene detection completat. L'àudio es manté a A1 sense trocejar.");
+            
             return success ? "OK_SCENES" : "NO_SCENES_DETECTED";
         } catch (e) { return "ERR: " + e.message; }
     },

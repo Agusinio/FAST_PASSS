@@ -111,6 +111,30 @@
                 log("⚠️ SRT_EDIT: Error generant waveform: " + e.message);
             }
             
+            // Carregar waveform des del fitxer .bin (WAV 8-bit 8000Hz)
+            try {
+                var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
+                var projFolder = await callJSX("Context.folder()");
+                if (wg && projFolder) {
+                    var binPath = await wg.getBinPath(projFolder);
+                    if (binPath) {
+                        log("📝 SRT_EDIT: Bin trovato: " + binPath);
+                        var canvasW = Math.max(1800, this._maxSec * this._pixelsPerSec + 100);
+                        var peaks = await wg.loadPeaksFromBin(binPath, canvasW);
+                        if (peaks && peaks.length > 0) {
+                            this._waveformPeaks = peaks;
+                            log("📝 SRT_EDIT: " + peaks.length + " peaks carregats del .bin");
+                        } else {
+                            log("⚠️ SRT_EDIT: No s'han pogut carregar peaks del .bin");
+                        }
+                    } else {
+                        log("⚠️ SRT_EDIT: No s'ha trobat fitxer .bin al directori del projecte");
+                    }
+                }
+            } catch(e) {
+                log("⚠️ SRT_EDIT: Error carregant .bin: " + e.message);
+            }
+            
             this.render();
             getUtils().status("SRT carregat: " + this._entries.length + " entrades", "exito");
             return true;
