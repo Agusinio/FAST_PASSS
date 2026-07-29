@@ -203,12 +203,11 @@
 
                 // .ps1: 
                 // 1. ffmpeg mp4 al UNC
-                // 2. ffmpeg audio mono 8000Hz raw unsigned 8-bit a C:\temp\
-                //    Despres copia al projecte via PowerShell Copy-Item (evita Unicode)
+                // 2. ffmpeg audio mono 8000Hz wav (pcm_u8) al projecte directament
+                //    -f wav per a que ffmpeg sàpiga el format de sortida
                 // 3. .done
                 let psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
-                psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -map 0:a:0 -ac 1 -ar 8000 -c:a pcm_u8 "${rawTemp}" -y\r\n`;
-                psContent += `if (Test-Path "${rawTemp}") { Copy-Item "${rawTemp}" "${audioRefPath}" -Force; Remove-Item "${rawTemp}" -Force }\r\n`;
+                psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -ac 1 -ar 8000 -c:a pcm_u8 -f wav "${audioRefPath}" -y\r\n`;
                 psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
                 const cepFs = window.cep.fs;
