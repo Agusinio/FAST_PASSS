@@ -581,12 +581,12 @@
                 }
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // Buscar items del bloc amb sufix de conductor (Intro/dp, Donapas/dp, Off/f, Lead/lead)
-                // NO inclou dir, Chy, GF, TE...
+                // Buscar el PRIMER item del bloc amb sufix de conductor (dp, i, lead, f)
+                // El conductor es col·loca aquí independentment de si la estructura té un chyron CONDUCTOR
+                // (el conductor ve del desplegable SETUP, no de l'estructura)
                 const CONDUCTOR_SUFFIX = ['dp', 'i', 'lead', 'f'];
                 let targetTime = null;
                 let targetId = null;
-                let hasAnyConductorItem = false;
 
                 for (const m of structuralMarkers) {
                     const rawId = (m.comments || "").split("-")[0].trim();
@@ -596,31 +596,20 @@
 
                     // Provar coincidència directa
                     if (structureById[rawId]) {
-                        // Verificar que l'entry té almenys un chyron CONDUCTOR
-                        const entry = structureById[rawId];
-                        if (entry.chyrons && entry.chyrons.some(c => (c.rol || '').toUpperCase() === "CONDUCTOR")) {
-                            if (!targetTime) { targetTime = m.time; targetId = rawId; }
-                            hasAnyConductorItem = true;
-                            continue;
-                        }
+                        if (!targetTime) { targetTime = m.time; targetId = rawId; break; }
                     }
-                    // Provar per sufixos de conductor
+                    // Provar per sufixos
                     for (const suf of CONDUCTOR_SUFFIX) {
-                        const candidate = base + suf;
-                        if (structureById[candidate]) {
-                            const entry = structureById[candidate];
-                            if (entry.chyrons && entry.chyrons.some(c => (c.rol || '').toUpperCase() === "CONDUCTOR")) {
-                                if (!targetTime) { targetTime = m.time; targetId = candidate; }
-                                hasAnyConductorItem = true;
-                                break;
-                            }
+                        if (structureById[base + suf]) {
+                            if (!targetTime) { targetTime = m.time; targetId = base + suf; break; }
                         }
                     }
+                    if (targetTime !== null) break;
                 }
 
-                if (!hasAnyConductorItem) {
-                    log("⚠️ [Conductor] No hi ha cap item amb conductor (dp/i/lead/f) al bloc.", "WARN");
-                    getUtils().status("Conductor: cap item amb conductor al bloc", "warn");
+                if (!targetTime) {
+                    log("⚠️ [Conductor] No hi ha cap item amb sufix dp/i/lead/f al bloc.", "WARN");
+                    getUtils().status("Conductor: cap item de tipus dp/i/lead/f", "warn");
                     return;
                 }
                 log(`🔬 [Conductor] Conductor trobat a: ${targetId} @ ${targetTime.toFixed(2)}s`);
