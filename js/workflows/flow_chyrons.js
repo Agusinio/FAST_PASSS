@@ -288,14 +288,21 @@
         _snapToNearestCut: async function(idealTimeSec) {
             const clips = await getClipsLogic().getTrackClips(1, "video");
             if (!clips || clips.length === 0) return idealTimeSec;
-            let bestClip = clips[0];
-            let bestDist = Math.abs(clips[0].start - idealTimeSec);
-            for (let i = 1; i < clips.length; i++) {
-                const dist = Math.abs(clips[i].start - idealTimeSec);
-                if (dist < bestDist) { bestDist = dist; bestClip = clips[i]; }
+            let bestStart = 0;
+            let bestDist = 999;
+            // Només mirar inicis de clip (talls), NO finals.
+            // Si el tall més proper és anterior al marcador o massa lluny, usar el marcador.
+            for (const cl of clips) {
+                const d = Math.abs(cl.start - idealTimeSec);
+                if (d < bestDist) { bestDist = d; bestStart = cl.start; }
             }
-            log(`   🎯 [_snap] ideal=${idealTimeSec.toFixed(2)}s → clip @ ${bestClip.start.toFixed(2)}s (Δ=${bestDist.toFixed(2)}s)`);
-            return bestClip.start;
+            // Si el millor tall és ABANS del marcador o massa lluny, usar marcador
+            if (bestDist > 1.0 || bestStart < idealTimeSec) {
+                log(`   🎯 [_snap] ideal=${idealTimeSec.toFixed(2)}s → cap tall proper (Δ=${bestDist.toFixed(2)}s, bestStart=${bestStart.toFixed(2)}s). Usant marcador directament.`);
+                return idealTimeSec;
+            }
+            log(`   🎯 [_snap] ideal=${idealTimeSec.toFixed(2)}s → clip @ ${bestStart.toFixed(2)}s (Δ=${bestDist.toFixed(2)}s)`);
+            return bestStart;
         },
 
         _freezeTemaTitol: async function (wottName, placeTime, stretchEnd, label) {
