@@ -623,34 +623,24 @@
                 let conductTime;
 
                 if (isFirstItem) {
-                    // Lògica Cas A/B: si l'item dura més que la suma d'animacions
-                    // El clip V1 on cau
+                    // Primer item: usar clips[0].start com a referència (0.00s post-TROSEJA)
+                    // NO buscar el clipV1 per targetTime (que pot ser 33+ si el marcador no s'ha actualitzat)
                     const clips = await getClipsLogic().getTrackClips(1, "video");
-                    let clipV1 = null;
-                    for (const cl of clips) {
-                        if (cl.start <= targetTime && cl.end > targetTime) {
-                            clipV1 = cl;
-                            break;
-                        }
-                    }
-                    const clipStart = clipV1 ? clipV1.start : targetTime;
-                    const clipEnd = clipV1 ? clipV1.end : targetTime + 10;
+                    const clipStart = clips.length > 0 ? clips[0].start : 0;
+                    const clipEnd = clips.length > 0 ? clips[0].end : targetTime + 10;
                     const margenDisponible = clipEnd - clipStart;
                     const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + 4.40; // ~11.04s
 
                     if (margenDisponible >= MIN_MARGEN) {
-                        // Cas A: prou espai → Conductor després del Tema-Titol
                         conductTime = clipStart + MARGEN_INICIO + DUR_TEMA_TITOL;
-                        log(`📌 [Conductor·CasA] Item al principi amb marge suficient (${margenDisponible.toFixed(2)}s ≥ ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
+                        log(`📌 [Conductor·CasA] Marge suficient (${margenDisponible.toFixed(2)}s ≥ ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
                     } else {
-                        // Cas B: espai just → Conductor al marge d'inici
                         conductTime = clipStart + MARGEN_INICIO;
-                        log(`📌 [Conductor·CasB] Item al principi amb marge insuficient (${margenDisponible.toFixed(2)}s < ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
+                        log(`📌 [Conductor·CasB] Marge insuficient (${margenDisponible.toFixed(2)}s < ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
                     }
                 } else {
-                    // No és el primer item: conductor al marcador de l'item + 0:10
                     conductTime = targetTime + MARGEN_INICIO;
-                    log(`📌 [Conductor] Item NO és el primer del bloc: Conductor @ marcador+0:10 = ${conductTime.toFixed(2)}s`);
+                    log(`📌 [Conductor] No és el primer: Conductor @ marcador+0:10 = ${conductTime.toFixed(2)}s`);
                 }
 
                 // Col·locar conductor
