@@ -68,6 +68,12 @@
         if (!escaletaId) {
             escaletaId = DEFAULT_ESCALETA_IDS[programArchivo] || null;
         }
+        // Fallback per nom de programa si escaletaId no arriba des de config
+        if (!escaletaId) {
+            if (programArchivo.indexOf('TN_COMARQUES') !== -1) escaletaId = 'PRO1439';
+            else if (programArchivo.indexOf('TN_MIGDIA') !== -1) escaletaId = 'PRO1440';
+            else if (programArchivo.indexOf('TN_VESPRE') !== -1) escaletaId = 'PRO1442';
+        }
         if (!escaletaId) {
             log('\u26A0\uFE0F [ER:Fetch] No es pot determinar escaletaId per a ' + programArchivo, 'ERROR');
             return null;

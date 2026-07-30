@@ -262,19 +262,14 @@ var isUserDraggingSlider = false;
                     }
                     const progId = elProg.value;
                     const progData = config.mapeoProgramas[progId];
-                    if (!progData || !progData.escaletaId) {
-                        utils.log('⚠️ [Fetch] Aquest programa no te escaletaId configurada', 'WARN');
-                        btnFetchEscaleta.innerText = '📷 FOTO';
-                        btnFetchEscaleta.disabled = false;
-                        return;
-                    }
+                    // escaletaId es opcional: si no ve de config, es dedueix per programa dins de fetchNewEscaleta
                     const blocId = elBloc.value;
                     const stateDateDir = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir) || utils.getFormattedDate().replace(/"/g, "").trim();
                     const folderDest = config.rutas.destinoBase + progData.directorio + '/' + stateDateDir;
 
-                    utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}, EscaletaID: ${progData.escaletaId}`, 'INFO');
+                    utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}`, 'INFO');
                     const result = await reader.fetchNewEscaleta(
-                        progData.escaletaId,
+                        progData.escaletaId || null,
                         stateDateDir,
                         progData.archivo,
                         blocId,
