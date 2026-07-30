@@ -202,11 +202,13 @@
                 const rawTemp = `C:\\temp\\audio_ref_raw_${timestamp}.raw`;
 
                 // .ps1: 
-                // 1. ffmpeg mp4 al UNC
-                // 2. ffmpeg audio mono 8000Hz wav (pcm_u8) al projecte directament
-                //    -f wav per a que ffmpeg sàpiga el format de sortida
+                // 1. ffmpeg mp4 al UNC — OUTPUT SEEKING (precis, sense keyframe alignment)
+                //    -i PRIMER, després -ss. Això obliga ffmpeg a decodificar des del keyframe
+                //    anterior però només ESCRIURE frames des de startSec. L'speed es redueix
+                //    però la precisió del tall és exacta (±0 frames). Per 188s a 30x ≈ 6s extra.
+                // 2. ffmpeg audio mono 8000Hz wav (pcm_u8)
                 // 3. .done
-                let psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
+                let psContent = `& "${ffmpegBin}" -i "${sourcePath}" -ss ${startSec} -t ${duration} -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
                 psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -ac 1 -ar 8000 -c:a pcm_u8 -f wav "${audioRefPath}" -y\r\n`;
                 psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
