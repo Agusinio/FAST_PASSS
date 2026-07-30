@@ -157,7 +157,8 @@
                         directorio:   p.dir,
                         wott:         p.wott,
                         archivo_wott: p.wott,
-                        conductors:   { titular: p.conductor, substituts: [] }
+                        conductors:   { titular: p.conductor, substituts: [] },
+                        escaletaId:   p.escaletaId || null
                     };
                 });
             }

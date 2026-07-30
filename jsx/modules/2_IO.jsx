@@ -179,6 +179,56 @@ FASTPASS.IO = (function () {
             } catch (e) {
                 return "ERR: " + e.message;
             }
+        },
+
+        /**
+         * curl: Executa una comanda curl per a l'API de digition.
+         * Utilitza executeShell internament (sistema de fitxers temporal).
+         * @param {string} url - URL completa amb paràmetres
+         * @param {string} authHeader - Capçalera d'autorització
+         * @returns {string} Contingut JSON de la resposta, o "ERR:missatge"
+         */
+        curl: function (url, authHeader) {
+            try {
+                var outFile = Folder.temp + "/fp_curl_" + new Date().getTime() + ".json";
+                var cmd = 'curl -s -X POST "' + url + '" -H "accept: application/json" -H "' + authHeader + '" > "' + outFile + '"';
+
+                // Crear .bat temporal
+                var tempFile = new File(Folder.temp + "/fp_curl_" + new Date().getTime() + ".bat");
+                tempFile.open('w');
+                tempFile.writeln("@echo off");
+                tempFile.writeln(cmd);
+                tempFile.writeln("exit");
+                tempFile.close();
+
+                var success = tempFile.execute();
+                if (!success) return "ERR:CURL_EXECUTE_FAILED";
+
+                // Esperar que el fitxer de sortida es crei (max 30 segons)
+                var maxWait = 30000;
+                var waited = 0;
+                var outFileObj = new File(outFile);
+                while (!outFileObj.exists && waited < maxWait) {
+                    $.sleep(500);
+                    waited += 500;
+                }
+
+                if (!outFileObj.exists) return "ERR:CURL_OUTPUT_NOT_FOUND";
+
+                // Llegir el resultat
+                var result = "";
+                outFileObj.open('r');
+                result = outFileObj.read();
+                outFileObj.close();
+
+                // Netejar fitxers temporals
+                try { tempFile.remove(); } catch(e) {}
+                try { outFileObj.remove(); } catch(e) {}
+
+                return result;
+            } catch (e) {
+                return "ERR:" + e.message;
+            }
         }
     };
 })();
