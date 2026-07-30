@@ -68,4 +68,15 @@
     ER.getNeighbourOnAirTimes = function (data, blockId) {
         const clips = data && data.cleanFeed && data.cleanFeed.clips ? data.cleanFeed.clips : [];
         const idx = clips.findIndex(function (c) { return c.id === blockId; });
-        if (idx === -1) return
+        if (idx === -1) return null;
+        const prevClip = idx > 0 ? clips[idx - 1] : null;
+        const nextClip = idx < clips.length - 1 ? clips[idx + 1] : null;
+        return {
+            prevOutPoint: prevClip ? this.tcToSeconds(prevClip.horaSortidaPrevista) : null,
+            nextInPoint: nextClip ? this.tcToSeconds(nextClip.horaEntradaOnAir || nextClip.horaEntradaPrevista) : null
+        };
+    };
+})
+
+
+

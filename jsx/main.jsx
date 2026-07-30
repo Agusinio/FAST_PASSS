@@ -433,41 +433,6 @@ $.global.Clips = {
 };
 
 
-$.global.Project = {
-    open: function(path) {
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.open(path) : "ERR";
-    },
-    saveAs: function(path) {
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.saveAs(path) : "ERR";
-    },
-    save: function() {
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.save() : "ERR";
-    },
-    path: function() {
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.path() : "";
-    },
-    bin: function(name) {
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.bin(name) : "ERR";
-    },
-    items: function(bin) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.items(bin) : "[]"; 
-    },
-    biggestIn: function(bin) { 
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.biggestIn(bin) : null; 
-    },
-    itemDuration: function(name) {
-        return ($.global.FASTPASS.Project) ? FASTPASS.Project.itemDuration(name) : 0;
-    },
-    hasItems: function(binName) {
-        if (!$.global.FASTPASS.Project) return "false";
-        var itemsRaw = FASTPASS.Project.items(binName || "");
-        try {
-            var items = JSON.parse(itemsRaw);
-            return (items.length > 0) ? "true" : "false";
-        } catch(e) { return "false"; }
-    }
-};
-
 // ============================================================================
 // --- 4. EFECTES I CAPTURA (Anim, Render, Diagnostic) ---
 // ============================================================================

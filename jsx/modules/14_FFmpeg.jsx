@@ -34,7 +34,7 @@
             var batFile = new File("C:/temp/extract_" + timestamp + ".bat");
             
             var batContent = '@echo off\r\n';
-            batContent += '"' + ffmpegPath + '" -ss ' + startSec + ' -t ' + duration + ' -i "' + sourcePath + '" -c copy -avoid_negative_ts make_zero -y "' + tempClip + '"\r\n';
+            batContent += '"' + ffmpegPath + '" -i "' + sourcePath + '" -ss ' + startSec + ' -t ' + duration + ' -c copy -avoid_negative_ts make_zero -y "' + tempClip + '"\r\n';
             batContent += 'if exist "' + tempClip + '" (\r\n';
             batContent += '  copy /y "' + tempClip + '" "' + outputPath + '"\r\n';
             batContent += '  del /f /q "' + tempClip + '"\r\n';

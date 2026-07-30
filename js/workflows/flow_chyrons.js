@@ -566,11 +566,9 @@
             }
             log(`👤 [Conductor] Fitxer: ${conductorFile}`);
 
-            // Constants (30 fps → correcte)
+            // Constants
             const MARGEN_INICIO = 0.40;         // 0:10
-            const DUR_CONDUCTOR = 4.40;         // 4:10
             const DUR_TEMA_TITOL = 6.24;        // 6:06
-            const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
 
             try {
                 const markersRaw = await callJSX('Markers.get()');
@@ -583,68 +581,87 @@
                 }
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // Buscar PRIMER marcador que es pugui aparellar amb l'estructura (per ID directe o base numèrica)
-                const SUFFIX_ORDER = ['dp', 'i', 'dir', 'lead', 'f', 'Chy', 'GF1', 'TE2'];
+                // Buscar items del bloc amb sufix de conductor (Intro/dp, Donapas/dp, Off/f, Lead/lead)
+                // NO inclou dir, Chy, GF, TE...
+                const CONDUCTOR_SUFFIX = ['dp', 'i', 'lead', 'f'];
                 let targetTime = null;
                 let targetId = null;
+                let hasAnyConductorItem = false;
+
                 for (const m of structuralMarkers) {
                     const rawId = (m.comments || "").split("-")[0].trim();
                     const baseMatch = rawId.match(/^(\d+)/);
                     if (!baseMatch) continue;
                     const base = baseMatch[1];
-                    // Provar coincidència directa primer
-                    if (structureById[rawId]) { targetTime = m.time; targetId = rawId; break; }
-                    // Provar per sufixos
-                    for (const suf of SUFFIX_ORDER) {
-                        if (structureById[base + suf]) { targetTime = m.time; targetId = base + suf; break; }
+
+                    // Provar coincidència directa
+                    if (structureById[rawId]) {
+                        // Verificar que l'entry té almenys un chyron CONDUCTOR
+                        const entry = structureById[rawId];
+                        if (entry.chyrons && entry.chyrons.some(c => (c.rol || '').toUpperCase() === "CONDUCTOR")) {
+                            if (!targetTime) { targetTime = m.time; targetId = rawId; }
+                            hasAnyConductorItem = true;
+                            continue;
+                        }
                     }
-                    if (targetTime !== null) break;
+                    // Provar per sufixos de conductor
+                    for (const suf of CONDUCTOR_SUFFIX) {
+                        const candidate = base + suf;
+                        if (structureById[candidate]) {
+                            const entry = structureById[candidate];
+                            if (entry.chyrons && entry.chyrons.some(c => (c.rol || '').toUpperCase() === "CONDUCTOR")) {
+                                if (!targetTime) { targetTime = m.time; targetId = candidate; }
+                                hasAnyConductorItem = true;
+                                break;
+                            }
+                        }
+                    }
                 }
-                if (targetTime === null) {
-                    log("⚠️ [Conductor] Cap marcador aparellable amb l'estructura.", "WARN");
+
+                if (!hasAnyConductorItem) {
+                    log("⚠️ [Conductor] No hi ha cap item amb conductor (dp/i/lead/f) al bloc.", "WARN");
+                    getUtils().status("Conductor: cap item amb conductor al bloc", "warn");
                     return;
                 }
-                log(`🔬 [Conductor] Marcador guia: ${targetId} @ ${targetTime.toFixed(2)}s`);
+                log(`🔬 [Conductor] Conductor trobat a: ${targetId} @ ${targetTime.toFixed(2)}s`);
 
-                // Clip V1 on cau aquest marcador
-                const clips = await getClipsLogic().getTrackClips(1, "video");
-                let clipV1 = null;
-                for (const cl of clips) {
-                    if (cl.start <= targetTime && cl.end > targetTime) {
-                        clipV1 = cl;
-                        break;
-                    }
-                }
-                if (!clipV1) {
-                    log("⚠️ [Conductor] Marcador no cau sobre cap clip V1.");
-                    return;
-                }
-                const clipStart = clipV1.start;
+                // Determinar si aquest item és el primer del bloc
+                const firstMarker = structuralMarkers[0];
+                const isFirstItem = Math.abs(firstMarker.time - targetTime) < 0.5;
+                log(`🔬 [Conductor] Primer marcador del bloc: ${firstMarker.time.toFixed(2)}s. Item és el primer? ${isFirstItem ? 'SÍ' : 'NO'}`);
 
-                // Calcular margen fins al proper marcador (TOTS, ordenats per temps)
-                allMarkers.sort((a, b) => a.time - b.time);
-                let nextMarkerTime = clipV1.end;
-                for (const m of allMarkers) {
-                    if (m.time > targetTime + 0.5) {
-                        nextMarkerTime = Math.min(nextMarkerTime, m.time);
-                        break;
-                    }
-                }
-                const margenDisponible = nextMarkerTime - clipStart;
-                log(`🔬 [Conductor] Clip V1: ${clipStart.toFixed(2)}s, proper marcador @ ${nextMarkerTime.toFixed(2)}s, marge=${margenDisponible.toFixed(2)}s`);
-
-                // Decidir posició del CONDUCTOR
+                // Calcular posició del conductor
                 let conductTime;
-                let isCasoA = false;
-                if (margenDisponible >= MIN_MARGEN_CASA) {
-                    // Cas A: TemaTitol 1r (0:10→6:16), Conductor després (0:10+6:06=6:16)
-                    isCasoA = true;
-                    conductTime = clipStart + MARGEN_INICIO + DUR_TEMA_TITOL;
-                    log(`📌 [Conductor] Cas A (marge ≥ ${MIN_MARGEN_CASA.toFixed(2)}s): TemaTitol 1r, Conductor @ ${conductTime.toFixed(2)}s`);
+
+                if (isFirstItem) {
+                    // Lògica Cas A/B: si l'item dura més que la suma d'animacions
+                    // El clip V1 on cau
+                    const clips = await getClipsLogic().getTrackClips(1, "video");
+                    let clipV1 = null;
+                    for (const cl of clips) {
+                        if (cl.start <= targetTime && cl.end > targetTime) {
+                            clipV1 = cl;
+                            break;
+                        }
+                    }
+                    const clipStart = clipV1 ? clipV1.start : targetTime;
+                    const clipEnd = clipV1 ? clipV1.end : targetTime + 10;
+                    const margenDisponible = clipEnd - clipStart;
+                    const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + 4.40; // ~11.04s
+
+                    if (margenDisponible >= MIN_MARGEN) {
+                        // Cas A: prou espai → Conductor després del Tema-Titol
+                        conductTime = clipStart + MARGEN_INICIO + DUR_TEMA_TITOL;
+                        log(`📌 [Conductor·CasA] Item al principi amb marge suficient (${margenDisponible.toFixed(2)}s ≥ ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
+                    } else {
+                        // Cas B: espai just → Conductor al marge d'inici
+                        conductTime = clipStart + MARGEN_INICIO;
+                        log(`📌 [Conductor·CasB] Item al principi amb marge insuficient (${margenDisponible.toFixed(2)}s < ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
+                    }
                 } else {
-                    // Cas B: Conductor 1r (0:10), TemaTitol després (0:10+4:10=4:20)
-                    conductTime = clipStart + MARGEN_INICIO;
-                    log(`📌 [Conductor] Cas B (marge < ${MIN_MARGEN_CASA.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s, TemaTitol anirA 0:10+4:10=4:20`);
+                    // No és el primer item: conductor al marcador de l'item + 0:10
+                    conductTime = targetTime + MARGEN_INICIO;
+                    log(`📌 [Conductor] Item NO és el primer del bloc: Conductor @ marcador+0:10 = ${conductTime.toFixed(2)}s`);
                 }
 
                 // Col·locar conductor

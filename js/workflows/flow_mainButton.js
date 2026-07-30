@@ -449,7 +449,7 @@
                                                 //   clipDuration         = mp4Duration (el segment extret té exactament mp4Duration)
                                                 const h = ctx.config.handles || 0;
                                                 const clipExpandedInPoint  = h;
-                                                const clipExpandedOutPoint = mp4Duration - h;
+                                                const clipExpandedOutPoint = mp4Duration;
                                                 const clipDuration         = mp4Duration;
 
                                                 // worldSecMediaStart s'ajusta per al clip extret:

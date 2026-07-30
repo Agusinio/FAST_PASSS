@@ -74,4 +74,45 @@
                 "BOLA DEL MON": 10
             },
             capDeSetmana: {
-                "CARETA INICI
+                "CARETA INICI": 17,
+                "CARETA SORTIDA": 5,
+                "CARETA": 5,
+                "SUMARI": 23,
+                "MOLINET": 5,
+                "RACO": 13,
+                "EFECTE": 3,
+                "BOLA DEL MON": 10
+            }
+        },
+        MAT: {
+            diari: {
+                "CARETA": 15,
+                "SUMARI": 30,
+                "MOLINET": 5
+            },
+            capDeSetmana: {
+                "CARETA": 15,
+                "SUMARI": 30,
+                "MOLINET": 5
+            }
+        }
+    };
+
+    /**
+     * getOverridenDuration: Retorna la durada override per un item, o null si no n'hi ha.
+     */
+    ER.getOverridenDuration = function (program, titol, isWeekend) {
+        const progOverrides = this.ITEM_DURATION_OVERRIDES[program];
+        if (!progOverrides) return null;
+        const mode = isWeekend ? 'capDeSetmana' : 'diari';
+        const modeOverrides = progOverrides[mode];
+        if (!modeOverrides) return null;
+        const upper = titol.toUpperCase().trim();
+        for (var key in modeOverrides) {
+            if (upper.indexOf(key) !== -1) {
+                return modeOverrides[key];
+            }
+        }
+        return null;
+    };
+})();

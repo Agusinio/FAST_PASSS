@@ -700,53 +700,26 @@ FASTPASS.Clips = {
     },
 
     /**
-     * scenes: Executa el Scene Edit Detection NOMÉS a V1 (vídeo sense àudio).
-     * Abans de trocejar, desvincula l'àudio del clip de V1 amb unlink().
-     * D'aquesta manera, en seleccionar només el clip de V1, el scene
-     * detection només troceja el vídeo.
-     * L'àudio desvinculat es queda com a clip independent a A1 sense trocejar.
-     * NO s'elimina res de les pistes d'àudio.
+     * scenes: Executa el Scene Edit Detection directament sobre la seqüència activa.
      */
     scenes: function(trackIdx) {
         try {
             $.writeln("DEBUG scenes: trackIdx=" + trackIdx);
-            var track = this._get(trackIdx, "video");
-            if (!track || track.clips.numItems == 0) return "ERR_EMPTY_TRACK";
+            var seq = app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var i = parseInt(trackIdx) - 1;
+            if (i < 0) i = 0;
+            var track = seq.videoTracks[i];
+            if (!track || !track.clips || track.clips.numItems == 0) return "ERR_EMPTY_TRACK";
             
             // Deseleccionar todo
-            for (var i = 0; i < track.clips.numItems; i++) {
-                track.clips[i].setSelected(false, false);
+            for (var c = 0; c < track.clips.numItems; c++) {
+                track.clips[c].setSelected(false, false);
             }
-            
             // Seleccionar solo el primer clip (MP4)
-            var clipV1 = track.clips[0];
+            track.clips[0].setSelected(true, true);
             
-            // ── DESVINCULAR ÀUDIO del clip de V1 ──
-            // Això separa el component d'audio del vídeo.
-            // L'audio es queda com a clip independent a A1.
-            // Així performSceneEditDetectionOnSelection només troceja
-            // el vídeo a V1, sense afectar l'àudio d'A1.
-            $.writeln("🔇 [scenes] Desvinculant àudio del clip V1...");
-            try {
-                clipV1.unlink();
-                $.writeln("✅ [scenes] Àudio desvinculat correctament. Es manté a A1 sense trocejar.");
-            } catch (eUnlink) {
-                $.writeln("⚠️ [scenes] No s'ha pogut desvincular l'àudio: " + eUnlink.message);
-            }
-            
-            // Seleccionar només el clip de V1 (l'audio ja està separat)
-            clipV1.setSelected(true, true);
-            
-            // ── EXECUTAR SCENE DETECTION ──
-            // Com que el clip d'audio està desvinculat, el scene detection
-            // només veu el clip de vídeo seleccionat i només troceja V1.
-            // L'àudio a A1 es queda com un sol clip sense trocejar.
-            var success = app.project.activeSequence.performSceneEditDetectionOnSelection('applyCuts');
-            
-            // ✅ L'àudio original es manté a A1 com a clip independent
-            //    (no es troceja, no s'elimina)
-            $.writeln("✅ [scenes] Scene detection completat. L'àudio es manté a A1 sense trocejar.");
-            
+            var success = seq.performSceneEditDetectionOnSelection('applyCuts');
             return success ? "OK_SCENES" : "NO_SCENES_DETECTED";
         } catch (e) { return "ERR: " + e.message; }
     },

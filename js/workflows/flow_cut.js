@@ -201,7 +201,7 @@
                 log(`📊 [V1·POST-TROSEJA] Fi del bolcat.`);
                 // ═══════════════════════════════════════════════
 
-                await callJSX('Project.save()');
+                await callJSX('FASTPASS.Project.save()');
                 getUtils().status("Trossejat i Projecte guardat", "exito");
             } catch (e) { getUtils().handleError(e, "Troseja"); }
         },

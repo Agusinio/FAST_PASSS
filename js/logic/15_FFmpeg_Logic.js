@@ -208,7 +208,7 @@
                 //    però la precisió del tall és exacta (±0 frames). Per 188s a 30x ≈ 6s extra.
                 // 2. ffmpeg audio mono 8000Hz wav (pcm_u8)
                 // 3. .done
-                let psContent = `& "${ffmpegBin}" -i "${sourcePath}" -ss ${startSec} -t ${duration} -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
+                let psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
                 psContent += `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -ac 1 -ar 8000 -c:a pcm_u8 -f wav "${audioRefPath}" -y\r\n`;
                 psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
