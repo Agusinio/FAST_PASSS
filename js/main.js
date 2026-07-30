@@ -235,6 +235,71 @@ var isUserDraggingSlider = false;
         const selectBloc = document.getElementById('bloc');
 
         if (btnSetup) btnSetup.addEventListener('click', () => callWorkflow('Config', 'toggleSetup', true));
+
+        // --- BOTÓ FER FOTO ESCALETA ---
+        const btnFetchEscaleta = document.getElementById('btnFetchEscaleta');
+        if (btnFetchEscaleta) {
+            btnFetchEscaleta.addEventListener('click', async function () {
+                const reader = window.FASTPASS_UI.EscaletaReader;
+                const utils = window.FASTPASS_UI.Utils;
+                if (!reader || !reader.fetchNewEscaleta) {
+                    console.error('❌ EscaletaReader.fetchNewEscaleta no disponible');
+                    return;
+                }
+                utils.log('📷 [Fetch] Sol·licitant foto actualitzada de l\'escaleta...', 'INFO');
+                btnFetchEscaleta.innerText = '⏳ FOTO...';
+                btnFetchEscaleta.disabled = true;
+
+                try {
+                    const config = window.FASTPASS_UI.Config.get();
+                    const elProg = document.getElementById('programa');
+                    const elBloc = document.getElementById('bloc');
+                    if (!elProg || !elBloc || !elProg.value || elBloc.value === '---') {
+                        utils.log('⚠️ [Fetch] Selecciona programa i bloc primer', 'WARN');
+                        btnFetchEscaleta.innerText = '📷 FOTO';
+                        btnFetchEscaleta.disabled = false;
+                        return;
+                    }
+                    const progId = elProg.value;
+                    const progData = config.mapeoProgramas[progId];
+                    if (!progData || !progData.escaletaId) {
+                        utils.log('⚠️ [Fetch] Aquest programa no te escaletaId configurada', 'WARN');
+                        btnFetchEscaleta.innerText = '📷 FOTO';
+                        btnFetchEscaleta.disabled = false;
+                        return;
+                    }
+                    const blocId = elBloc.value;
+                    const stateDateDir = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir) || utils.getFormattedDate().replace(/"/g, "").trim();
+                    const folderDest = config.rutas.destinoBase + progData.directorio + '/' + stateDateDir;
+
+                    utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}, EscaletaID: ${progData.escaletaId}`, 'INFO');
+                    const result = await reader.fetchNewEscaleta(
+                        progData.escaletaId,
+                        stateDateDir,
+                        progData.archivo,
+                        blocId,
+                        folderDest
+                    );
+
+                    if (result) {
+                        utils.log(`✅ [Fetch] Nova escaleta guardada: ${result.filename}`, 'INFO');
+                        utils.status('Escaleta actualitzada! Recalculant...', 'exito');
+                        // Forçar recàrrega del context
+                        if (window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context) {
+                            await window.FASTPASS_UI.Core.Context.checkContext();
+                        }
+                    } else {
+                        utils.log('❌ [Fetch] No s\'ha pogut obtenir la foto de l\'escaleta', 'ERROR');
+                        utils.status('Error obtenint foto escaleta', 'error');
+                    }
+                } catch (e) {
+                    utils.log(`❌ [Fetch] Error: ${e.message}`, 'ERROR');
+                } finally {
+                    btnFetchEscaleta.innerText = '📷 FOTO';
+                    btnFetchEscaleta.disabled = false;
+                }
+            });
+        }
         // FIX A4: Els handlers 'change' de programa/bloc ja estan definits a
         // Context.init() (p.onchange / b.onchange). Eliminem els addEventListener
         // duplicats per evitar doble disparament i possibles race conditions.
