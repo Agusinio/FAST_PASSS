@@ -35,6 +35,10 @@
         _waveformSegments: [],
         _waveformMediaTag: "",
         _pollCount: 0,
+        _localPlayInterval: null,
+        _ctiSec: 0,
+        _ctiAt: 0,
+        _lastLocalPx: -1,
         _isPlaying: false,
 
         init: function () {
@@ -146,13 +150,22 @@
 
         _pollTick: async function () {
             try {
+                var now0 = (window.performance && performance.now) ? performance.now() : Date.now();
                 var cti = await callJSX("Timeline.get()");
+                var now1 = (window.performance && performance.now) ? performance.now() : Date.now();
                 if (cti && cti !== "null" && cti !== "") {
                     var sec = parseFloat(cti);
-                    if (!isNaN(sec)) { this._playheadSec = sec; this._updatePreview(sec); }
+                    if (!isNaN(sec)) {
+                        this._playheadSec = sec;
+                        this._ctiSec = sec;
+                        // El CTI llegat correspon a ~mig vol del evalScript (compensa latència)
+                        this._ctiAt = now0 + (now1 - now0) / 2;
+                        this._updatePreview(sec);
+                    }
                 }
                 this._pollCount = (this._pollCount || 0) + 1;
                 if (this._pollCount % 5 === 1) { await this._refreshWaveformSegments(); }
+                if (this._isPlaying && this._pollCount % 10 === 0) { log("⏱ SRT_SYNC cti=" + this._playheadSec.toFixed(2)); }
                 this.render();
             } catch(e) { }
         },
@@ -192,6 +205,10 @@
                 clearInterval(this._pollInterval);
                 this._pollInterval = null;
             }
+            if (this._localPlayInterval) {
+                clearInterval(this._localPlayInterval);
+                this._localPlayInterval = null;
+            }
         },
 
         togglePlay: function () {
@@ -204,14 +221,32 @@
                 });
                 if (btn) btn.innerHTML = '⏸ PAUSA';
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(function () { self._pollTick(); }, 200);
+                this._pollInterval = setInterval(function () { self._pollTick(); }, 500);
+                // Interpolació local: playhead fluid i síncron entre polls JSX.
+                // est = últim CTI real + temps local transcorregut (rellotge local, vel 1x);
+                // cada poll (500ms) corregeix la deriva → error acumulat imperceptible.
+                if (this._localPlayInterval) clearInterval(this._localPlayInterval);
+                this._localPlayInterval = setInterval(function () {
+                    if (!self._isPlaying) return;
+                    var now = (window.performance && performance.now) ? performance.now() : Date.now();
+                    var est = self._ctiSec + (now - self._ctiAt) / 1000;
+                    if (est < 0) est = 0;
+                    var pxEst = est * self._pixelsPerSec;
+                    if (Math.abs(pxEst - self._lastLocalPx) < 0.5) return; // estalvi: no redibuixar si no es mou
+                    self._lastLocalPx = pxEst;
+                    self._playheadSec = est;
+                    self.render();
+                    self._updatePreview(est);
+                }, 66);
             } else {
                 callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
                     log("📝 SRT: STOP result: " + result);
                 });
                 if (btn) btn.innerHTML = '▶ PLAY';
+                if (this._localPlayInterval) { clearInterval(this._localPlayInterval); this._localPlayInterval = null; }
                 if (this._pollInterval) clearInterval(this._pollInterval);
                 this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
+                this._pollTick(); // re-sincronitzar el playhead amb el CTI real de seguida
             }
         },
 
