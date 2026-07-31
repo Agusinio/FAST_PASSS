@@ -129,30 +129,53 @@
          * @returns {string} Path complet al .bin o ''
          */
         getBinPath: async function (projectFolder) {
-            // Busca un fitxer que acabi en _AUDIO_REF.bin o .bin al directori del projecte
+            // Busca un fitxer .bin al directori del projecte
             if (!projectFolder || projectFolder.indexOf('ERR') === 0) return '';
             
-            // Intentar per noms coneguts
+            try {
+                // Escanejar directori i buscar qualsevol .bin
+                var scanResult = await window.FASTPASS_UI.Utils.callJSX("IO.scanDirectory('" + projectFolder.replace(/\\/g, '\\\\') + "')");
+                if (scanResult && scanResult.indexOf('ERR') !== 0 && scanResult !== '[]') {
+                    var files = JSON.parse(scanResult);
+                    // Prioritat: fitxers amb "_AUDIO_REF.bin" o "WAVEFORM" al nom
+                    var bestMatch = null;
+                    for (var i = 0; i < files.length; i++) {
+                        var f = files[i];
+                        if (!f || !f.name) continue;
+                        var upper = f.name.toUpperCase();
+                        if (upper.indexOf('.BIN') === -1) continue;
+                        if (upper.indexOf('AUDIO_REF') >= 0 || upper.indexOf('WAVEFORM') >= 0) {
+                            if (upper.indexOf('AUDIO_REF') >= 0) { bestMatch = f; break; }
+                            if (!bestMatch) bestMatch = f;
+                        }
+                        if (!bestMatch) bestMatch = f;
+                    }
+                    if (bestMatch && bestMatch.path) return bestMatch.path;
+                }
+            } catch(e) {}
+            
+            // Fallback: intentar noms coneguts
             var possibleNames = [
                 "TNV_V1_CLIP_AUDIO_REF.bin",
                 "TNV_V2_CLIP_AUDIO_REF.bin",
                 "TNV_V3_CLIP_AUDIO_REF.bin",
+                "TNC_V1_CLIP_AUDIO_REF.bin",
+                "TNC_V2_CLIP_AUDIO_REF.bin",
                 "CLIP_AUDIO_REF.bin"
             ];
-            
             for (var i = 0; i < possibleNames.length; i++) {
                 var testPath = projectFolder + "\\" + possibleNames[i];
                 var exists = await window.FASTPASS_UI.Utils.callJSX("IO.exists('" + testPath.replace(/\\/g, '\\\\') + "')");
                 if (exists === "true") return testPath;
             }
             
-            // Fallback: buscar qualsevol .bin
             return '';
         },
 
         /**
-         * Llegeix fitxer .bin RAW (8-bit signed) i retorna peaks normalitzats (0..1)
-         * El fitxer és RAW sense capçalera: bytes signed, 0 = silenci, ±127 = màxim
+         * Llegeix fitxer .bin compacte i retorna peaks normalitzats (0..15 → 0..1)
+         * Format: cada byte empaqueta 2 valors de 4 bits: [ V1(4bits) | V2(4bits) ]
+         * Cada Vi = valor absolut de la senyal (0..15)
          * @param {string} binPath - Path complet al .bin
          * @param {number} widthPx - Amplada en píxels per reduir
          * @returns {Promise<number[]|null>} Array de peaks (0..1)
@@ -171,14 +194,14 @@
                 var data = result.data;
                 var rawPeaks = [];
                 
-                // RAW signed 8-bit: cada byte és un valor signed (-128..127)
+                // Format compacte: cada byte = [V1(4bits)|V2(4bits)]
+                // Desempaquetar: V1 = byte >> 4, V2 = byte & 0x0F
                 for (var b = 0; b < data.length; b++) {
-                    var code = data.charCodeAt(b);
-                    // Convertir a signed 8-bit: si > 127, restar 256
-                    var signed = (code > 127) ? code - 256 : code;
-                    // Normalitzar a 0..1: |signed| / 127
-                    var normalized = Math.min(Math.abs(signed) / 127, 1);
-                    rawPeaks.push(normalized);
+                    var code = data.charCodeAt(b) & 0xFF;
+                    var val1 = (code >> 4) & 0x0F;  // nipble alt
+                    var val2 = code & 0x0F;          // nibble baix
+                    rawPeaks.push(val1 / 15);        // normalitzar 0..15 → 0..1
+                    rawPeaks.push(val2 / 15);
                 }
                 
                 if (rawPeaks.length === 0) return null;
