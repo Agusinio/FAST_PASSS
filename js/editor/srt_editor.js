@@ -40,6 +40,12 @@
         _ctiAt: 0,
         _lastLocalPx: -1,
         _isPlaying: false,
+        _markers: [],
+        _editMode: "move",
+        _dragIdx: -1,
+        _dragSnapshot: null,
+        _suppressClick: false,
+        _MARKER_TOL_PX: 7,
 
         init: function () {
             this._canvas = document.getElementById('srtCanvas');
@@ -48,12 +54,57 @@
             var self = this;
 
             this._canvas.addEventListener('click', function (e) {
-                var rect = self._canvas.getBoundingClientRect();
-                var scaleX = self._canvas.width / rect.width;
-                var canvasX = (e.clientX - rect.left) * scaleX;
-                var sec = canvasX / self._pixelsPerSec;
-                self.setPlayhead(sec);
+                if (self._suppressClick) { self._suppressClick = false; return; }
+                self.setPlayhead(self._canvasXToSec(e));
             });
+
+            // Click dret: crear marcador (o esborrar-lo si ja n'hi ha un a sota)
+            this._canvas.addEventListener('contextmenu', function (e) {
+                e.preventDefault();
+                var sec = self._canvasXToSec(e);
+                var idx = self._markerAtSec(sec);
+                if (idx >= 0) {
+                    self._markers.splice(idx, 1);
+                    log("📝 SRT_EDIT: Marcador esborrat a " + sec.toFixed(2) + "s");
+                } else {
+                    self._markers.push(sec);
+                    self._markers.sort(function (a, b) { return a - b; });
+                    log("📝 SRT_EDIT: Marcador creat a " + sec.toFixed(2) + "s");
+                }
+                self._isDirty = true;
+                self.render();
+                self._persistMarkers();
+            });
+
+            // Botó esquerre sobre un marcador: iniciar arrossegament (amb snapshot per no acumular error)
+            this._canvas.addEventListener('mousedown', function (e) {
+                if (e.button !== 0) return;
+                var idx = self._markerAtSec(self._canvasXToSec(e));
+                if (idx < 0) return;
+                self._dragIdx = idx;
+                self._dragSnapshot = {
+                    entries: self._entries.map(function (en) { return { index: en.index, timeStr: en.timeStr, texts: en.texts.slice(), startSec: en.startSec, endSec: en.endSec }; }),
+                    markers: self._markers.slice()
+                };
+                self._suppressClick = true;
+                e.preventDefault();
+            });
+            this._canvas.addEventListener('mousemove', function (e) {
+                if (self._dragIdx >= 0) {
+                    self._applyMarkerDrag(self._canvasXToSec(e));
+                    self.render();
+                }
+            });
+            var endDrag = function () {
+                if (self._dragIdx >= 0) {
+                    self._dragIdx = -1;
+                    self._dragSnapshot = null;
+                    self._isDirty = true;
+                    self._persistMarkers();
+                }
+            };
+            this._canvas.addEventListener('mouseup', endDrag);
+            this._canvas.addEventListener('mouseleave', endDrag);
 
             var btnIn = document.getElementById('btnZoomIn');
             var btnOut = document.getElementById('btnZoomOut');
@@ -71,6 +122,15 @@
                     var label = document.getElementById('zoomLabel');
                     if (label) label.textContent = self._pixelsPerSec + 'px/s';
                     self.render();
+                });
+            }
+            var btnMode = document.getElementById('btnSrtMode');
+            if (btnMode) {
+                btnMode.addEventListener('click', function () {
+                    self._editMode = (self._editMode === 'move') ? 'scaleBoth' : 'move';
+                    btnMode.textContent = (self._editMode === 'move') ? '⇒ MOURE' : '⇄ AMBDÓS';
+                    btnMode.style.background = (self._editMode === 'move') ? '' : '#5a4a2a';
+                    getUtils().status('Mode marcadors: ' + (self._editMode === 'move' ? 'MOURE (dreta solidària)' : 'ESCALA AMBDÓS COSTATS'), 'exito');
                 });
             }
             return true;
@@ -95,6 +155,8 @@
             this._showEditor();
             this._startPolling();
             this._waveformPeaks = null;
+            this._markers = [];
+            await this._restoreMarkers();
 
             // Carregar waveform des del fitxer .bin (WAV 8-bit 8000Hz)
             try {
@@ -267,6 +329,7 @@
             this._drawRuler(ctx);
             this._drawTrack(ctx, trackY);
             this._drawWaveform(ctx, waveformY);
+            this._drawMarkers(ctx);
             this._drawPlayhead();
         },
 
@@ -385,6 +448,122 @@
             if (entry) { div.innerHTML = entry.texts.join('<br>'); } else { div.innerHTML = ''; }
         },
 
+        _drawMarkers: function (ctx) {
+            if (!this._markers || this._markers.length === 0) return;
+            for (var i = 0; i < this._markers.length; i++) {
+                var x = this._markers[i] * this._pixelsPerSec;
+                var inDrag = (i === this._dragIdx);
+                ctx.strokeStyle = inDrag ? '#ffd24d' : '#ffaa00';
+                ctx.lineWidth = inDrag ? 2 : 1;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, this._canvas.height);
+                ctx.stroke();
+                ctx.fillStyle = inDrag ? '#ffd24d' : '#ffaa00';
+                ctx.beginPath();
+                ctx.moveTo(x - 5, 0); ctx.lineTo(x + 5, 0); ctx.lineTo(x, 8);
+                ctx.closePath();
+                ctx.fill();
+            }
+        },
+
+        _canvasXToSec: function (e) {
+            var rect = this._canvas.getBoundingClientRect();
+            var scaleX = this._canvas.width / rect.width;
+            var canvasX = (e.clientX - rect.left) * scaleX;
+            return canvasX / this._pixelsPerSec;
+        },
+
+        _markerAtSec: function (sec) {
+            var tol = this._MARKER_TOL_PX / this._pixelsPerSec;
+            for (var i = 0; i < this._markers.length; i++) {
+                if (Math.abs(this._markers[i] - sec) <= tol) return i;
+            }
+            return -1;
+        },
+
+        /**
+         * Aplica l'efecte d'arrossegar el marcador _dragIdx a la nova posició P1.
+         * Mode "move": dreta solidària (+delta), tram [anterior, marcador] escalat.
+         * Mode "scaleBoth": escala els dos trams veins (no afecta altres punts);
+         *                   si és l'últim marcador, la dreta es mou sense escalar.
+         * Recalcula des del snapshot inicial del drag → sense error acumulat.
+         */
+        _applyMarkerDrag: function (P1) {
+            var snap = this._dragSnapshot;
+            if (!snap || this._dragIdx < 0) return;
+            var i = this._dragIdx;
+            var P0 = snap.markers[i];
+            var A = i > 0 ? snap.markers[i - 1] : 0;
+            var N = i < snap.markers.length - 1 ? snap.markers[i + 1] : null;
+            if (P1 < A + 0.1) P1 = A + 0.1;
+            if (N !== null && P1 > N - 0.1) P1 = N - 0.1;
+            var delta = P1 - P0;
+            var spanL = P0 - A;
+            var spanR = (N !== null) ? (N - P0) : 0;
+            var self = this;
+
+            this._entries = snap.entries.map(function (e) {
+                var s = e.startSec, en = e.endSec;
+                if (self._editMode === 'move') {
+                    if (s >= P0) { s += delta; en += delta; }
+                    else if (s >= A && spanL > 0.05) {
+                        var f = (P1 - A) / spanL;
+                        s = A + (s - A) * f; en = A + (en - A) * f;
+                    }
+                } else {
+                    if (s >= P0) {
+                        if (N !== null && s < N && spanR > 0.05) {
+                            var fR = (N - P1) / spanR;
+                            s = P1 + (s - P0) * fR; en = P1 + (en - P0) * fR;
+                        } else if (N === null) { s += delta; en += delta; }
+                    } else if (s >= A && spanL > 0.05) {
+                        var fL = (P1 - A) / spanL;
+                        s = A + (s - A) * fL; en = A + (en - A) * fL;
+                    }
+                }
+                if (en < s + 0.04) en = s + 0.04;
+                return { index: e.index, timeStr: e.timeStr, texts: e.texts.slice(), startSec: s, endSec: en };
+            });
+
+            var ms = snap.markers.slice();
+            ms[i] = P1;
+            if (this._editMode === 'move') {
+                for (var j = i + 1; j < ms.length; j++) ms[j] = snap.markers[j] + delta;
+            }
+            this._markers = ms;
+        },
+
+        _getManifestCtx: function () {
+            var ctx = window.FASTPASS_UI.State;
+            if (!ctx || !ctx.progData || !ctx.config || !ctx.dateDir || !ctx.bloque) return null;
+            if (!ctx.config.rutas || !ctx.config.rutas.destinoBase) return null;
+            return ctx;
+        },
+
+        _persistMarkers: async function () {
+            try {
+                var ctx = this._getManifestCtx();
+                if (!ctx || !window.FASTPASS_UI.SessionManifest) return;
+                await window.FASTPASS_UI.SessionManifest.save(ctx, {
+                    srtEditor: { srtName: this._srtName, markers: this._markers.slice(), updatedAt: new Date().toISOString() }
+                });
+            } catch (e) { }
+        },
+
+        _restoreMarkers: async function () {
+            try {
+                var ctx = this._getManifestCtx();
+                if (!ctx || !window.FASTPASS_UI.SessionManifest) return;
+                var manifest = await window.FASTPASS_UI.SessionManifest.load(ctx);
+                if (manifest && manifest.srtEditor && manifest.srtEditor.srtName === this._srtName && Array.isArray(manifest.srtEditor.markers)) {
+                    this._markers = manifest.srtEditor.markers.filter(function (m) { return typeof m === 'number' && isFinite(m); });
+                    this._markers.sort(function (a, b) { return a - b; });
+                    if (this._markers.length > 0) log("📝 SRT_EDIT: " + this._markers.length + " marcadors restaurats del manifest");
+                }
+            } catch (e) { }
+        },
+
         setPlayhead: function (sec) {
             if (sec < 0) sec = 0;
             this._playheadSec = sec;
@@ -397,8 +576,19 @@
             var cti = this._playheadSec;
             var targetIdx = window.FASTPASS_UI.Logic.SrtParser.findTargetByTime(this._entries, cti);
             if (targetIdx < 0) { getUtils().status("CTI no sobre cap caption", "warn"); return; }
+            var originalStart = this._entries[targetIdx].startSec;
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTrimIn(this._entries, targetIdx, 0.4);
+            // Marcadors: mateix offset que les entrades + àncora al primer clip
+            var offset = 0.4 - originalStart;
+            this._markers = this._markers.map(function (m) { return m + offset; }).filter(function (m) { return m >= 0.39; });
+            if (this._entries.length > 0) {
+                var first = this._entries[0].startSec;
+                var exists = this._markers.some(function (m) { return Math.abs(m - first) < 0.05; });
+                if (!exists) this._markers.push(first);
+                this._markers.sort(function (a, b) { return a - b; });
+            }
             this._isDirty = true; this.render();
+            this._persistMarkers();
             getUtils().status("IN: " + this._entries.length + " entrades", "exito");
         },
 
@@ -413,8 +603,17 @@
 
         applyAdjust: function () {
             var cti = this._playheadSec;
+            var firstIn = this._entries.length > 0 ? this._entries[0].startSec : 0;
+            var lastOut = this._entries.length > 0 ? this._entries[this._entries.length - 1].endSec : 0;
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTimeAdjust(this._entries, cti, 0.04);
+            // Escalar marcadors amb el mateix ratio que les entrades
+            var curDur = lastOut - firstIn, newDur = cti - firstIn;
+            if (curDur > 0 && newDur > 0 && this._markers.length > 0) {
+                var ratio = newDur / curDur;
+                this._markers = this._markers.map(function (m) { return firstIn + (m - firstIn) * ratio; });
+            }
             this._isDirty = true; this.render();
+            this._persistMarkers();
             getUtils().status("AJUSTAT: " + this._entries.length + " entrades", "exito");
         },
 
@@ -452,6 +651,9 @@
             this._entries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
             this._waveformPeaks = null; this._waveformPPS = 100; this._isPlaying = false;
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
+            this._markers = []; this._editMode = "move"; this._dragIdx = -1; this._dragSnapshot = null;
+            var btnMode = document.getElementById('btnSrtMode');
+            if (btnMode) { btnMode.textContent = '⇒ MOURE'; btnMode.style.background = ''; }
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
             this._hideEditor();
         }
