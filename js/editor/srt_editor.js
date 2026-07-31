@@ -32,6 +32,9 @@
         _isDirty: false,
         _waveformPeaks: null,
         _waveformPPS: 100,
+        _waveformSegments: [],
+        _waveformMediaTag: "",
+        _pollCount: 0,
         _isPlaying: false,
 
         init: function () {
@@ -101,7 +104,9 @@
                         if (wfResult && wfResult.peaks && wfResult.peaks.length > 0) {
                             this._waveformPeaks = wfResult.peaks;
                             this._waveformPPS = wfResult.peaksPerSec || 100;
+                            this._waveformMediaTag = binPath.split(/[\\/]/).pop().toUpperCase().replace(/_AUDIO_REF\.BIN$/i, '').replace(/\.BIN$/i, '');
                             log("📝 SRT_EDIT: " + wfResult.peaks.length + " peaks (" + this._waveformPPS + "/s, " + wfResult.durSec.toFixed(1) + "s)");
+                            await this._refreshWaveformSegments();
                         } else {
                             log("⚠️ SRT_EDIT: No s'han pogut carregar peaks del .bin");
                         }
@@ -136,19 +141,50 @@
         _startPolling: function () {
             if (this._pollInterval) clearInterval(this._pollInterval);
             var self = this;
-            this._pollInterval = setInterval(async function () {
-                try {
-                    var cti = await callJSX("Timeline.get()");
-                    if (cti && cti !== "null" && cti !== "") {
-                        var sec = parseFloat(cti);
-                        if (!isNaN(sec)) {
-                            self._playheadSec = sec;
-                            self.render();
-                            self._updatePreview(sec);
-                        }
-                    }
-                } catch(e) { }
-            }, 400);
+            this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
+        },
+
+        _pollTick: async function () {
+            try {
+                var cti = await callJSX("Timeline.get()");
+                if (cti && cti !== "null" && cti !== "") {
+                    var sec = parseFloat(cti);
+                    if (!isNaN(sec)) { this._playheadSec = sec; this._updatePreview(sec); }
+                }
+                this._pollCount = (this._pollCount || 0) + 1;
+                if (this._pollCount % 5 === 1) { await this._refreshWaveformSegments(); }
+                this.render();
+            } catch(e) { }
+        },
+
+        /**
+         * Llegeix els clips de vídeo de la seqüència i construeix el mapa
+         * temps_timeline → temps_media, perquè la waveform correspongui
+         * a l'àudio que realment sona al timeline (IN/OUT/talls inclosos).
+         */
+        _refreshWaveformSegments: async function () {
+            try {
+                var tag = (this._waveformMediaTag || "").replace(/'/g, "");
+                var jsx = "(function(){try{var seq=app.project.activeSequence;if(!seq)return'[]';var segs=[];var all=[];"
+                    + "for(var v=0;v<seq.videoTracks.numTracks;v++){var clips=seq.videoTracks[v].clips;"
+                    + "for(var i=0;i<clips.numItems;i++){var c=clips[i];var nm='';try{nm=c.projectItem?c.projectItem.name:''}catch(e2){}"
+                    + "var o={v:v,s:c.start.seconds,e:c.end.seconds,m:c.inPoint.seconds,m2:c.outPoint.seconds,n:nm};all.push(o);"
+                    + "if('" + tag + "'===''||nm.toUpperCase().indexOf('" + tag + "')>=0)segs.push(o)}}"
+                    + "if(segs.length===0)segs=all;return JSON.stringify(segs)}catch(e){return'ERR:'+e.message}})()";
+                var raw = await callJSX(jsx);
+                if (!raw || raw.indexOf('ERR') === 0) return;
+                var arr = JSON.parse(raw);
+                var segs = [];
+                for (var i = 0; i < arr.length; i++) {
+                    var o = arr[i];
+                    if (!isFinite(o.s) || !isFinite(o.e) || !isFinite(o.m) || !isFinite(o.m2)) continue;
+                    var r = 1;
+                    if (o.e > o.s && o.m2 > o.m) r = (o.m2 - o.m) / (o.e - o.s);
+                    segs.push({ v: o.v, s: o.s, e: o.e, m: o.m, r: r });
+                }
+                segs.sort(function (a, b) { return a.v - b.v || a.s - b.s; });
+                this._waveformSegments = segs;
+            } catch(e) { }
         },
 
         stop: function () {
@@ -168,32 +204,14 @@
                 });
                 if (btn) btn.innerHTML = '⏸ PAUSA';
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(async function () {
-                    try {
-                        var cti = await callJSX("Timeline.get()");
-                        if (cti && cti !== "null" && cti !== "") {
-                            var sec = parseFloat(cti);
-                            if (!isNaN(sec)) {
-                                self._playheadSec = sec; self.render(); self._updatePreview(sec);
-                            }
-                        }
-                    } catch(e) { }
-                }, 200);
+                this._pollInterval = setInterval(function () { self._pollTick(); }, 200);
             } else {
                 callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
                     log("📝 SRT: STOP result: " + result);
                 });
                 if (btn) btn.innerHTML = '▶ PLAY';
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(async function () {
-                    try {
-                        var cti = await callJSX("Timeline.get()");
-                        if (cti && cti !== "null" && cti !== "") {
-                            var sec = parseFloat(cti);
-                            if (!isNaN(sec)) { self._playheadSec = sec; self.render(); self._updatePreview(sec); }
-                        }
-                    } catch(e) { }
-                }, 400);
+                this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
             }
         },
 
@@ -260,16 +278,37 @@
             ctx.fillStyle = '#0d2818';
             ctx.fillRect(0, y, this._canvas.width, wh);
             if (this._waveformPeaks && this._waveformPeaks.length > 0) {
-                // Mapa temps→peaks: solidari amb el zoom (pixelsPerSec)
+                // Mapa temps_timeline → temps_media (segments del timeline) → peaks
                 var pps = this._waveformPPS || 100;
                 var nPeaks = this._waveformPeaks.length;
+                var segs = this._waveformSegments || [];
                 ctx.fillStyle = '#22cc66';
                 for (var px = 0; px < this._canvas.width; px++) {
-                    var idxStart = Math.floor((px / this._pixelsPerSec) * pps);
-                    if (idxStart >= nPeaks) break;
-                    var idxEnd = Math.max(idxStart + 1, Math.floor(((px + 1) / this._pixelsPerSec) * pps));
+                    var sec = px / this._pixelsPerSec;
+                    var secEnd = (px + 1) / this._pixelsPerSec;
+                    // Trobar el segment del timeline que cobreix aquest instant
+                    // (ordenats: pista baixa primer). Si no hi ha segments → identitat.
+                    var mediaSec = -1, mediaSecEnd = -1;
+                    if (segs.length === 0) {
+                        mediaSec = sec; mediaSecEnd = secEnd;
+                    } else {
+                        for (var g = 0; g < segs.length; g++) {
+                            var sg = segs[g];
+                            if (sec >= sg.s && sec < sg.e) {
+                                mediaSec = sg.m + (sec - sg.s) * sg.r;
+                                mediaSecEnd = sg.m + (Math.min(secEnd, sg.e) - sg.s) * sg.r;
+                                break;
+                            }
+                        }
+                        if (mediaSec < 0) continue; // fora de clip → buit (com al timeline)
+                    }
+                    var idxStart = Math.floor(mediaSec * pps);
+                    var idxEnd = Math.max(idxStart + 1, Math.floor(mediaSecEnd * pps));
+                    if (idxStart < 0) continue;
+                    if (idxStart >= nPeaks) continue;
+                    if (idxEnd > nPeaks) idxEnd = nPeaks;
                     var maxV = 0;
-                    for (var k = idxStart; k < idxEnd && k < nPeaks; k++) {
+                    for (var k = idxStart; k < idxEnd; k++) {
                         if (this._waveformPeaks[k] > maxV) maxV = this._waveformPeaks[k];
                     }
                     // Només part positiva: barra des de la base cap amunt
@@ -377,6 +416,7 @@
             this.stop();
             this._entries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
             this._waveformPeaks = null; this._waveformPPS = 100; this._isPlaying = false;
+            this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
             this._hideEditor();
         }
