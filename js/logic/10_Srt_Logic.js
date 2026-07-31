@@ -178,14 +178,15 @@
          *   1) Demana Base64 (cep.encoding.Base64) + atob → bytes exactes (evita corrupció UTF-8)
          *   2) Autodetecció: "UklGR" = Base64 de "RIFF" → atob; "RIFF" → bytes crus; sinó → crues
          *   3) Localitza el chunk "data" recorrent els chunks RIFF (fallback: offset 44)
-         *   4) v = |byte-128|/128, guany x3 amb clamp, reducció per màxim a widthPx
+         *   4) v = |byte-128|/128, guany x3 amb clamp
+         *   5) Redueix a densitat fixa (peaksPerSec) amb màxim per grup → zoom solidari
          * @param {string} binPath - Path complet al .bin
-         * @param {number} widthPx - Amplada en píxels per reduir
-         * @returns {Promise<number[]|null>} Array de peaks (0..1)
+         * @param {number} peaksPerSec - Densitat de peaks per segon (defecte 100)
+         * @returns {Promise<{peaks:number[], peaksPerSec:number, durSec:number}|null>}
          */
-        loadPeaksFromBin: async function (binPath, widthPx) {
+        loadPeaksFromBin: async function (binPath, peaksPerSec) {
             if (!binPath) return null;
-            widthPx = widthPx || 1800;
+            peaksPerSec = peaksPerSec || 100;
 
             try {
                 var cepFs = window.cep.fs;
@@ -231,10 +232,13 @@
 
                 if (!bytes || bytes.length < 4) return null;
 
-                // 3. Localitzar el chunk "data" del WAV
+                // 3. Localitzar el chunk "data" del WAV (+ sample rate del fmt)
                 var dataOff = 0;
                 var dataLen = bytes.length;
+                var sampleRate = 8000;
                 if (bytes.length > 44 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+                    sampleRate = (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16) | (bytes[27] << 24)) >>> 0;
+                    if (sampleRate < 1000 || sampleRate > 192000) sampleRate = 8000;
                     var pos = 12;
                     var found = false;
                     while (pos + 8 <= bytes.length) {
@@ -260,10 +264,10 @@
                     rawPeaks.push(v);
                 }
 
-                // 5. Reduir als píxels desitjats (màxim de cada grup)
-                var step = Math.max(1, Math.floor(rawPeaks.length / widthPx));
+                // 5. Reduir a densitat fixa de peaks/segon (màxim de cada grup)
+                var step = Math.max(1, Math.floor(sampleRate / peaksPerSec));
                 var peaks = [];
-                for (var pi = 0; pi < widthPx && pi * step < rawPeaks.length; pi++) {
+                for (var pi = 0; pi * step < rawPeaks.length; pi++) {
                     var maxVal = 0;
                     for (var si = 0; si < step && pi * step + si < rawPeaks.length; si++) {
                         if (rawPeaks[pi * step + si] > maxVal) maxVal = rawPeaks[pi * step + si];
@@ -271,7 +275,11 @@
                     peaks.push(maxVal);
                 }
 
-                return peaks;
+                return {
+                    peaks: peaks,
+                    peaksPerSec: Math.round(sampleRate / step),
+                    durSec: rawPeaks.length / sampleRate
+                };
 
             } catch(e) {
                 return null;

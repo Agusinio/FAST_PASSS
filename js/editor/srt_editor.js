@@ -31,6 +31,7 @@
         _ctx: null,
         _isDirty: false,
         _waveformPeaks: null,
+        _waveformPPS: 100,
         _isPlaying: false,
 
         init: function () {
@@ -96,11 +97,11 @@
                     var binPath = await wg.getBinPath(projFolder);
                     if (binPath) {
                         log("📝 SRT_EDIT: Bin trovato: " + binPath);
-                        var canvasW = Math.max(1800, this._maxSec * this._pixelsPerSec + 100);
-                        var peaks = await wg.loadPeaksFromBin(binPath, canvasW);
-                        if (peaks && peaks.length > 0) {
-                            this._waveformPeaks = peaks;
-                            log("📝 SRT_EDIT: " + peaks.length + " peaks carregats del .bin");
+                        var wfResult = await wg.loadPeaksFromBin(binPath, 100);
+                        if (wfResult && wfResult.peaks && wfResult.peaks.length > 0) {
+                            this._waveformPeaks = wfResult.peaks;
+                            this._waveformPPS = wfResult.peaksPerSec || 100;
+                            log("📝 SRT_EDIT: " + wfResult.peaks.length + " peaks (" + this._waveformPPS + "/s, " + wfResult.durSec.toFixed(1) + "s)");
                         } else {
                             log("⚠️ SRT_EDIT: No s'han pogut carregar peaks del .bin");
                         }
@@ -259,18 +260,22 @@
             ctx.fillStyle = '#0d2818';
             ctx.fillRect(0, y, this._canvas.width, wh);
             if (this._waveformPeaks && this._waveformPeaks.length > 0) {
-                var midY = y + wh / 2;
-                var step = Math.max(1, Math.floor(this._waveformPeaks.length / this._canvas.width));
-                ctx.strokeStyle = '#22cc66';
-                ctx.lineWidth = 1;
+                // Mapa temps→peaks: solidari amb el zoom (pixelsPerSec)
+                var pps = this._waveformPPS || 100;
+                var nPeaks = this._waveformPeaks.length;
+                ctx.fillStyle = '#22cc66';
                 for (var px = 0; px < this._canvas.width; px++) {
-                    var idx = Math.floor(px * step);
-                    if (idx >= this._waveformPeaks.length) break;
-                    var h = Math.min(Math.abs(this._waveformPeaks[idx]) * (wh / 2), wh / 2);
-                    ctx.beginPath();
-                    ctx.moveTo(px, midY - h);
-                    ctx.lineTo(px, midY + h);
-                    ctx.stroke();
+                    var idxStart = Math.floor((px / this._pixelsPerSec) * pps);
+                    if (idxStart >= nPeaks) break;
+                    var idxEnd = Math.max(idxStart + 1, Math.floor(((px + 1) / this._pixelsPerSec) * pps));
+                    var maxV = 0;
+                    for (var k = idxStart; k < idxEnd && k < nPeaks; k++) {
+                        if (this._waveformPeaks[k] > maxV) maxV = this._waveformPeaks[k];
+                    }
+                    // Només part positiva: barra des de la base cap amunt
+                    var h = maxV * (wh - 2);
+                    if (h < 1) h = 1;
+                    ctx.fillRect(px, y + wh - h, 1, h);
                 }
             } else {
                 // Sense dades: fons verd fosc buit
@@ -371,7 +376,7 @@
         reset: function () {
             this.stop();
             this._entries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
-            this._waveformPeaks = null; this._isPlaying = false;
+            this._waveformPeaks = null; this._waveformPPS = 100; this._isPlaying = false;
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
             this._hideEditor();
         }
