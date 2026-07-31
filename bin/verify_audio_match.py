@@ -7,9 +7,10 @@ import subprocess, sys, os
 
 FFMPEG = r"E:\ffmpeg\bin\ffmpeg.exe"
 BASE = r"\\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2"
-DIR_REL = r"PROVES\02_COMARQUES_PROJECTES\2026_07_30"
-MP4_NAME = "TNC_V2_CLIP.mp4"
-BIN_NAME = "TNC_V2_CLIP_AUDIO_REF.bin"
+# Ús: verify_audio_match.py [DIR_REL] [MP4_NAME] [BIN_NAME]
+DIR_REL = sys.argv[1] if len(sys.argv) > 1 else r"PROVES\02_COMARQUES_PROJECTES\2026_07_30"
+MP4_NAME = sys.argv[2] if len(sys.argv) > 2 else "TNC_V2_CLIP.mp4"
+BIN_NAME = sys.argv[3] if len(sys.argv) > 3 else MP4_NAME.replace(".mp4", "_AUDIO_REF.bin")
 SECONDS = 60      # trams a comparar
 PPS = 100         # peaks/segon (finestra 10ms)
 SR = 8000
