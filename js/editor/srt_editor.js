@@ -87,30 +87,7 @@
             this._showEditor();
             this._startPolling();
             this._waveformPeaks = null;
-            
-            // Generar peaks de waveform via ffmpeg RAW + cep.fs
-            try {
-                var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
-                if (wg) {
-                    var audioPath = await wg.getAudioPath();
-                    if (audioPath) {
-                        log("📝 SRT_EDIT: Audio path = " + audioPath);
-                        var canvasW = Math.max(1800, this._maxSec * this._pixelsPerSec + 100);
-                        var peaks = await wg.generatePeaks(audioPath, this._maxSec, canvasW);
-                        if (peaks && peaks.length > 0) {
-                            this._waveformPeaks = peaks;
-                            log("📝 SRT_EDIT: " + peaks.length + " peaks carregats");
-                        } else {
-                            log("⚠️ SRT_EDIT: No s'han pogut generar peaks");
-                        }
-                    } else {
-                        log("⚠️ SRT_EDIT: No s'ha pogut obtenir path d'audio");
-                    }
-                }
-            } catch(e) {
-                log("⚠️ SRT_EDIT: Error generant waveform: " + e.message);
-            }
-            
+
             // Carregar waveform des del fitxer .bin (WAV 8-bit 8000Hz)
             try {
                 var wg = window.FASTPASS_UI.Logic.WaveformGenerator;

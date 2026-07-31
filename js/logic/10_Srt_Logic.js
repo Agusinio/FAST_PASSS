@@ -173,9 +173,12 @@
         },
 
         /**
-         * Llegeix fitxer .bin compacte i retorna peaks normalitzats (0..15 → 0..1)
-         * Format: cada byte empaqueta 2 valors de 4 bits: [ V1(4bits) | V2(4bits) ]
-         * Cada Vi = valor absolut de la senyal (0..15)
+         * Llegeix fitxer .bin (WAV PCM 8-bit unsigned, mono, 8000Hz) i retorna peaks 0..1
+         * Lectura robusta:
+         *   1) Demana Base64 (cep.encoding.Base64) + atob → bytes exactes (evita corrupció UTF-8)
+         *   2) Autodetecció: "UklGR" = Base64 de "RIFF" → atob; "RIFF" → bytes crus; sinó → crues
+         *   3) Localitza el chunk "data" recorrent els chunks RIFF (fallback: offset 44)
+         *   4) v = |byte-128|/128, guany x3 amb clamp, reducció per màxim a widthPx
          * @param {string} binPath - Path complet al .bin
          * @param {number} widthPx - Amplada en píxels per reduir
          * @returns {Promise<number[]|null>} Array de peaks (0..1)
@@ -183,33 +186,81 @@
         loadPeaksFromBin: async function (binPath, widthPx) {
             if (!binPath) return null;
             widthPx = widthPx || 1800;
-            
+
             try {
                 var cepFs = window.cep.fs;
                 if (!cepFs || !cepFs.readFile) return null;
-                
-                var result = cepFs.readFile(binPath);
-                if (result.err !== 0 || !result.data || result.data.length < 4) return null;
-                
-                var data = result.data;
-                var rawPeaks = [];
-                
-                // Format compacte: cada byte = [V1(4bits)|V2(4bits)]
-                // Desempaquetar: V1 = byte >> 4, V2 = byte & 0x0F
-                // Amplificar valors baixos (x3) per fer visible la variació
-                for (var b = 0; b < data.length; b++) {
-                    var code = data.charCodeAt(b) & 0xFF;
-                    var val1 = ((code >> 4) & 0x0F) / 15 * 3;  // amplify 3x
-                    var val2 = (code & 0x0F) / 15 * 3;
-                    if (val1 > 1) val1 = 1;
-                    if (val2 > 1) val2 = 1;
-                    rawPeaks.push(val1);
-                    rawPeaks.push(val2);
+
+                // 1. Llegir demanant Base64 (bytes exactes, sense corrupció UTF-8)
+                var enc = (window.cep.encoding && window.cep.encoding.Base64) ? window.cep.encoding.Base64 : "Base64";
+                var result = cepFs.readFile(binPath, enc);
+                if (result.err !== 0 || !result.data || result.data.length < 4) {
+                    // Fallback: sense encoding
+                    result = cepFs.readFile(binPath);
+                    if (result.err !== 0 || !result.data || result.data.length < 4) return null;
                 }
-                
-                if (rawPeaks.length === 0) return null;
-                
-                // Reduir als píxels desitjats (agafar el màxim de cada grup)
+
+                var data = result.data;
+
+                // 2. Autodetecció del format de dades → obtenir array de bytes
+                var bytes = null;
+                var i;
+                if (data.substring(0, 5) === "UklGR") {
+                    // Base64 d'un WAV (RIFF) → decodificar
+                    var binStr = atob(data.replace(/\s/g, ''));
+                    bytes = new Uint8Array(binStr.length);
+                    for (i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+                } else if (data.substring(0, 4) === "RIFF") {
+                    // String crua del WAV
+                    bytes = new Uint8Array(data.length);
+                    for (i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xFF;
+                } else {
+                    // Provar Base64 genèric; si falla, tractar com a bytes crus
+                    try {
+                        var binStr2 = atob(data.replace(/\s/g, ''));
+                        if (binStr2.length > 44) {
+                            bytes = new Uint8Array(binStr2.length);
+                            for (i = 0; i < binStr2.length; i++) bytes[i] = binStr2.charCodeAt(i);
+                        }
+                    } catch (eB) { /* no era Base64 */ }
+                    if (!bytes) {
+                        bytes = new Uint8Array(data.length);
+                        for (i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xFF;
+                    }
+                }
+
+                if (!bytes || bytes.length < 4) return null;
+
+                // 3. Localitzar el chunk "data" del WAV
+                var dataOff = 0;
+                var dataLen = bytes.length;
+                if (bytes.length > 44 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+                    var pos = 12;
+                    var found = false;
+                    while (pos + 8 <= bytes.length) {
+                        var id = String.fromCharCode(bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]);
+                        var size = (bytes[pos + 4] | (bytes[pos + 5] << 8) | (bytes[pos + 6] << 16) | (bytes[pos + 7] << 24)) >>> 0;
+                        if (id === "data") {
+                            dataOff = pos + 8;
+                            dataLen = Math.min(size, bytes.length - dataOff);
+                            found = true;
+                            break;
+                        }
+                        pos += 8 + size + (size % 2); // chunks alineats a 2
+                    }
+                    if (!found) { dataOff = 44; dataLen = bytes.length - 44; } // fallback WAV estàndard
+                }
+                if (dataLen <= 0) return null;
+
+                // 4. Convertir mostres unsigned 8-bit → peaks (guany x3 amb clamp)
+                var rawPeaks = [];
+                for (var b = dataOff; b < dataOff + dataLen; b++) {
+                    var v = Math.abs(bytes[b] - 128) / 128 * 3;
+                    if (v > 1) v = 1;
+                    rawPeaks.push(v);
+                }
+
+                // 5. Reduir als píxels desitjats (màxim de cada grup)
                 var step = Math.max(1, Math.floor(rawPeaks.length / widthPx));
                 var peaks = [];
                 for (var pi = 0; pi < widthPx && pi * step < rawPeaks.length; pi++) {
@@ -219,9 +270,9 @@
                     }
                     peaks.push(maxVal);
                 }
-                
+
                 return peaks;
-                
+
             } catch(e) {
                 return null;
             }
