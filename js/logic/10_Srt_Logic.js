@@ -196,12 +196,15 @@
                 
                 // Format compacte: cada byte = [V1(4bits)|V2(4bits)]
                 // Desempaquetar: V1 = byte >> 4, V2 = byte & 0x0F
+                // Amplificar valors baixos (x3) per fer visible la variació
                 for (var b = 0; b < data.length; b++) {
                     var code = data.charCodeAt(b) & 0xFF;
-                    var val1 = (code >> 4) & 0x0F;  // nipble alt
-                    var val2 = code & 0x0F;          // nibble baix
-                    rawPeaks.push(val1 / 15);        // normalitzar 0..15 → 0..1
-                    rawPeaks.push(val2 / 15);
+                    var val1 = ((code >> 4) & 0x0F) / 15 * 3;  // amplify 3x
+                    var val2 = (code & 0x0F) / 15 * 3;
+                    if (val1 > 1) val1 = 1;
+                    if (val2 > 1) val2 = 1;
+                    rawPeaks.push(val1);
+                    rawPeaks.push(val2);
                 }
                 
                 if (rawPeaks.length === 0) return null;

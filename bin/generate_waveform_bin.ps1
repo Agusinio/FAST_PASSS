@@ -42,7 +42,21 @@ try {
     $numSamples = [math]::Floor($bytes.Length / 4)
     Write-Host ("PCM samples: " + $numSamples + " (downsample " + $downsample + ")")
     
-    # 3. Processar: valor absolut, >> 4, submostrejar, empaquetar 2 per byte
+    # 2b. Calcular el val màxim absolut (per normalitzar)
+    $maxAbs = 0.0
+    $sampleBytes = 0
+    for ($si = 0; $si -lt $numSamples; $si += 1) {
+        $soff = $si * 4
+        if ($soff + 4 -gt $bytes.Length) { break }
+        $sv = [System.BitConverter]::ToSingle($bytes, $soff)
+        $av = [math]::Abs($sv)
+        if ($av -gt $maxAbs) { $maxAbs = $av }
+        $sampleBytes = $si
+    }
+    if ($maxAbs -lt 0.0001) { $maxAbs = 0.0001 }  # Evitar divisió per zero
+    Write-Host ("Max abs sample: " + $maxAbs.ToString("F6"))
+    
+    # 3. Processar: normalitzar per maxAbs, valor abs, * 15, empaquetar 2 per byte
     $outBytes = New-Object System.Collections.Generic.List[byte]
     $pending = -1
     
@@ -51,12 +65,11 @@ try {
         if ($off + 4 -gt $bytes.Length) { break }
         
         $sample = [System.BitConverter]::ToSingle($bytes, $off)
-        # Valor absolut normalitzat ~0..1 (El PCM float normalment és -1..1)
-        $absVal = [math]::Abs($sample)
+        # Normalitzar: |sample| / maxAbs → 0..1
+        $absVal = [math]::Abs($sample) / $maxAbs
         if ($absVal -gt 1) { $absVal = 1 }
         
-        # Descartar el bit de signe (ja ho fem amb Abs) i els 4 LSB,
-        # quedant-nos amb 4 bits significatius (0..15)
+        # Escalar a 0..15 (4 bits)
         $nibble = [int]($absVal * 15)
         if ($nibble -gt 15) { $nibble = 15 }
         if ($nibble -lt 0) { $nibble = 0 }
