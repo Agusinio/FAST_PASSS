@@ -206,12 +206,13 @@
                 //    -i PRIMER, després -ss. Això obliga ffmpeg a decodificar des del keyframe
                 //    anterior però només ESCRIURE frames des de startSec. L'speed es redueix
                 //    però la precisió del tall és exacta (±0 frames). Per 188s a 30x ≈ 6s extra.
-                // 2. ffmpeg audio mono 8000Hz wav (pcm_u8) DES DEL CLIP JA EXTRET (no del source!)
+                // 2. ffmpeg audio mono 480Hz wav (pcm_u8) DES DEL CLIP JA EXTRET (no del source!)
                 //    → sincronia 1:1 amb el mp4 del timeline per construcció. Abans es generava
                 //    del source amb -ss i quedava desfasat (~0,9s) pels keyframes del -c copy.
+                //    480 Hz: 1 byte = 1 mostra = 1/480s exactes → waveform lleugera i directa.
                 // 3. .done
                 let psContent = `& "${ffmpegBin}" -ss ${startSec} -t ${duration} -i "${sourcePath}" -c copy -avoid_negative_ts make_zero -y "${outputPath}"\r\n`;
-                psContent += `& "${ffmpegBin}" -i "${outputPath}" -ac 1 -ar 8000 -c:a pcm_u8 -f wav "${audioRefPath}" -y\r\n`;
+                psContent += `& "${ffmpegBin}" -i "${outputPath}" -ac 1 -ar 480 -c:a pcm_u8 -f wav "${audioRefPath}" -y\r\n`;
                 psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" }\r\n`;
                 
                 const cepFs = window.cep.fs;

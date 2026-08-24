@@ -119,7 +119,7 @@
 
     /**
      * WaveformGenerator: Llegeix fitxer WAV (.bin) amb mostra d'àudio de referència
-     * Format: WAV, 8000Hz, 8-bit, mono
+     * Format: WAV, 480Hz, 8-bit, mono (1 byte = 1 mostra = 1/480s exactes)
      */
     FASTPASS_UI.Logic.WaveformGenerator = {
 
@@ -173,7 +173,7 @@
         },
 
         /**
-         * Llegeix fitxer .bin (WAV PCM 8-bit unsigned, mono, 8000Hz) i retorna peaks 0..1
+         * Llegeix fitxer .bin (WAV PCM 8-bit unsigned, mono, 480Hz) i retorna peaks 0..1
          * Lectura robusta:
          *   1) Demana Base64 (cep.encoding.Base64) + atob → bytes exactes (evita corrupció UTF-8)
          *   2) Autodetecció: "UklGR" = Base64 de "RIFF" → atob; "RIFF" → bytes crus; sinó → crues
@@ -235,10 +235,10 @@
                 // 3. Localitzar el chunk "data" del WAV (+ sample rate del fmt)
                 var dataOff = 0;
                 var dataLen = bytes.length;
-                var sampleRate = 8000;
+                var sampleRate = 480;
                 if (bytes.length > 44 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
                     sampleRate = (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16) | (bytes[27] << 24)) >>> 0;
-                    if (sampleRate < 1000 || sampleRate > 192000) sampleRate = 8000;
+                    if (sampleRate < 100 || sampleRate > 192000) sampleRate = 480;
                     var pos = 12;
                     var found = false;
                     while (pos + 8 <= bytes.length) {

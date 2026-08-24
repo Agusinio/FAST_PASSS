@@ -1,7 +1,7 @@
 # ============================================================================
-# Verifica si TNC_V2_CLIP_AUDIO_REF.bin (WAV u8 8kHz) conte el MATEIX audio
-# que TNC_V2_CLIP.mp4. Compara empremtes de peaks (max |b-128| per finestra
-# de 10ms) i cerca el millor desfasament temporal (lag).
+# Verifica si <CLIP>_AUDIO_REF.bin (WAV u8, SR llegit del propi fitxer)
+# conte el MATEIX audio que <CLIP>.mp4. Compara empremtes de peaks
+# (max |b-128| per finestra de ~10ms) i cerca el millor desfasament (lag).
 # ============================================================================
 import subprocess, sys, os
 
@@ -12,8 +12,7 @@ DIR_REL = sys.argv[1] if len(sys.argv) > 1 else r"PROVES\02_COMARQUES_PROJECTES\
 MP4_NAME = sys.argv[2] if len(sys.argv) > 2 else "TNC_V2_CLIP.mp4"
 BIN_NAME = sys.argv[3] if len(sys.argv) > 3 else MP4_NAME.replace(".mp4", "_AUDIO_REF.bin")
 SECONDS = 60      # trams a comparar
-PPS = 100         # peaks/segon (finestra 10ms)
-SR = 8000
+PPS = 100         # peaks/segon objectiu (finestra ~10ms)
 
 def find_dir():
     for d in os.listdir(BASE):
@@ -23,30 +22,34 @@ def find_dir():
                 return cand
     sys.exit("NO trobo la carpeta del projecte")
 
-def extract_pcm(path, seconds):
+def extract_pcm(path, seconds, sr):
     r = subprocess.run([FFMPEG, "-v", "error", "-i", path, "-t", str(seconds),
-                        "-ac", "1", "-ar", str(SR), "-f", "u8", "-"],
+                        "-ac", "1", "-ar", str(sr), "-f", "u8", "-"],
                        capture_output=True)
     if r.returncode != 0:
         sys.exit("ffmpeg error: " + r.stderr.decode("utf8", "replace")[:300])
     return r.stdout
 
 def wav_data(p):
+    """Retorna (bytes, data_offset, sample_rate llegit del fmt; fallback 480)."""
     with open(p, "rb") as f:
         b = f.read()
-    if b[:4] != b"RIFF":
-        return b, 0
+    if b[:4] != b"RIFF" or len(b) < 44:
+        return b, 0, 480
+    sr = int.from_bytes(b[24:28], "little")
+    if sr < 100 or sr > 192000:
+        sr = 480
     pos = 12
     while pos + 8 <= len(b):
         cid = b[pos:pos+4]
         size = int.from_bytes(b[pos+4:pos+8], "little")
         if cid == b"data":
-            return b, pos + 8
+            return b, pos + 8, sr
         pos += 8 + size + (size % 2)
-    return b, 44
+    return b, 44, sr
 
-def peaks(data, off=0, limit=None):
-    step = SR // PPS
+def peaks(data, off=0, sr=480, limit=None):
+    step = max(1, sr // PPS)
     n = len(data) if limit is None else min(len(data), off + limit * step)
     out = []
     i = off
@@ -77,12 +80,13 @@ def main():
     print("MP4:", mp4)
     print("BIN:", binp)
 
-    raw = extract_pcm(mp4, SECONDS)
-    wav, doff = wav_data(binp)
+    wav, doff, SR = wav_data(binp)
+    print("WAV sample rate llegit: %d Hz" % SR)
+    raw = extract_pcm(mp4, SECONDS, SR)
     print("PCM mp4: %d bytes | WAV data off=%d len=%d (%.1fs)" % (len(raw), doff, len(wav)-doff, (len(wav)-doff)/SR))
 
-    pa = peaks(raw)                       # mp4
-    pb = peaks(wav, doff)                 # bin
+    pa = peaks(raw, 0, SR)                # mp4
+    pb = peaks(wav, doff, SR)             # bin
     print("peaks mp4=%d, peaks bin=%d (%.1fs)" % (len(pa), len(pb), len(pb)/PPS))
 
     # Cerca de lag (+-3s en passos de 10ms)

@@ -31,7 +31,7 @@
         _ctx: null,
         _isDirty: false,
         _waveformPeaks: null,
-        _waveformPPS: 100,
+        _waveformPPS: 480,
         _waveformSegments: [],
         _waveformMediaTag: "",
         _pollCount: 0,
@@ -47,6 +47,7 @@
         _didDrag: false,
         _suppressClick: false,
         _MARKER_TOL_PX: 7,
+        _lastSegLog: -1,
 
         init: function () {
             this._canvas = document.getElementById('srtCanvas');
@@ -166,7 +167,7 @@
             this._markers = [];
             await this._restoreMarkers();
 
-            // Carregar waveform des del fitxer .bin (WAV 8-bit 8000Hz)
+            // Carregar waveform des del fitxer .bin (WAV 8-bit 480Hz, 1 byte = 1 peak)
             try {
                 var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
                 var projFolder = await callJSX("Context.folder()");
@@ -174,10 +175,10 @@
                     var binPath = await wg.getBinPath(projFolder);
                     if (binPath) {
                         log("📝 SRT_EDIT: Bin trovato: " + binPath);
-                        var wfResult = await wg.loadPeaksFromBin(binPath, 100);
+                        var wfResult = await wg.loadPeaksFromBin(binPath, 480);
                         if (wfResult && wfResult.peaks && wfResult.peaks.length > 0) {
                             this._waveformPeaks = wfResult.peaks;
-                            this._waveformPPS = wfResult.peaksPerSec || 100;
+                            this._waveformPPS = wfResult.peaksPerSec || 480;
                             this._waveformMediaTag = binPath.split(/[\\/]/).pop().toUpperCase().replace(/_AUDIO_REF\.BIN$/i, '').replace(/\.BIN$/i, '');
                             log("📝 SRT_EDIT: " + wfResult.peaks.length + " peaks (" + this._waveformPPS + "/s, " + wfResult.durSec.toFixed(1) + "s)");
                             await this._refreshWaveformSegments();
@@ -248,15 +249,17 @@
         _refreshWaveformSegments: async function () {
             try {
                 var tag = (this._waveformMediaTag || "").replace(/'/g, "");
-                var jsx = "(function(){try{var seq=app.project.activeSequence;if(!seq)return'[]';var segs=[];var all=[];"
+                // Mateixa seqüència que el cabezal (getWorkSequence = projecte ancorat)
+                var jsx = "(function(){try{var seq=($.global.FASTPASS&&FASTPASS.Context)?FASTPASS.Context.getWorkSequence():app.project.activeSequence;if(!seq)return'[]';var segs=[];var all=[];"
                     + "for(var v=0;v<seq.videoTracks.numTracks;v++){var clips=seq.videoTracks[v].clips;"
                     + "for(var i=0;i<clips.numItems;i++){var c=clips[i];var nm='';try{nm=c.projectItem?c.projectItem.name:''}catch(e2){}"
                     + "var o={v:v,s:c.start.seconds,e:c.end.seconds,m:c.inPoint.seconds,m2:c.outPoint.seconds,n:nm};all.push(o);"
                     + "if('" + tag + "'===''||nm.toUpperCase().indexOf('" + tag + "')>=0)segs.push(o)}}"
-                    + "if(segs.length===0)segs=all;return JSON.stringify(segs)}catch(e){return'ERR:'+e.message}})()";
+                    + "if(segs.length===0)segs=all;return JSON.stringify({seqName:String(seq.name),segs:segs})}catch(e){return'ERR:'+e.message}})()";
                 var raw = await callJSX(jsx);
                 if (!raw || raw.indexOf('ERR') === 0) return;
-                var arr = JSON.parse(raw);
+                var parsed = JSON.parse(raw);
+                var arr = parsed.segs || (Array.isArray(parsed) ? parsed : []);
                 var segs = [];
                 for (var i = 0; i < arr.length; i++) {
                     var o = arr[i];
@@ -267,6 +270,12 @@
                 }
                 segs.sort(function (a, b) { return a.v - b.v || a.s - b.s; });
                 this._waveformSegments = segs;
+                // Log diagnòstic quan canvia el mapa (o primer cop)
+                if (this._lastSegLog !== segs.length) {
+                    this._lastSegLog = segs.length;
+                    log("📝 SRT_EDIT: WF segments=" + segs.length + " seq=\"" + (parsed.seqName || "?") + "\""
+                        + (segs.length > 0 ? " [0] tl=" + segs[0].s.toFixed(2) + "-" + segs[0].e.toFixed(2) + "s → media=" + segs[0].m.toFixed(2) + "s" : ""));
+                }
             } catch(e) { }
         },
 
@@ -385,7 +394,7 @@
             ctx.fillRect(0, y, this._canvas.width, wh);
             if (this._waveformPeaks && this._waveformPeaks.length > 0) {
                 // Mapa temps_timeline → temps_media (segments del timeline) → peaks
-                var pps = this._waveformPPS || 100;
+                var pps = this._waveformPPS || 480;
                 var nPeaks = this._waveformPeaks.length;
                 var segs = this._waveformSegments || [];
                 ctx.fillStyle = '#22cc66';
@@ -659,7 +668,7 @@
         reset: function () {
             this.stop();
             this._entries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
-            this._waveformPeaks = null; this._waveformPPS = 100; this._isPlaying = false;
+            this._waveformPeaks = null; this._waveformPPS = 480; this._isPlaying = false;
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             this._markers = []; this._editMode = "move"; this._dragIdx = -1; this._dragSnapshot = null;
             var btnMode = document.getElementById('btnSrtMode');
