@@ -129,11 +129,10 @@
          * @returns {string} Path complet al .bin o ''
          */
         getBinPath: async function (projectFolder) {
-            // Busca un fitxer .bin al directori del projecte
+            // NORMA ESTRICTA: només el .bin del BLOC actual (<PROG>_<BLOC>_CLIP_AUDIO_REF.bin).
+            // Sense cap fallback a altres .bin de la carpeta: millor cap WF que una WF equivocada.
             if (!projectFolder || projectFolder.indexOf('ERR') === 0) return '';
 
-            // Nom esperat per al BLOC actual (ex: TNV_V1_CLIP_AUDIO_REF.bin) → prioritat màxima
-            // per evitar carregar el .bin d'un altre bloc si conviuen a la mateixa carpeta.
             var expected = '';
             try {
                 var st = window.FASTPASS_UI.State;
@@ -141,55 +140,27 @@
                     expected = (st.progData.wott + '_' + st.bloque + '_CLIP_AUDIO_REF.bin').toUpperCase();
                 }
             } catch(e0) {}
+            if (!expected) return ''; // sense bloc conegut → no carreguem res
 
             try {
-                // Escanejar directori i buscar qualsevol .bin
+                // 1. Escaneig de directori: coincidència exacta de nom
                 var scanResult = await window.FASTPASS_UI.Utils.callJSX("IO.scanDirectory('" + projectFolder.replace(/\\/g, '\\\\') + "')");
                 if (scanResult && scanResult.indexOf('ERR') !== 0 && scanResult !== '[]') {
                     var files = JSON.parse(scanResult);
-                    var bestMatch = null;
-                    // 1. Coincidència exacta amb el bloc actual
-                    if (expected) {
-                        for (var i = 0; i < files.length; i++) {
-                            var f0 = files[i];
-                            if (f0 && f0.name && f0.name.toUpperCase() === expected) { bestMatch = f0; break; }
-                        }
+                    for (var i = 0; i < files.length; i++) {
+                        var f = files[i];
+                        if (f && f.name && f.name.toUpperCase() === expected && f.path) return f.path;
                     }
-                    // 2. Fitxers amb "_AUDIO_REF.bin" o "WAVEFORM" al nom
-                    if (!bestMatch) {
-                        for (var j = 0; j < files.length; j++) {
-                            var f = files[j];
-                            if (!f || !f.name) continue;
-                            var upper = f.name.toUpperCase();
-                            if (upper.indexOf('.BIN') === -1) continue;
-                            if (upper.indexOf('AUDIO_REF') >= 0 || upper.indexOf('WAVEFORM') >= 0) {
-                                if (upper.indexOf('AUDIO_REF') >= 0) { bestMatch = f; break; }
-                                if (!bestMatch) bestMatch = f;
-                            }
-                            if (!bestMatch) bestMatch = f;
-                        }
-                    }
-                    if (bestMatch && bestMatch.path) return bestMatch.path;
                 }
             } catch(e) {}
 
-            // Fallback: intentar noms coneguts (primer el del bloc actual si es coneix)
-            var possibleNames = [];
-            if (expected) possibleNames.push(expected);
-            possibleNames = possibleNames.concat([
-                "TNV_V1_CLIP_AUDIO_REF.bin",
-                "TNV_V2_CLIP_AUDIO_REF.bin",
-                "TNV_V3_CLIP_AUDIO_REF.bin",
-                "TNC_V1_CLIP_AUDIO_REF.bin",
-                "TNC_V2_CLIP_AUDIO_REF.bin",
-                "CLIP_AUDIO_REF.bin"
-            ]);
-            for (var i = 0; i < possibleNames.length; i++) {
-                var testPath = projectFolder + "\\" + possibleNames[i];
+            // 2. Comprovació directa per si l'escaneig falla (IO.exists és case-insensitive a Windows)
+            try {
+                var testPath = projectFolder + "\\" + expected;
                 var exists = await window.FASTPASS_UI.Utils.callJSX("IO.exists('" + testPath.replace(/\\/g, '\\\\') + "')");
                 if (exists === "true") return testPath;
-            }
-            
+            } catch(e2) {}
+
             return '';
         },
 
