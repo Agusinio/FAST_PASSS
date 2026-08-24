@@ -407,11 +407,15 @@
                                         const ffmpeg = window.FASTPASS_UI.Logic.FFmpeg;
                                         if (ffmpeg && ffmpeg.extractClip) {
                                             const clipName = `${ctx.progData.wott || "TNV"}_${ctx.bloque}_CLIP.mp4`;
-                                            // NOTA: El clip va a un path UNC de Windows. ffmpeg i PowerShell necessiten
-                                            // backslashes. El .replace de folderPath converteix a forward slashes per a
-                                            // Premiere, però per al clip local necessitem backslashes.
-                                            const clipPath = (ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + clipName).replace(/\//g, "\\");
-                                            log(`🎬 [EXTRACT] Intentant extracció de clip: ${clipPath}`);
+                                            // Destí: DIRECTORI DEL PROJECTE (folderPath = on neix el .prproj a _runNew).
+                                            // El clip del bloc, l'AUDIO_REF.bin i el .prproj queden sempre junts
+                                            // i la importació es fa des d'aquesta ruta (cleanFeedData.mediaPath).
+                                            // NOTA: no usem Context.folder() aquí perquè a _runNew el projecte nou
+                                            // encara no existeix (retornaria la carpeta del projecte ANTERIOR).
+                                            // ffmpeg/PowerShell necessiten backslashes; Premiere, forward slashes (després).
+                                            const projFolder = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir;
+                                            const clipPath = (projFolder + "\\" + clipName).replace(/\//g, "\\");
+                                            log(`🎬 [EXTRACT] Clip del bloc → directori del projecte: ${clipPath}`);
 
                                             // mp4Duration es necessita per a l'extracció i el recàlcul de bounds
                                             const mp4Duration = bounds.mp4Duration;
