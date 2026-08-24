@@ -266,15 +266,22 @@
                     if (!isFinite(o.s) || !isFinite(o.e) || !isFinite(o.m) || !isFinite(o.m2)) continue;
                     var r = 1;
                     if (o.e > o.s && o.m2 > o.m) r = (o.m2 - o.m) / (o.e - o.s);
-                    segs.push({ v: o.v, s: o.s, e: o.e, m: o.m, r: r });
+                    segs.push({ v: o.v, s: o.s, e: o.e, m: o.m, r: r, n: o.n || "" });
                 }
                 segs.sort(function (a, b) { return a.v - b.v || a.s - b.s; });
                 this._waveformSegments = segs;
-                // Log diagnòstic quan canvia el mapa (o primer cop)
+                // Log diagnòstic quan canvia el mapa (o primer cop): resum de medias + primers segments
                 if (this._lastSegLog !== segs.length) {
                     this._lastSegLog = segs.length;
-                    log("📝 SRT_EDIT: WF segments=" + segs.length + " seq=\"" + (parsed.seqName || "?") + "\""
-                        + (segs.length > 0 ? " [0] tl=" + segs[0].s.toFixed(2) + "-" + segs[0].e.toFixed(2) + "s → media=" + segs[0].m.toFixed(2) + "s" : ""));
+                    log("📝 SRT_EDIT: WF segments=" + segs.length + " seq=\"" + (parsed.seqName || "?") + "\"");
+                    var counts = {};
+                    for (var c = 0; c < segs.length; c++) { var key = segs[c].n || "?"; counts[key] = (counts[key] || 0) + 1; }
+                    for (var kname in counts) { log("📝 SRT_EDIT:   media " + counts[kname] + "x \"" + kname + "\""); }
+                    var N = Math.min(8, segs.length);
+                    for (var d = 0; d < N; d++) {
+                        var sg = segs[d];
+                        log("📝 SRT_EDIT:   seg[" + d + "] v" + sg.v + " tl=" + sg.s.toFixed(2) + "-" + sg.e.toFixed(2) + "s ← media=" + sg.m.toFixed(2) + "s \"" + (sg.n || "?") + "\"");
+                    }
                 }
             } catch(e) { }
         },
