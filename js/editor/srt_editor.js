@@ -44,6 +44,7 @@
         _editMode: "move",
         _dragIdx: -1,
         _dragSnapshot: null,
+        _didDrag: false,
         _suppressClick: false,
         _MARKER_TOL_PX: 7,
 
@@ -76,21 +77,24 @@
                 self._persistMarkers();
             });
 
-            // Botó esquerre sobre un marcador: iniciar arrossegament (amb snapshot per no acumular error)
+            // Botó esquerre sobre un marcador: possible arrossegament.
+            // El click NOMÉS se suprimeix si hi ha hagut moviment real (_didDrag);
+            // un click simple sobre un marcador posiciona el playhead normalment.
             this._canvas.addEventListener('mousedown', function (e) {
                 if (e.button !== 0) return;
                 var idx = self._markerAtSec(self._canvasXToSec(e));
                 if (idx < 0) return;
                 self._dragIdx = idx;
+                self._didDrag = false;
                 self._dragSnapshot = {
                     entries: self._entries.map(function (en) { return { index: en.index, timeStr: en.timeStr, texts: en.texts.slice(), startSec: en.startSec, endSec: en.endSec }; }),
                     markers: self._markers.slice()
                 };
-                self._suppressClick = true;
                 e.preventDefault();
             });
             this._canvas.addEventListener('mousemove', function (e) {
                 if (self._dragIdx >= 0) {
+                    self._didDrag = true;
                     self._applyMarkerDrag(self._canvasXToSec(e));
                     self.render();
                 }
@@ -99,8 +103,12 @@
                 if (self._dragIdx >= 0) {
                     self._dragIdx = -1;
                     self._dragSnapshot = null;
-                    self._isDirty = true;
-                    self._persistMarkers();
+                    if (self._didDrag) {
+                        self._suppressClick = true; // el click del mouseup no ha de moure el playhead
+                        self._isDirty = true;
+                        self._persistMarkers();
+                    }
+                    self._didDrag = false;
                 }
             };
             this._canvas.addEventListener('mouseup', endDrag);
@@ -575,6 +583,8 @@
         applyIn: function () {
             var cti = this._playheadSec;
             var targetIdx = window.FASTPASS_UI.Logic.SrtParser.findTargetByTime(this._entries, cti);
+            log("📝 SRT_EDIT: IN cti=" + cti.toFixed(2) + "s → targetIdx=" + targetIdx + "/" + this._entries.length
+                + (targetIdx >= 0 ? " (entry start=" + this._entries[targetIdx].startSec.toFixed(2) + "s)" : ""));
             if (targetIdx < 0) { getUtils().status("CTI no sobre cap caption", "warn"); return; }
             var originalStart = this._entries[targetIdx].startSec;
             this._entries = window.FASTPASS_UI.Logic.SrtParser.applyTrimIn(this._entries, targetIdx, 0.4);
