@@ -33,8 +33,15 @@
 
     /**
      * Ruta d'escaletes al servidor.
+     * PRIMÀRIA: IP directa (algunes màquines amb polítiques no resolen
+     * el nom de domini public.ad-ccrtv.local i el listat es bloqueja).
      */
-    ER.ESCALETES_PATH = "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\ESCALETES";
+    ER.ESCALETES_PATH = "\\\\192.168.147.199\\public\\VERTICALITZACIO_INFORMATIUS\\ESCALETES";
+
+    /**
+     * Fallback pel nom de domini (antics equips on la IP podia variar).
+     */
+    ER.ESCALETES_PATH_DOMAIN = "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\ESCALETES";
 
     /**
      * Handles en segons (marge de seguretat al voltant del TC d'emissió).

@@ -44,6 +44,33 @@
         return p.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     };
 
+    /**
+     * _listEscaletas: Llista la carpeta d'escaletes provant IP directa primer
+     * i nom de domini com a fallback (alguns PCs no resolen public.ad-ccrtv.local).
+     * @returns {Promise<{raw:string|null, path:string}>}
+     */
+    ER._listEscaletas = async function () {
+        var candidates = [];
+        if (this.ESCALETES_PATH) candidates.push(this.ESCALETES_PATH);
+        if (this.ESCALETES_PATH_DOMAIN && this.ESCALETES_PATH_DOMAIN !== this.ESCALETES_PATH) {
+            candidates.push(this.ESCALETES_PATH_DOMAIN);
+        }
+        for (var ci = 0; ci < candidates.length; ci++) {
+            var p = candidates[ci];
+            try {
+                var raw = await callJSX("IO.listFolder('" + this._escapePath(p) + "')");
+                if (raw && raw !== '[]' && raw.indexOf('ERR') !== 0) {
+                    if (ci > 0) log('🔁 [ER:IO] Escaletes llistades via domini (fallback): ' + p);
+                    return { raw: raw, path: p };
+                }
+                log('⚠️ [ER:IO] No s\'ha pogut llistar (' + p + '): ' + (raw || 'null'));
+            } catch (e) {
+                log('⚠️ [ER:IO] Excepció llistant (' + p + '): ' + e.message);
+            }
+        }
+        return { raw: null, path: '' };
+    };
+
     // ----------------------------------------------------------------
     // 2. DESCOBRIR EL JSON MÉS RECENT PER PROGRAMA
     // ----------------------------------------------------------------
@@ -93,9 +120,10 @@
         var searchLabel = programArchivo + (blockId ? '/' + blockId : '') + (datePrefix ? ' [' + datePrefix + ']' : '');
         log('\uD83D\uDCE1 [ER:IO] Cercant JSON per a: ' + searchLabel);
         try {
-            var raw = await callJSX("IO.listFolder('" + this._escapePath(this.ESCALETES_PATH) + "')");
-            if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) {
-                log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llistar: ' + this.ESCALETES_PATH);
+            var listRes = await this._listEscaletas();
+            var raw = listRes.raw;
+            if (!raw) {
+                log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llistar la carpeta d\'escaletes (IP ni domini)');
                 return null;
             }
 
@@ -263,9 +291,10 @@
         log('\uD83D\uDD0D [ER:IO] findLatestValid: ' + searchLabel);
 
         try {
-            var raw = await callJSX("IO.listFolder('" + this._escapePath(this.ESCALETES_PATH) + "')");
-            if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) {
-                log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llistar: ' + this.ESCALETES_PATH);
+            var listRes = await this._listEscaletas();
+            var raw = listRes.raw;
+            if (!raw) {
+                log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llistar la carpeta d\'escaletes (IP ni domini)');
                 return { valid: false, lastItemEndSec: null, estimatedWaitSec: null, error: 'No s\'ha pogut llistar la carpeta d\'escaletes' };
             }
 
