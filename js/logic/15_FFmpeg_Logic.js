@@ -16,10 +16,62 @@
     };
 
     // Path real de ffmpeg. NO està al directori bin/ de l'extensió!
-    // S'ha trobat via `where ffmpeg` a C:\Program Files (x86)\OpenVideoDownloader\open-video-downloader\
-    // ffmpeg a Dalet (canvi d'ordinador 29/07)
-    const FFMPEG_BIN = "C:\\Program Files\\Dalet\\DaletPlus.409526\\bin\\ffmpeg.exe";
-    const FFPROBE_BIN = "C:\\Program Files\\Dalet\\DaletPlus.409526\\bin\\ffprobe.exe";
+    // Candidats provats en ordre: Dalet (equips d'edició), E:\ffmpeg (equips de
+    // desenvolupament), OpenVideoDownloader. La primera que existeixi s'usa.
+    const FFMPEG_CANDIDATES = [
+        "C:\\Program Files\\Dalet\\DaletPlus.409526\\bin\\ffmpeg.exe",
+        "E:\\ffmpeg\\bin\\ffmpeg.exe",
+        "C:\\Program Files (x86)\\OpenVideoDownloader\\open-video-downloader\\ffmpeg.exe"
+    ];
+    const FFPROBE_CANDIDATES = [
+        "C:\\Program Files\\Dalet\\DaletPlus.409526\\bin\\ffprobe.exe",
+        "E:\\ffmpeg\\bin\\ffprobe.exe",
+        "C:\\Program Files (x86)\\OpenVideoDownloader\\open-video-downloader\\ffprobe.exe"
+    ];
+
+    /**
+     * _firstExisting: retorna el primer candidat que existeixi al disc
+     * (via cep.fs.stat). Si cap existeix, retorna el primer candidat.
+     */
+    function _firstExisting(candidates) {
+        try {
+            var fs = window.cep && window.cep.fs;
+            if (fs && fs.stat) {
+                for (var i = 0; i < candidates.length; i++) {
+                    var st = fs.stat(candidates[i]);
+                    if (st && st.err === 0) return candidates[i];
+                }
+            }
+        } catch(e) {}
+        return candidates[0] || "";
+    }
+    /**
+     * getFfmpeg / getFfprobe: resolen el binari preferentment des de la carpeta
+     * de l'extensió (bin\ffmpeg\bin\... → no es pusheja, ve amb la instal·lació)
+     * i, si no hi és, proven rutes absolutes conegudes per màquina.
+     */
+    async function getFfmpeg() {
+        var candidates = [];
+        try {
+            var extRoot = await utils.getExtPath();
+            if (extRoot) {
+                candidates.push(extRoot + "\\bin\\ffmpeg\\bin\\ffmpeg.exe");
+                candidates.push(extRoot + "\\bin\\ffmpeg\\ffmpeg.exe");
+            }
+        } catch(e) {}
+        return _firstExisting(candidates.concat(FFMPEG_CANDIDATES));
+    }
+    async function getFfprobe() {
+        var candidates = [];
+        try {
+            var extRoot = await utils.getExtPath();
+            if (extRoot) {
+                candidates.push(extRoot + "\\bin\\ffmpeg\\bin\\ffprobe.exe");
+                candidates.push(extRoot + "\\bin\\ffmpeg\\ffprobe.exe");
+            }
+        } catch(e) {}
+        return _firstExisting(candidates.concat(FFPROBE_CANDIDATES));
+    }
 
     FASTPASS_UI.Logic.FFmpeg = {
 
@@ -109,7 +161,7 @@
                 return { ok: false, wait: false, duration: 0, error: "sourcePath buit" };
             }
 
-            const ffprobeBin = FFPROBE_BIN;
+            const ffprobeBin = await getFfprobe();
 
             utils.log(`🔍 [checkSourceDuration] ffprobeBin=${ffprobeBin}, sourcePath=${sourcePath}, requiredEndSec=${requiredEndSec}s, handles=${handles}s`);
 
@@ -180,7 +232,7 @@
                 return { ok: false, path: outputPath, error: errMsg };
             }
 
-            const ffmpegBin = FFMPEG_BIN;
+            const ffmpegBin = await getFfmpeg();
             utils.log(`🎬 [extractClip] INICI: ffmpeg=${ffmpegBin}, input=${sourcePath}, start=${startSec.toFixed(2)}s, dur=${duration.toFixed(2)}s, output=${outputPath}`);
 
             try {

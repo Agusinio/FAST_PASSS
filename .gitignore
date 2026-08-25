@@ -35,3 +35,7 @@ graphify-out/
 # Archivos temporales Roo Code
 .roo/progress/*.md
 !.roo/progress/README.md
+
+# ffmpeg local (no es pusheja, es copia amb la instal·lacio)
+bin/ffmpeg/
+
