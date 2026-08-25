@@ -91,7 +91,7 @@ const projectResult = await logicProject.createFromTemplate(cfg.rutas.plantilla_
 🧠 ¿Por qué esta solución es mejor?
 Fiabilidad de Red: window.cep.fs (capa JS) gestiona mucho mejor los tiempos de espera del NAS y los bloqueos de red que ExtendScript.
 
-Caracteres Especiales: El motor de JS de la extensión usa UTF-16 nativo, por lo que la "Ó" de VERTICALITZACIÓ no se corrompe al crear la carpeta, algo que en JSX es una pesadilla constante.
+Caracteres Especiales: El motor de JS de la extensión usa UTF-16 nativo, por lo que la "Ó" de VERTICALITZACIO no se corrompe al crear la carpeta, algo que en JSX es una pesadilla constante.
 
 Control Total: Ahora, si falla la creación de carpetas, lo verás en la consola del navegador (Chrome DevTools) con un código de error de sistema real.
 
@@ -351,7 +351,7 @@ utils.js:16 🔵 [FASTPASS]: 🔍 [SCANNER] Buscant rètols de TNCOMARQUES (Filt
 
 utils.js:16 🔵 [FASTPASS]: 📂 [SCANNER] Wotts trobats: 48
 
-utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\02_COMARQUES_PROJECTES
+utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\02_COMARQUES_PROJECTES
 
 utils.js:16 🔵 [FASTPASS]: 🏗️ Creant projecte a partir de plantilla...
 
@@ -666,7 +666,7 @@ utils.js:16 🔵 [FASTPASS]: 🔍 [SCANNER] Buscant rètols de TNCOMARQUES (Filt
 
 utils.js:16 🔵 [FASTPASS]: 📂 [SCANNER] Wotts trobats: 48
 
-utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\02_COMARQUES_PROJECTES
+utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\02_COMARQUES_PROJECTES
 
 utils.js:16 🔵 [FASTPASS]: 🏗️ Creant projecte a partir de plantilla...
 
@@ -811,7 +811,7 @@ utils.js:16 🔵 [FASTPASS]: 🔍 [SCANNER] Buscant rètols de TNCOMARQUES (Filt
 
 utils.js:16 🔵 [FASTPASS]: 📂 [SCANNER] Wotts trobats: 48
 
-utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\02_COMARQUES_PROJECTES
+utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\02_COMARQUES_PROJECTES
 
 utils.js:16 🔵 [FASTPASS]: 🏗️ Creant projecte a partir de plantilla...
 
@@ -835,7 +835,7 @@ utils.js:16 🔵 [FASTPASS]: 🔍 [SCANNER] Buscant rètols de TNV (Filtre: TNV)
 
 utils.js:16 🔵 [FASTPASS]: 📂 [SCANNER] Wotts trobats: 56
 
-utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\04_TN VESPRE_PROJECTES
+utils.js:16 🔵 [FASTPASS]: 🛠️ Verificant ruta al NAS: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\04_TN VESPRE_PROJECTES
 
 utils.js:16 🔵 [FASTPASS]: 🏗️ Creant projecte a partir de plantilla...
 
@@ -854,7 +854,7 @@ Si el saveAs devuelve FALSE incluso cuando el JS ha creado la carpeta, es porque
 
 Límite de caracteres (MAX_PATH): Tu ruta tiene unos 215 caracteres. El límite de Windows es 260. Estamos peligrosamente cerca, y a veces la red añade "ruido" que supera ese límite.
 
-El acento en la red: VERTICALITZACIÓ es un imán de problemas para el motor de 32 bits de ExtendScript.
+El acento en la red: VERTICALITZACIO es un imán de problemas para el motor de 32 bits de ExtendScript.
 
 Protocolo UNC: Premiere a veces exige que las rutas de red se le pasen como una URI (file://) o con barras inclinadas /.
 
@@ -927,7 +927,7 @@ Tu ruta es muy larga. Si los intentos del punto 1 fallan, haz esta prueba de 10 
 En tu config.js, cambia temporalmente el destinoBase a:
 \\DSMEDIA07\portal324\TEST\ (una carpeta muy corta y sin acentos).
 
-Si ahí SÍ funciona, el problema es que el nombre del proyecto + la ruta de VERTICALITZACIÓ están superando el límite técnico de Windows para rutas de red.
+Si ahí SÍ funciona, el problema es que el nombre del proyecto + la ruta de VERTICALITZACIO están superando el límite técnico de Windows para rutas de red.
 
 💡 Una recomendación de "Supervivencia"
 En entornos corporativos de TV, la solución más estable siempre es mapear la unidad de red.
@@ -969,9 +969,9 @@ Almacenamiento: NAS (UNC Path) \\DSMEDIA07\portal324\...
 
 Punto Crítico: La ruta contiene caracteres especiales y profundidad considerable.
 
-Ejemplo de ruta: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\02_COMARQUES_PROJECTES\
+Ejemplo de ruta: \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\02_COMARQUES_PROJECTES\
 
-Carácter conflictivo: La "Ó" de VERTICALITZACIÓ.
+Carácter conflictivo: La "Ó" de VERTICALITZACIO.
 
 3. Estructura de Nombres (Naming Convention)
 Según los requerimientos del usuario, el sistema debe seguir este patrón:
@@ -1054,7 +1054,7 @@ Aunque la capa de JavaScript (JS) consigue crear las carpetas en el servidor sat
 Datos de la Ruta Crítica
 Servidor: \\DSMEDIA07\portal324\
 
-Carpeta conflictiva: ...AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\...
+Carpeta conflictiva: ...AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\...
 
 Ruta completa: Aproximadamente 215-230 caracteres.
 
@@ -1107,8 +1107,8 @@ A pesar de que la capa de JavaScript (JS) logra crear las carpetas en el NAS sat
 
 ### Datos de la Ruta
 - **Servidor:** \\DSMEDIA07\portal324\
-- **Ruta Completa:** \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\PROVES\02_COMARQUES_PROJECTES\
-- **Conflicto Potencial:** Uso de caracteres especiales como la "Ó" en "VERTICALITZACIÓ" y longitud de ruta (Path Length).
+- **Ruta Completa:** \\DSMEDIA07\portal324\PROJECTE 9x16 PREMIERE 2\AAA_PROJECTES PREMIERE VERTICALITZACIO\PROVES\02_COMARQUES_PROJECTES\
+- **Conflicto Potencial:** Uso de caracteres especiales como la "Ó" en "VERTICALITZACIO" y longitud de ruta (Path Length).
 
 ## 3. Estructura de Nombres Definida
 Se han establecido las siguientes fórmulas de nomenclatura centralizadas en `config.js`:

@@ -31,7 +31,7 @@
 ## Últims canvis fets (avui)
 
 ### 1. `11_Configuracio.js`
-- Canviat `destino_base`: `VERTICALITZACIÓ` → `VERTICALITZACIO` (sense accent)
+- Canviat `destino_base`: `VERTICALITZACIO` → `VERTICALITZACIO` (sense accent)
 - Els projectes es crearan al directori sense accent
 
 ### 2. `15_FFmpeg_Logic.js`
@@ -65,7 +65,7 @@ Al log de les 14:00, `IO.executeShell` amb `cmd /c "C:\temp\extract.bat"` va mos
 | Test | Resultat | Conclusió |
 |------|----------|-----------|
 | `ffmpeg -y "C:\temp\clip.mp4"` | ✅ | ffmpeg a local funciona |
-| `ffmpeg -y "\\UNC\clip.mp4"` (_amb accent_) | ❌ | `VERTICALITZACIÓ` corromput a `VERTICALITZACI├ô` |
+| `ffmpeg -y "\\UNC\clip.mp4"` (_amb accent_) | ❌ | `VERTICALITZACIO` corromput a `VERTICALITZACI├ô` |
 | `ffmpeg -y "\\UNC sense_accent\clip.mp4"` | ✅ | ffmpeg a UNC **sense accent** funciona |
 | `copy /y "C:\temp" "\\UNC\clip.mp4"` (_amb accent_) | ❌ | `The system cannot find the path specified` (Unicode!) |
 | `copy /y "C:\temp" "\\UNC_noaccent\clip.mp4"` | ✅ | `copy` a UNC **sense accent** funciona |

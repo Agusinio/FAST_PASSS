@@ -275,7 +275,7 @@
 
   "paths": {
     "escaletas_nas": "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\ESCALETES\\",
-    "proyectos_premiere": "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIÓ\\PROVES\\",
+    "proyectos_premiere": "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIO\\PROVES\\",
     "bin": "bin/",
     "docs": "docs/",
     "plans": "plans/"
