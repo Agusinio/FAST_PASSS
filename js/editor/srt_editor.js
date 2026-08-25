@@ -40,9 +40,10 @@
         _localPlayInterval: null,
         _ctiSec: 0,
         _ctiAt: 0,
-        _ctiMediaBase: 0,
-        _prevPh: null,
-        _prevAt: null,
+        _phReal: 0,
+        _phRealAt: 0,
+        _prevRealPh: null,
+        _prevRealAt: null,
         _rEff: 1,
         _lastLocalPx: -1,
         _isPlaying: false,
@@ -236,22 +237,27 @@
                         this._ctiSec = sec; // CTI real de Premiere (temps de timeline)
                         // El CTI llegat correspon a ~mig vol del evalScript (compensa latència)
                         this._ctiAt = now0 + (now1 - now0) / 2;
-                        // Playhead a l'espai de MEDIA (on viuen SRT i WF)
+                        // Posició REAL en espai de MEDIA (només amb dades del CTI, sense
+                        // retroalimentació de la interpolació)
                         var mediaPh = this._mediaAtSec(sec);
-                        this._playheadSec = (mediaPh < 0) ? sec : mediaPh;
-                        this._ctiMediaBase = this._playheadSec;
-                        // Mesurar velocitat efectiva del media per segon de rellotge (rEff)
-                        // → interpolació directa en media sense amplificar l'error de tl (×r)
-                        if (this._prevPh !== null && this._prevAt !== null) {
-                            var dtM = (now1 - this._prevAt) / 1000;
-                            var dPh = this._playheadSec - this._prevPh;
+                        var realPh = (mediaPh < 0) ? sec : mediaPh;
+                        // Mesurar velocitat efectiva del media (rEff) NOMÉS amb posicions reals
+                        if (this._prevRealPh !== null && this._prevRealAt !== null) {
+                            var dtM = (now1 - this._prevRealAt) / 1000;
+                            var dPh = realPh - this._prevRealPh;
                             if (dPh > 0.001 && dtM > 0.05 && dtM < 5) {
                                 var rEffM = dPh / dtM;
                                 if (rEffM >= 0.1 && rEffM < 50) this._rEff = rEffM;
                             }
                         }
-                        this._prevPh = this._playheadSec;
-                        this._prevAt = now1;
+                        this._prevRealPh = realPh;
+                        this._prevRealAt = now1;
+                        this._phReal = realPh;
+                        this._phRealAt = now0 + (now1 - now0) / 2;
+                        // En pausa (sense interpolació activa) col·loquem directament el cabezal
+                        if (!this._isPlaying) {
+                            this._playheadSec = realPh;
+                        }
                         this._updatePreview(this._playheadSec);
                     }
                 }
@@ -340,24 +346,24 @@
                 });
                 if (btn) btn.innerHTML = '⏸ PAUSA';
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(function () { self._pollTick(); }, 500);
-                // Interpolació local: playhead fluid i síncron entre polls JSX.
-                // est = últim CTI real + temps local transcorregut (rellotge local, vel 1x);
-                // cada poll (500ms) corregeix la deriva → error acumulat imperceptible.
+                this._pollInterval = setInterval(function () { self._pollTick(); }, 250);
+                // Interpolació directa en MEDIA amb velocitat mesurada (rEff).
+                // rEff es mesura NOMÉS amb posicions reals del CTI (sense retroalimentació).
+                // El render se suavitza proporcionalment per evitar salts quan arriba el poll.
                 if (this._localPlayInterval) clearInterval(this._localPlayInterval);
-                this._prevPh = null; this._prevAt = null; // reiniciar mesura de rEff
+                this._prevRealPh = null; this._prevRealAt = null; // reiniciar mesura de rEff
                 this._localPlayInterval = setInterval(function () {
                     if (!self._isPlaying) return;
                     var now = (window.performance && performance.now) ? performance.now() : Date.now();
-                    // Interpolació directa en MEDIA (evita amplificar l'error de tl ×r)
-                    var ph = self._ctiMediaBase + self._rEff * (now - self._ctiAt) / 1000;
-                    if (ph < 0) ph = 0;
-                    var pxEst = ph * self._pixelsPerSec;
+                    var est = self._phReal + self._rEff * (now - self._phRealAt) / 1000;
+                    if (est < 0) est = 0;
+                    // Suavitzat: absorbir la diferència sense salts bruscos
+                    self._playheadSec += (est - self._playheadSec) * 0.5;
+                    var pxEst = self._playheadSec * self._pixelsPerSec;
                     if (Math.abs(pxEst - self._lastLocalPx) < 0.5) return; // estalvi: no redibuixar si no es mou
                     self._lastLocalPx = pxEst;
-                    self._playheadSec = ph;
                     self.render();
-                    self._updatePreview(ph);
+                    self._updatePreview(self._playheadSec);
                 }, 66);
             } else {
                 callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
@@ -748,7 +754,7 @@
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             this._wfMediaStart = 0; this._wfMediaEnd = 0;
             this._markers = []; this._editMode = "move"; this._dragIdx = -1; this._dragSnapshot = null;
-            this._ctiMediaBase = 0; this._prevPh = null; this._prevAt = null; this._rEff = 1;
+            this._phReal = 0; this._phRealAt = 0; this._prevRealPh = null; this._prevRealAt = null; this._rEff = 1;
             var btnMode = document.getElementById('btnSrtMode');
             if (btnMode) { btnMode.textContent = '⇒ MOURE'; btnMode.style.background = ''; }
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
