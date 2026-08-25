@@ -55,8 +55,9 @@
         try {
             var extRoot = await utils.getExtPath();
             if (extRoot) {
-                candidates.push(extRoot + "\\bin\\ffmpeg\\bin\\ffmpeg.exe");
-                candidates.push(extRoot + "\\bin\\ffmpeg\\ffmpeg.exe");
+                var rootWin = extRoot.replace(/\//g, "\\");
+                candidates.push(rootWin + "\\bin\\ffmpeg\\bin\\ffmpeg.exe");
+                candidates.push(rootWin + "\\bin\\ffmpeg\\ffmpeg.exe");
             }
         } catch(e) {}
         return _firstExisting(candidates.concat(FFMPEG_CANDIDATES));
@@ -66,8 +67,9 @@
         try {
             var extRoot = await utils.getExtPath();
             if (extRoot) {
-                candidates.push(extRoot + "\\bin\\ffmpeg\\bin\\ffprobe.exe");
-                candidates.push(extRoot + "\\bin\\ffmpeg\\ffprobe.exe");
+                var rootWin = extRoot.replace(/\//g, "\\");
+                candidates.push(rootWin + "\\bin\\ffmpeg\\bin\\ffprobe.exe");
+                candidates.push(rootWin + "\\bin\\ffmpeg\\ffprobe.exe");
             }
         } catch(e) {}
         return _firstExisting(candidates.concat(FFPROBE_CANDIDATES));
@@ -308,8 +310,7 @@
          * @param {string} args - Arguments del comando FFmpeg
          */
         runCommand: async function(args) {
-            const extRoot = await utils.getExtPath();
-            const ffmpegBin = `${extRoot}/bin/ffmpeg.exe`.replace(/\//g, "\\");
+            const ffmpegBin = await getFfmpeg();
 
             const fullCommand = `"${ffmpegBin}" ${args}`;
             utils.log(`🎬 Executant FFmpeg: ${fullCommand}`);
