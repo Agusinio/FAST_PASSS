@@ -170,7 +170,7 @@
          *   1) Demana Base64 (cep.encoding.Base64) + atob → bytes exactes (evita corrupció UTF-8)
          *   2) Autodetecció: "UklGR" = Base64 de "RIFF" → atob; "RIFF" → bytes crus; sinó → crues
          *   3) Localitza el chunk "data" recorrent els chunks RIFF (fallback: offset 44)
-         *   4) v = |byte-128|/128, guany x3 amb clamp
+         *   4) v = |byte-128|/maxAbs del bin (normalització fidel, sense saturació)
          *   5) Redueix a densitat fixa (peaksPerSec) amb màxim per grup → zoom solidari
          * @param {string} binPath - Path complet al .bin
          * @param {number} peaksPerSec - Densitat de peaks per segon (defecte 100)
@@ -248,10 +248,20 @@
                 }
                 if (dataLen <= 0) return null;
 
-                // 4. Convertir mostres unsigned 8-bit → peaks (guany x3 amb clamp)
+                // 4. Convertir mostres unsigned 8-bit → peaks
+                // Normalització FIDEL al perfil real: v = |b-128| / maxAbs del bin.
+                // Sense guany x3 ni saturació → el perfil (siluetes/pauses) coincideix
+                // amb la forma de la WF del timeline de Premiere (que normalitza pel
+                // seu propi màxim).
+                var maxAbs = 0;
+                for (var b0 = dataOff; b0 < dataOff + dataLen; b0++) {
+                    var av0 = Math.abs(bytes[b0] - 128);
+                    if (av0 > maxAbs) maxAbs = av0;
+                }
+                if (maxAbs < 1) maxAbs = 1;
                 var rawPeaks = [];
                 for (var b = dataOff; b < dataOff + dataLen; b++) {
-                    var v = Math.abs(bytes[b] - 128) / 128 * 3;
+                    var v = Math.abs(bytes[b] - 128) / maxAbs;
                     if (v > 1) v = 1;
                     rawPeaks.push(v);
                 }

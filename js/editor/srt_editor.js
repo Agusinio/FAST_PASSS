@@ -280,7 +280,9 @@
                     var N = Math.min(8, segs.length);
                     for (var d = 0; d < N; d++) {
                         var sg = segs[d];
-                        log("📝 SRT_EDIT:   seg[" + d + "] v" + sg.v + " tl=" + sg.s.toFixed(2) + "-" + sg.e.toFixed(2) + "s ← media=" + sg.m.toFixed(2) + "s \"" + (sg.n || "?") + "\"");
+                        // media_out = m + (e - s) * r  (últim segon de media del segment)
+                        var mOut = sg.m + (sg.e - sg.s) * sg.r;
+                        log("📝 SRT_EDIT:   seg[" + d + "] v" + sg.v + " tl=" + sg.s.toFixed(2) + "-" + sg.e.toFixed(2) + "s (dur=" + (sg.e - sg.s).toFixed(2) + ") ← media=" + sg.m.toFixed(2) + "->" + mOut.toFixed(2) + "s r=" + sg.r.toFixed(3) + " \"" + (sg.n || "?") + "\"");
                     }
                 }
             } catch(e) { }
