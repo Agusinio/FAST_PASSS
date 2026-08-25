@@ -227,16 +227,18 @@
                 if (cti && cti !== "null" && cti !== "") {
                     var sec = parseFloat(cti);
                     if (!isNaN(sec)) {
-                        this._playheadSec = sec;
-                        this._ctiSec = sec;
+                        this._ctiSec = sec; // CTI real de Premiere (temps de timeline)
                         // El CTI llegat correspon a ~mig vol del evalScript (compensa latència)
                         this._ctiAt = now0 + (now1 - now0) / 2;
-                        this._updatePreview(sec);
+                        // Playhead a l'espai de MEDIA (on viuen SRT i WF)
+                        var mediaPh = this._mediaAtSec(sec);
+                        this._playheadSec = (mediaPh < 0) ? sec : mediaPh;
+                        this._updatePreview(this._playheadSec);
                     }
                 }
                 this._pollCount = (this._pollCount || 0) + 1;
                 if (this._pollCount % 5 === 1) { await this._refreshWaveformSegments(); }
-                if (this._isPlaying && this._pollCount % 10 === 0) { log("⏱ SRT_SYNC cti=" + this._playheadSec.toFixed(2)); }
+                if (this._isPlaying && this._pollCount % 10 === 0) { log("⏱ SRT_SYNC tl=" + this._ctiSec.toFixed(2)); }
                 this.render();
             } catch(e) { }
         },
@@ -317,14 +319,16 @@
                 this._localPlayInterval = setInterval(function () {
                     if (!self._isPlaying) return;
                     var now = (window.performance && performance.now) ? performance.now() : Date.now();
-                    var est = self._ctiSec + (now - self._ctiAt) / 1000;
+                    var est = self._ctiSec + (now - self._ctiAt) / 1000; // est és TL
                     if (est < 0) est = 0;
-                    var pxEst = est * self._pixelsPerSec;
+                    var mediaPh = self._mediaAtSec(est);
+                    var ph = (mediaPh < 0) ? est : mediaPh;
+                    var pxEst = ph * self._pixelsPerSec;
                     if (Math.abs(pxEst - self._lastLocalPx) < 0.5) return; // estalvi: no redibuixar si no es mou
                     self._lastLocalPx = pxEst;
-                    self._playheadSec = est;
+                    self._playheadSec = ph;
                     self.render();
-                    self._updatePreview(est);
+                    self._updatePreview(ph);
                 }, 66);
             } else {
                 callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
@@ -358,14 +362,15 @@
             this._drawMarkers(ctx);
             this._drawPlayhead();
 
-            // Diagnòstic: TC del cabezal i media que dibuixa la WF en aquest punt
-            // (per verificar la correspondència WF↔timeline)
-            var med = this._mediaAtSec(this._playheadSec);
+            // Diagnòstic: media del cabezal (espai dels subtítols) i tl de Premiere
+            // (per verificar la correspondència WF↔timeline en la mateixa escala)
+            var med = this._playheadSec;
+            var tl = this._tlAtMedia(med);
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(this._canvas.width - 235, 0, 235, 15);
+            ctx.fillRect(2, 0, 280, 15);
             ctx.fillStyle = '#ffcc55';
             ctx.font = '10px monospace';
-            ctx.fillText('tl=' + this._playheadSec.toFixed(2) + 's → media=' + (med < 0 ? 'fora de clip' : med.toFixed(2) + 's'), this._canvas.width - 230, 11);
+            ctx.fillText('media=' + med.toFixed(2) + 's | tl=' + tl.toFixed(2) + 's', 6, 11);
         },
 
         _drawRuler: function (ctx) {
@@ -411,30 +416,16 @@
             ctx.fillStyle = '#0d2818';
             ctx.fillRect(0, y, this._canvas.width, wh);
             if (this._waveformPeaks && this._waveformPeaks.length > 0) {
-                // Mapa temps_timeline → temps_media (segments del timeline) → peaks
+                // Espai de MEDIA del clip (identitat): la WF coincideix amb els
+                // subtítols del SRT (que viuen en temps de media). El cabezal
+                // converteix tl↔media (vegeu _mediaAtSec/_tlAtMedia).
                 var pps = this._waveformPPS || 480;
                 var nPeaks = this._waveformPeaks.length;
-                var segs = this._waveformSegments || [];
                 ctx.fillStyle = '#22cc66';
                 for (var px = 0; px < this._canvas.width; px++) {
                     var sec = px / this._pixelsPerSec;
                     var secEnd = (px + 1) / this._pixelsPerSec;
-                    // Trobar el segment del timeline que cobreix aquest instant
-                    // (ordenats: pista baixa primer). Si no hi ha segments → identitat.
-                    var mediaSec = -1, mediaSecEnd = -1;
-                    if (segs.length === 0) {
-                        mediaSec = sec; mediaSecEnd = secEnd;
-                    } else {
-                        for (var g = 0; g < segs.length; g++) {
-                            var sg = segs[g];
-                            if (sec >= sg.s && sec < sg.e) {
-                                mediaSec = sg.m + (sec - sg.s) * sg.r;
-                                mediaSecEnd = sg.m + (Math.min(secEnd, sg.e) - sg.s) * sg.r;
-                                break;
-                            }
-                        }
-                        if (mediaSec < 0) continue; // fora de clip → buit (com al timeline)
-                    }
+                    var mediaSec = sec, mediaSecEnd = secEnd;
                     var idxStart = Math.floor(mediaSec * pps);
                     var idxEnd = Math.max(idxStart + 1, Math.floor(mediaSecEnd * pps));
                     if (idxStart < 0) continue;
@@ -518,8 +509,8 @@
         },
 
         /**
-         * _mediaAtSec: retorna el temps de media que la WF dibuixa a l'instant
-         * de timeline 'sec' (mateix mapeig que _drawWaveform). -1 si fora de clip.
+         * _mediaAtSec: retorna el temps de media que correspon a un instant de
+         * timeline 'sec' (invers del mapeig dels segments). -1 si fora de clip.
          */
         _mediaAtSec: function (sec) {
             var segs = this._waveformSegments || [];
@@ -529,6 +520,23 @@
                 if (sec >= sg.s && sec < sg.e) return sg.m + (sec - sg.s) * sg.r;
             }
             return -1;
+        },
+
+        /**
+         * _tlAtMedia: retorna el temps de timeline on sona el temps de media 'media'.
+         * (invers de _mediaAtSec). Fora de cap segment → retorna 'media' (identitat).
+         */
+        _tlAtMedia: function (media) {
+            var segs = this._waveformSegments || [];
+            if (segs.length === 0) return media;
+            for (var g = 0; g < segs.length; g++) {
+                var sg = segs[g];
+                var mEnd = sg.m + (sg.e - sg.s) * sg.r;
+                if (media >= sg.m && media < mEnd) {
+                    return sg.s + (media - sg.m) / sg.r;
+                }
+            }
+            return media;
         },
 
         /**
@@ -615,8 +623,10 @@
 
         setPlayhead: function (sec) {
             if (sec < 0) sec = 0;
+            // sec és temps de MEDIA (espai dels subtítols i la WF) → convertir a TL per Premiere
             this._playheadSec = sec;
-            callJSX("Timeline.set(" + sec.toFixed(3) + ")");
+            var tl = this._tlAtMedia(sec);
+            callJSX("Timeline.set(" + tl.toFixed(3) + ")");
             this.render();
             this._updatePreview(sec);
         },
