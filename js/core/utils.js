@@ -22,7 +22,12 @@
          */
         _setLogPath: function(folderPath, projectName) {
             var normalized = folderPath.replace(/\\/g, '\\').replace(/\/$/, '');
-            this._debugLogPath = normalized + '\\' + projectName + '.log';
+            // Log comú a la carpeta PROVES (per seguir qualsevol projecte des d'un únic fitxer obert a l'editor)
+            var provIdx = normalized.toUpperCase().indexOf('\\PROVES\\');
+            if (provIdx > 0) {
+                normalized = normalized.substring(0, provIdx) + '\\PROVES';
+            }
+            this._debugLogPath = normalized + '\\FASTPASS.log';
             this._logBuffer = [];
             try {
                 window.cep.fs.writeFile(this._debugLogPath, '');
