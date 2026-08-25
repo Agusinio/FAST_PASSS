@@ -34,6 +34,8 @@
         _waveformPPS: 480,
         _waveformSegments: [],
         _waveformMediaTag: "",
+        _wfMediaStart: 0,
+        _wfMediaEnd: 0,
         _pollCount: 0,
         _localPlayInterval: null,
         _ctiSec: 0,
@@ -272,6 +274,16 @@
                 }
                 segs.sort(function (a, b) { return a.v - b.v || a.s - b.s; });
                 this._waveformSegments = segs;
+                // Rang de media cobert pel timeline (recurs de la WF al trimeo real)
+                var wfStart = Infinity, wfEnd = -Infinity;
+                for (var wi = 0; wi < segs.length; wi++) {
+                    var mIn = segs[wi].m;
+                    var mOut = segs[wi].m + (segs[wi].e - segs[wi].s) * segs[wi].r;
+                    if (mIn < wfStart) wfStart = mIn;
+                    if (mOut > wfEnd) wfEnd = mOut;
+                }
+                this._wfMediaStart = isFinite(wfStart) ? wfStart : 0;
+                this._wfMediaEnd = isFinite(wfEnd) ? wfEnd : 0;
                 // Log diagnòstic quan canvia el mapa (o primer cop): resum de medias + primers segments
                 if (this._lastSegLog !== segs.length) {
                     this._lastSegLog = segs.length;
@@ -421,10 +433,15 @@
                 // converteix tl↔media (vegeu _mediaAtSec/_tlAtMedia).
                 var pps = this._waveformPPS || 480;
                 var nPeaks = this._waveformPeaks.length;
+                var wfStart = this._wfMediaStart || 0;
+                var wfEnd = this._wfMediaEnd || 0;
+                var hasRange = (wfEnd > wfStart);
                 ctx.fillStyle = '#22cc66';
                 for (var px = 0; px < this._canvas.width; px++) {
                     var sec = px / this._pixelsPerSec;
                     var secEnd = (px + 1) / this._pixelsPerSec;
+                    // Recurs al trimeo real del timeline: només dibuixar el rang de media cobert
+                    if (hasRange && (sec < wfStart || sec >= wfEnd)) continue;
                     var mediaSec = sec, mediaSecEnd = secEnd;
                     var idxStart = Math.floor(mediaSec * pps);
                     var idxEnd = Math.max(idxStart + 1, Math.floor(mediaSecEnd * pps));
@@ -712,6 +729,7 @@
             this._entries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
             this._waveformPeaks = null; this._waveformPPS = 480; this._isPlaying = false;
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
+            this._wfMediaStart = 0; this._wfMediaEnd = 0;
             this._markers = []; this._editMode = "move"; this._dragIdx = -1; this._dragSnapshot = null;
             var btnMode = document.getElementById('btnSrtMode');
             if (btnMode) { btnMode.textContent = '⇒ MOURE'; btnMode.style.background = ''; }
