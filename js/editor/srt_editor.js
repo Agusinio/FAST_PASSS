@@ -40,6 +40,10 @@
         _localPlayInterval: null,
         _ctiSec: 0,
         _ctiAt: 0,
+        _ctiMediaBase: 0,
+        _prevPh: null,
+        _prevAt: null,
+        _rEff: 1,
         _lastLocalPx: -1,
         _isPlaying: false,
         _markers: [],
@@ -235,6 +239,19 @@
                         // Playhead a l'espai de MEDIA (on viuen SRT i WF)
                         var mediaPh = this._mediaAtSec(sec);
                         this._playheadSec = (mediaPh < 0) ? sec : mediaPh;
+                        this._ctiMediaBase = this._playheadSec;
+                        // Mesurar velocitat efectiva del media per segon de rellotge (rEff)
+                        // → interpolació directa en media sense amplificar l'error de tl (×r)
+                        if (this._prevPh !== null && this._prevAt !== null) {
+                            var dtM = (now1 - this._prevAt) / 1000;
+                            var dPh = this._playheadSec - this._prevPh;
+                            if (dPh > 0.001 && dtM > 0.05 && dtM < 5) {
+                                var rEffM = dPh / dtM;
+                                if (rEffM >= 0.1 && rEffM < 50) this._rEff = rEffM;
+                            }
+                        }
+                        this._prevPh = this._playheadSec;
+                        this._prevAt = now1;
                         this._updatePreview(this._playheadSec);
                     }
                 }
@@ -328,13 +345,13 @@
                 // est = últim CTI real + temps local transcorregut (rellotge local, vel 1x);
                 // cada poll (500ms) corregeix la deriva → error acumulat imperceptible.
                 if (this._localPlayInterval) clearInterval(this._localPlayInterval);
+                this._prevPh = null; this._prevAt = null; // reiniciar mesura de rEff
                 this._localPlayInterval = setInterval(function () {
                     if (!self._isPlaying) return;
                     var now = (window.performance && performance.now) ? performance.now() : Date.now();
-                    var est = self._ctiSec + (now - self._ctiAt) / 1000; // est és TL
-                    if (est < 0) est = 0;
-                    var mediaPh = self._mediaAtSec(est);
-                    var ph = (mediaPh < 0) ? est : mediaPh;
+                    // Interpolació directa en MEDIA (evita amplificar l'error de tl ×r)
+                    var ph = self._ctiMediaBase + self._rEff * (now - self._ctiAt) / 1000;
+                    if (ph < 0) ph = 0;
                     var pxEst = ph * self._pixelsPerSec;
                     if (Math.abs(pxEst - self._lastLocalPx) < 0.5) return; // estalvi: no redibuixar si no es mou
                     self._lastLocalPx = pxEst;
@@ -731,6 +748,7 @@
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             this._wfMediaStart = 0; this._wfMediaEnd = 0;
             this._markers = []; this._editMode = "move"; this._dragIdx = -1; this._dragSnapshot = null;
+            this._ctiMediaBase = 0; this._prevPh = null; this._prevAt = null; this._rEff = 1;
             var btnMode = document.getElementById('btnSrtMode');
             if (btnMode) { btnMode.textContent = '⇒ MOURE'; btnMode.style.background = ''; }
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
