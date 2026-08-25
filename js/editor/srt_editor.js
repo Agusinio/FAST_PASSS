@@ -240,11 +240,13 @@
                             this._playheadSec = realPh;
                         }
                         this._updatePreview(this._playheadSec);
+                        if (this._isPlaying) {
+                            log("⏱ PLY tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " show=" + this._playheadSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms");
+                        }
                     }
                 }
                 this._pollCount = (this._pollCount || 0) + 1;
                 if (this._pollCount % 5 === 1) { await this._refreshWaveformSegments(); }
-                if (this._isPlaying && this._pollCount % 4 === 0) { log("⏱ SRT_SYNC tl=" + this._ctiSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms"); }
                 this.render();
             } catch(e) { }
         },
@@ -322,6 +324,7 @@
             var btn = document.getElementById('btnSrtPlay');
             var self = this;
             if (this._isPlaying) {
+                log("▶▶ PLAY inici: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
                 callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().play();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
                     log("📝 SRT: PLAY result: " + result);
                 });
@@ -351,6 +354,7 @@
                     log("📝 SRT: STOP result: " + result);
                 });
                 if (btn) btn.innerHTML = '▶ PLAY';
+                log("⏸⏸ PAUSA: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
                 if (this._localPlayInterval) { clearInterval(this._localPlayInterval); this._localPlayInterval = null; }
                 if (this._pollInterval) clearInterval(this._pollInterval);
                 this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
