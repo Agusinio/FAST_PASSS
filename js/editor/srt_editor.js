@@ -40,11 +40,7 @@
         _localPlayInterval: null,
         _ctiSec: 0,
         _ctiAt: 0,
-        _phReal: 0,
-        _phRealAt: 0,
-        _prevRealPh: null,
-        _prevRealAt: null,
-        _rEff: 1,
+        _lastLocalT: -1,
         _lastLocalPx: -1,
         _isPlaying: false,
         _markers: [],
@@ -237,24 +233,9 @@
                         this._ctiSec = sec; // CTI real de Premiere (temps de timeline)
                         // El CTI llegat correspon a ~mig vol del evalScript (compensa latència)
                         this._ctiAt = now0 + (now1 - now0) / 2;
-                        // Posició REAL en espai de MEDIA (només amb dades del CTI, sense
-                        // retroalimentació de la interpolació)
+                        // Posició real en MEDIA (per posicionar directament en pausa)
                         var mediaPh = this._mediaAtSec(sec);
                         var realPh = (mediaPh < 0) ? sec : mediaPh;
-                        // Mesurar velocitat efectiva del media (rEff) NOMÉS amb posicions reals
-                        if (this._prevRealPh !== null && this._prevRealAt !== null) {
-                            var dtM = (now1 - this._prevRealAt) / 1000;
-                            var dPh = realPh - this._prevRealPh;
-                            if (dPh > 0.001 && dtM > 0.05 && dtM < 5) {
-                                var rEffM = dPh / dtM;
-                                if (rEffM >= 0.1 && rEffM < 50) this._rEff = rEffM;
-                            }
-                        }
-                        this._prevRealPh = realPh;
-                        this._prevRealAt = now1;
-                        this._phReal = realPh;
-                        this._phRealAt = now0 + (now1 - now0) / 2;
-                        // En pausa (sense interpolació activa) col·loquem directament el cabezal
                         if (!this._isPlaying) {
                             this._playheadSec = realPh;
                         }
@@ -263,7 +244,7 @@
                 }
                 this._pollCount = (this._pollCount || 0) + 1;
                 if (this._pollCount % 5 === 1) { await this._refreshWaveformSegments(); }
-                if (this._isPlaying && this._pollCount % 10 === 0) { log("⏱ SRT_SYNC tl=" + this._ctiSec.toFixed(2)); }
+                if (this._isPlaying && this._pollCount % 4 === 0) { log("⏱ SRT_SYNC tl=" + this._ctiSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms"); }
                 this.render();
             } catch(e) { }
         },
@@ -347,21 +328,21 @@
                 if (btn) btn.innerHTML = '⏸ PAUSA';
                 if (this._pollInterval) clearInterval(this._pollInterval);
                 this._pollInterval = setInterval(function () { self._pollTick(); }, 250);
-                // Interpolació directa en MEDIA amb velocitat mesurada (rEff).
-                // rEff es mesura NOMÉS amb posicions reals del CTI (sense retroalimentació).
-                // El render se suavitza proporcionalment per evitar salts quan arriba el poll.
+                // Interpolació: el CTI de Premiere avança SEMPRE a 1× en temps de timeline,
+                // així que s'extrapola en tl (velocitat exacta) i es converteix a media.
+                // Render suavitzat + umbral per TEMPS (independent del zoom +/−).
                 if (this._localPlayInterval) clearInterval(this._localPlayInterval);
-                this._prevRealPh = null; this._prevRealAt = null; // reiniciar mesura de rEff
                 this._localPlayInterval = setInterval(function () {
                     if (!self._isPlaying) return;
                     var now = (window.performance && performance.now) ? performance.now() : Date.now();
-                    var est = self._phReal + self._rEff * (now - self._phRealAt) / 1000;
-                    if (est < 0) est = 0;
+                    var estTl = self._ctiSec + (now - self._ctiAt) / 1000; // tl avança a 1×
+                    if (estTl < 0) estTl = 0;
+                    var mPh = self._mediaAtSec(estTl);
+                    var ph = (mPh < 0) ? estTl : mPh;
                     // Suavitzat: absorbir la diferència sense salts bruscos
-                    self._playheadSec += (est - self._playheadSec) * 0.5;
-                    var pxEst = self._playheadSec * self._pixelsPerSec;
-                    if (Math.abs(pxEst - self._lastLocalPx) < 0.5) return; // estalvi: no redibuixar si no es mou
-                    self._lastLocalPx = pxEst;
+                    self._playheadSec += (ph - self._playheadSec) * 0.6;
+                    if (Math.abs(self._playheadSec - self._lastLocalT) < 0.02) return;
+                    self._lastLocalT = self._playheadSec;
                     self.render();
                     self._updatePreview(self._playheadSec);
                 }, 66);
@@ -754,7 +735,7 @@
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             this._wfMediaStart = 0; this._wfMediaEnd = 0;
             this._markers = []; this._editMode = "move"; this._dragIdx = -1; this._dragSnapshot = null;
-            this._phReal = 0; this._phRealAt = 0; this._prevRealPh = null; this._prevRealAt = null; this._rEff = 1;
+            this._lastLocalT = -1; this._lastLocalPx = -1;
             var btnMode = document.getElementById('btnSrtMode');
             if (btnMode) { btnMode.textContent = '⇒ MOURE'; btnMode.style.background = ''; }
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
