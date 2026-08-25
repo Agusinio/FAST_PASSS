@@ -357,6 +357,15 @@
             this._drawWaveform(ctx, waveformY);
             this._drawMarkers(ctx);
             this._drawPlayhead();
+
+            // Diagnòstic: TC del cabezal i media que dibuixa la WF en aquest punt
+            // (per verificar la correspondència WF↔timeline)
+            var med = this._mediaAtSec(this._playheadSec);
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(this._canvas.width - 235, 0, 235, 15);
+            ctx.fillStyle = '#ffcc55';
+            ctx.font = '10px monospace';
+            ctx.fillText('tl=' + this._playheadSec.toFixed(2) + 's → media=' + (med < 0 ? 'fora de clip' : med.toFixed(2) + 's'), this._canvas.width - 230, 11);
         },
 
         _drawRuler: function (ctx) {
@@ -504,6 +513,20 @@
             var tol = this._MARKER_TOL_PX / this._pixelsPerSec;
             for (var i = 0; i < this._markers.length; i++) {
                 if (Math.abs(this._markers[i] - sec) <= tol) return i;
+            }
+            return -1;
+        },
+
+        /**
+         * _mediaAtSec: retorna el temps de media que la WF dibuixa a l'instant
+         * de timeline 'sec' (mateix mapeig que _drawWaveform). -1 si fora de clip.
+         */
+        _mediaAtSec: function (sec) {
+            var segs = this._waveformSegments || [];
+            if (segs.length === 0) return sec;
+            for (var g = 0; g < segs.length; g++) {
+                var sg = segs[g];
+                if (sec >= sg.s && sec < sg.e) return sg.m + (sec - sg.s) * sg.r;
             }
             return -1;
         },
