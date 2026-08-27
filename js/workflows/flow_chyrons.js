@@ -633,9 +633,10 @@
                 let conductTime;
 
                 if (isFirstItem) {
-                    // Primer item: localitzar el clip V1 del bloc actiu (el que conte
-                    // targetTime) en lloc de clips[0] (primer clip del timeline complet,
-                    // nomes valid quan el bloc esta aillat per TROSEJA).
+                    // Primer item: localitzar el segment del clip del bloc actiu a la
+                    // pista MP4 (v_mp4=1, on hi ha el clip del bloc, ex: TNV_V2_CLIP.mp4)
+                    // que conte targetTime. Abans s'usava clips[0] (primer segment del
+                    // timeline complet, nomes valid quan el bloc esta aillat per TROSEJA).
                     const clips = await getClipsLogic().getTrackClips(1, "video");
                     let blockClip = null;
                     for (const cl of clips) {
