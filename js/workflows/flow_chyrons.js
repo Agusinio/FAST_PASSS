@@ -591,43 +591,15 @@
                 }
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // Buscar el PRIMER item del bloc amb sufix de conductor (dp, i, lead, f)
-                // El conductor es col·loca aquí independentment de si la estructura té un chyron CONDUCTOR
-                // (el conductor ve del desplegable SETUP, no de l'estructura)
-                const CONDUCTOR_SUFFIX = ['dp', 'i', 'lead', 'f'];
-                let targetTime = null;
-                let targetId = null;
-
-                for (const m of structuralMarkers) {
-                    const rawId = (m.comments || "").split("-")[0].trim();
-                    const baseMatch = rawId.match(/^(\d+)/);
-                    if (!baseMatch) continue;
-                    const base = baseMatch[1];
-
-                    // Provar coincidència directa
-                    if (structureById[rawId]) {
-                        if (!targetTime) { targetTime = m.time; targetId = rawId; break; }
-                    }
-                    // Provar per sufixos
-                    for (const suf of CONDUCTOR_SUFFIX) {
-                        if (structureById[base + suf]) {
-                            if (!targetTime) { targetTime = m.time; targetId = base + suf; break; }
-                        }
-                    }
-                    if (targetTime !== null) break;
-                }
-
-                if (!targetTime) {
-                    log("⚠️ [Conductor] No hi ha cap item amb sufix dp/i/lead/f al bloc.", "WARN");
-                    getUtils().status("Conductor: cap item de tipus dp/i/lead/f", "warn");
-                    return;
-                }
-                log(`🔬 [Conductor] Conductor trobat a: ${targetId} @ ${targetTime.toFixed(2)}s`);
-
-                // Determinar si aquest item és el primer del bloc
+                // El conductor es colÂ·loca al PRIMER item estructural del bloc:
+                // el marcador estructural mes primerenc del timeline (ja ordenat per temps).
+                // No cal dependre de State.structure ni de structureById.
                 const firstMarker = structuralMarkers[0];
-                const isFirstItem = Math.abs(firstMarker.time - targetTime) < 0.5;
-                log(`🔬 [Conductor] Primer marcador del bloc: ${firstMarker.time.toFixed(2)}s. Item és el primer? ${isFirstItem ? 'SÍ' : 'NO'}`);
+                const targetId = (firstMarker.comments || "").split("-")[0].trim();
+                const targetTime = firstMarker.time;
+                const isFirstItem = true; // sempre es el primer item del bloc
+
+                log(`[Conductor] Primer item del bloc: ${targetId} @ ${targetTime.toFixed(2)}s`);
 
                 // Calcular posició del conductor
                 let conductTime;
@@ -667,7 +639,8 @@
 
                 // Col·locar conductor
                 const escapedName = getUtils().escape(conductorFile);
-                await callJSX(`Clips.insert('${escapedName}', ${T_CHY}, ${conductTime}, null, 'video')`);
+                const insertRes = await callJSX(`Clips.insert('${escapedName}', ${T_CHY}, ${conductTime}, null, 'video')`);
+                log(`   [Conductor] Resultat insert: ${insertRes}`);
                 log(`   ✅ [Conductor] "${conductorFile}" → V6 @ ${conductTime.toFixed(2)}s`);
                 getUtils().status("Conductor col·locat", "exito");
 
