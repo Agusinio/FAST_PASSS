@@ -633,11 +633,22 @@
                 let conductTime;
 
                 if (isFirstItem) {
-                    // Primer item: usar clips[0].start com a referència (0.00s post-TROSEJA)
-                    // NO buscar el clipV1 per targetTime (que pot ser 33+ si el marcador no s'ha actualitzat)
+                    // Primer item: localitzar el clip V1 del bloc actiu (el que conte
+                    // targetTime) en lloc de clips[0] (primer clip del timeline complet,
+                    // nomes valid quan el bloc esta aillat per TROSEJA).
                     const clips = await getClipsLogic().getTrackClips(1, "video");
-                    const clipStart = clips.length > 0 ? clips[0].start : 0;
-                    const clipEnd = clips.length > 0 ? clips[0].end : targetTime + 10;
+                    let blockClip = null;
+                    for (const cl of clips) {
+                        if (cl.start <= targetTime && cl.end > targetTime) { blockClip = cl; break; }
+                    }
+                    if (!blockClip) {
+                        for (const cl of clips) {
+                            if (cl.start >= targetTime - 0.05) { blockClip = cl; break; }
+                        }
+                    }
+                    if (!blockClip && clips.length > 0) blockClip = clips[clips.length - 1];
+                    const clipStart = blockClip ? blockClip.start : (clips.length > 0 ? clips[0].start : 0);
+                    const clipEnd = blockClip ? blockClip.end : (clips.length > 0 ? clips[0].end : targetTime + 10);
                     const margenDisponible = clipEnd - clipStart;
                     const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + 4.40; // ~11.04s
 
