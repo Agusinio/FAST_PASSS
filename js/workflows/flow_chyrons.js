@@ -560,7 +560,10 @@
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const T_CHY = cfg.tracks.video.chyrons;
-            const struct = FASTPASS_UI.State.structure;
+            const stateStruct = FASTPASS_UI.State.structure;
+            const struct = (stateStruct && stateStruct.length > 0)
+                ? stateStruct
+                : await this._getStructureFromMarkers();
             const structureById = {};
             for (const entry of struct || []) { if (entry.id) structureById[entry.id] = entry; }
 
