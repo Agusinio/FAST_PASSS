@@ -87,7 +87,11 @@
             const resClone = await callJSX(`FASTPASS.Project.cloneSeq('${encodeURIComponent(plantillaSeq)}')`);
             
             if (resClone && resClone.indexOf("ERR") === -1) {
-                const temaNet = wottData.tema.toUpperCase();
+                // Usar sanitizedTheme (tema real extret del JSON), NO wottData.tema
+                // (que pot ser "INTRO"/"PENDENT" quan el scanner no detecta tema als rètols).
+                const temaNet = (sanitizedTheme && sanitizedTheme.length > 2)
+                    ? sanitizedTheme.toUpperCase()
+                    : (wottData && wottData.tema ? wottData.tema.toUpperCase() : "TEMA");
                 const finalSeqName = `${shortProg}_${temaNet}`;
                 
                 utils.log(`📝 Seqüència clonada [${resClone}]. Renombrant a: ${finalSeqName}`);
@@ -329,10 +333,28 @@
             if (media?.mp4?.path && !existing.media.includes(media.mp4.name)) {
                 mediaList.push(media.mp4.path.replace(/\\/g, "/"));
             }
-            if (media?.srt?.path && !existing.media.includes(media.srt.name)) {
-                mediaList.push(media.srt.path.replace(/\\/g, "/"));
+
+            // SRT: es copia SEMPRE al directori del projecte (font única local).
+            // Així CARREGAR troba exactament un .srt al costat del .prproj,
+            // sense dependre del bin de Premiere (que pot tenir .srt residuals).
+            let srtImportPath = null;
+            if (media?.srt?.path) {
+                const destFolder = (ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir)
+                    .replace(/\\/g, "/").replace(/\/+$/, "");
+                const localSrt = destFolder + "/" + media.srt.name;
+                const copyResult = await this._copySrtToProjectFolder(media.srt.path, localSrt);
+                if (copyResult === "OK") {
+                    srtImportPath = localSrt;
+                    utils.log(`📥 SRT copiat al directori del projecte: ${localSrt}`);
+                } else {
+                    srtImportPath = media.srt.path.replace(/\\/g, "/");
+                    utils.log(`⚠️ No s'ha pogut copiar el SRT al projecte (${copyResult}). S'importarà des del NAS.`);
+                }
+                if (!existing.media.includes(media.srt.name)) {
+                    mediaList.push(srtImportPath);
+                }
             }
-        
+
             if (mediaList.length > 0) {
                 utils.log(`📥 Ingestant assets media al ROOT...`);
                 await utils.importList(mediaList, "root");
@@ -392,6 +414,21 @@
             } catch (e) {
                 utils.log("⚠️ Error obteniendo assets existentes: " + e.message, "WARN");
                 return { wotts: [], media: [], portadas: [] };
+            }
+        },
+
+        /**
+         * _copySrtToProjectFolder: Copia el .srt al directori del projecte via JSX (File.copy).
+         * @returns {Promise<string>} "OK" si s'ha copiat, o "ERR:..." en cas contrari.
+         */
+        _copySrtToProjectFolder: async function (src, dst) {
+            try {
+                const srcEsc = String(src).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const dstEsc = String(dst).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const jsx = "(function(){try{var s=new File('" + srcEsc + "');var d=new File('" + dstEsc + "');if(!s.exists)return'ERR_SRC_NOT_FOUND';if(d.exists){try{d.remove()}catch(e){}}var ok=s.copy(d);return ok?'OK':'ERR_COPY'}catch(e){return'ERR:'+e.message}})()";
+                return await callJSX(jsx);
+            } catch (e) {
+                return "ERR:" + e.message;
             }
         },
 
