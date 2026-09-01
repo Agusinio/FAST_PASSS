@@ -116,6 +116,27 @@ FASTPASS.IO = (function () {
         },
 
         /**
+         * copyFile: Copia un fitxer (binari o text) d'origen a destí.
+         * Útil per copiar l'escaleta del NAS al directori del projecte.
+         * @param {string} srcPath - Ruta d'origen (UNC o local)
+         * @param {string} destPath - Ruta de destí completa (amb nom de fitxer)
+         * @returns {string} "OK" o "ERR:..."
+         */
+        copyFile: function(srcPath, destPath) {
+            try {
+                var src = new File(srcPath);
+                if (!src.exists) return "ERR_SRC_NOT_FOUND:" + srcPath;
+                var dest = new File(destPath);
+                if (!dest.parent.exists) {
+                    var created = dest.parent.create();
+                    if (!created) return "ERR_CREATE_DEST_FOLDER";
+                }
+                var ok = src.copy(destPath);
+                return ok ? "OK" : "ERR_COPY_FAILED";
+            } catch(e) { return "ERR: " + e.message; }
+        },
+
+        /**
          * writeTxt: Escriu contingut de text en un fitxer.
          */
         writeTxt: function(path, content) {

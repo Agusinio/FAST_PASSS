@@ -205,6 +205,87 @@
     };
 
     /**
+     * findInFolder: Busca el JSON d'escaleta més recent al directori del projecte.
+     * Reconeix tant les escaletes copiades del NAS (YYYYMMDD_HHMMSS_PROGRAMA_*.json)
+     * com les generades pel botó Foto (escaleta_on_demand_*.json).
+     *
+     * @param {string} folderPath - Directori del projecte (on viu el .prproj)
+     * @param {string} [programArchivo] - Filtre opcional pel nom del programa (ex: "TN_VESPRE")
+     * @returns {Promise<{path:string, filename:string}|null>}
+     */
+    ER.findInFolder = async function (folderPath, programArchivo) {
+        if (!folderPath) return null;
+        try {
+            var raw = await callJSX("IO.listFolder('" + this._escapePath(folderPath) + "')");
+            if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) return null;
+            var files;
+            try { files = JSON.parse(raw); } catch (e) { return null; }
+            if (!files || files.length === 0) return null;
+
+            var progKey = programArchivo ? programArchivo.toUpperCase() : null;
+            var candidates = files.filter(function (f) {
+                var name = (f.name || '');
+                if (name.toLowerCase().indexOf('.json') !== name.length - 5) return false;
+                var isNasCopy = /^\d{8}_\d{6}_/.test(name);
+                var isOnDemand = name.indexOf('escaleta_on_demand') === 0;
+                if (!isNasCopy && !isOnDemand) return false;
+                if (progKey) {
+                    // Escaletes del NAS copiades: han de contenir el programa.
+                    // Les on_demand no porten programa al nom, es consideren del projecte actiu.
+                    return name.toUpperCase().indexOf(progKey) !== -1 || isOnDemand;
+                }
+                return true;
+            });
+            if (candidates.length === 0) return null;
+
+            candidates.sort(function (a, b) { return (b.modified || 0) - (a.modified || 0); });
+            var best = candidates[0];
+            var path = folderPath.replace(/[\\/]+$/, '') + '\\' + best.name;
+            log('\uD83D\uDCC1 [ER:IO] Escaleta local trobada: ' + best.name);
+            return { path: path, filename: best.name };
+        } catch (e) {
+            log('\u26A0\uFE0F [ER:IO] Error en findInFolder: ' + e.message);
+            return null;
+        }
+    };
+
+    /**
+     * ensureLocalCopy: Garanteix que el directori del projecte té una còpia de l'escaleta.
+     * 1. Busca localment (findInFolder). Si existeix, la retorna.
+     * 2. Si no, busca al NAS (findLatest) i la copia al directori del projecte.
+     *
+     * @param {Object} ctx - Context del projecte (config, progData, dateDir, bloque)
+     * @param {string} [datePrefix] - Prefix YYYYMMDD per filtrar al NAS
+     * @returns {Promise<{path:string, filename:string}|null>} Còpia local
+     */
+    ER.ensureLocalCopy = async function (ctx, datePrefix) {
+        if (!ctx || !ctx.config || !ctx.progData || !ctx.dateDir) return null;
+        var folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + '/' + ctx.dateDir;
+
+        // 1. Intentar amb la còpia local
+        var local = await this.findInFolder(folderPath, ctx.progData.archivo);
+        if (local) return local;
+
+        // 2. Buscar al NAS
+        var remote = await this.findLatest(ctx.progData.archivo, ctx.bloque, datePrefix);
+        if (!remote) {
+            log('\u26A0\uFE0F [ER:IO] Cap escaleta al NAS per copiar al directori del projecte.');
+            return null;
+        }
+
+        // 3. Copiar al directori del projecte
+        await callJSX("IO.createFolder('" + this._escapePath(folderPath) + "')");
+        var destPath = folderPath.replace(/[\\/]+$/, '\\') + remote.filename;
+        var copyRes = await callJSX("IO.copyFile('" + this._escapePath(remote.path) + "', '" + this._escapePath(destPath) + "')");
+        if (copyRes !== 'OK') {
+            log('\u26A0\uFE0F [ER:IO] Error copiant escaleta al directori del projecte: ' + copyRes);
+            return null;
+        }
+        log('\uD83D\uDCC1 [ER:IO] Escaleta copiada al directori del projecte: ' + remote.filename);
+        return { path: destPath, filename: remote.filename };
+    };
+
+    /**
      * _filenameToUnixSec: Converteix el timestamp del nom d'un fitxer JSON
      * (YYYYMMDD_HHMMSS) a segons Unix (UTC).
      * @param {string} filename

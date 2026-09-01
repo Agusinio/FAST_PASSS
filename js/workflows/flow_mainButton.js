@@ -104,18 +104,13 @@
                     const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                     if (reader) {
                         var datePrefixJson = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                        // Usar findLatestValid per evitar JSONs d'error del servidor
-                        // (ex: TNC V3 06/07 sense cleanFeed/escaleta)
-                        var validResult = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixJson);
-                        if (validResult && validResult.valid) {
-                            jsonMeta = { path: validResult.path, filename: validResult.filename };
-                            jsonData = validResult.data || await reader.load(validResult.path);
-                        } else {
-                            // Fallback: findLatest tradicional si findLatestValid falla
-                            jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson);
-                            if (jsonMeta) {
-                                jsonData = await reader.load(jsonMeta.path);
-                            }
+                        // ─── ESCALETA LOCAL (DIRECTORI DEL PROJECTE) ──
+                        // La extensió treballa SEMPRE amb la còpia de l'escaleta al directori
+                        // del projecte (tant si ve del NAS copiada com si la genera el botó Foto).
+                        // ensureLocalCopy: busca local i, si no hi és, la baixa del NAS i la copia.
+                        jsonMeta = await reader.ensureLocalCopy(ctx, datePrefixJson);
+                        if (jsonMeta) {
+                            jsonData = await reader.load(jsonMeta.path);
                         }
                         if (jsonMeta && jsonData) {
                             if (jsonData) {
@@ -207,18 +202,9 @@
                         // També si jsonData és null (JSON descartat per load), usar findLatestValid
                         if (!jsonMeta || !jsonData) {
                             var datePrefixJson2 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                            var validResult2 = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixJson2);
-                            if (validResult2 && validResult2.valid) {
-                                jsonMeta = { path: validResult2.path, filename: validResult2.filename };
-                                jsonData = validResult2.data;
-                            } else {
-                                // Fallback a findLatest tradicional
-                                if (!jsonMeta) {
-                                    jsonMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixJson2);
-                                }
-                                if (jsonMeta && !jsonData) {
-                                    jsonData = await reader.load(jsonMeta.path);
-                                }
+                            jsonMeta = await reader.ensureLocalCopy(ctx, datePrefixJson2);
+                            if (jsonMeta) {
+                                jsonData = await reader.load(jsonMeta.path);
                             }
                         }
                         if (jsonMeta && jsonData) {
@@ -900,7 +886,13 @@
             const ctx = await this._setupContext();
             const assets = await this._fullScan(ctx);
             await this._completeSyncUI(ctx, assets);
-            
+
+            // ─── ESCALETA LOCAL + MANIFEST ──
+            // Al obrir un projecte, la extensió treballa amb la còpia local de
+            // l'escaleta al directori del projecte. Si no hi és, es baixa del NAS
+            // i es copia. El manifest es regenera des de l'últim JSON del directori.
+            await this._rebuildManifestFromLocal(ctx);
+
             // Registrar como último proyecto abierto
             if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                 window.FASTPASS_UI.State.lastOpenedProjectName = projName;
@@ -967,6 +959,70 @@
             // 3. Focus i Targeting
             await callJSX("Tracks.target(1, true, 'video')");
             await callJSX("Tracks.target(1, true, 'audio')");
+        },
+
+        /**
+         * _rebuildManifestFromLocal: Regenera el manifest de sessió a partir de
+         * l'última còpia local de l'escaleta al directori del projecte.
+         * S'usa al botó FOTO (després de generar una nova escaleta) i a LOAD.
+         * @param {Object} ctx - Context del projecte
+         * @returns {Promise<{jsonMeta, jsonData, bounds}|null>}
+         */
+        _rebuildManifestFromLocal: async function (ctx) {
+            const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+            const datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+            const jsonMeta = await reader.ensureLocalCopy(ctx, datePrefix);
+            if (!jsonMeta) {
+                log("⚠️ [Manifest] Cap escaleta local per reconstruir el manifest.");
+                return null;
+            }
+            const jsonData = await reader.load(jsonMeta.path);
+            if (!jsonData) {
+                log("⚠️ [Manifest] Escaleta local no carregable: " + jsonMeta.filename);
+                return null;
+            }
+            try {
+                const bounds = reader.calcPrecisionTrimBounds(
+                    jsonData,
+                    ctx.bloque,
+                    jsonData.cleanFeed.mediaStart,
+                    jsonData.cleanFeed.mediaStop,
+                    ctx.config
+                );
+                if (!bounds) {
+                    log("⚠️ [Manifest] Bounds no calculables des de " + jsonMeta.filename);
+                    return null;
+                }
+                const allItems = jsonData.escaleta ? (jsonData.escaleta.liniesEscaleta || []) : [];
+                await FASTPASS_UI.SessionManifest.save(ctx, {
+                    program: { escaletaFile: jsonMeta.filename },
+                    cleanFeed: jsonData.cleanFeed,
+                    blockBounds: bounds,
+                    ref: {
+                        ...bounds.ref,
+                        tlBlockInPointSec: bounds.mp4ExpandedInPoint
+                    },
+                    escaletaItems: allItems.map(l => ({
+                        sequencia: l.sequencia,
+                        num: l.num,
+                        titol: l.titol,
+                        teVideo: l.teVideo,
+                        horaEntradaOnAir: l.horaEntradaOnAir,
+                        horaEntradaPrevista: l.horaEntradaPrevista,
+                        horaSortidaPrevista: l.horaSortidaPrevista,
+                        duradaOnAir: l.duradaOnAir,
+                        durada: l.durada,
+                        agrupacio: l.agrupacio,
+                        flotant: l.flotant || false
+                    })),
+                    phases: { boundsCalculated: true }
+                });
+                log(`✅ [Manifest] Manifest regenerat des de: ${jsonMeta.filename}`);
+                return { jsonMeta, jsonData, bounds };
+            } catch (e) {
+                log(`⚠️ [Manifest] Error reconstruint manifest: ${e.message}`);
+                return null;
+            }
         },
 
         _setupContext: async function () {

@@ -415,6 +415,22 @@ function applySliderLimits() {
                     if (result) {
                         utils.log(`✅ [Fetch] Nova escaleta guardada: ${result.filename}`, 'INFO');
                         utils.status('Escaleta actualitzada! Recalculant...', 'exito');
+
+                        // ─── REGENERAR MANIFEST DES DE LA CÒPIA LOCAL ──
+                        // La extensió treballa amb la còpia de l'escaleta al directori
+                        // del projecte. Després de generar una nova (botó FOTO), es
+                        // regenera el manifest des de l'últim JSON del directori.
+                        const ctxFoto = {
+                            config: config,
+                            progData: progData,
+                            bloque: blocId,
+                            dateDir: stateDateDir
+                        };
+                        if (window.FASTPASS_UI.Workflows && window.FASTPASS_UI.Workflows.MainButton
+                            && window.FASTPASS_UI.Workflows.MainButton._rebuildManifestFromLocal) {
+                            await window.FASTPASS_UI.Workflows.MainButton._rebuildManifestFromLocal(ctxFoto);
+                        }
+
                         // Forçar recàrrega del context
                         if (window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context) {
                             await window.FASTPASS_UI.Core.Context.checkContext();

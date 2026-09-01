@@ -156,8 +156,10 @@
                 const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                 if (!reader) { log("⚠️ EscaletaReader no disponible."); return; }
 
-                // Cargar escaleta
-                const latest = await reader.findLatest(ctx.progData.archivo, ctx.bloque);
+                // Cargar escaleta (còpia local del directori del projecte; si no hi és,
+                // es baixa del NAS i es copia al directori).
+                const datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
+                const latest = await reader.ensureLocalCopy(ctx, datePrefix);
                 if (!latest) { log("⚠️ No es troba l'escaleta."); return; }
                 const data = await reader.load(latest.path);
                 if (!data) { log("⚠️ No s'ha pogut carregar l'escaleta."); return; }
