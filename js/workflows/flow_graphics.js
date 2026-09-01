@@ -204,23 +204,63 @@
                     return;
                 }
                 const info = JSON.parse(infoRaw);
-                const clipIndex = info.index;
-                log(`🎬 [DoblePantalla] Clip origen: V1[${clipIndex}] "${info.name}" ${info.start.toFixed(2)}s→${info.end.toFixed(2)}s`);
+                const v1Index = info.index;
+                const v1Start = info.start;
+                const v1End = info.end;
+                log(`🎬 [DoblePantalla] Clip origen: V1[${v1Index}] "${info.name}" ${v1Start.toFixed(2)}s→${v1End.toFixed(2)}s`);
 
-                // 1. Clip de fons a la pista de fons (V2)
-                // ⚠️ Pendiente: el usuari donarà el nom del clip de fons (avui s'usa el genèric).
-                const T_FONS = cfg.tracks.video.fondos;
-                const bgName = "Fons_Vertical_Generic.png";
-                const bgRes = await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${cti}, null, 'video')`);
-                log(`🎬 [DoblePantalla] Fons a V${T_FONS}: ${bgName} → ${bgRes}`);
+                const T_V1 = 1;   // on va el clip de fons
+                const T_V2 = 2;   // on va el clip inferior (doble pantalla)
+                const T_V3 = 3;   // capa superior (còpia)
+                const T_V4 = 4;   // on es preserva el clip que hi havia a V2
 
-                // 2. Duplicar a la capa superior + propietats Motion (JSX)
-                const result = await callJSX(`FASTPASS.Anim.doblePantalla(1, ${clipIndex})`);
-                if (result === "OK") {
+                // 1. Preservar el clip de V2: recortar-lo al rang del clip V1 i moure'l a V4
+                const v2Clips = await getClipsLogic().getTrackClips(T_V2, 'video');
+                const v2Clip = v2Clips.find(c => c.start < v1End && c.end > v1Start);
+                if (v2Clip) {
+                    log(`🎬 [DoblePantalla] Preservant clip V2[${v2Clip.index}] "${v2Clip.name}" → V4`);
+                    const trimRes = await callJSX(`Clips.trim(${T_V2}, ${v2Clip.index}, ${v1Start}, ${v1End})`);
+                    log(`🎬 [DoblePantalla] Trim V2 → ${trimRes}`);
+                    const moveRes = await callJSX(`Clips.move(${T_V2}, ${v2Clip.index}, ${T_V4})`);
+                    log(`🎬 [DoblePantalla] Move V2→V4 → ${moveRes}`);
+                } else {
+                    log("ℹ️ [DoblePantalla] No hi ha cap clip a V2 en el rang. Es continua.");
+                }
+
+                // 2. Moure el clip de V1 a V2 (inferior)
+                const moveV1 = await callJSX(`Clips.move(1, ${v1Index}, ${T_V2})`);
+                log(`🎬 [DoblePantalla] Move V1→V2 → ${moveV1}`);
+                if (moveV1 !== "OK") { getUtils().status("Error movent clip a V2", "error"); return; }
+
+                // 3. Duplicar V2 → V3 (superior)
+                const v2AfterRaw = await callJSX(`Clips.at(${T_V2}, ${cti}, 'video')`);
+                if (!v2AfterRaw || v2AfterRaw === "null") { getUtils().status("No trobat clip a V2", "error"); return; }
+                const v2After = JSON.parse(v2AfterRaw);
+                const dupRes = await callJSX(`Clips.duplicate(${T_V2}, ${v2After.index}, ${T_V3})`);
+                log(`🎬 [DoblePantalla] Duplicar V2→V3 → ${dupRes}`);
+                if (dupRes !== "OK") { getUtils().status("Error duplicant clip", "error"); return; }
+
+                // 4. Col·locar el clip de fons a V1
+                const bgName = "Fons_Vertical_Generic.png"; // ⚠️ Pendiente: usuari donarà el clip de fons
+                const bgRes = await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_V1}, ${cti}, null, 'video')`);
+                log(`🎬 [DoblePantalla] Fons a V1: ${bgName} → ${bgRes}`);
+
+                // 5. Aplicar propietats Motion a inferior (V2) i superior (V3)
+                const comuns = { scale: 68, cropTop: 14, cropBottom: 15.5 };
+                const infVals = Object.assign({}, comuns, { position: [141, 451], cropLeft: 61 });
+                const supVals = Object.assign({}, comuns, { position: [492, 451], cropRight: 64.5 });
+
+                const infRes = await callJSX(`Anim.setMotionValues(${T_V2}, ${v2After.index}, '${JSON.stringify(infVals).replace(/'/g, "\\'")}')`);
+                const v3Clips = await getClipsLogic().getTrackClips(T_V3, 'video');
+                const v3Clip = v3Clips.find(c => Math.abs(c.start - v1Start) < 0.1) || v3Clips[v3Clips.length - 1];
+                const supRes = await callJSX(`Anim.setMotionValues(${T_V3}, ${v3Clip.index}, '${JSON.stringify(supVals).replace(/'/g, "\\'")}')`);
+
+                log(`🎬 [DoblePantalla] Motion inferior: ${infRes} | superior: ${supRes}`);
+
+                if (infRes === "OK" && supRes === "OK") {
                     getUtils().status("Doble pantalla verticalitzada", "exito");
                 } else {
-                    log(`❌ [DoblePantalla] Error: ${result}`, "ERROR");
-                    getUtils().status("Error Doble Pantalla", "error");
+                    getUtils().status("Doble pantalla amb avisos", "warn");
                 }
             } catch (e) { getUtils().handleError(e, "runDoblePantalla"); }
         },

@@ -854,4 +854,135 @@ FASTPASS.Clips = {
             return "OK";
         } catch(e) { return "ERR: " + e.message; }
     },
+
+    /**
+     * move: Mou un clip d'una pista a una altra preservant start, inPoint i outPoint.
+     * Funció ATÒMICA: no pren decisions, només executa el moviment.
+     * @param {number} trackIdx - Pista d'origen (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {number} targetTrackIdx - Pista de destí (1-based)
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK" o "ERR:..."
+     */
+    move: function(trackIdx, clipIdx, targetTrackIdx, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var srcTrack = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!srcTrack || !srcTrack.clips) return "ERR_NO_SRC_TRACK";
+            var clip = srcTrack.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+            if (!clip.projectItem) return "ERR_NO_PROJECT_ITEM";
+            var tgtTrack = isVideo ? seq.videoTracks[parseInt(targetTrackIdx) - 1] : seq.audioTracks[parseInt(targetTrackIdx) - 1];
+            if (!tgtTrack) return "ERR_NO_TARGET_TRACK";
+
+            var tStart = new Time(); tStart.seconds = clip.start.seconds;
+            var tIn = new Time(); tIn.seconds = clip.inPoint.seconds;
+            var tOut = new Time(); tOut.seconds = clip.outPoint.seconds;
+
+            tgtTrack.overwriteClip(clip.projectItem, tStart);
+
+            var newClip = null;
+            for (var i = 0; i < tgtTrack.clips.numItems; i++) {
+                if (Math.abs(tgtTrack.clips[i].start.seconds - tStart.seconds) < 0.1) { newClip = tgtTrack.clips[i]; break; }
+            }
+            if (!newClip) newClip = tgtTrack.clips[tgtTrack.clips.numItems - 1];
+            if (!newClip) return "ERR_CLIP_NOT_FOUND_AFTER_MOVE";
+
+            newClip.inPoint = tIn;
+            newClip.outPoint = tOut;
+            var tEnd = new Time(); tEnd.seconds = tStart.seconds + (tOut.seconds - tIn.seconds);
+            newClip.end = tEnd;
+
+            clip.remove(true, true);
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * duplicate: Duplica un clip a una altra pista preservant start, inPoint i outPoint.
+     * Funció ATÒMICA: deixa l'original intacte.
+     * @param {number} trackIdx - Pista d'origen (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {number} targetTrackIdx - Pista de destí (1-based)
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK" o "ERR:..."
+     */
+    duplicate: function(trackIdx, clipIdx, targetTrackIdx, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var srcTrack = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!srcTrack || !srcTrack.clips) return "ERR_NO_SRC_TRACK";
+            var clip = srcTrack.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+            if (!clip.projectItem) return "ERR_NO_PROJECT_ITEM";
+            var tgtTrack = isVideo ? seq.videoTracks[parseInt(targetTrackIdx) - 1] : seq.audioTracks[parseInt(targetTrackIdx) - 1];
+            if (!tgtTrack) return "ERR_NO_TARGET_TRACK";
+
+            var tStart = new Time(); tStart.seconds = clip.start.seconds;
+            var tIn = new Time(); tIn.seconds = clip.inPoint.seconds;
+            var tOut = new Time(); tOut.seconds = clip.outPoint.seconds;
+
+            tgtTrack.overwriteClip(clip.projectItem, tStart);
+
+            var newClip = null;
+            for (var i = 0; i < tgtTrack.clips.numItems; i++) {
+                if (Math.abs(tgtTrack.clips[i].start.seconds - tStart.seconds) < 0.1) { newClip = tgtTrack.clips[i]; break; }
+            }
+            if (!newClip) newClip = tgtTrack.clips[tgtTrack.clips.numItems - 1];
+            if (!newClip) return "ERR_CLIP_NOT_FOUND_AFTER_DUP";
+
+            newClip.inPoint = tIn;
+            newClip.outPoint = tOut;
+            var tEnd = new Time(); tEnd.seconds = tStart.seconds + (tOut.seconds - tIn.seconds);
+            newClip.end = tEnd;
+
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * trim: Retalla un clip del timeline al rang [startSec, endSec], ajustant
+     * els in/out points del source per mantenir la sincronia.
+     * Funció ATÒMICA.
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {number} startSec - Nou inici al timeline
+     * @param {number} endSec - Nou final al timeline
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK" o "ERR:..."
+     */
+    trim: function(trackIdx, clipIdx, startSec, endSec, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var track = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+
+            var newStart = parseFloat(startSec);
+            var newEnd = parseFloat(endSec);
+            var oldStart = clip.start.seconds;
+            var oldIn = clip.inPoint.seconds;
+            var newDur = newEnd - newStart;
+            var newIn = oldIn + (newStart - oldStart);
+            var newOut = newIn + newDur;
+
+            var tStart = new Time(); tStart.seconds = newStart;
+            clip.start = tStart;
+            var tIn = new Time(); tIn.seconds = newIn;
+            clip.inPoint = tIn;
+            var tOut = new Time(); tOut.seconds = newOut;
+            clip.outPoint = tOut;
+            var tEnd = new Time(); tEnd.seconds = newEnd;
+            clip.end = tEnd;
+
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
 }

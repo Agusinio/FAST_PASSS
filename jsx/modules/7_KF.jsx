@@ -751,12 +751,25 @@ FASTPASS.Anim = {
     },
 
     /**
-     * _applyMotionValues: Aplica valors directes a les propietats de Motion d'un clip.
-     * Índexs (segons "Propiedades del clip.txt"): 0=Position, 1=Scale,
+     * setMotionValues: Aplica valors directes a les propietats de Motion d'un clip.
+     * Funcio atomica: rep els valors com a JSON (tota la logica viu a la capa JS).
+     * Indexs (segons "Propiedades del clip.txt"): 0=Position, 1=Scale,
      * 7=CropLeft, 8=CropTop, 9=CropRight, 10=CropBottom.
+     *
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} clipIdx - Index del clip (0-based)
+     * @param {string} valuesJson - JSON amb {position:[x,y], scale, cropLeft, cropTop, cropRight, cropBottom}
+     * @returns {string} "OK" o "ERR:..."
      */
-    _applyMotionValues: function(clip, values) {
+    setMotionValues: function(trackIdx, clipIdx, valuesJson) {
         try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var track = seq.videoTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+            var values = JSON.parse(valuesJson);
             var mp = this._getMotionProps(clip);
             if (!mp || !mp.motion || !mp.motion.properties) return "ERR_NO_MOTION";
             var props = mp.motion.properties;
@@ -766,68 +779,6 @@ FASTPASS.Anim = {
             if (values.cropTop != null) props[8].setValue(values.cropTop);
             if (values.cropRight != null) props[9].setValue(values.cropRight);
             if (values.cropBottom != null) props[10].setValue(values.cropBottom);
-            return "OK";
-        } catch(e) { return "ERR: " + e.message; }
-    },
-
-    _mergeProps: function(a, b) {
-        var out = {};
-        for (var k in a) if (a.hasOwnProperty(k)) out[k] = a[k];
-        for (var k2 in b) if (b.hasOwnProperty(k2)) out[k2] = b[k2];
-        return out;
-    },
-
-    /**
-     * doblePantalla: Verticalitza un clip 16:9 amb doble pantalla.
-     * Duplica el clip a la pista superior (V3) i aplica crop/posició/scale
-     * per convertir les dues imatges 16:9 en dues verticals.
-     *
-     * Valors:
-     *   Ambdós clips:  Scale 68%, Crop Top 14%, Crop Bottom 15,5%
-     *   Inferior (V1): Position (141,451), Crop Left 61%
-     *   Superior (V3): Position (492,451), Crop Right 64,5%
-     *
-     * @param {number} srcTrackIdx - Pista d'origen (1-based, MP4 = 1)
-     * @param {number} clipIndex - Índex del clip dins la pista d'origen
-     * @returns {string} "OK" o "ERR:..."
-     */
-    doblePantalla: function(srcTrackIdx, clipIndex) {
-        try {
-            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-            if (!seq) return "ERR_NO_SEQ";
-            var srcTrack = seq.videoTracks[parseInt(srcTrackIdx) - 1];
-            if (!srcTrack || !srcTrack.clips) return "ERR_NO_SRC_TRACK";
-            var srcClip = srcTrack.clips[parseInt(clipIndex)];
-            if (!srcClip) return "ERR_NO_CLIP";
-            if (!srcClip.projectItem) return "ERR_NO_PROJECT_ITEM";
-
-            var targetTrack = seq.videoTracks[2]; // V3 = capa superior (graf)
-            if (!targetTrack) return "ERR_NO_TARGET_TRACK";
-
-            var tStart = srcClip.start.seconds;
-            var tIn = srcClip.inPoint.seconds;
-            var tOut = srcClip.outPoint.seconds;
-
-            // 1. Duplicar a la pista superior
-            targetTrack.insertClip(srcClip.projectItem, tStart);
-            var newClip = targetTrack.clips[targetTrack.clips.numItems - 1];
-            if (!newClip) return "ERR_DUP_FAILED";
-            // Igualar trims (in/out) amb el clip original
-            try {
-                if (typeof newClip.setInPoint === 'function') newClip.setInPoint(tIn);
-                else newClip.inPoint.seconds = tIn;
-                if (typeof newClip.setOutPoint === 'function') newClip.setOutPoint(tOut);
-                else newClip.outPoint.seconds = tOut;
-            } catch(e) {}
-
-            // 2. Valors Motion
-            var comuns = { scale: 68, cropTop: 14, cropBottom: 15.5 };
-            var inf    = { position: [141, 451], cropLeft: 61 };
-            var sup    = { position: [492, 451], cropRight: 64.5 };
-
-            var rInf = this._applyMotionValues(srcClip, this._mergeProps(comuns, inf));
-            var rSup = this._applyMotionValues(newClip, this._mergeProps(comuns, sup));
-            if (rInf !== "OK" || rSup !== "OK") return "ERR_PROP inf=" + rInf + " sup=" + rSup;
             return "OK";
         } catch(e) { return "ERR: " + e.message; }
     }

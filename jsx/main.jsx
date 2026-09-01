@@ -435,6 +435,15 @@ $.global.Clips = {
         if (!$.global.FASTPASS.Clips) return "false";
         var count = FASTPASS.Clips.count(ti, type || "video");
         return (parseInt(count) > 0) ? "true" : "false";
+    },
+    move: function(ti, ci, tgt, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.move(ti, ci, tgt, type || "video") : "ERR";
+    },
+    duplicate: function(ti, ci, tgt, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.duplicate(ti, ci, tgt, type || "video") : "ERR";
+    },
+    trim: function(ti, ci, s, e, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.trim(ti, ci, s, e, type || "video") : "ERR";
     }
 };
 
@@ -492,6 +501,9 @@ $.global.Anim = {
     },
     debugKF: function() { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.debugKF() : "ERR"; 
+    },
+    setMotionValues: function(ti, ci, valuesJson) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.setMotionValues(ti, ci, valuesJson) : "ERR"; 
     }
 };
 
