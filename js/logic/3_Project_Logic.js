@@ -363,6 +363,21 @@
                 if (copyResult === "OK") {
                     srtImportPath = localSrt;
                     utils.log(`📥 SRT copiat al directori del projecte: ${localSrt}`);
+
+                    // ── PROJECTE NOU: Netejar marcadors persistits d'una sessió anterior ──
+                    // El SrtEditor restaura els marcadors des de C:/temp/fastpass_srt_markers_<nom>.json
+                    // quan el nom del SRT coincideix. En un projecte nou volem començar de zero.
+                    try {
+                        const srtBase = media.srt.name.replace(/\.srt$/i, '');
+                        const safeName = srtBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+                        const markersFile = "C:/temp/fastpass_srt_markers_" + safeName + ".json";
+                        const rmRes = await callJSX(`IO.remove('${markersFile.replace(/\\/g, '/')}')`);
+                        if (rmRes !== 'NOT_EXISTS') {
+                            utils.log(`🧹 Marcadors SRT anteriors eliminats (${rmRes}): ${markersFile}`);
+                        }
+                    } catch (eClean) {
+                        utils.log(`⚠️ No s'han pogut netejar marcadors SRT: ${eClean.message}`, "WARN");
+                    }
                 } else {
                     srtImportPath = media.srt.path.replace(/\\/g, "/");
                     utils.log(`⚠️ No s'ha pogut copiar el SRT al projecte (${copyResult}). S'importarà des del NAS.`);

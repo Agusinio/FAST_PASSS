@@ -316,7 +316,10 @@ function applySliderLimits() {
                     }
                     const files = await u.readFolder(folder);
                     const srtFiles = (files || []).filter(function (f) {
-                        return f && f.name && f.name.toUpperCase().endsWith('.SRT');
+                        // Excloure _MOD (exportacions de l'editor de subtítols) per carregar
+                        // SEMPRE el .srt original de la sessió, no les modificacions antigues.
+                        return f && f.name && f.name.toUpperCase().endsWith('.SRT')
+                            && f.name.toUpperCase().indexOf('_MOD') === -1;
                     });
                     if (srtFiles.length === 0) {
                         u.status("No s'ha trobat .srt a la carpeta del projecte", "warn");
