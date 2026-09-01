@@ -296,4 +296,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\open_ayer.ps1" -DateS
 
 ---
 
+## 💸 ECONOMÍA DE TOKENS (generación de código)
+
+Estas reglas existen para reducir el coste de cada sesión (el proveedor cobra por tokens):
+
+- **Sé conciso.** No repitas código que ya existe; muestra solo el cambio (diff) o la función afectada. No vuelques archivos completos salvo que se pida explícitamente.
+- **No expliques lo obvio.** Respuestas cortas y directas. Usa bullets. Evita reafirmar lo que el usuario ya sabe.
+- **Edita solo lo necesario.** Un `editor` para un cambio puntual > reescribir el archivo entero. No toques archivos no relacionados.
+- **No leas de más.** Lee solo las secciones/funciones necesarias de un archivo (usa `start_line`/`end_line`), no el archivo completo cuando no hace falta.
+- **Plan mode primero.** Para explorar/diseñar usa modo Plan y espera aprobación; en Act, ve directo al grano.
+- **Un solo intento.** No hagas "prueba y error" de comandos en cadena; verifica la ruta correcta antes de ejecutar.
+- **No regeneres lo ya hecho.** Si un cambio ya se aplicó en esta sesión, no lo repitas "por confirmar".
+
+---
+
 *FAST >>> PASS · Harness Engineering · 2026-06-09*

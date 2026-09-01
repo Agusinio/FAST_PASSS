@@ -460,6 +460,9 @@ $.global.Anim = {
         if (!$.global.FASTPASS.Anim) return "0";
         return (arguments.length === 0) ? FASTPASS.Anim.x() : FASTPASS.Anim.x(v, f); 
     },
+    limits: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.limits() : "{}"; 
+    },
     reframe: function(ti, ci) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
     },

@@ -39,10 +39,17 @@ FASTPASS.Timeline = {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
         if (!seq) return "ERR:NO_SEQ";
         
-        seq.setInPoint(this._sec(inSec).ticks);
-        seq.setOutPoint(this._sec(outSec).ticks);
-        
-        return "OK";
+        $.writeln("[Timeline.range·DBG] in=" + inSec + " out=" + outSec + " seq=" + (seq.name || "?"));
+        try {
+            seq.setInPoint(parseFloat(inSec));
+            $.writeln("[Timeline.range·DBG] setInPoint OK. inPoint prop=" + seq.inPoint + " type=" + (typeof seq.inPoint));
+            seq.setOutPoint(parseFloat(outSec));
+            $.writeln("[Timeline.range·DBG] setOutPoint OK. outPoint prop=" + seq.outPoint + " type=" + (typeof seq.outPoint) + " seconds=" + (seq.outPoint && seq.outPoint.seconds));
+            return "OK|outProp=" + seq.outPoint + "|type=" + (typeof seq.outPoint) + "|sec=" + (seq.outPoint && seq.outPoint.seconds) + "|inSec=" + (seq.inPoint && seq.inPoint.seconds);
+        } catch(e) {
+            $.writeln("[Timeline.range·DBG] EXCEPTION: " + e.message + " (line " + e.line + ")");
+            return "ERR:" + e.message + "|line=" + e.line;
+        }
     },
 
     /**
@@ -75,7 +82,7 @@ FASTPASS.Timeline = {
      */
     inPoint: function(val) {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-        if (seq) { seq.setInPoint(this._sec(val).ticks); return "OK"; }
+        if (seq) { seq.setInPoint(parseFloat(val)); return "OK"; }
         return "ERR";
     },
 
@@ -84,8 +91,16 @@ FASTPASS.Timeline = {
      */
     outPoint: function(val) {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-        if (seq) { seq.setOutPoint(this._sec(val).ticks); return "OK"; }
-        return "ERR";
+        if (!seq) return "ERR";
+        $.writeln("[Timeline.outPoint·DBG] val=" + val + " seq=" + (seq.name || "?"));
+        try {
+            seq.setOutPoint(parseFloat(val));
+            $.writeln("[Timeline.outPoint·DBG] OK. outPoint prop=" + seq.outPoint + " type=" + (typeof seq.outPoint) + " seconds=" + (seq.outPoint && seq.outPoint.seconds));
+            return "OK";
+        } catch(e) {
+            $.writeln("[Timeline.outPoint·DBG] EXCEPTION: " + e.message);
+            return "ERR:" + e.message;
+        }
     },
 
     /**
@@ -104,8 +119,17 @@ FASTPASS.Timeline = {
     getOut: function() {
         var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
         if (!seq) return 0;
-        // Protecció: després de trims, outPoint pot ser undefined
-        return (typeof seq.outPoint !== "undefined") ? seq.outPoint.seconds : 0;
+        var op = seq.outPoint;
+        $.writeln("[Timeline.getOut·DBG] seq.outPoint=" + op + " type=" + (typeof op) + " seconds=" + (op && op.seconds));
+        // Vía canònica: getOutPointAsTime() sempre retorna un objecte Time amb .seconds
+        try {
+            if (typeof seq.getOutPointAsTime === "function") {
+                var t = seq.getOutPointAsTime();
+                $.writeln("[Timeline.getOut·DBG] getOutPointAsTime()=" + (t && t.seconds) + " ticks=" + (t && t.ticks));
+                return (t && typeof t.seconds === "number") ? t.seconds : 0;
+            }
+        } catch(e) { $.writeln("[Timeline.getOut·DBG] getOutPointAsTime EXC: " + e.message); }
+        return (typeof op !== "undefined") ? op.seconds : 0;
     },
 
     /**
@@ -118,30 +142,31 @@ FASTPASS.Timeline = {
         try {
             var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             if (!seq) return "ERR:NO_SEQ";
-            var inTicks = seq.inPoint;
-            var outTicks = seq.outPoint;
-            // ── Fallback resilient: si IN/OUT no estan definits (ex: després de trim tails),
-            //     usar l'inici (0) i el final de la seqüència ──
-            if (typeof inTicks === "undefined" || typeof outTicks === "undefined") {
-                // Fallback: usar inici (0) i final de la seqüència
-                var seqStart = new Time();
-                seqStart.seconds = 0;
-                inTicks = seqStart.ticks;
-                // seq.outPoint és un objecte Time, .seconds és la propietat numèrica
-                var seqEnd = new Time();
-                seqEnd.seconds = seq.outPoint.seconds;
-                outTicks = seqEnd.ticks;
-            }
+
+            // Llegir IN/OUT per la via canònica (getXAsTime), amb fallback a seq.inPoint/outPoint
+            var inSec = 0, outSec = 0;
+            try {
+                var ti = seq.getInPointAsTime ? seq.getInPointAsTime() : null;
+                var to = seq.getOutPointAsTime ? seq.getOutPointAsTime() : null;
+                if (ti && typeof ti.seconds === "number") inSec = ti.seconds;
+                if (to && typeof to.seconds === "number") outSec = to.seconds;
+            } catch(e2) { /* fallback a propietats */ }
+            if (inSec <= 0 && typeof seq.inPoint !== "undefined") inSec = seq.inPoint.seconds || 0;
+            if (outSec <= 0 && typeof seq.outPoint !== "undefined") outSec = seq.outPoint.seconds || 0;
+
             // 1. Moure el CTI a l'inici del rang
-            seq.setPlayerPosition(inTicks);
-            // 2. Establir l'àrea de treball al rang IN-OUT
-            var tIn = new Time();
-            tIn.ticks = inTicks;
-            var tOut = new Time();
-            tOut.ticks = outTicks;
-            seq.setWorkAreaInPoint(tIn);
-            seq.setWorkAreaOutPoint(tOut);
-            return "OK:cti+" + tIn.seconds.toFixed(2) + "s workArea=" + tIn.seconds.toFixed(2) + "-" + tOut.seconds.toFixed(2);
+            var tCti = new Time(); tCti.seconds = inSec;
+            seq.setPlayerPosition(tCti.ticks);
+
+            // 2. Àrea de treball al rang IN-OUT (l'API espera SEGONS, no Time)
+            seq.setWorkAreaInPoint(inSec);
+            seq.setWorkAreaOutPoint(outSec);
+
+            // Nota: el zoom visual del timeline no és exposat per l'API de Premiere en
+            // aquesta versió (ni PProDOM.setZoomToTimeRange, ni app.executeCommand, ni QEDOM).
+            // L'usuari fa el zoom manual (tecla "\") sobre el Work Area ja ajustat.
+
+            return "OK:cti=" + inSec.toFixed(2) + "s workArea=" + inSec.toFixed(2) + "-" + outSec.toFixed(2) + "s";
         } catch(e) {
             return "ERR:" + e.message;
         }

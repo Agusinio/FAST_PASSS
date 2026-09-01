@@ -185,7 +185,7 @@ FASTPASS.Anim = {
 
             if (!mp || !mp.pos) return "ERR_NO_MOTION";
 
-            var val = parseFloat(valNorm);   // 0..1
+            var val = parseFloat(valNorm);   // 0..1 normalitzat (centre 0.5)
             var pPos = mp.pos;
             var pScale = mp.scale;
             if (!pScale) return "ERR_NO_SCALE";
@@ -194,20 +194,19 @@ FASTPASS.Anim = {
             if (scale == null) return "ERR_NO_SCALE_VAL";
             scale = scale / 100;
 
-            var clipW = 1920 * scale;   // px (ample del clip escalat)
-
             var raw = pPos.getValue();
             if (!raw) return "ERR_NO_POS_VAL";
 
-            if (clipW > seqW) {
-                var margin = ((clipW - seqW) / 2) / seqW;   // normalitzat
-                var minL = 0.5 - margin;
-                var maxL = 0.5 + margin;
-                if (val < minL) val = minL;
-                if (val > maxL) val = maxL;
-            } else {
-                val = 0.5;   // centrar (no hi ha marge)
-            }
+            // Canvas 9:16 (ample del recorte vertical que ocupa tot l'alt del frame)
+            var seqH = seq.frameSizeVertical || (seq.frameRect ? (seq.frameRect[3] - seq.frameRect[1]) : 0);
+            var canvasW = seqH * (9 / 16);
+            var clipW = 1920 * scale;
+            // Moviment màxim = ample del clip escalat - ample del canvas, repartit als dos costats
+            var margenNorm = Math.max(0, (clipW - canvasW) / (2 * seqW));
+            var minL = raw[0] - margenNorm;
+            var maxL = raw[0] + margenNorm;
+            if (val < minL) val = minL;
+            if (val > maxL) val = maxL;
 
             var newVal = [val, raw[1]];   // array literal nou (sense mutar getValue)
 
@@ -225,6 +224,42 @@ FASTPASS.Anim = {
                 pPos.setValue(newVal, true);
             }
             return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * limits: Retorna els límits de moviment lateral (pos X normalitzada 0..1)
+     * per al clip sota el CTI, sense que la imatge surti del canvas.
+     * El centre és 0.5, així que els límits són 0.5±margin (no simètrics a 0).
+     */
+    limits: function() {
+        try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var cti = seq.getPlayerPosition();
+            if (!cti) return "ERR_NO_CTI";
+            var info = FASTPASS.Clips.at(1, cti.seconds, "video");
+            if (!info || info === "null") return "ERR_NO_CLIP_AT_CTI";
+            var idx = JSON.parse(info).index;
+            var track = seq.videoTracks[0];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[idx];
+            if (!clip) return "ERR_NO_CLIP";
+            var mp = this._getMotionProps(clip);
+            if (!mp || !mp.scale || !mp.pos) return "ERR_NO_MOTION";
+            var scale = mp.scale.getValue();
+            if (scale == null) return "ERR_NO_SCALE_VAL";
+            scale = scale / 100;
+            var seqW = seq.frameSizeHorizontal || (seq.frameRect ? (seq.frameRect[2] - seq.frameRect[0]) : 0);
+            var seqH = seq.frameSizeVertical || (seq.frameRect ? (seq.frameRect[3] - seq.frameRect[1]) : 0);
+            var raw = mp.pos.getValue();
+            var curNorm = (raw && typeof raw[0] === "number") ? raw[0] : 0.5;
+            var canvasW = seqH * (9 / 16);
+            var clipW = 1920 * scale;
+            var margenNorm = Math.max(0, (clipW - canvasW) / (2 * seqW));
+            var minNorm = curNorm - margenNorm;
+            var maxNorm = curNorm + margenNorm;
+            return JSON.stringify({ min: minNorm, max: maxNorm, cur: curNorm, margen: margenNorm, scale: scale, seqW: seqW, seqH: seqH, clipW: clipW, canvasW: canvasW });
         } catch(e) { return "ERR: " + e.message; }
     },
 

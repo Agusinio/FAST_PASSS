@@ -18,11 +18,14 @@
 
         /**
          * Ripple Trim In usant el cabezal (CTI) com a referència de tall.
+         * Abans del ripple:
+         *   - Es calcula quants frames es recorten al clip: diff = cutTime - clip.start
+         *   - El corchete OUT es mou els mateixos frames cap a l'esquerra (ANTES de tallar,
+         *     sino Premiere el col·loca al final del clip ja retallat)
          * Després del ripple:
-         *   - El clip (vídeo + àudio) es recorta a l'altura del CTI
-         *   - Tot es desplaça cap a l'esquerra solidàriament (definidors inclosos)
+         *   - El clip (vídeo + àudio) es recorta a l'altura del CTI i es desplaça a zero
          *   - SOLO el delimitador IN de seqüència es mou a 00:00
-         *   - OUT es desplaça cap a l'esquerra: newOut = oldOut - cutTime
+         *   - OUT es re-aplica: newOut = oldOut - diff
          *   - Els marcadors es recol·loquen via get/clear/set existents
          */
         runCutIn: async function () {
@@ -68,23 +71,40 @@
                     markersBefore = JSON.parse(raw || "[]");
                 } catch (e) { log(`⚠️ No s'han pogut llegir marcadors: ${e.message}`); }
 
+                // ── 2b. Capturar l'OUT de seqüència ABANS del ripple ──
+                var oldOut = 0;
+                try {
+                    const rawOut = await callJSX('Timeline.getOut()');
+                    oldOut = parseFloat(rawOut) || 0;
+                } catch (e) { log(`⚠️ No s'ha pogut llegir el OUT de seqüència: ${e.message}`); }
+                // Frames recortats al clip = CTI - start del clip
+                var diff = cutTime - (clip.start || 0);
+                // Referència del final del contingut: OUT definit, o final del clip que es recorta
+                var refOut = (oldOut > 0.04) ? oldOut : ((clip && clip.end) || 0);
+                // El corchete es mou els mateixos frames recortats cap a l'esquerra (solidari)
+                var newOut = Math.max(0.04, refOut - diff);
+                log(`📍 [IN] oldOut=${oldOut.toFixed(3)}s diff=${diff.toFixed(3)}s refOut=${refOut.toFixed(3)}s → newOut=${newOut.toFixed(3)}s`);
+
+                // ── 2c. Moure el corchete OUT (i IN) ANTES de tallar ──
+                //    range(0,newOut) = setInPoint(0) + setOutPoint(newOut) en una sola crida
+                var rPre = await callJSX(`Timeline.range(0, ${newOut.toFixed(3)})`);
+                var preOut = await callJSX('Timeline.getOut()');
+                log(`📍 [IN·PRE] range(0, ${newOut.toFixed(3)}) → ${rPre} | getOut()=${preOut}`);
+
                 // ── 3. Ripple trim: retalla el clip (vídeo + àudio) al CTI i ho desplaça tot a zero ──
                 log(`✂️ Aplicant Ripple Trim In a V${T_MP4} (CTI: ${cutTime.toFixed(2)}s)`);
                 await getClipsLogic().rippleIn(T_MP4, clip.index, cutTime, clip);
 
-                // ── 4. Llegir el final real del clip DESPRÉS del ripple ──
-                //    (evita dependre de seq.outPoint, que pot ser undefined)
-                const clipAfterRaw = await callJSX(`Clips.get(${T_MP4}, 0, 'video')`);
-                var clipEndAfter = 0.04;
-                try {
-                    const cd = JSON.parse(clipAfterRaw);
-                    clipEndAfter = cd.end || 0.04;
-                } catch (e) { log(`⚠️ No s'ha pogut llegir clip end: ${e.message}`); }
-
-                // ── 5. SOLO moure seq IN a 0. OUT = final real del clip ──
-                await callJSX('Timeline.in(0)');
-                await callJSX(`Timeline.out(${clipEndAfter})`);
-                log(`📍 Seq: IN=0 OUT=${clipEndAfter.toFixed(2)}s (del clip V${T_MP4})`);
+                // ── 5. Re-aplicar OUT DESPRÉS del tall (Premiere pot re-anclar-lo al final del clip) ──
+                var rPost = await callJSX(`Timeline.range(0, ${newOut.toFixed(3)})`);
+                var postOut = await callJSX('Timeline.getOut()');
+                log(`📍 [IN·POST] range(0, ${newOut.toFixed(3)}) → ${rPost} | getOut()=${postOut}`);
+                if (Math.abs(parseFloat(postOut) - newOut) > 0.05) {
+                    log(`⚠️ [IN] OUT real (${postOut}) ≠ newOut (${newOut.toFixed(3)}). Reintent directe...`);
+                    await callJSX(`Timeline.out(${newOut.toFixed(3)})`);
+                    postOut = await callJSX('Timeline.getOut()');
+                    log(`📍 [IN·RETRY] Timeline.out(${newOut.toFixed(3)}) → getOut()=${postOut}`);
+                }
 
                 // ── 6. Recol·locar marcadors desplaçats (sense nou JSX) ──
                 if (markersBefore.length > 0) {
@@ -147,6 +167,10 @@
 
                 const outPoint = (val - 0.04).toFixed(2);
                 await callJSX(`Timeline.range(0.0, ${outPoint})`);
+
+                // ── Zoom al rang de treball (corchetes IN/OUT) ──
+                const zoomRes = await callJSX('Timeline.zoomToSelection()');
+                log(`🔍 [FLOW-CUT] Zoom a selecció IN/OUT: ${zoomRes}`);
 
                 /*if (state.masterTheme) {
                     await callJSX(`Clips.insert('${getUtils().escape(state.masterTheme.name)}', ${T_THEME}, 0.0, null, 'video')`);

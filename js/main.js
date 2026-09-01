@@ -19,7 +19,36 @@ function setReframeActive(on) {
     if (zone) zone.classList.toggle('active', on);
     if (slider) slider.disabled = !on;
     if (!on && window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = false;
+    if (on) applySliderLimits();
     FASTPASS_UI.Utils.log(on ? "🎛️ Reencuadre manual ACTIVAT" : "🛑 Reencuadre manual desactivat", "DEBUG");
+}
+
+/**
+ * applySliderLimits: Ajusta els límits del slider de moviment lateral perquè
+ * coincideixin amb les posicions màximes del clip sense que la imatge surti del
+ * canvas. Els límits normalitzats (0..1, centre 0.5) provenen d'Anim.limits().
+ */
+function applySliderLimits() {
+    var slider = document.getElementById('slider-move');
+    if (!slider || !FASTPASS_UI.Utils) return;
+    FASTPASS_UI.Utils.callJSX('Anim.limits()').then(function (raw) {
+        if (!raw || raw.indexOf("ERR") === 0) return;
+        try {
+            var lim = JSON.parse(raw);
+            var minNorm = parseFloat(lim.min), maxNorm = parseFloat(lim.max);
+            if (!isFinite(minNorm) || !isFinite(maxNorm)) return;
+            // Normalitzat (0..1, centre 0.5) -> escala del slider (-1000..1000)
+            var sMin = Math.round((minNorm - 0.5) * 2000);
+            var sMax = Math.round((maxNorm - 0.5) * 2000);
+            slider.min = sMin;
+            slider.max = sMax;
+            var v = parseInt(slider.value, 10);
+            if (isNaN(v)) v = Math.round((parseFloat(lim.cur) - 0.5) * 2000) || 0;
+            if (v < sMin) slider.value = sMin;
+            if (v > sMax) slider.value = sMax;
+            FASTPASS_UI.Utils.log("🎚️ Slider límits(norm): " + lim.min.toFixed(3) + ".." + lim.max.toFixed(3) + " (slider " + sMin + ".." + sMax + ") cur=" + lim.cur.toFixed(3) + " margen=" + lim.margen.toFixed(3), "DEBUG");
+        } catch (e) { /* ignora */ }
+    });
 }
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
@@ -176,18 +205,15 @@ function setReframeActive(on) {
             slider.oninput = function () {
                 if (!reframeActive) return;
                 isUserDraggingSlider = true;
-                var val = parseInt(slider.value, 10);
-                // Mapa slider (-1000..1000) -> posició normalitzada (0..1)
-                var norm = (val + 1000) / 2000;
-                // Sempre només moure en viu; el keyframe es clava en onchange
+                // Mapa slider (-1000..1000) -> posició normalitzada (0..1, centre 0.5)
+                var norm = (parseInt(slider.value, 10) + 1000) / 2000;
                 FASTPASS_UI.Utils.callJSX(`Anim.x(${norm}, false)`);
             };
 
             slider.onchange = function () {
                 if (!reframeActive) return;
                 isUserDraggingSlider = false;
-                var val = parseInt(slider.value, 10);
-                var norm = (val + 1000) / 2000;
+                var norm = (parseInt(slider.value, 10) + 1000) / 2000;
                 // Clava el keyframe només al soltar (si el mode KF està actiu)
                 FASTPASS_UI.Utils.callJSX(`Anim.x(${norm}, ${kfMode()})`).then(res => {
                     if (res !== "OK") FASTPASS_UI.Utils.log("Slider: " + res, "DEBUG");
@@ -484,8 +510,7 @@ FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
             const norm = parseFloat(val);
-            const sliderValue = Math.round((norm - 0.5) * 2000); // 0..1 -> -1000..1000
-            slider.value = sliderValue;
+            slider.value = Math.round((norm - 0.5) * 2000);   // 0..1 -> -1000..1000
         }
     });
 };
