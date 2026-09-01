@@ -137,6 +137,20 @@ FASTPASS.IO = (function () {
         },
 
         /**
+         * createFolder: Crea una carpeta (i subcarpetes) si no existeix.
+         * @param {string} folderPath - Ruta completa de la carpeta
+         * @returns {string} "OK" o "ERR:..."
+         */
+        createFolder: function(folderPath) {
+            try {
+                var f = new Folder(folderPath);
+                if (f.exists) return "OK";
+                var created = f.create();
+                return created ? "OK" : "ERR_CREATE_FOLDER";
+            } catch(e) { return "ERR: " + e.message; }
+        },
+
+        /**
          * writeTxt: Escriu contingut de text en un fitxer.
          */
         writeTxt: function(path, content) {

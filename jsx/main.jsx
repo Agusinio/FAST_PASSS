@@ -136,6 +136,12 @@ $.global.IO = {
     },
     executeShell: function(c) {
         return ($.global.FASTPASS.IO) ? FASTPASS.IO.executeShell(c) : "ERR_NO_IO";
+    },
+    copyFile: function(src, dst) {
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.copyFile(src, dst) : "ERR_NO_IO";
+    },
+    createFolder: function(f) {
+        return ($.global.FASTPASS.IO) ? FASTPASS.IO.createFolder(f) : "ERR_NO_IO";
     }
 };
 // ============================================================================
