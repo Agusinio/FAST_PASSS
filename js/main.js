@@ -281,6 +281,16 @@ function applySliderLimits() {
         if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronResto'));
         const btnChyronRepartir = document.getElementById('btnChyronRepartir');
         if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'repartirChyronTraduccio'));
+
+        // --- BOTONS GRÀFICS (IPD, Doble Pantalla, MAPA, TOTEM) ---
+        const btnGrafIpd = document.getElementById('btnGrafIpd');
+        const btnGrafDoblePantalla = document.getElementById('btnGrafDoblePantalla');
+        const btnGrafMapa = document.getElementById('btnGrafMapa');
+        const btnGrafTotem = document.getElementById('btnGrafTotem');
+        if (btnGrafIpd) btnGrafIpd.addEventListener('click', () => callWorkflow('Graphics', 'runIpd'));
+        if (btnGrafDoblePantalla) btnGrafDoblePantalla.addEventListener('click', () => callWorkflow('Graphics', 'runDoblePantalla'));
+        if (btnGrafMapa) btnGrafMapa.addEventListener('click', () => callWorkflow('Graphics', 'runMapa'));
+        if (btnGrafTotem) btnGrafTotem.addEventListener('click', () => callWorkflow('Graphics', 'runTotem'));
         // --- WORKFLOW: SRT EDITOR (SUBTÍTULOS) ---
         const btnSrtLoad = document.getElementById('btnSrtLoad');
         const btnSrtPlay = document.getElementById('btnSrtPlay');

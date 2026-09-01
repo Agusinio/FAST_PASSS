@@ -186,6 +186,62 @@
         },
 
         /**
+         * runDoblePantalla: Verticalitza el clip 16:9 de doble pantalla sota el CTI.
+         * 1. Col·loca un clip de fons a la pista de fons (V2).
+         * 2. Duplica el clip a la pista superior (V3) amb els mateixos trims (JSX).
+         * 3. Aplica crop/posició/scale a ambdós clips (JSX).
+         */
+        runDoblePantalla: async function () {
+            if (!(await getUtils().validateActiveSequence())) return;
+            const cfg = FASTPASS_UI.Config.get();
+            try {
+                log("🎬 [DoblePantalla] Iniciant verticalització de clip 16:9...");
+                const cti = parseFloat(await callJSX('Timeline.get()') || "0");
+                const infoRaw = await callJSX(`Clips.at(1, ${cti}, 'video')`);
+                if (!infoRaw || infoRaw === "null") {
+                    log("⚠️ [DoblePantalla] Cap clip sota el CTI a V1.");
+                    getUtils().status("Col·loca el CTI sobre el clip 16:9", "warn");
+                    return;
+                }
+                const info = JSON.parse(infoRaw);
+                const clipIndex = info.index;
+                log(`🎬 [DoblePantalla] Clip origen: V1[${clipIndex}] "${info.name}" ${info.start.toFixed(2)}s→${info.end.toFixed(2)}s`);
+
+                // 1. Clip de fons a la pista de fons (V2)
+                // ⚠️ Pendiente: el usuari donarà el nom del clip de fons (avui s'usa el genèric).
+                const T_FONS = cfg.tracks.video.fondos;
+                const bgName = "Fons_Vertical_Generic.png";
+                const bgRes = await callJSX(`Clips.insert('${getUtils().escape(bgName)}', ${T_FONS}, ${cti}, null, 'video')`);
+                log(`🎬 [DoblePantalla] Fons a V${T_FONS}: ${bgName} → ${bgRes}`);
+
+                // 2. Duplicar a la capa superior + propietats Motion (JSX)
+                const result = await callJSX(`FASTPASS.Anim.doblePantalla(1, ${clipIndex})`);
+                if (result === "OK") {
+                    getUtils().status("Doble pantalla verticalitzada", "exito");
+                } else {
+                    log(`❌ [DoblePantalla] Error: ${result}`, "ERROR");
+                    getUtils().status("Error Doble Pantalla", "error");
+                }
+            } catch (e) { getUtils().handleError(e, "runDoblePantalla"); }
+        },
+
+        /**
+         * Placeholders pels botons IPD / MAPA / TOTEM (pendents d'especificació).
+         */
+        runIpd: async function () {
+            log("ℹ️ [IPD] Botó pendent d'implementar.");
+            getUtils().status("IPD pendent", "warn");
+        },
+        runMapa: async function () {
+            log("ℹ️ [MAPA] Botó pendent d'implementar.");
+            getUtils().status("MAPA pendent", "warn");
+        },
+        runTotem: async function () {
+            log("ℹ️ [TOTEM] Botó pendent d'implementar.");
+            getUtils().status("TOTEM pendent", "warn");
+        },
+
+        /**
          * FASE 3a-b y 4a-b s'han mogut a flow_markers.js (placeCookedMarkers,
          * capturaUsuarioInOut, capturaUsuarioMarks)
          */

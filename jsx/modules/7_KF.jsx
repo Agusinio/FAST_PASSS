@@ -10,6 +10,9 @@ var FASTPASS = $.global.FASTPASS;
 
 FASTPASS.Anim = {
 
+    // Caché dels límits de moviment (recalculats amb Anim.limits(); estables durant l'arrossegament)
+    _limitsCache: null,
+
     /**
      * _get: Helper intern per trobar l'índex d'un keyframe per el seu temps.
      */
@@ -153,6 +156,43 @@ FASTPASS.Anim = {
     },
 
     /**
+     * _calcLimits: Calcula els límits de moviment normalitzats del clip sota el CTI.
+     * Lògica pesada (accés a scale/frameSize) que NOMÉS s'executa aquí o quan
+     * Anim.limits() es crida, NO a cada moviment del slider (per evitar latència).
+     */
+    _calcLimits: function() {
+        try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return null;
+            var cti = seq.getPlayerPosition();
+            if (!cti) return null;
+            var info = FASTPASS.Clips.at(1, cti.seconds, "video");
+            if (!info || info === "null") return null;
+            var idx = JSON.parse(info).index;
+            var track = seq.videoTracks[0];
+            if (!track || !track.clips) return null;
+            var clip = track.clips[idx];
+            if (!clip) return null;
+            var mp = this._getMotionProps(clip);
+            if (!mp || !mp.scale || !mp.pos) return null;
+            var scale = mp.scale.getValue();
+            if (scale == null) return null;
+            scale = scale / 100;
+            var seqW = seq.frameSizeHorizontal || (seq.frameRect ? (seq.frameRect[2] - seq.frameRect[0]) : 0);
+            var seqH = seq.frameSizeVertical || (seq.frameRect ? (seq.frameRect[3] - seq.frameRect[1]) : 0);
+            if (!seqW || !seqH) return null;
+            var raw = mp.pos.getValue();
+            var curNorm = (raw && typeof raw[0] === "number") ? raw[0] : 0.5;
+            var canvasW = seqH * (9 / 16);
+            var clipW = 1920 * scale;
+            var margenNorm = Math.max(0, (clipW - canvasW) / (2 * seqW));
+            var minNorm = curNorm - margenNorm;
+            var maxNorm = curNorm + margenNorm;
+            return { min: minNorm, max: maxNorm, cur: curNorm, margen: margenNorm, scale: scale, seqW: seqW, seqH: seqH, clipW: clipW, canvasW: canvasW };
+        } catch(e) { return null; }
+    },
+
+    /**
      * x: Getter/Setter literal per a la posició X del clip sota CTI.
      */
     x: function(valNorm, isFinal) {
@@ -173,9 +213,6 @@ FASTPASS.Anim = {
 
             var mp = this._getMotionProps(clip);
 
-            var seqW = seq.frameSizeHorizontal || (seq.frameRect ? (seq.frameRect[2] - seq.frameRect[0]) : 0);
-            if (!seqW) return "ERR_NO_FRAMESIZE";
-
             if (arguments.length === 0) {
                 if (!mp || !mp.pos) return 0.5;
                 var gv = mp.pos.getValue();
@@ -187,26 +224,18 @@ FASTPASS.Anim = {
 
             var val = parseFloat(valNorm);   // 0..1 normalitzat (centre 0.5)
             var pPos = mp.pos;
-            var pScale = mp.scale;
-            if (!pScale) return "ERR_NO_SCALE";
-
-            var scale = pScale.getValue();
-            if (scale == null) return "ERR_NO_SCALE_VAL";
-            scale = scale / 100;
 
             var raw = pPos.getValue();
             if (!raw) return "ERR_NO_POS_VAL";
 
-            // Canvas 9:16 (ample del recorte vertical que ocupa tot l'alt del frame)
-            var seqH = seq.frameSizeVertical || (seq.frameRect ? (seq.frameRect[3] - seq.frameRect[1]) : 0);
-            var canvasW = seqH * (9 / 16);
-            var clipW = 1920 * scale;
-            // Moviment màxim = ample del clip escalat - ample del canvas, repartit als dos costats
-            var margenNorm = Math.max(0, (clipW - canvasW) / (2 * seqW));
-            var minL = raw[0] - margenNorm;
-            var maxL = raw[0] + margenNorm;
-            if (val < minL) val = minL;
-            if (val > maxL) val = maxL;
+            // Clampejar amb els límits cacheados (es recalculen a Anim.limits(),
+            // NO a cada moviment del slider → menys latència)
+            if (!this._limitsCache) this._limitsCache = this._calcLimits();
+            var L = this._limitsCache;
+            if (L) {
+                if (val < L.min) val = L.min;
+                if (val > L.max) val = L.max;
+            }
 
             var newVal = [val, raw[1]];   // array literal nou (sense mutar getValue)
 
@@ -233,34 +262,9 @@ FASTPASS.Anim = {
      * El centre és 0.5, així que els límits són 0.5±margin (no simètrics a 0).
      */
     limits: function() {
-        try {
-            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-            if (!seq) return "ERR_NO_SEQ";
-            var cti = seq.getPlayerPosition();
-            if (!cti) return "ERR_NO_CTI";
-            var info = FASTPASS.Clips.at(1, cti.seconds, "video");
-            if (!info || info === "null") return "ERR_NO_CLIP_AT_CTI";
-            var idx = JSON.parse(info).index;
-            var track = seq.videoTracks[0];
-            if (!track || !track.clips) return "ERR_NO_TRACK";
-            var clip = track.clips[idx];
-            if (!clip) return "ERR_NO_CLIP";
-            var mp = this._getMotionProps(clip);
-            if (!mp || !mp.scale || !mp.pos) return "ERR_NO_MOTION";
-            var scale = mp.scale.getValue();
-            if (scale == null) return "ERR_NO_SCALE_VAL";
-            scale = scale / 100;
-            var seqW = seq.frameSizeHorizontal || (seq.frameRect ? (seq.frameRect[2] - seq.frameRect[0]) : 0);
-            var seqH = seq.frameSizeVertical || (seq.frameRect ? (seq.frameRect[3] - seq.frameRect[1]) : 0);
-            var raw = mp.pos.getValue();
-            var curNorm = (raw && typeof raw[0] === "number") ? raw[0] : 0.5;
-            var canvasW = seqH * (9 / 16);
-            var clipW = 1920 * scale;
-            var margenNorm = Math.max(0, (clipW - canvasW) / (2 * seqW));
-            var minNorm = curNorm - margenNorm;
-            var maxNorm = curNorm + margenNorm;
-            return JSON.stringify({ min: minNorm, max: maxNorm, cur: curNorm, margen: margenNorm, scale: scale, seqW: seqW, seqH: seqH, clipW: clipW, canvasW: canvasW });
-        } catch(e) { return "ERR: " + e.message; }
+        var L = this._calcLimits();
+        this._limitsCache = L;   // actualitza la caché per al pròxim moviment del slider
+        return L ? JSON.stringify(L) : "ERR:no-limits";
     },
 
     /**
@@ -743,6 +747,88 @@ FASTPASS.Anim = {
                 }
             }
             return out.join(" | ");
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * _applyMotionValues: Aplica valors directes a les propietats de Motion d'un clip.
+     * Índexs (segons "Propiedades del clip.txt"): 0=Position, 1=Scale,
+     * 7=CropLeft, 8=CropTop, 9=CropRight, 10=CropBottom.
+     */
+    _applyMotionValues: function(clip, values) {
+        try {
+            var mp = this._getMotionProps(clip);
+            if (!mp || !mp.motion || !mp.motion.properties) return "ERR_NO_MOTION";
+            var props = mp.motion.properties;
+            if (values.position) props[0].setValue(values.position);
+            if (values.scale != null) props[1].setValue(values.scale);
+            if (values.cropLeft != null) props[7].setValue(values.cropLeft);
+            if (values.cropTop != null) props[8].setValue(values.cropTop);
+            if (values.cropRight != null) props[9].setValue(values.cropRight);
+            if (values.cropBottom != null) props[10].setValue(values.cropBottom);
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    _mergeProps: function(a, b) {
+        var out = {};
+        for (var k in a) if (a.hasOwnProperty(k)) out[k] = a[k];
+        for (var k2 in b) if (b.hasOwnProperty(k2)) out[k2] = b[k2];
+        return out;
+    },
+
+    /**
+     * doblePantalla: Verticalitza un clip 16:9 amb doble pantalla.
+     * Duplica el clip a la pista superior (V3) i aplica crop/posició/scale
+     * per convertir les dues imatges 16:9 en dues verticals.
+     *
+     * Valors:
+     *   Ambdós clips:  Scale 68%, Crop Top 14%, Crop Bottom 15,5%
+     *   Inferior (V1): Position (141,451), Crop Left 61%
+     *   Superior (V3): Position (492,451), Crop Right 64,5%
+     *
+     * @param {number} srcTrackIdx - Pista d'origen (1-based, MP4 = 1)
+     * @param {number} clipIndex - Índex del clip dins la pista d'origen
+     * @returns {string} "OK" o "ERR:..."
+     */
+    doblePantalla: function(srcTrackIdx, clipIndex) {
+        try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var srcTrack = seq.videoTracks[parseInt(srcTrackIdx) - 1];
+            if (!srcTrack || !srcTrack.clips) return "ERR_NO_SRC_TRACK";
+            var srcClip = srcTrack.clips[parseInt(clipIndex)];
+            if (!srcClip) return "ERR_NO_CLIP";
+            if (!srcClip.projectItem) return "ERR_NO_PROJECT_ITEM";
+
+            var targetTrack = seq.videoTracks[2]; // V3 = capa superior (graf)
+            if (!targetTrack) return "ERR_NO_TARGET_TRACK";
+
+            var tStart = srcClip.start.seconds;
+            var tIn = srcClip.inPoint.seconds;
+            var tOut = srcClip.outPoint.seconds;
+
+            // 1. Duplicar a la pista superior
+            targetTrack.insertClip(srcClip.projectItem, tStart);
+            var newClip = targetTrack.clips[targetTrack.clips.numItems - 1];
+            if (!newClip) return "ERR_DUP_FAILED";
+            // Igualar trims (in/out) amb el clip original
+            try {
+                if (typeof newClip.setInPoint === 'function') newClip.setInPoint(tIn);
+                else newClip.inPoint.seconds = tIn;
+                if (typeof newClip.setOutPoint === 'function') newClip.setOutPoint(tOut);
+                else newClip.outPoint.seconds = tOut;
+            } catch(e) {}
+
+            // 2. Valors Motion
+            var comuns = { scale: 68, cropTop: 14, cropBottom: 15.5 };
+            var inf    = { position: [141, 451], cropLeft: 61 };
+            var sup    = { position: [492, 451], cropRight: 64.5 };
+
+            var rInf = this._applyMotionValues(srcClip, this._mergeProps(comuns, inf));
+            var rSup = this._applyMotionValues(newClip, this._mergeProps(comuns, sup));
+            if (rInf !== "OK" || rSup !== "OK") return "ERR_PROP inf=" + rInf + " sup=" + rSup;
+            return "OK";
         } catch(e) { return "ERR: " + e.message; }
     }
 };
