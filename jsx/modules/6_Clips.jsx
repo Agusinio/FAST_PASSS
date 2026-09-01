@@ -669,11 +669,57 @@ FASTPASS.Clips = {
         try {
             var track = this._get(trackIdx, type || "video");
             var clip = track.clips[clipIdx];
-            if (!clip) return null;
-            
-            var comp = clip.components.getComponentByMatchName(compMatch);
-            if (!comp) return null;
-            var prop = comp.properties.getPropertyByMatchName(propMatch);
+            if (!clip || !clip.components) return null;
+
+            var upper = function(s){ return (s || "").toUpperCase(); };
+            var nComps = clip.components.numItems || clip.components.length || 0;
+
+            // 1. Component: per matchName/displayName (fallback iteratiu)
+            var comp = null;
+            if (typeof clip.components.getComponentByMatchName === 'function') {
+                comp = clip.components.getComponentByMatchName(compMatch);
+            }
+            if (!comp) {
+                var wantMotion = upper(compMatch).indexOf("MOTION") !== -1;
+                for (var i = 0; i < nComps; i++) {
+                    var c = clip.components[i];
+                    if (!c) continue;
+                    var cmn = upper(c.matchName), cdn = upper(c.displayName);
+                    if (c.matchName === compMatch || c.displayName === compMatch ||
+                        cmn.indexOf(upper(compMatch)) !== -1 || cdn.indexOf(upper(compMatch)) !== -1 ||
+                        (wantMotion && (cdn === "MOTION" || cdn === "MOVIMIENTO"))) {
+                        comp = c; break;
+                    }
+                }
+            }
+            if (!comp || !comp.properties) return null;
+
+            // 2. Propietat: per matchName/displayName (fallback iteratiu)
+            var prop = null;
+            if (typeof comp.properties.getPropertyByMatchName === 'function') {
+                prop = comp.properties.getPropertyByMatchName(propMatch);
+            }
+            if (!prop) {
+                var nProps = comp.properties.numItems || comp.properties.length || 0;
+                for (var j = 0; j < nProps; j++) {
+                    var p = comp.properties[j];
+                    if (!p) continue;
+                    var pmn = upper(p.matchName), pdn = upper(p.displayName);
+                    if (p.matchName === propMatch || p.displayName === propMatch ||
+                        pmn.indexOf(upper(propMatch)) !== -1 || pdn.indexOf(upper(propMatch)) !== -1) {
+                        prop = p; break;
+                    }
+                }
+            }
+            // 3. Fallback per índex conegut (Motion: 0=Position, 1=Scale, 2=Anchor Point)
+            if (!prop) {
+                var up = upper(propMatch);
+                var pi = -1;
+                if (up.indexOf("POSITION") !== -1 || up.indexOf("POS") !== -1) pi = 0;
+                else if (up.indexOf("SCALE") !== -1) pi = 1;
+                else if (up.indexOf("ANCHOR") !== -1) pi = 2;
+                if (pi !== -1 && comp.properties[pi]) prop = comp.properties[pi];
+            }
             return prop;
         } catch(e) { return null; }
     },
@@ -776,6 +822,36 @@ FASTPASS.Clips = {
             var result = seq.createCaptionTrack(item, tStart);
             if (result) return "OK";
             return "ERR_CREATE_CAPTION_FAILED";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * placeSrtOnExistingSubtitleTrack: Col·loca un .srt a una pista de subtítols
+     * JA EXISTENT (conserva el seu estil). Si no n'hi ha cap, retorna error.
+     * @param {string} itemName - Nom del .srt al projecte (URI-encoded)
+     * @param {number} startSec - Segon d'inici al timeline (normalment 0)
+     * @returns {string} "OK" o "ERR:..."
+     */
+    placeSrtOnExistingSubtitleTrack: function(itemName, startSec) {
+        try {
+            var seq = app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var nameToFind = decodeURIComponent(itemName);
+            var item = FASTPASS.Project.find(nameToFind);
+            if (!item) {
+                var lastDot = nameToFind.lastIndexOf(".");
+                if (lastDot > 0) item = FASTPASS.Project.find(nameToFind.substring(0, lastDot));
+            }
+            if (!item) return "ERR_ITEM_NOT_FOUND";
+            var tracks = seq.subtitleTracks;
+            if (!tracks) return "ERR_NO_SUBTITLE_TRACKS";
+            var n = tracks.numTracks || tracks.numItems || 0;
+            if (n <= 0) return "ERR_NO_SUBTITLE_TRACKS";
+            var track = tracks[0];
+            var tStart = new Time();
+            tStart.seconds = parseFloat(startSec || 0);
+            track.overwriteClip(item, tStart);
+            return "OK";
         } catch(e) { return "ERR: " + e.message; }
     },
 }

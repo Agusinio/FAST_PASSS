@@ -58,6 +58,10 @@
             if (typeof sec !== 'number' || isNaN(sec)) sec = 0;
             if (sec < 0) sec = 0;
             var hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = Math.floor(sec % 60), ms = Math.round((sec - Math.floor(sec)) * 1000);
+            // Carry de redondeo: 0.9999s → 1000ms s'ha de convertir a +1s (evita "00,1000")
+            if (ms >= 1000) { ms = 0; ss += 1; }
+            if (ss >= 60) { ss = 0; mm += 1; }
+            if (mm >= 60) { mm = 0; hh += 1; }
             var pad2 = function (v) { return v < 10 ? '0' + v : String(v); };
             var pad3 = function (v) { return v < 100 ? (v < 10 ? '00' + v : '0' + v) : String(v); };
             return pad2(hh) + ':' + pad2(mm) + ':' + pad2(ss) + ',' + pad3(ms);
@@ -105,6 +109,80 @@
             for (var i = 0; i < entries.length; i++) {
                 var e = entries[i], oldDur = e.endSec - e.startSec, newStart = firstIn + (e.startSec - firstIn) * ratio;
                 result.push({ index: i + 1, timeStr: '', texts: e.texts.slice(), startSec: newStart, endSec: newStart + oldDur * ratio });
+            }
+            return result;
+        },
+
+        /**
+         * scaleSegmentWithGaps: Re-escala un segment de clips (contigus) mantenint
+         * la separació base de 3 frames i escalant només durades + pauses.
+         * @param {Array} clips - clips del segment en ordre (startSec/endSec originals)
+         * @param {Array} boundaryGaps - gaps en ordre [lead, g1..g(n-1), trail] (longitud = clips.length+1)
+         * @param {number} newStart - nou IN del primer clip
+         * @param {number} newEnd   - nou límit dret (després del trail)
+         * @returns {Array} clips re-posicionats (index re-numerat 1..n)
+         */
+        scaleSegmentWithGaps: function (clips, boundaryGaps, newStart, newEnd) {
+            if (!clips || clips.length === 0) return [];
+            if (!isFinite(newStart) || !isFinite(newEnd) || newEnd <= newStart) {
+                // Rang degenerat: retornar els clips sense canvis (clonats) per no col·lapsar
+                return clips.map(function (c) { return { index: c.index, timeStr: c.timeStr, texts: c.texts.slice(), startSec: c.startSec, endSec: c.endSec }; });
+            }
+            var FPS = 25;
+            var GAP = 3 / FPS;      // 0.12s = 3 frames
+            var EPS = 1 / FPS;      // 0.04s (umbral gap base vs pausa)
+            var MIN_DUR = 1 / FPS;  // 0.04s (durada mínima d'un clip)
+            var n = clips.length;
+
+            var durs = [];
+            for (var d0 = 0; d0 < n; d0++) durs.push(Math.max(0, clips[d0].endSec - clips[d0].startSec));
+
+            // Classificar cada gap: contigu (0) / base (3 frames) / pausa (excés escalable)
+            var base = [], excess = [];
+            for (var j = 0; j < boundaryGaps.length; j++) {
+                var g = boundaryGaps[j];
+                if (g <= EPS) { base.push(0); excess.push(0); }
+                else if (g <= GAP + EPS) { base.push(GAP); excess.push(0); }
+                else { base.push(GAP); excess.push(g - GAP); }
+            }
+
+            var fixed = 0;
+            for (var f0 = 0; f0 < base.length; f0++) fixed += base[f0];
+
+            // Water-filling: les durades que caurien sota el mínim es fixen a MIN_DUR
+            var frozen = [];
+            for (var fr = 0; fr < n; fr++) frozen.push(false);
+            var factor = 1;
+            for (var iter = 0; iter <= n; iter++) {
+                var scalable = 0;
+                for (var s0 = 0; s0 < n; s0++) if (!frozen[s0]) scalable += durs[s0];
+                for (var e0 = 0; e0 < excess.length; e0++) scalable += excess[e0];
+                var fixedNow = fixed;
+                for (var fz = 0; fz < n; fz++) if (frozen[fz]) fixedNow += MIN_DUR;
+                var f = 1;
+                if (scalable > 0) f = (newEnd - newStart - fixedNow) / scalable;
+                var changed = false;
+                for (var w = 0; w < n; w++) {
+                    if (!frozen[w] && durs[w] * f < MIN_DUR) { frozen[w] = true; changed = true; }
+                }
+                factor = f;
+                if (!changed) break;
+            }
+
+            // Durades i gaps finals
+            var newDurs = [];
+            for (var i0 = 0; i0 < n; i0++) newDurs.push(frozen[i0] ? MIN_DUR : Math.max(MIN_DUR, durs[i0] * factor));
+            var newGaps = [];
+            for (var j0 = 0; j0 < excess.length; j0++) newGaps.push(base[j0] + excess[j0] * factor);
+
+            // Reensamblar: lead → clip → gap → clip → ... → trail
+            var result = [];
+            var t = newStart + newGaps[0];
+            for (var i = 0; i < n; i++) {
+                var s = t;
+                var e = t + newDurs[i];
+                result.push({ index: i + 1, timeStr: '', texts: clips[i].texts.slice(), startSec: s, endSec: e });
+                t = e + newGaps[i + 1];
             }
             return result;
         },
@@ -179,6 +257,11 @@
         loadPeaksFromBin: async function (binPath, peaksPerSec) {
             if (!binPath) return null;
             peaksPerSec = peaksPerSec || 100;
+
+            // Cache per path: evita rellegir el mateix .bin (NAS lent) en recàrregues
+            var self = FASTPASS_UI.Logic.WaveformGenerator;
+            if (!self._peaksCache) self._peaksCache = {};
+            if (self._peaksCache[binPath]) return self._peaksCache[binPath];
 
             try {
                 var cepFs = window.cep.fs;
@@ -277,11 +360,13 @@
                     peaks.push(maxVal);
                 }
 
-                return {
+                var out = {
                     peaks: peaks,
                     peaksPerSec: Math.round(sampleRate / step),
                     durSec: rawPeaks.length / sampleRate
                 };
+                self._peaksCache[binPath] = out;
+                return out;
 
             } catch(e) {
                 return null;

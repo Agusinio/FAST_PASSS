@@ -10,6 +10,17 @@ var csInterface = new CSInterface();
 var FASTPASS_UI = window.FASTPASS_UI || {};
 FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; 
 var isUserDraggingSlider = false;
+var reframeActive = false;
+
+function setReframeActive(on) {
+    reframeActive = on;
+    var zone = document.getElementById('sliderZone');
+    var slider = document.getElementById('slider-move');
+    if (zone) zone.classList.toggle('active', on);
+    if (slider) slider.disabled = !on;
+    if (!on && window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = false;
+    FASTPASS_UI.Utils.log(on ? "🎛️ Reencuadre manual ACTIVAT" : "🛑 Reencuadre manual desactivat", "DEBUG");
+}
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
@@ -53,6 +64,70 @@ var isUserDraggingSlider = false;
 (function () {
     'use strict';
 
+    function logLayoutWidth() {
+        var left = document.querySelector('.upper-left');
+        var right = document.querySelector('.right-zone');
+        var mainUpper = document.querySelector('.main-upper');
+        if (!left) return;
+        var lw = Math.round(left.getBoundingClientRect().width);
+        var lh = Math.round(left.getBoundingClientRect().height);
+        var rw = right ? Math.round(right.getBoundingClientRect().width) : 0;
+        var rh = right ? Math.round(right.getBoundingClientRect().height) : 0;
+        var tw = mainUpper ? Math.round(mainUpper.getBoundingClientRect().width) : 0;
+        var msg = 'Columna: ' + lw + '×' + lh + 'px | Vídeo: ' + rw + '×' + rh + 'px | Total: ' + tw + 'px';
+        console.log('📐 [LAYOUT] ' + msg);
+        var info = document.getElementById('layoutInfo');
+        if (info) info.textContent = '📐 ' + msg;
+    }
+
+    function applyLayoutMode(mode) {
+        if (mode === 'work') {
+            document.body.classList.add('mode-work');
+        } else {
+            document.body.classList.remove('mode-work');
+        }
+        window.FASTPASS_UI.LayoutMode = mode;
+        var btnMode = document.getElementById('btnMode');
+        if (btnMode) btnMode.textContent = (mode === 'work') ? '👤' : '🧪';
+        FASTPASS_UI.Utils.log('🔀 Layout mode: ' + mode.toUpperCase(), 'INFO');
+    }
+
+    function initSplitter() {
+        var splitter = document.getElementById('splitter');
+        var left = document.querySelector('.upper-left');
+        var right = document.querySelector('.right-zone');
+        var mainUpper = document.querySelector('.main-upper');
+        if (!splitter || !left || !right || !mainUpper) return;
+
+        var dragging = false;
+        splitter.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            dragging = true;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+        document.addEventListener('mousemove', function (e) {
+            if (!dragging) return;
+            var rect = mainUpper.getBoundingClientRect();
+            var x = e.clientX - rect.left;
+            var total = rect.width;
+            var splitterW = splitter.getBoundingClientRect().width;
+            var leftW = x - splitterW / 2;
+            if (leftW < 80) leftW = 80;
+            if (leftW > total - 120) leftW = total - 120;
+            left.style.flex = '0 0 ' + leftW + 'px';
+            right.style.flex = '1 1 auto';
+        });
+        var stop = function () {
+            if (!dragging) return;
+            dragging = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            logLayoutWidth();
+        };
+        document.addEventListener('mouseup', stop);
+    }
+
     function initPanel() {
         FASTPASS_UI.Utils.log("🚀 Vinculando botones...");
 
@@ -84,24 +159,38 @@ var isUserDraggingSlider = false;
             });
         }
 
-        // --- SLIDER: MOVIMIENTO Y ANIMACIÓN ---
+        // --- SLIDER: MOVIMIENTO Y ANIMACIÓN (zona sensible toggle) ---
         const slider = document.getElementById('slider-move');
-        if (slider) {
+        const sliderZone = document.getElementById('sliderZone');
+        if (slider && sliderZone) {
+            sliderZone.addEventListener('click', function (e) {
+                // El clic sobre el mateix slider (thumb) no ha de fer toggle
+                if (e.target === slider) return;
+                setReframeActive(!reframeActive);
+            });
+
+            var kfMode = function () {
+                return !!(window.FASTPASS_UI.State && window.FASTPASS_UI.State.isKeyframeMode);
+            };
+
             slider.oninput = function () {
+                if (!reframeActive) return;
                 isUserDraggingSlider = true;
                 var val = parseInt(slider.value, 10);
-                // Moviment visual literal
-                FASTPASS_UI.Utils.callJSX(`Anim.x(${val}, false)`);
+                // Mapa slider (-1000..1000) -> posició normalitzada (0..1)
+                var norm = (val + 1000) / 2000;
+                // Sempre només moure en viu; el keyframe es clava en onchange
+                FASTPASS_UI.Utils.callJSX(`Anim.x(${norm}, false)`);
             };
 
             slider.onchange = function () {
+                if (!reframeActive) return;
                 isUserDraggingSlider = false;
                 var val = parseInt(slider.value, 10);
-                // Clavat de KF i suavitzat literal
-                FASTPASS_UI.Utils.callJSX(`Anim.x(${val}, true)`).then(() => {
-                    if (FASTPASS_UI.Workflows.KF && FASTPASS_UI.Workflows.KF.runSmoothKF) {
-                        FASTPASS_UI.Workflows.KF.runSmoothKF();
-                    }
+                var norm = (val + 1000) / 2000;
+                // Clava el keyframe només al soltar (si el mode KF està actiu)
+                FASTPASS_UI.Utils.callJSX(`Anim.x(${norm}, ${kfMode()})`).then(res => {
+                    if (res !== "OK") FASTPASS_UI.Utils.log("Slider: " + res, "DEBUG");
                 });
             };
         }
@@ -173,30 +262,48 @@ var isUserDraggingSlider = false;
         const btnSrtOut = document.getElementById('btnSrtOut');
         const btnSrtAdjust = document.getElementById('btnSrtAdjust');
         const btnSrtExport = document.getElementById('btnSrtExport');
+        const btnSrtReset = document.getElementById('btnSrtReset');
 
         if (btnSrtLoad) {
-            btnSrtLoad.addEventListener('click', async function () {
+            btnSrtLoad.addEventListener('click', async function (e) {
                 const u = FASTPASS_UI.Utils;
-                u.log("📝 SRT_CARREGAR: Buscant .srt al projecte...");
+                // Control+click → mode EMERGÈNCIA (SRTs per blocs de 15 min)
+                if (e && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    u.log("🚨 SRT_CARREGAR: mode EMERGÈNCIA (Control+click)...");
+                    if (window.SrtEditor && window.SrtEditor.loadEmergencySrt) {
+                        await window.SrtEditor.loadEmergencySrt();
+                    } else {
+                        u.status("Error: SrtEditor no disponible", "error");
+                    }
+                    return;
+                }
+                u.log("📝 SRT_CARREGAR: Buscant .srt al directori del projecte...");
                 try {
-                    const itemsRaw = await u.callJSX("FASTPASS.Project.items('')");
-                    let items = [];
-                    try { items = JSON.parse(itemsRaw || "[]"); } catch(e) { items = []; }
-                    const srtItem = items.find(i => i && i.name && i.name.toUpperCase().endsWith('.SRT'));
-                    if (!srtItem) {
-                        u.status("No s'ha trobat .srt al projecte", "warn");
+                    // Font única de veritat: el .srt que viu a la carpeta del projecte.
+                    // (No es consulta el bin de Premiere perquè pot contenir .srt residuals
+                    //  d'altres notícies/blocs importats anteriorment.)
+                    const folder = await u.callJSX("Context.folder()");
+                    if (!folder || folder === "" || folder.indexOf('ERR') === 0) {
+                        u.status("No s'ha pogut obtenir la carpeta del projecte", "warn");
                         return;
                     }
-                    u.log("📝 SRT_CARREGAR: Trobat " + srtItem.name);
-                    const srtPathRaw = await u.callJSX('(function(){try{var p=app.project.rootItem;for(var i=0;i<p.children.numItems;i++){var c=p.children[i];if(c.name&&c.name.toUpperCase().indexOf(\'.SRT\')>=0&&(c.type===1||c.type===2)){return c.name+\'|\'+c.getMediaPath()}}return\'\'}catch(e){return\'ERR:\'+e.message}})()');
-                    if (srtPathRaw && srtPathRaw.indexOf('|') > 0) {
-                        var parts = srtPathRaw.split('|');
-                        u.log("📝 SRT_CARREGAR: Path = " + parts[1]);
-                        if (window.SrtEditor) {
-                            await window.SrtEditor.loadSrt(parts[1]);
-                        } else {
-                            u.status("Error: SrtEditor no disponible", "error");
-                        }
+                    const files = await u.readFolder(folder);
+                    const srtFiles = (files || []).filter(function (f) {
+                        return f && f.name && f.name.toUpperCase().endsWith('.SRT');
+                    });
+                    if (srtFiles.length === 0) {
+                        u.status("No s'ha trobat .srt a la carpeta del projecte", "warn");
+                        return;
+                    }
+                    const srtName = srtFiles[0].name;
+                    const srtPath = folder.replace(/[\\/]+$/, '') + '\\' + srtName;
+                    u.log("📝 SRT_CARREGAR: Trobat " + srtName);
+                    u.log("📝 SRT_CARREGAR: Path = " + srtPath);
+                    if (window.SrtEditor) {
+                        await window.SrtEditor.loadSrt(srtPath);
+                    } else {
+                        u.status("Error: SrtEditor no disponible", "error");
                     }
                 } catch(e) {
                     u.log("💥 SRT_CARREGAR: " + e.message);
@@ -218,6 +325,9 @@ var isUserDraggingSlider = false;
         });
         if (btnSrtExport) btnSrtExport.addEventListener('click', function () {
             if (window.SrtEditor) window.SrtEditor.exportToPremiere();
+        });
+        if (btnSrtReset) btnSrtReset.addEventListener('click', function () {
+            if (window.SrtEditor) window.SrtEditor.resetToOriginal();
         });
 
         // --- WORKFLOW: RENDER ---
@@ -315,6 +425,17 @@ var isUserDraggingSlider = false;
 
         callContextAudit();
         FASTPASS_UI.Utils.log("✅ TODOS LOS BOTONES VINCULADOS");
+        initSplitter();
+        var btnMode = document.getElementById('btnMode');
+        if (btnMode) {
+            btnMode.addEventListener('click', function () {
+                var cur = window.FASTPASS_UI.LayoutMode || 'test';
+                applyLayoutMode(cur === 'test' ? 'work' : 'test');
+            });
+        }
+        applyLayoutMode(window.FASTPASS_UI.LayoutMode || 'test');
+        logLayoutWidth();
+        window.addEventListener('resize', logLayoutWidth);
     }
 
     async function callWorkflow(module, method, ...args) {
@@ -357,15 +478,30 @@ var isUserDraggingSlider = false;
 
 // 4. SINCRONIZACIÓN (POLLING DEL SLIDER)
 FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
+    if (!reframeActive) return;          // polling només amb el reencuadre actiu
     if (isUserDraggingSlider) return;
     FASTPASS_UI.Utils.callJSX('Anim.x()').then(val => {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
-            const pxValue = Math.round(parseFloat(val) * 608);
-            slider.value = pxValue;
+            const norm = parseFloat(val);
+            const sliderValue = Math.round((norm - 0.5) * 2000); // 0..1 -> -1000..1000
+            slider.value = sliderValue;
         }
     });
 };
+
+// 5. DESACTIVAR EL REENCUADRE QUAN ES TOCA UN ALTRE CONTROL
+document.addEventListener('click', function (e) {
+    if (!reframeActive) return;
+    var zone = document.getElementById('sliderZone');
+    if (zone && !zone.contains(e.target)) {
+        // No desactivar amb els controls de navegació ni KEYFRAME
+        var keep = ['btnPrevClip', 'btnNextClip', 'btnKey'];
+        var id = e.target && e.target.id;
+        if (id && keep.indexOf(id) !== -1) return;
+        setReframeActive(false);
+    }
+});
 
 setInterval(function () {
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {

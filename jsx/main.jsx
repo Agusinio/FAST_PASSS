@@ -462,6 +462,27 @@ $.global.Anim = {
     },
     reframe: function(ti, ci) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
+    },
+    toggleReframe: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.toggleReframe() : "ERR"; 
+    },
+    reframeAtTime: function(t) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframeAtTime(t) : "ERR"; 
+    },
+    debugVideoEffects: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.debugVideoEffects() : "ERR"; 
+    },
+    debugMotion: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.debugMotion() : "ERR"; 
+    },
+    addKF: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.addKF() : "ERR"; 
+    },
+    debugPos: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.debugPos() : "ERR"; 
+    },
+    debugKF: function() { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.debugKF() : "ERR"; 
     }
 };
 

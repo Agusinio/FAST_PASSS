@@ -370,7 +370,7 @@
             return { success: true, duration };
         },
 
-        _placeChyronsByType: async function (filterFn, trackResolver, label) {
+        _placeChyronsByType: async function (filterFn, trackResolver, label, onPlaced) {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const struct = FASTPASS_UI.State.structure;
@@ -424,6 +424,7 @@
                         await callJSX(`Clips.insert('${escapedName}', ${track}, ${placeTime}, null, 'video')`);
                         log(`   ✅ [${label}] ${chy.name} → V${track} @ ${placeTime.toFixed(2)}s`);
                         placedCount++;
+                        if (onPlaced) { await onPlaced(chy, placeTime); }
                     }
                 }
                 if (placedCount === 0) {
@@ -660,6 +661,18 @@
                 c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec"),
                 (c, cfg) => cfg.tracks.video.chyrons,
                 "Nom"
+                // ── Reencuadre automàtic DESACTIVAT de moment: el botó NOM només col·loca
+                //    els chyrons. L'efecte Auto Reframe s'aplica manualment amb el botó REFRAME.
+                // async (chy, placeTime) => {
+                //     const res = await callJSX(`Anim.reframeAtTime(${placeTime})`);
+                //     if (res === "OK_ADDED_REFRAME") {
+                //         log(`   🎯 [Nom] Auto Reframe aplicat al clip de V1 sota ${chy.name} @ ${placeTime.toFixed(2)}s`);
+                //     } else if (res === "INFO_ALREADY_HAS_REFRAME") {
+                //         log(`   ⚠️ [Nom] El clip sota ${chy.name} ja té Auto Reframe.`);
+                //     } else {
+                //         log(`   ❌ [Nom] No s'ha pogut reencuadrar sota ${chy.name}: ${res}`, "WARN");
+                //     }
+                // }
             );
         },
 

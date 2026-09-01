@@ -330,7 +330,24 @@
         
             // B. MEDIA ASSETS (MP4 / SRT) -> Root
             const mediaList = [];
-            if (media?.mp4?.path && !existing.media.includes(media.mp4.name)) {
+
+            // (TO DO UPDATE #1) NO reimportar el MP4 si ja existeix un clip al projecte.
+            // existing.media només llista el root, així que fem una cerca RECURSIVA
+            // (root + bins) amb Project.find, tolerant amb/sense extensió.
+            let mp4Exists = false;
+            if (media?.mp4?.path) {
+                const mp4Enc = encodeURIComponent(media.mp4.name);
+                const mp4Found = await callJSX(`FASTPASS.Project.find('${mp4Enc}')`);
+                mp4Exists = !!mp4Found && mp4Found !== 'null' && mp4Found.indexOf('null') !== 0;
+                if (!mp4Exists) {
+                    const lastDot = media.mp4.name.lastIndexOf('.');
+                    if (lastDot > 0) {
+                        const mp4FoundNoExt = await callJSX(`FASTPASS.Project.find('${encodeURIComponent(media.mp4.name.substring(0, lastDot))}')`);
+                        mp4Exists = !!mp4FoundNoExt && mp4FoundNoExt !== 'null' && mp4FoundNoExt.indexOf('null') !== 0;
+                    }
+                }
+            }
+            if (media?.mp4?.path && !mp4Exists) {
                 mediaList.push(media.mp4.path.replace(/\\/g, "/"));
             }
 

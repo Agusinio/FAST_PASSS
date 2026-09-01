@@ -4,16 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css?v=31">
 </head>
 <body>
     <div id="main-content">
+        <div class="main-upper">
+        <div class="upper-left">
         
         <!-- SECTION: SETUP -->
         <div class="section-container">
-            <div class="section-label"><span>SETUP</span></div>
+            <div class="section-label"><span>INICI</span></div>
             <div class="section-content">
-                <div class="semaforo-strip">
+                <div class="setup-top-row">
+                    <div class="semaforo-strip">
                     <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">
                         <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
                     </div>
@@ -33,6 +36,8 @@
                         <div id="sem-srt" class="light off"></div>
                         <span>SRT</span>
                     </div>
+                    </div>
+                    <button id="btnFetchEscaleta" class="secondary btn-sq-double-high" title="Fer foto actualitzada de l'escaleta via API digition" style="background:#5a2a2a; color:#f99;">📷 FOTO</button>
                 </div>
                 <div class="setup-grid">
                     <div class="setup-inputs">
@@ -60,7 +65,6 @@
                     </div>
                     <div class="setup-button-container">
                         <button id="btnMainAction" class="btn-big-sq">NOU</button>
-                        <button id="btnFetchEscaleta" class="secondary btn-sq-double-high" title="Fer foto actualitzada de l'escaleta via API digition">📷 FOTO</button>
                     </div>
                 </div>
             </div>
@@ -79,8 +83,8 @@
                     </div>
                     <div class="video-row-bottom">
                         <button id="btnPrevClip" class="secondary btn-sq-std">◀</button>
-                        <div class="slider-container">
-                            <input type="range" id="slider-move" min="-1000" max="1000" value="0">
+                        <div class="slider-zone" id="sliderZone" title="Clica per activar/desactivar el reencuadre manual">
+                            <input type="range" id="slider-move" min="-1000" max="1000" value="0" disabled>
                         </div>
                         <button id="btnNextClip" class="secondary btn-sq-std">▶</button>
                         <button id="btnKey" class="secondary btn-sq-double-high">KEYFRAME</button>
@@ -89,8 +93,10 @@
             </div>
         </div>
         
+        <!-- GRUP: GRÀFICS + CHYRONS (2 columnes) -->
+        <div class="graphics-group">
         <!-- SECTION: GRÀFICS -->
-        <div class="section-container">
+        <div class="section-container test-only">
             <div class="section-label"><span>GRÀFICS</span></div>
             <div class="section-content">
                  <div class="graphics-strip">
@@ -120,32 +126,23 @@
                  </div>
             </div>
         </div>
+        </div>
 
+        <!-- GRUP: SUBTÍTOLS + RENDER (2 columnes) -->
+        <div class="graphics-group">
         <!-- SECTION: SUBTÍTOLS EDITOR -->
         <div class="section-container">
             <div class="section-label"><span>SUBTÍTOLS</span></div>
             <div class="section-content">
-                <!-- Fila superior: botons + preview -->
-                <div style="display:flex; gap:4px; align-items:stretch; min-height:60px;">
-                    <div style="display:flex; gap:3px; flex-wrap:wrap; align-content:flex-start; flex:1;">
-                        <button id="btnSrtLoad" class="secondary btn-sq-double-high">CARREGAR</button>
-                        <button id="btnSrtIn" class="secondary btn-sq-double-high">IN</button>
-                        <button id="btnSrtOut" class="secondary btn-sq-double-high">OUT</button>
-                        <button id="btnSrtAdjust" class="secondary btn-sq-double-high">AJUSTAR</button>
-                        <button id="btnSrtMode" class="secondary btn-sq-double-high" title="Mode marcadors: MOURE = dreta solidària | AMBDÓS = escala dos costats">⇒ MOURE</button>
-                        <button id="btnSrtExport" class="secondary btn-sq-double-high">EXPORTAR</button>
-                        <div style="width:100%;"></div>
-                        <button id="btnSrtPlay" class="secondary btn-sq-double-high" style="background:#2a5a2a; color:#8f8;">▶ PLAY</button>
-                        <button id="btnZoomOut" class="secondary btn-sq-std" style="font-size:16px; width:32px;">−</button>
-                        <button id="btnZoomIn" class="secondary btn-sq-std" style="font-size:16px; width:32px;">+</button>
-                        <span id="zoomLabel" style="font:11px sans-serif; color:#888; align-self:center; margin-left:4px;">20px/s</span>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <div style="display:flex; gap:4px; flex-wrap:nowrap;">
+                        <button id="btnSrtLoad" class="secondary srt-top">CARREGAR</button>
+                        <button id="btnSrtExport" class="secondary srt-top">EXPORTAR</button>
+                        <button id="btnSrtReset" class="secondary srt-top" style="background:#5a2a2a; color:#f99;">RESET</button>
                     </div>
-                    <div id="srtPreview" style="width:210px; min-width:160px; height:70px; background:#2a2a2a; border-radius:4px; padding:8px; color:#eee; font:16px/1.4 sans-serif; overflow-y:auto; display:flex; flex-direction:column; justify-content:flex-end;"></div>
-                </div>
-                <!-- Timeline (canvas) -->
-                <div id="srtEditorContainer" style="margin-top:4px; display:none;">
-                    <div style="overflow-x:auto; overflow-y:hidden;">
-                        <canvas id="srtCanvas" width="1800" height="150" style="cursor:pointer; background:#1a1a1a;"></canvas>
+                    <div style="display:flex; gap:6px;">
+                        <button id="btnSrtIn" class="secondary srt-inout">IN</button>
+                        <button id="btnSrtOut" class="secondary srt-inout">OUT</button>
                     </div>
                 </div>
             </div>
@@ -156,9 +153,37 @@
             <div class="section-label"><span>RENDER</span></div>
             <div class="section-content">
                 <div class="render-strip">
-                    <button id="btnRenderVideo" class="secondary btn-sq-double-high">VÍDEO</button>
-                    <button id="btnRenderPortada" class="secondary btn-sq-double-high">PORTADA</button>
-                    <button id="btnRenderClose" class="secondary btn-sq-double-high">TANCAR</button>
+                    <button id="btnRenderVideo" class="secondary srt-inout">VÍDEO</button>
+                    <button id="btnRenderPortada" class="secondary srt-inout">PORTADA</button>
+                    <button id="btnRenderClose" class="secondary srt-inout">TANCAR</button>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+                    <button id="btnMode" class="icon-button" title="Alternar layout TEST / TREBALL" style="flex:0 0 auto;">🧪</button>
+                    <div id="layoutInfo" style="font-size:12px; color:#fff; flex:1;">📐 —</div>
+                </div>
+            </div>
+        </div>
+        </div>
+        <div id="splitter" title="Arrossega per redimensionar"></div>
+        </div>
+        <div class="right-zone">
+            <div id="srtVideoWrap">
+                <video id="srtVideo" playsinline muted></video>
+                <div id="srtVideoSubs"></div>
+            </div>
+        </div>
+        </div>
+
+        <!-- ZONA TIMELINE SUBTÍTOLS (ample complet) -->
+        <div class="srt-timeline-zone">
+            <div id="srtEditorContainer" style="display:none;">
+                <div style="overflow-x:hidden; overflow-y:hidden;">
+                    <canvas id="srtCanvas" width="1800" height="150" style="cursor:crosshair; background:#1a1a1a;"></canvas>
+                </div>
+                <div class="srt-zoombar" id="srtZoomBar" title="Arrossega els extrems per fer zoom · arrossega el centre per desplaçar-te">
+                    <div class="srt-zoombar-fill" id="srtZoomFill"></div>
+                    <div class="srt-zoombar-handle srt-zoombar-handle-l" id="srtZoomHandleL"></div>
+                    <div class="srt-zoombar-handle srt-zoombar-handle-r" id="srtZoomHandleR"></div>
                 </div>
             </div>
         </div>
@@ -182,38 +207,38 @@
     <script src="js/core/escaleta_fallback.js?v=5"></script>
     <script src="js/core/escaleta_fetch.js?v=5"></script>
     <script src="js/core/escaleta_reader.js?v=5"></script>
-    <script src="js/core/session_manifest.js?v=5"></script>
+    <script src="js/core/session_manifest.js?v=6"></script>
     <script src="js/core/state.js?v=5"></script>
     <script src="js/inspectors/1_SourceAssets.js?v=5"></script>
     <script src="js/logic/Scanner.js?v=5"></script>
     <script src="js/inspectors/2_App.js?v=5"></script>
     <script src="js/inspectors/3_Session.js?v=5"></script>
     <script src="js/core/4_Context.js?v=5"></script>
-    <script src="js/logic/3_Project_Logic.js?v=5"></script>
+    <script src="js/logic/3_Project_Logic.js?v=6"></script>
     <script src="js/logic/5_Tracks_Logic.js?v=5"></script>
     <script src="js/logic/6_Clips_Logic.js?v=5"></script>
     <script src="js/logic/7_KF_Logic.js?v=5"></script>
     <script src="js/logic/9_Render_Logic.js?v=5"></script>
-    <script src="js/logic/10_Srt_Logic.js?v=5"></script>
+    <script src="js/logic/10_Srt_Logic.js?v=9"></script>
     <script src="js/logic/13_Parse.js?v=5"></script>
-    <script src="js/logic/14_Assembly_Logic.js?v=5"></script>
+    <script src="js/logic/14_Assembly_Logic.js?v=6"></script>
     <script src="js/logic/15_FFmpeg_Logic.js?v=5"></script>
     <script src="js/logic/16_Analysis_Logic.js?v=5"></script>
     <script src="js/core/assembly_context.js?v=5"></script>
     <script src="js/workflows/flow_mp4.js?v=5"></script>
     <script src="js/workflows/flow_markers.js?v=5"></script>
-    <script src="js/workflows/flow_chyrons.js?v=5"></script>
+    <script src="js/workflows/flow_chyrons.js?v=6"></script>
     <script src="js/workflows/flow_graphics.js?v=5"></script>
-    <script src="js/workflows/flow_mainButton.js?v=5"></script>
+    <script src="js/workflows/flow_mainButton.js?v=6"></script>
     <script src="js/workflows/flow_cut.js?v=5"></script>
     <script src="js/workflows/flow_retols.js?v=5"></script>
     <script src="js/workflows/flow_srt.js?v=5"></script>
-    <script src="js/workflows/flow_render.js?v=5"></script>
-    <script src="js/workflows/flow_KF.js?v=5"></script>
+    <script src="js/workflows/flow_render.js?v=6"></script>
+    <script src="js/workflows/flow_KF.js?v=10"></script>
     <script src="js/workflows/flow_config.js?v=5"></script>
     <script src="js/workflows/flow_assembly.js?v=5"></script>
     <script src="js/core/project_registry.js?v=5"></script>
-    <script src="js/editor/srt_editor.js?v=5"></script>
-    <script src="js/main.js?v=5"></script>
+    <script src="js/editor/srt_editor.js?v=54"></script>
+    <script src="js/main.js?v=19"></script>
 </body>
 </html>

@@ -143,6 +143,15 @@
             } catch (e) {
                 getUtils().handleError(e, "RenderClose");
             }
+            // Netejar l'editor de subtítols (timeline + waveform) en tancar el projecte:
+            // sense projecte obert no té sentit que es puguin seguir editant.
+            try {
+                if (window.SrtEditor && typeof window.SrtEditor.reset === 'function') {
+                    window.SrtEditor.reset();
+                }
+            } catch (e2) {
+                getUtils().log("⚠️ Error netejant editor SRT: " + e2.message, "WARN");
+            }
         }
     };
 

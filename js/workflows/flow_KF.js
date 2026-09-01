@@ -14,19 +14,25 @@
 
         runAddKF: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            var self = this;
-            log("💎 Sol·licitant nou KF...");
+            log("💎 Col·locant keyframe al cabezal...");
             console.log('DEBUG runAddKF: called');
-
-            // Literal: Anim.add(track, clip, component, property, time)
-            // Posem -1 per a que el motor busque la selecció actual
-            callJSX(`Anim.add(-1, -1, '${COMPANT}', '${PROPPOS}', -1)`).then(function (res) {
-                if (res && res.indexOf("OK") !== -1) {
-                    return self.runSmoothKF();
+            try {
+                const res = await callJSX("Anim.addKF()");
+                if (res && res.indexOf("OK") === 0) {
+                    if (window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = true;
+                    getUtils().status("Keyframe col·locat", "exito");
+                    log("✅ Keyframe col·locat al cabezal. Mode KF activat. " + res);
+                    const diag = await callJSX("Anim.debugPos()");
+                    log("📍 DebugPos: " + diag, "DEBUG");
+                    const diagKF = await callJSX("Anim.debugKF()");
+                    log("🎞️ DebugKF: " + diagKF, "DEBUG");
+                } else {
+                    getUtils().status("Error Keyframe", "error");
+                    log("⚠️ Error en addKF: " + res, "WARN");
                 }
-            })['catch'](function (err) {
-                console.error("Error en flux AddKF: " + err);
-            });
+            } catch (e) {
+                console.error("Error en runAddKF: " + e);
+            }
         },
 
         runSmoothKF: async function () {
@@ -71,19 +77,26 @@
         },
 
         runAutoReframe: async function() {
-            log("🤖 Executant Auto Reframe Intel·ligent...");
+            log("🔄 Toggle Auto Reframe...");
             console.log('DEBUG runAutoReframe: called');
             try {
-                const res = await callJSX("Anim.reframe(1, -1)"); // V1, cabezal
+                const res = await callJSX("Anim.toggleReframe()");
                 if (res === "OK_ADDED_REFRAME") {
                     getUtils().status("Reframe APLICAT", "exito");
-                    log("✅ Auto Reframe aplicat al clip de V1.");
+                    log("✅ Auto Reframe aplicat al clip seleccionat.");
+                } else if (res === "OK_REMOVED_REFRAME") {
+                    getUtils().status("Reframe TRET", "warn");
+                    log("🔁 Auto Reframe tret del clip.");
                 } else if (res === "INFO_ALREADY_HAS_REFRAME") {
                     getUtils().status("Clip ja té Reframe", "warn");
                     log("⚠️ El clip ja conté l'efecte Auto Reframe.");
                 } else {
                     getUtils().status("Error Reframe", "error");
                     log("⚠️ Error d'aplicació: " + res, "WARN");
+                    if (res === "ERR_EFFECT_NOT_FOUND") {
+                        const diag = await callJSX("Anim.debugVideoEffects()");
+                        log("🔍 Efectes de vídeo: " + diag, "WARN");
+                    }
                 }
             } catch (e) {
                 console.error("Error en AutoReframe: " + e);

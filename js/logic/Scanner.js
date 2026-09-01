@@ -39,6 +39,28 @@
             return null;
         },
 
+        /**
+         * _normalize: Redueix una cadena a minúscules sense accents ni símbols.
+         * Serveix per comparar el "tema" del projecte amb els noms dels .srt
+         * (ex: "DONAPAS BARCELONA" == "Donapas_Barcelona" == "donapasbarcelona").
+         */
+        _normalize: function (s) {
+            if (!s) return '';
+            var str = String(s).toLowerCase();
+            var map = {
+                'à':'a','á':'a','â':'a','ã':'a','ä':'a','å':'a',
+                'ç':'c',
+                'è':'e','é':'e','ê':'e','ë':'e',
+                'ì':'i','í':'i','î':'i','ï':'i',
+                'ñ':'n',
+                'ò':'o','ó':'o','ô':'o','õ':'o','ö':'o',
+                'ù':'u','ú':'u','û':'u','ü':'u',
+                'ý':'y','ÿ':'y'
+            };
+            str = str.replace(/[àáâãäåçèéêëìíîïñòóôõöùúûüýÿ]/g, function (ch) { return map[ch] || ch; });
+            return str.replace(/[^a-z0-9]+/g, '');
+        },
+
         selectedProject: function(fileList, progKey, blocKey) {
             if (!fileList || fileList.length === 0) return null;
             
@@ -56,7 +78,7 @@
             return match ? match.name : null;
         },
 
-        mediaAssets: async function (ctx) {
+        mediaAssets: async function (ctx, temaHint) {
             try {
                 const pathNAS = ctx.config.rutas.verticalitzacio;
                 const allFiles = await utils.readFolder(pathNAS);
@@ -89,7 +111,26 @@
                     return null;
                 };
 
-                return { mp4: getAsset('.MP4'), srt: getAsset('.SRT') };
+                var mp4 = getAsset('.MP4');
+                var srt = getAsset('.SRT');
+
+                // ─── AFINAR LA LOCALITZACIÓ DEL SRT ─────────────────────────────
+                // Dins d'un mateix bloc hi pot haver diversos .srt (una per notícia).
+                // Preferim el que coincideix amb el tema del projecte (si es coneix).
+                if (srt && temaHint && String(temaHint).trim().length > 1) {
+                    var normalizedTema = this._normalize(temaHint);
+                    for (var j = 0; j < validFiles.length; j++) {
+                        var candidate = validFiles[j].name;
+                        if (!candidate.toUpperCase().endsWith('.SRT')) continue;
+                        if (normalizedTema && this._normalize(candidate).indexOf(normalizedTema) !== -1) {
+                            srt = { name: candidate, path: pathNAS + candidate };
+                            utils.log('🎯 [SCAN:media] SRT coincident amb el tema "' + temaHint + '": ' + candidate, 'DEBUG');
+                            break;
+                        }
+                    }
+                }
+
+                return { mp4: mp4, srt: srt };
             } catch (e) { return { mp4: null, srt: null }; }
         },
 

@@ -48,40 +48,10 @@
         },
 
         /**
-         * freeze: Genera el freeze frame final automatitzat.
+         * (TO DO #4) S'ha eliminat el mètode 'freeze' que generava un frame congelat
+         * genèric i l'inseria a la pista de Tema-Títol com a "títol sustituto".
+         * Ara, si no hi ha Tema-Títol real, NO es col·loca cap sustituto congelat.
          */
-        freeze: async function(targetTime = 6.6) {
-            utils.log(`📸 Assembly: Generant Freeze Frame a ${targetTime}s...`);
-            const cfg = window.FASTPASS_UI.Config.get();
-            const T_THEME = cfg.tracks.video.tematitol;
-
-            // 1. Aïllament visual de la pista de Temes
-            await window.Tracks.isolate(T_THEME, "video");
-            await window.Timeline.set(targetTime);
-            await utils.delay(1000);
-
-            // 2. Captura orquestrada (Literal: Context.folder)
-            const folder = await utils.callJSX("Context.folder()");
-            const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`.replace(/\\/g, "\\\\");
-            const res = await window.Render.capture(snapPath, targetTime);
-            
-            // 3. Restauració de visibilitat
-            await window.Tracks.all("video", "mute", false);
-
-            // 4. Importació i "Smart Insert"
-            if (res.success) {
-                const fileName = snapPath.split("\\\\").pop();
-                const payload = JSON.stringify([snapPath]);
-                // Literal: IO.importFiles
-                await utils.callJSX(`IO.importFiles('${payload}', 'root')`);
-                
-                // Literal: Timeline.duration()
-                const dur = await utils.callJSX("Timeline.duration()");
-                await window.Clips.insert(fileName, T_THEME, targetTime, dur);
-                return "OK_FREEZE";
-            }
-            return "ERR_FREEZE";
-        },
 
         /**
          * conductor: Insereix el grafisme del conductor.

@@ -921,7 +921,7 @@
             
             // 1. Busquem materials al NAS
             const wotts = await window.Scan.wotts(ctx);
-            const media = await window.Scan.mediaAssets(ctx);
+            const media = await window.Scan.mediaAssets(ctx, wotts.tema);
             const portada = await window.Scan.portadas(ctx);
             
             // 2. Actualitzem State global
@@ -959,30 +959,9 @@
             // 1. Ingesta (Rètols, Media)
             await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
 
-            // 2. Auto-Insert SRT via createCaptionTrack (API nativa Adobe, inline)
-            if (assets.media && assets.media.srt) {
-                log("🎞️ Autocol·locant SRT via createCaptionTrack natiu...");
-                const escapedSrtName2 = encodeURIComponent(assets.media.srt.name);
-                const result = await callJSX(`(function(){var s=app.project.activeSequence;if(!s)return'ERR_NO_SEQ';var i=FASTPASS.Project.find(decodeURIComponent('${escapedSrtName2}'));if(!i)return'ERR_ITEM_NOT_FOUND';if(typeof s.createCaptionTrack!=='function')return'ERR_NO_CAPTION_API';return s.createCaptionTrack(i,0)?'OK':'ERR_FAILED'})()`);
-                log("🎞️ Resultat autocol·locació SRT: " + result);
-                // Desar path del SRT a State per a IN/OUT
-                const srtNameEsc = encodeURIComponent(assets.media.srt.name);
-                const srtPathRaw2 = await callJSX(`(function(){try{var p=app.project.rootItem;for(var i=0;i<p.children.numItems;i++){var c=p.children[i];if(c.name&&c.name.toUpperCase().indexOf('.SRT')>=0&&(c.type===1||c.type===2)){return c.name+'|'+c.getMediaPath()}}return''}catch(e){return'ERR:'+e.message}})()`);
-                /*if (srtPathRaw2 && srtPathRaw2.indexOf('|') > 0) {
-                    var parts2 = srtPathRaw2.split('|');
-                    if (window.FASTPASS_UI.State) {
-                        window.FASTPASS_UI.State.srt = window.FASTPASS_UI.State.srt || {};
-                        window.FASTPASS_UI.State.srt.mediaPath = parts2[1];
-                        window.FASTPASS_UI.State.srt.name = parts2[0];
-                        log("🎞️ SRT mediaPath desat a State: " + parts2[1]);
-                    }
-                }*/
-                // Habilitar botons IN/OUT
-                const btnIn = document.getElementById('btnSrtIn');
-                const btnOut = document.getElementById('btnSrtOut');
-                if (btnIn) btnIn.disabled = false;
-                if (btnOut) btnOut.disabled = false;
-            }
+            // 2. (TO DO UPDATE #2) NO col·locar el SRT a la pista de subtítols aquí.
+            // El SRT es gestiona únicament via l'editor SRT (CARREGAR + EXPORTAR),
+            // així que UPDATE/GO/LOAD no han de crear cap caption track.
 
 
             // 3. Focus i Targeting

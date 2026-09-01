@@ -11,6 +11,8 @@
 
     FASTPASS_UI.SessionManifest = {
 
+        _cache: {},   // path -> manifest (en memòria, evita rellegir el NAS)
+
         /**
          * Retorna la ruta del fitxer manifest per al context actual.
          * Ubicació: mateixa carpeta que el .prproj
@@ -29,10 +31,16 @@
         load: async function(ctx) {
             const path = this.getPath(ctx);
             const utils = window.FASTPASS_UI.Utils;
+            // Cache en memòria: la lectura del JSON al NAS triga ~20-25s i bloqueja
+            // ExtendScript (causa dels cuelgues). Un cop llegit, es reutilitza.
+            if (this._cache[path]) {
+                return this._cache[path];
+            }
             try {
                 const raw = await utils.callJSX(`IO.readTxt('${utils.escape(path)}')`);
                 if (raw && !raw.startsWith('ERR') && raw !== '') {
                     const parsed = JSON.parse(raw);
+                    this._cache[path] = parsed;
                     const items = parsed.escaletaItems ? parsed.escaletaItems.length : 0;
                     utils.log(`📂 [SessionManifest] Manifest carregat: ${items} items d'escaleta (${path.substring(Math.max(0, path.length - 60))})`, 'DEBUG');
                     return parsed;
@@ -53,13 +61,18 @@
             updated._lastUpdated = new Date().toISOString();
             
             const path = this.getPath(ctx);
+            // Actualitzar el cache en memòria abans de tornar (font de veritat immediata)
+            this._cache[path] = updated;
+            
             const json = JSON.stringify(updated);
             const utils = window.FASTPASS_UI.Utils;
             
-            const writeResult = await utils.callJSX(`IO.writeTxt('${utils.escape(path)}', '${utils.escape(json)}')`);
-            if (writeResult === '[]') {
-                utils.log(`❌ [SessionManifest] Error escrivint manifest a: ${path} (writeTxt ha fallat)`, 'ERROR');
-            }
+            // Escriure al NAS en segon pla (no bloqueja l'edició ni els clics)
+            utils.callJSX(`IO.writeTxt('${utils.escape(path)}', '${utils.escape(json)}')`).then(function(writeResult) {
+                if (writeResult === '[]') {
+                    utils.log(`❌ [SessionManifest] Error escrivint manifest a: ${path} (writeTxt ha fallat)`, 'ERROR');
+                }
+            });
             
             // Sincronització immediata amb l'estat global per a compatibilitat
             if (updated.ref) {
