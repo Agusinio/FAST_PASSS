@@ -519,9 +519,6 @@ $.global.Clips = {
     },
     getSelectedVideo: function() {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.getSelectedVideo() : "ERR";
-    },
-    setClipLabel: function(ti, ci, colorIdx) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.setClipLabel(ti, ci, colorIdx) : "ERR";
     }
 };
 

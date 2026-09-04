@@ -1253,8 +1253,7 @@
                     }
                     const valsJson = JSON.stringify({ scale: 144, position: [-94.5, 562] });
                     const resM = await callJSX(`Anim.setMotionValues(${T_MP4}, ${clip.index}, '${valsJson}')`);
-                    const resL = await callJSX(`Clips.setClipLabel(${T_MP4}, ${clip.index}, 15)`);
-                    log(`🎬 [IPD-MARKERS] V${T_MP4}[${clip.index}] a ${clip.start.toFixed(2)}s (marker IPD ${t.toFixed(2)}s) → Motion ${resM} | etiqueta ${resL}`);
+                    log(`🎬 [IPD-MARKERS] V${T_MP4}[${clip.index}] a ${clip.start.toFixed(2)}s (marker IPD ${t.toFixed(2)}s) → Motion ${resM}`);
                     modificats++;
                 }
                 getUtils().status(`IPD aplicat a ${modificats} clips des de markers`, modificats ? "exito" : "warn");

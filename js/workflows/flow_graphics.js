@@ -883,14 +883,7 @@
                     } catch (eS) {}
                 }
                 const ok = await this._aplicarMotionAClip("IPD", sel, IPD_VALS);
-                if (ok) {
-                    // 🎨 [IPD-LABEL 2026-09-04] Canviar el color d'etiqueta del clip al
-                    // timeline (índex 15=Amarillo). El resultat indica la via usada:
-                    // OK:trackItem = només aquest clip | OK:projectItem = tot el media.
-                    const labelRes = await callJSX(`Clips.setClipLabel(${sel.track}, ${sel.index}, 15)`);
-                    log(`🎬 [IPD] color etiqueta V${sel.track}[${sel.index}] → ${labelRes}`);
-                    getUtils().status("IPD aplicat: 144% · pos -94.5, 562 · etiqueta", "exito");
-                }
+                if (ok) getUtils().status("IPD aplicat: 144% · pos -94.5, 562", "exito");
             } catch (e) { getUtils().handleError(e, "runIpd"); }
         },
 

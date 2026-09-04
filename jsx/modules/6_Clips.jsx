@@ -1508,47 +1508,5 @@ FASTPASS.Clips = {
             _restoreTargets2();
             return "OK";
         } catch(e) { return "ERR: " + e.message; }
-    },
-
-    /**
-     * setClipLabel: Canvia el COLOR D'ETIQUETA d'un clip del timeline (el color que
-     * es veu al clip a la línia de temps).
-     * Vies possibles (es proven en ordre):
-     *   1) TrackItem.setColorLabel  → només aquest clip del timeline (si l'API ho
-     *      exposa al TrackItem; no està documentada però pot existir en versions noves).
-     *   2) ProjectItem.setColorLabel → canvia el color del MEDIA al bin → afecta a TOTS
-     *      els clips del timeline que usin aquest mateix media (comportament estàndard).
-     * @param {number} trackIdx - Pista (1-based)
-     * @param {number} clipIdx - Índex del clip (0-based)
-     * @param {number} colorIdx - Índex de color d'etiqueta (0..15). Ex: 4=Cerulean, 15=Yellow.
-     * @returns {string} "OK:trackItem", "OK:projectItem" o "ERR:..."
-     */
-    setClipLabel: function(trackIdx, clipIdx, colorIdx) {
-        try {
-            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
-            if (!seq) return "ERR_NO_SEQ";
-            var track = seq.videoTracks[parseInt(trackIdx) - 1];
-            if (!track || !track.clips) return "ERR_NO_TRACK";
-            var clip = track.clips[parseInt(clipIdx)];
-            if (!clip) return "ERR_NO_CLIP";
-            var cIdx = parseInt(colorIdx);
-            if (isNaN(cIdx)) return "ERR_BAD_COLOR";
-
-            // Via 1: TrackItem (només aquest clip del timeline)
-            if (typeof clip.setColorLabel === 'function') {
-                try {
-                    clip.setColorLabel(cIdx);
-                    try { clip.setSelected(false, false); clip.setSelected(true, true); } catch(eSel1) {}
-                    return "OK:trackItem";
-                } catch(eT) {}
-            }
-            // Via 2: ProjectItem (el media del bin → tots els clips d'aquest media)
-            if (clip.projectItem && typeof clip.projectItem.setColorLabel === 'function') {
-                clip.projectItem.setColorLabel(cIdx);
-                try { clip.setSelected(false, false); clip.setSelected(true, true); } catch(eSel2) {}
-                return "OK:projectItem";
-            }
-            return "ERR_NO_COLORLABEL_API";
-        } catch(e) { return "ERR: " + e.message; }
     }
 }
