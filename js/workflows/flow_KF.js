@@ -21,13 +21,16 @@
                 if (res && res.indexOf("OK") === 0) {
                     if (window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = true;
                     getUtils().status("Keyframe col·locat", "exito");
-                    log("✅ Keyframe col·locat al cabezal. Mode KF activat. " + res);
                     const diag = await callJSX("Anim.debugPos()");
-                    log("📍 DebugPos: " + diag, "DEBUG");
                     const diagKF = await callJSX("Anim.debugKF()");
-                    log("🎞️ DebugKF: " + diagKF, "DEBUG");
+                    // Traça de diagnòstic visible al FASTPASS.log (sense filtres)
+                    if (getUtils().forceLog) {
+                        getUtils().forceLog("🔬 addKF TRACE: " + res + " || DebugPos: " + diag + " || DebugKF: " + diagKF);
+                    }
+                    log("✅ Keyframe col·locat al cabezal. Mode KF activat. " + res);
                 } else {
                     getUtils().status("Error Keyframe", "error");
+                    if (getUtils().forceLog) getUtils().forceLog("🔬 addKF ERROR: " + res);
                     log("⚠️ Error en addKF: " + res, "WARN");
                 }
             } catch (e) {

@@ -60,6 +60,11 @@
         _didDrag: false,
         _suppressClick: false,
         _MARKER_TOL_PX: 12,
+        // Tolerància MÍNIMA de captura de marcadors en SEGONS (per cada costat).
+        // Amb zooms amples (p. ex. mode emergència SRT / blocs de 15 min) la tol en
+        // píxels (12/pps) es queda en pocs segons i és difícil agafar el marcador
+        // sense "pillar-se els dits". 2026-09-04: mínim de 20s (ajustable).
+        _MARKER_TOL_MIN_SEC: 20,
         _lastSegLog: -1,
 
         init: function () {
@@ -114,7 +119,8 @@
             this._canvas.addEventListener('mousedown', function (e) {
                 if (e.button !== 0) return;
                 var sec = self._canvasXToSec(e);
-                var idx = self._markerAtSec(sec);
+                // Tol ampliada per capturar el marcador per ARROSSEGAR-lo (wideTol=true).
+                var idx = self._markerAtSec(sec, true);
                 if (idx < 0) {
                     // Cap marcador a sota: posicionar el playhead immediatament.
                     log("🖱 MOUSEDOWN canvas → media=" + sec.toFixed(2) + "s");
@@ -1050,8 +1056,13 @@
             return this._xToSec(canvasX);
         },
 
-        _markerAtSec: function (sec) {
-            var tol = this._MARKER_TOL_PX / this._pixelsPerSec;
+        _markerAtSec: function (sec, wideTol) {
+            // Tolerància de captura. Amb wideTol=true (arrossegament) s'usa el més gran
+            // entre la tol en píxels (12/pps) i un mínim en segons (20s per defecte) per
+            // no "pillar-se els dits" en zooms amples. Amb wideTol=false (crear/esborrar
+            // marcadors amb clic dret) es manté la tol estricta en píxels.
+            var tolPx = this._MARKER_TOL_PX / this._pixelsPerSec;
+            var tol = (wideTol) ? Math.max(tolPx, this._MARKER_TOL_MIN_SEC || 0) : tolPx;
             for (var i = 0; i < this._markers.length; i++) {
                 if (Math.abs(this._markers[i] - sec) <= tol) return i;
             }

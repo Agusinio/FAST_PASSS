@@ -13,6 +13,29 @@
 
         _logBuffer: [],
         _debugLogPath: null,
+        // Auditoria de crides JSX: registra cada script enviat a Premiere per poder
+        // comparar les accions REALS amb les que el codi pretén executar.
+        _auditBuffer: [],
+        _auditPath: null,
+        // Filtre de logs per tema: string amb keywords separades per coma o null (desactivat).
+        // Quan està actiu, log() NOMÉS escriu els missatges que continguin alguna keyword.
+        // ⚠️ TEMPORAL (2026-09-04): DESACTIVAT per poder veure els logs del botó Main
+        // (diagnòstic deriva IN del MP4). Per reactivar el filtre: setLogFilter('DoblePantalla')
+        // o setLogFilter('Main, ProgramStart, sweet') des de la consola del panell.
+        _logFilter: null,
+
+        /**
+         * Activa el filtre de logs per tema. Ex: setLogFilter('DoblePantalla') o
+         * setLogFilter('Chyrons, PAS') o setLogFilter('') per desactivar.
+         */
+        setLogFilter: function(keywords) {
+            this._logFilter = (keywords && String(keywords).trim()) ? String(keywords).split(',').map(function(k) { return k.trim().toLowerCase(); }).filter(Boolean) : null;
+            this.log("🎛️ Filtre de logs: " + (this._logFilter ? this._logFilter.join(', ') : 'DESACTIVAT'), "DEBUG");
+        },
+
+        clearLogFilter: function() {
+            this.setLogFilter("");
+        },
 
         /**
          * Inicialitza (o reinicia) el fitxer de log per al projecte actiu.
@@ -32,6 +55,12 @@
             try {
                 window.cep.fs.writeFile(this._debugLogPath, '');
             } catch(e) {}
+            // Fitxer d'auditoria de crides JSX (sense filtre de tema)
+            this._auditPath = normalized + '\\FASTPASS_audit.log';
+            this._auditBuffer = [];
+            try {
+                window.cep.fs.writeFile(this._auditPath, '');
+            } catch(e) {}
             this.log("📄 Log iniciat per a: " + projectName, "DEBUG");
         },
 
@@ -46,6 +75,18 @@
         },
 
         log: function(msg, level) { 
+            // Filtre de logs per tema (estalvia tokens/ruido al chat).
+            // Els missatges de nivell ERROR sempre es mostren.
+            if (this._logFilter && level !== "ERROR") {
+                var filter = this._logFilter;
+                if (typeof filter === "string") filter = [String(filter).toLowerCase()];
+                var _m = String(msg).toLowerCase();
+                var _match = false;
+                for (var _i = 0; _i < filter.length; _i++) {
+                    if (_m.indexOf(String(filter[_i]).toLowerCase()) !== -1) { _match = true; break; }
+                }
+                if (!_match) return;
+            }
             const colors = { "INFO": "🔵", "DEBUG": "🟢", "ERROR": "🔴", "WARN": "🟡" };
             var ts = this._timestamp();
             var formatted = ts + ' ' + (colors[level || "INFO"] || '🔵') + ' [FASTPASS]: ' + msg;
@@ -70,9 +111,49 @@
         },
 
         /**
+         * forceLog: Escriu SEMPRE al console i al fitxer FASTPASS.log, saltant-se
+         * el filtre de tema (_logFilter). Útil per a traçes de diagnòstic.
+         */
+        forceLog: function(msg) {
+            try {
+                var ts = this._timestamp();
+                var formatted = ts + ' 🟢 [FASTPASS]: ' + msg;
+                console.log(formatted);
+                if (this._debugLogPath) {
+                    this._logBuffer.push(formatted);
+                    window.cep.fs.writeFile(this._debugLogPath, this._logBuffer.join('\n') + '\n');
+                } else {
+                    // Fallback: arrel de la mateixa extensió (sempre accessible)
+                    if (!this._extLogPath) {
+                        var href = window.location.href;
+                        var qi = href.indexOf('/index.html');
+                        if (qi > 0) {
+                            var p = decodeURIComponent(href.substring(0, qi));
+                            if (p.indexOf('file:///') === 0) p = p.substring(8);
+                            this._extLogPath = p.replace(/\//g, '\\') + '\\_keyframe_trace.log';
+                        }
+                    }
+                    if (this._extLogPath) {
+                        var prev = '';
+                        try { prev = window.cep.fs.readFile(this._extLogPath) || ''; } catch(e) {}
+                        window.cep.fs.writeFile(this._extLogPath, prev + formatted + '\n');
+                    }
+                }
+            } catch(e) {}
+        },
+
+        /**
          * Pont asíncron cap al motor ExtendScript (JSX).
          */
         callJSX: function(script) {
+            // Auditoria: registra cada script enviat a Premiere (per poder comparar
+            // les accions reals amb el que el codi pretén executar)
+            if (this._auditPath) {
+                try {
+                    this._auditBuffer.push(this._timestamp() + " JSX> " + script);
+                    window.cep.fs.writeFile(this._auditPath, this._auditBuffer.join('\n') + '\n');
+                } catch(e) {}
+            }
             // Si estem en mode batching i NO és una crida de consulta crítica (com Anim.x), encolar
             if (this.Batch._isBatching && !script.includes("Anim.x") && !script.includes(".get") && !script.includes(".active")) {
                 this.Batch._queue.push(script);

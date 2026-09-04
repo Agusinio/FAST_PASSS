@@ -179,6 +179,41 @@
     
                 if (freshFiles.length === 0) return { tema: 'PENDENT', list: [] };
                 filtered = freshFiles;
+
+                // ---- FILTRE PER DATA DEL PROJECTE (2026-09-02) ----
+                // La guarda per mtime (22h) NO es suficient: un chyron d'ahir
+                // generat fa menys de 22h encara hi cap dins la guarda, de manera
+                // que s'importarien retols que NO pertanyen al projecte actual.
+                // Exigim que la data del fitxer (extreta del nom si el porta, o de
+                // la data de creacio com a fallback) coincideixi amb la data de
+                // treball del projecte (ctx.dateDir). Si no es pot datar el fitxer,
+                // es conserva per no trencar formats antics sense data al nom.
+                var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                if (dateTarget) {
+                    var beforeCount = filtered.length;
+                    var keep = [];
+                    var droppedDate = [];
+                    for (var wI = 0; wI < filtered.length; wI++) {
+                        var fileDate = this._extractDateFromFileName(filtered[wI].name);
+                        if (!fileDate && filtered[wI].created) {
+                            var cd = new Date(filtered[wI].created);
+                            if (!isNaN(cd.getTime())) {
+                                fileDate = '' + cd.getFullYear() +
+                                    ('0' + (cd.getMonth() + 1)).slice(-2) +
+                                    ('0' + cd.getDate()).slice(-2);
+                            }
+                        }
+                        if (fileDate && fileDate !== dateTarget) { droppedDate.push(filtered[wI].name); }
+                        else { keep.push(filtered[wI]); }
+                    }
+                    utils.log('[SCAN:wotts] Filtre per data projecte ' + dateTarget + ': ' + beforeCount + ' -> ' + keep.length +
+                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
+                    filtered = keep;
+                    if (filtered.length === 0) {
+                        utils.log('[SCAN:wotts] Cap chyron de la data del projecte (' + dateTarget + "). No s'importara cap retol.", 'WARN');
+                        return { tema: 'PENDENT', list: [] };
+                    }
+                }
     
                 // 2. EXTRACCIÓ INTEL·LIGENT DEL TEMA
                 const nameSource = filtered.find(f => f.name.includes("Tema-Titol")) || filtered[0];
@@ -241,7 +276,34 @@
                     return name.indexOf(prefix) !== -1 && name.endsWith('.PNG') && name.indexOf('TEMA-TITOL') !== -1;
                 });
     
-                const freshFiles = this._discardOld(filtered, ctx.config.guarda || 22);
+                let freshFiles = this._discardOld(filtered, ctx.config.guarda || 22);
+
+                // ---- FILTRE PER DATA DEL PROJECTE (2026-09-02) ----
+                // Mateix criteri que Scan.wotts: nomes portades de la data de
+                // treball del projecte (ctx.dateDir). Data del nom (YYYYMMDD) o
+                // de la creacio com a fallback; si no es pot datar, es conserva.
+                var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                if (dateTarget) {
+                    var beforeCount = freshFiles.length;
+                    var keep = [];
+                    var droppedDate = [];
+                    for (var pI = 0; pI < freshFiles.length; pI++) {
+                        var fileDate = this._extractDateFromFileName(freshFiles[pI].name);
+                        if (!fileDate && freshFiles[pI].created) {
+                            var cd = new Date(freshFiles[pI].created);
+                            if (!isNaN(cd.getTime())) {
+                                fileDate = '' + cd.getFullYear() +
+                                    ('0' + (cd.getMonth() + 1)).slice(-2) +
+                                    ('0' + cd.getDate()).slice(-2);
+                            }
+                        }
+                        if (fileDate && fileDate !== dateTarget) { droppedDate.push(freshFiles[pI].name); }
+                        else { keep.push(freshFiles[pI]); }
+                    }
+                    utils.log('[SCAN:portades] Filtre per data projecte ' + dateTarget + ': ' + beforeCount + ' -> ' + keep.length +
+                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
+                    freshFiles = keep;
+                }
 
                 return freshFiles.map(function (f) { return { name: f.name, path: pathNAS + f.name }; });
             } catch (e) { return []; }

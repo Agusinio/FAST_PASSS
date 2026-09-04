@@ -181,7 +181,12 @@
                         // deriva d'ingesta, desplaçant el rang source del MP4 (on es llegeix el contingut
                         // dins del fitxer). El clip es col·loca sempre a start=0 al timeline.
                         const globalOffset = config.tcOffset || 0;
-                        const mp4InPt  = (cleanFeedData.mp4ExpandedInPoint || 0) + globalOffset;  // expanded (amb handle), AMB offset
+                        // 🎛️ [IN-OFFSET 2026-09-04] Restar clipInOffset a l'IN (media origen)
+                        // del clip: el punt real d'inici del bloc està ~8-10s ABANS del que
+                        // el sistema calcula, així el clip s'insereix amb més marge per
+                        // davant. Només MODE NORMAL. Config: Config.get().clipInOffset.
+                        const clipInOffset = config.clipInOffset || 0;
+                        const mp4InPt  = (cleanFeedData.mp4ExpandedInPoint || 0) + globalOffset - clipInOffset;  // expanded (amb handle), AMB offset i ajust IN
                         const mp4OutPt = (cleanFeedData.mp4ExpandedOutPoint || 0) + globalOffset;  // expanded (amb handle), AMB offset
                         clipDuration = mp4OutPt - mp4InPt;
                         utils.log(`🎬 Col·locant cleanFeed a V1 amb bounds: IN=${mp4InPt.toFixed(2)}s OUT=${mp4OutPt.toFixed(2)}s (start=0) | duradaEsperada=${clipDuration.toFixed(2)}s`);
@@ -200,7 +205,12 @@
                     // on comença i acaba el contingut REAL del bloc, ignorant els handles.
                     // Font única de veritat: Config.get().handles → cleanFeedData.handleSecs.
                     const h = cleanFeedData.handleSecs || 0;
-                    const sweetSeqIn  = h;
+                    // 🎛️ [ZONA-IN 2026-09-04] Adelantar el corchete IN de la zona de treball
+                    // (sweetSeqIn) restant zonaInOffset (per defecte 10s) perquè quedi més a
+                    // prop de l'inici real del bloc. Només en mode normal (no fallback).
+                    // Config: Config.get().zonaInOffset.
+                    const zonaInAdj = (isFallbackBlockMedia) ? 0 : (config.zonaInOffset || 0);
+                    const sweetSeqIn  = Math.max(0, h - zonaInAdj);
                     const sweetSeqOut = clipDuration - h;
                     utils.log(`📍 [DEBUG] IN/OUT de seqüència (sweet points): seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s (durada=${clipDuration.toFixed(2)}s, handleSecs=${h}s${isFallbackBlockMedia ? ', mode=fallback' : ''})`);
                     const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);

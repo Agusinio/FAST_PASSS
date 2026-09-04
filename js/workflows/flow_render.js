@@ -72,7 +72,10 @@
                 const config = FASTPASS_UI.Config.get();
                 const state = FASTPASS_UI.State;
                 // 1. BUSCAR LA PORTADA RECENT (Logic.Scan)
-                const ctx = { config, progData: state.progData, bloque: state.bloque };
+                // La data de treball es passa explícitament perquè Scan.portades
+                // filtri els PNG per la data del projecte actual (no només mtime).
+                const stateDateDir = state.dateDir || getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
+                const ctx = { config, progData: state.progData, bloque: state.bloque, dateDir: stateDateDir };
                 const portadas = await getScanner().portadas(ctx);
                 const portada = (portadas && portadas.length > 0) ? portadas[0] : null;
                 

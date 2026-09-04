@@ -15,7 +15,7 @@
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     // Tracks alineats amb Profile.json (v_mp4:1, v_fondos:2, v_graf:3, v_tema:5, v_chyrons:6, v_lloc:7)
     let _activeConfig = {
-        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0 },
+        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10 },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
@@ -140,7 +140,15 @@
                 },
                 debug:    cfg.general.debug,
                 handles:  cfg.general.handles  || 0,
-                tcOffset: cfg.general.tcOffset || 0
+                tcOffset: cfg.general.tcOffset || 0,
+                // 🎛️ [IN-OFFSET 2026-09-04] Ajustos del flujo NOU/Main (create):
+                // - clipInOffset: segons a RESTAR a l'IN (media origen) del clip inserit
+                //   (el punt real del bloc està ~8-10s abans del calculat → més marge).
+                // - zonaInOffset: segons a RESTAR al sweetSeqIn (corchete IN de la zona)
+                //   perquè quedi més a prop de l'inici real del bloc.
+                // Només s'apliquen a create() MODE NORMAL (3_Project_Logic.js).
+                clipInOffset: cfg.general.clipInOffset || 0,
+                zonaInOffset: cfg.general.zonaInOffset || 0
             };
         },
 

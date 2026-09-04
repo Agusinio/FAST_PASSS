@@ -11,6 +11,9 @@ var FASTPASS_UI = window.FASTPASS_UI || {};
 FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; 
 var isUserDraggingSlider = false;
 var reframeActive = false;
+// Escala fÃ­sica del slider en PÃXELS: slider.min=-351, slider.max=959.
+// seqW (amplada del frame) es guarda per convertir px <-> normalitzat.
+var sliderSeqW = 608;
 
 function setReframeActive(on) {
     reframeActive = on;
@@ -20,40 +23,77 @@ function setReframeActive(on) {
     if (slider) slider.disabled = !on;
     if (!on && window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = false;
     if (on) applySliderLimits();
-    FASTPASS_UI.Utils.log(on ? "🎛️ Reencuadre manual ACTIVAT" : "🛑 Reencuadre manual desactivat", "DEBUG");
+    FASTPASS_UI.Utils.log(on ? "ðŸŽ›ï¸ Reencuadre manual ACTIVAT (actua sobre el clip SELECCIONAT)" : "ðŸ›‘ Reencuadre manual desactivat", "DEBUG");
 }
 
 /**
- * applySliderLimits: Ajusta els límits del slider de moviment lateral perquè
- * coincideixin amb les posicions màximes del clip sense que la imatge surti del
- * canvas. Els límits normalitzats (0..1, centre 0.5) provenen d'Anim.limits().
+ * applySliderLimits: Ajusta el recorregut FÃSIC del slider al rang en pÃ­xels
+ * del reencuadre horitzontal (min=-351 px, max=959 px). El valor del slider Ã©s
+ * directament la posiciÃ³ X en PÃXELS (no una escala relativa), de manera que el
+ * valor mÃ xim fÃ­sic del <input> Ã©s exactament 959 i el mÃ­nim -351 â†’ no es pot
+ * arrossegar mÃ©s enllÃ  ni provocar el "reset" del motor.
  */
 function applySliderLimits() {
     var slider = document.getElementById('slider-move');
     if (!slider || !FASTPASS_UI.Utils) return;
-    FASTPASS_UI.Utils.callJSX('Anim.limits()').then(function (raw) {
+    // Els lÃ­mits es calculen sobre el clip SELECCIONAT (o V1 sota CTI si no n'hi ha).
+    // Anim.sliderLimits incorpora la restricciÃ³ dels recortes si el clip en tÃ©.
+    FASTPASS_UI.Utils.callJSX('Anim.sliderLimits()').then(function (raw) {
         if (!raw || raw.indexOf("ERR") === 0) return;
         try {
             var lim = JSON.parse(raw);
-            var minNorm = parseFloat(lim.min), maxNorm = parseFloat(lim.max);
-            if (!isFinite(minNorm) || !isFinite(maxNorm)) return;
-            // Normalitzat (0..1, centre 0.5) -> escala del slider (-1000..1000)
-            var sMin = Math.round((minNorm - 0.5) * 2000);
-            var sMax = Math.round((maxNorm - 0.5) * 2000);
-            slider.min = sMin;
-            slider.max = sMax;
-            var v = parseInt(slider.value, 10);
-            if (isNaN(v)) v = Math.round((parseFloat(lim.cur) - 0.5) * 2000) || 0;
-            if (v < sMin) slider.value = sMin;
-            if (v > sMax) slider.value = sMax;
-            FASTPASS_UI.Utils.log("🎚️ Slider límits(norm): " + lim.min.toFixed(3) + ".." + lim.max.toFixed(3) + " (slider " + sMin + ".." + sMax + ") cur=" + lim.cur.toFixed(3) + " margen=" + lim.margen.toFixed(3), "DEBUG");
+            var minPx = parseFloat(lim.minPx), maxPx = parseFloat(lim.maxPx);
+            var seqW = parseFloat(lim.seqW);
+            var curPx = parseFloat(lim.curPx);
+            if (!isFinite(minPx) || !isFinite(maxPx) || !isFinite(seqW)) return;
+
+            // ðŸŽ¯ Doble Finestra: ajust FI hardcodejat (Â±margen px) al voltant de la base
+            // del PAS4 per a V2/V3. Evita que el moviment mostri la imatge de l'altra
+            // finestra. NomÃ©s s'aplica si la DF s'ha processat i hi ha clip SELECCIONAT
+            // a V2 o V3 (el mateix criteri que decideix el comportament del slider).
+            var base = (window.FASTPASS_UI && FASTPASS_UI._dfReencuadre) ? FASTPASS_UI._dfReencuadre : null;
+            if (base && typeof base.margen === 'number') {
+                FASTPASS_UI.Utils.callJSX('Clips.getSelectedVideo()').then(function (selRaw) {
+                    var bx = null;
+                    if (selRaw && selRaw !== "null") {
+                        try {
+                            var sel = JSON.parse(selRaw);
+                            if (parseInt(sel.track, 10) === 2) bx = parseFloat(base.v2x);
+                            else if (parseInt(sel.track, 10) === 3) bx = parseFloat(base.v3x);
+                        } catch (eSel) {}
+                    }
+                    if (bx != null && isFinite(bx)) {
+                        minPx = bx - parseFloat(base.margen);
+                        maxPx = bx + parseFloat(base.margen);
+                    }
+                    _applySliderRange(minPx, maxPx, seqW, curPx);
+                }).catch(function () { _applySliderRange(minPx, maxPx, seqW, curPx); });
+            } else {
+                _applySliderRange(minPx, maxPx, seqW, curPx);
+            }
         } catch (e) { /* ignora */ }
     });
+
+    function _applySliderRange(minPx, maxPx, seqW, curPx) {
+        if (!slider) return;
+        sliderSeqW = seqW;
+        slider.min = Math.round(minPx);
+        slider.max = Math.round(maxPx);
+        // Posicionar el thumb a la X actual (px). Centre per defecte = seqW/2.
+        var v = parseInt(slider.value, 10);
+        if (isNaN(v) || !isFinite(curPx)) v = Math.round(seqW / 2);
+        else v = Math.round(curPx);
+        if (v < slider.min) slider.value = slider.min;
+        else if (v > slider.max) slider.value = slider.max;
+        else slider.value = v;
+        // forceLog: salta el filtre de tema perquÃ¨ el rang del slider sempre es vegi.
+        FASTPASS_UI.Utils.forceLog("ðŸŽšï¸ Slider lÃ­mits(px): " + Math.round(minPx) + ".." + Math.round(maxPx) + " cur=" + v + " seqW=" + seqW);
+    }
 }
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
-    console.log('🔴 MAIN.JS cargado');
+    console.log('ðŸ”´ MAIN.JS cargado');
     var utils = window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
     
     try {
@@ -65,27 +105,27 @@ function applySliderLimits() {
         // Esto evita que Windows interprete \U o \T como caracteres especiales
         var safeRoot = extensionRoot.replace(/\\/g, "/");
 
-        utils.log("📂 Ruta detectada: " + safeRoot, "DEBUG");
+        utils.log("ðŸ“‚ Ruta detectada: " + safeRoot, "DEBUG");
 
-        // 3. LLAMADA QUIRÚRGICA:
+        // 3. LLAMADA QUIRÃšRGICA:
         // Usamos comillas simples para el envoltorio y dobles para el contenido
         var result = await utils.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
 
         if (result && result.indexOf("OK") !== -1) {
-            window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
-            utils.log("✅ Motor JSX montado con éxito.");
+            window.FASTPASS_UI.Utils.isJsxReady = true; // ðŸ“ ESTA LÃNEA ES VITAL
+            utils.log("âœ… Motor JSX montado con Ã©xito.");
             //utils.isJsxReady = true;
             
             if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
                 await FASTPASS_UI.Core.Context.init();
             }
         } else {
-            // Si el motor falla, ahora el 'result' nos dirá EXACTAMENTE en qué línea del JSX falló
-            console.error("❌ Fallo en el motor: " + result);
+            // Si el motor falla, ahora el 'result' nos dirÃ¡ EXACTAMENTE en quÃ© lÃ­nea del JSX fallÃ³
+            console.error("âŒ Fallo en el motor: " + result);
         }
 
     } catch (error) {
-        console.error("💥 Error fatal:", error);
+        console.error("ðŸ’¥ Error fatal:", error);
     }
 })();
 
@@ -103,10 +143,10 @@ function applySliderLimits() {
         var rw = right ? Math.round(right.getBoundingClientRect().width) : 0;
         var rh = right ? Math.round(right.getBoundingClientRect().height) : 0;
         var tw = mainUpper ? Math.round(mainUpper.getBoundingClientRect().width) : 0;
-        var msg = 'Columna: ' + lw + '×' + lh + 'px | Vídeo: ' + rw + '×' + rh + 'px | Total: ' + tw + 'px';
-        console.log('📐 [LAYOUT] ' + msg);
+        var msg = 'Columna: ' + lw + 'Ã—' + lh + 'px | VÃ­deo: ' + rw + 'Ã—' + rh + 'px | Total: ' + tw + 'px';
+        console.log('ðŸ“ [LAYOUT] ' + msg);
         var info = document.getElementById('layoutInfo');
-        if (info) info.textContent = '📐 ' + msg;
+        if (info) info.textContent = 'ðŸ“ ' + msg;
     }
 
     function applyLayoutMode(mode) {
@@ -117,8 +157,8 @@ function applySliderLimits() {
         }
         window.FASTPASS_UI.LayoutMode = mode;
         var btnMode = document.getElementById('btnMode');
-        if (btnMode) btnMode.textContent = (mode === 'work') ? '👤' : '🧪';
-        FASTPASS_UI.Utils.log('🔀 Layout mode: ' + mode.toUpperCase(), 'INFO');
+        if (btnMode) btnMode.textContent = (mode === 'work') ? 'ðŸ‘¤' : 'ðŸ§ª';
+        FASTPASS_UI.Utils.log('ðŸ”€ Layout mode: ' + mode.toUpperCase(), 'INFO');
     }
 
     function initSplitter() {
@@ -158,12 +198,12 @@ function applySliderLimits() {
     }
 
     function initPanel() {
-        FASTPASS_UI.Utils.log("🚀 Vinculando botones...");
+        FASTPASS_UI.Utils.log("ðŸš€ Vinculando botones...");
 
         // --- WORKFLOW: CUT ---
         const btnIn = document.getElementById('btnIn');
-        console.log('🔍 btnIn:', btnIn);
-        if (!btnIn) alert('❌ btnIn no encontrado en el DOM');
+        console.log('ðŸ” btnIn:', btnIn);
+        if (!btnIn) alert('âŒ btnIn no encontrado en el DOM');
         const btnOut = document.getElementById('btnOut');
         const btnScene = document.getElementById('btnScene');
         const btnPrevClip = document.getElementById('btnPrevClip');
@@ -171,7 +211,7 @@ function applySliderLimits() {
         const btnCenter = document.getElementById('btnCenter');
         const btnKey = document.getElementById('btnKey');
 
-        if (btnIn) btnIn.addEventListener('click', function () { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
+        if (btnIn) btnIn.addEventListener('click', function () { console.log('ðŸ”˜ BotÃ³n IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
         if (btnOut) btnOut.addEventListener('click', function () { callWorkflow('Cut', 'runCutOut'); });
         if (btnScene) btnScene.addEventListener('click', function () { callWorkflow('Cut', 'runScene'); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
@@ -183,12 +223,27 @@ function applySliderLimits() {
             });
         }
         if (btnKey) {
-            btnKey.addEventListener('click', function () {
+            btnKey.addEventListener('click', async function (ev) {
+                // DIAGNÃ’STIC: Ctrl+clic a KEY = probeRange (lÃ­mit real de la Position)
+                if (ev && (ev.ctrlKey || ev.metaKey)) {
+                    if (FASTPASS_UI.Utils) {
+                        FASTPASS_UI.Utils.log('ðŸ”¬ [PROBE] Provant lÃ­mit real de la Position al clip del CTI...', 'INFO');
+                        try {
+                            const pr = await FASTPASS_UI.Utils.callJSX('Anim.probeRange()');
+                            FASTPASS_UI.Utils.log('ðŸ”¬ [PROBE] RESULTAT: ' + pr, 'INFO');
+                            try { alert('PROBE lÃ­mit Position:\n\n' + pr); } catch (eAl) {}
+                        } catch (ePr) {
+                            FASTPASS_UI.Utils.log('ðŸ”¬ [PROBE] Error: ' + ePr.message, 'ERROR');
+                            try { alert('PROBE Error: ' + ePr.message); } catch (eAl2) {}
+                        }
+                    }
+                    return;
+                }
                 if (FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAddKF();
             });
         }
 
-        // --- SLIDER: MOVIMIENTO Y ANIMACIÓN (zona sensible toggle) ---
+        // --- SLIDER: MOVIMIENTO Y ANIMACIÃ“N (zona sensible toggle) ---
         const slider = document.getElementById('slider-move');
         const sliderZone = document.getElementById('sliderZone');
         if (slider && sliderZone) {
@@ -202,21 +257,28 @@ function applySliderLimits() {
                 return !!(window.FASTPASS_UI.State && window.FASTPASS_UI.State.isKeyframeMode);
             };
 
+            // El slider actua sobre el clip SELECCIONAT (Anim.sliderApply ho decideix:
+            // V1 sense recorte â†’ x(); V2 sense recorte â†’ posiciÃ³ normal;
+            // clip amb recorte (V3 de la doble finestra) â†’ PAN amb compensaciÃ³).
             slider.oninput = function () {
                 if (!reframeActive) return;
                 isUserDraggingSlider = true;
-                // Mapa slider (-1000..1000) -> posició normalitzada (0..1, centre 0.5)
-                var norm = (parseInt(slider.value, 10) + 1000) / 2000;
-                FASTPASS_UI.Utils.callJSX(`Anim.x(${norm}, false)`);
+                // El valor del slider ja Ã©s la X en PÃXELS â†’ normalitzar (0..1)
+                var norm = parseInt(slider.value, 10) / sliderSeqW;
+                FASTPASS_UI.Utils.callJSX(`Anim.sliderApply(${norm}, false)`).then(res => {
+                    FASTPASS_UI.Utils.log(`ðŸŽšï¸ Slider ${Math.round(slider.value)}px â†’ ${res}`, "DEBUG");
+                });
             };
 
             slider.onchange = function () {
                 if (!reframeActive) return;
                 isUserDraggingSlider = false;
-                var norm = (parseInt(slider.value, 10) + 1000) / 2000;
-                // Clava el keyframe només al soltar (si el mode KF està actiu)
-                FASTPASS_UI.Utils.callJSX(`Anim.x(${norm}, ${kfMode()})`).then(res => {
-                    if (res !== "OK") FASTPASS_UI.Utils.log("Slider: " + res, "DEBUG");
+                var norm = parseInt(slider.value, 10) / sliderSeqW;
+                // En soltar: isFinal=true per fer el COMMIT (refresc) a Premiere.
+                FASTPASS_UI.Utils.callJSX(`Anim.sliderApply(${norm}, true, ${kfMode()})`).then(res => {
+                    // forceLog: salta el filtre de tema perquÃ¨ el resultat (dx/crops del
+                    // panRecorte) sempre aparegui al log de diagnÃ²stic.
+                    FASTPASS_UI.Utils.forceLog(`ðŸŽšï¸ Slider FINAL ${Math.round(slider.value)}px â†’ ${res}`);
                 });
             };
         }
@@ -238,7 +300,7 @@ function applySliderLimits() {
         if (btnMarksF5) btnMarksF5.addEventListener('click', () => callWorkflow('Markers', 'snapOrphanMarkers'));
         if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Markers', 'placeGraphicMarkers'));
 
-        // Botons ocults de moment (preservats per a ús futur):
+        // Botons ocults de moment (preservats per a Ãºs futur):
         // const btnResetGrafs = document.getElementById('btnResetGrafs');
         // const btnPlaceGrafic = document.getElementById('btnPlaceGrafic');
         // const btnGraph169 = document.getElementById('btnPlaceGraph169');
@@ -253,7 +315,7 @@ function applySliderLimits() {
         // if (btnPlaceStructure) btnPlaceStructure.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'estructura'));
         // if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'runInOutCrudo'));
         // if (btnSetBlocOut) btnSetBlocOut.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocOutFromCTI'));
-        // // --- BOTONES DE ANÁLISIS (DEBUG MARCADORES) ---
+        // // --- BOTONES DE ANÃLISIS (DEBUG MARCADORES) ---
         // const btnMarksCrudo = document.getElementById('btnMarksCrudo');
         // const btnInoutCocinado = document.getElementById('btnInoutCocinado');
         // const btnMarksCocinado = document.getElementById('btnMarksCocinado');
@@ -282,16 +344,16 @@ function applySliderLimits() {
         const btnChyronRepartir = document.getElementById('btnChyronRepartir');
         if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'repartirChyronTraduccio'));
 
-        // --- BOTONS GRÀFICS (IPD, Doble Pantalla, MAPA, TOTEM) ---
+        // --- BOTONS GRÃ€FICS (IPD, Doble Pantalla, MAPA, TOTEM) ---
         const btnGrafIpd = document.getElementById('btnGrafIpd');
         const btnGrafDoblePantalla = document.getElementById('btnGrafDoblePantalla');
         const btnGrafMapa = document.getElementById('btnGrafMapa');
         const btnGrafTotem = document.getElementById('btnGrafTotem');
         if (btnGrafIpd) btnGrafIpd.addEventListener('click', () => callWorkflow('Graphics', 'runIpd'));
-        if (btnGrafDoblePantalla) btnGrafDoblePantalla.addEventListener('click', () => callWorkflow('Graphics', 'runDoblePantalla'));
+        if (btnGrafDoblePantalla) btnGrafDoblePantalla.addEventListener('click', (e) => callWorkflow('Graphics', 'runDoblePantalla', e));
         if (btnGrafMapa) btnGrafMapa.addEventListener('click', () => callWorkflow('Graphics', 'runMapa'));
         if (btnGrafTotem) btnGrafTotem.addEventListener('click', () => callWorkflow('Graphics', 'runTotem'));
-        // --- WORKFLOW: SRT EDITOR (SUBTÍTULOS) ---
+        // --- WORKFLOW: SRT EDITOR (SUBTÃTULOS) ---
         const btnSrtLoad = document.getElementById('btnSrtLoad');
         const btnSrtPlay = document.getElementById('btnSrtPlay');
         const btnSrtIn = document.getElementById('btnSrtIn');
@@ -303,50 +365,14 @@ function applySliderLimits() {
         if (btnSrtLoad) {
             btnSrtLoad.addEventListener('click', async function (e) {
                 const u = FASTPASS_UI.Utils;
-                // Control+click → mode EMERGÈNCIA (SRTs per blocs de 15 min)
-                if (e && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    u.log("🚨 SRT_CARREGAR: mode EMERGÈNCIA (Control+click)...");
-                    if (window.SrtEditor && window.SrtEditor.loadEmergencySrt) {
-                        await window.SrtEditor.loadEmergencySrt();
-                    } else {
-                        u.status("Error: SrtEditor no disponible", "error");
-                    }
-                    return;
-                }
-                u.log("📝 SRT_CARREGAR: Buscant .srt al directori del projecte...");
-                try {
-                    // Font única de veritat: el .srt que viu a la carpeta del projecte.
-                    // (No es consulta el bin de Premiere perquè pot contenir .srt residuals
-                    //  d'altres notícies/blocs importats anteriorment.)
-                    const folder = await u.callJSX("Context.folder()");
-                    if (!folder || folder === "" || folder.indexOf('ERR') === 0) {
-                        u.status("No s'ha pogut obtenir la carpeta del projecte", "warn");
-                        return;
-                    }
-                    const files = await u.readFolder(folder);
-                    const srtFiles = (files || []).filter(function (f) {
-                        // Excloure _MOD (exportacions de l'editor de subtítols) per carregar
-                        // SEMPRE el .srt original de la sessió, no les modificacions antigues.
-                        return f && f.name && f.name.toUpperCase().endsWith('.SRT')
-                            && f.name.toUpperCase().indexOf('_MOD') === -1;
-                    });
-                    if (srtFiles.length === 0) {
-                        u.status("No s'ha trobat .srt a la carpeta del projecte", "warn");
-                        return;
-                    }
-                    const srtName = srtFiles[0].name;
-                    const srtPath = folder.replace(/[\\/]+$/, '') + '\\' + srtName;
-                    u.log("📝 SRT_CARREGAR: Trobat " + srtName);
-                    u.log("📝 SRT_CARREGAR: Path = " + srtPath);
-                    if (window.SrtEditor) {
-                        await window.SrtEditor.loadSrt(srtPath);
-                    } else {
-                        u.status("Error: SrtEditor no disponible", "error");
-                    }
-                } catch(e) {
-                    u.log("💥 SRT_CARREGAR: " + e.message);
-                    u.status("Error carregant .srt", "error");
+                // [SRT 2026-09-04] El mecanisme d'emergencia (SRTs per blocs de 15 min)
+                // passa a ser el mecanisme PRINCIPAL de CARREGAR (abans nomes amb Ctrl+clic).
+                if (e && (e.ctrlKey || e.metaKey)) e.preventDefault();
+                u.log("[SRT_CARREGAR] Carregant SRT (mecanisme principal: blocs de 15 min)...");
+                if (window.SrtEditor && window.SrtEditor.loadEmergencySrt) {
+                    await window.SrtEditor.loadEmergencySrt();
+                } else {
+                    u.status("Error: SrtEditor no disponible", "error");
                 }
             });
         }
@@ -385,18 +411,18 @@ function applySliderLimits() {
 
         if (btnSetup) btnSetup.addEventListener('click', () => callWorkflow('Config', 'toggleSetup', true));
 
-        // --- BOTÓ FER FOTO ESCALETA ---
+        // --- BOTÃ“ FER FOTO ESCALETA ---
         const btnFetchEscaleta = document.getElementById('btnFetchEscaleta');
         if (btnFetchEscaleta) {
             btnFetchEscaleta.addEventListener('click', async function () {
                 const reader = window.FASTPASS_UI.EscaletaReader;
                 const utils = window.FASTPASS_UI.Utils;
                 if (!reader || !reader.fetchNewEscaleta) {
-                    console.error('❌ EscaletaReader.fetchNewEscaleta no disponible');
+                    console.error('âŒ EscaletaReader.fetchNewEscaleta no disponible');
                     return;
                 }
-                utils.log('📷 [Fetch] Sol·licitant foto actualitzada de l\'escaleta...', 'INFO');
-                btnFetchEscaleta.innerText = '⏳ FOTO...';
+                utils.log('ðŸ“· [Fetch] SolÂ·licitant foto actualitzada de l\'escaleta...', 'INFO');
+                btnFetchEscaleta.innerText = 'â³ FOTO...';
                 btnFetchEscaleta.disabled = true;
 
                 try {
@@ -404,8 +430,8 @@ function applySliderLimits() {
                     const elProg = document.getElementById('programa');
                     const elBloc = document.getElementById('bloc');
                     if (!elProg || !elBloc || !elProg.value || elBloc.value === '---') {
-                        utils.log('⚠️ [Fetch] Selecciona programa i bloc primer', 'WARN');
-                        btnFetchEscaleta.innerText = '📷 FOTO';
+                        utils.log('âš ï¸ [Fetch] Selecciona programa i bloc primer', 'WARN');
+                        btnFetchEscaleta.innerText = 'ðŸ“· FOTO';
                         btnFetchEscaleta.disabled = false;
                         return;
                     }
@@ -413,10 +439,35 @@ function applySliderLimits() {
                     const progData = config.mapeoProgramas[progId];
                     // escaletaId es opcional: si no ve de config, es dedueix per programa dins de fetchNewEscaleta
                     const blocId = elBloc.value;
-                    const stateDateDir = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir) || utils.getFormattedDate().replace(/"/g, "").trim();
+
+                    // â”€â”€ FIX FOTO (2026-09-02) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    // La foto sempre ha de ser de l'emissiÃ³ CORRENT. Si el TimeGuard
+                    // va fixar State.dateDir a AHIR durant la matinada (o en una
+                    // sessiÃ³ anterior) i ara ja estem en horari d'emissiÃ³ d'avui, la
+                    // consulta a digition tornaria l'escaleta d'ahir i la guardaria al
+                    // directori d'ahir. Per aixÃ² es torna a resoldre la data amb el
+                    // TimeGuard (sense arrossegar la data obsoleta) i es sincronitza
+                    // State.dateDir perquÃ¨ la resta del flujo la faci servir.
+                    let fotoDateDir = utils.getFormattedDate().replace(/"/g, "").trim();
+                    try {
+                        const oldDateDir = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir) || null;
+                        const coreCtx = window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
+                        if (coreCtx && coreCtx._getValidDateDir) {
+                            // null com a existingDateDir â†’ no arrossegar data obsoleta
+                            const tg = coreCtx._getValidDateDir(progData, null);
+                            if (tg && tg.dateDir) fotoDateDir = tg.dateDir;
+                            utils.log('ðŸ“… [Fetch] TimeGuard FOTO: dateDir ' + fotoDateDir + ' (action=' + (tg && tg.action) + ') | State tenia: ' + (oldDateDir || 'null'), 'INFO');
+                        }
+                    } catch (eDate) {
+                        utils.log('âš ï¸ [Fetch] No s\'ha pogut validar la data (TimeGuard): ' + eDate.message, 'WARN');
+                    }
+                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
+                        window.FASTPASS_UI.State.dateDir = fotoDateDir;
+                    }
+                    const stateDateDir = fotoDateDir;
                     const folderDest = config.rutas.destinoBase + progData.directorio + '/' + stateDateDir;
 
-                    utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}`, 'INFO');
+                    utils.log(`ðŸ“· [Fetch] Programa: ${progId}, Bloc: ${blocId}`, 'INFO');
                     const result = await reader.fetchNewEscaleta(
                         progData.escaletaId || null,
                         stateDateDir,
@@ -426,13 +477,13 @@ function applySliderLimits() {
                     );
 
                     if (result) {
-                        utils.log(`✅ [Fetch] Nova escaleta guardada: ${result.filename}`, 'INFO');
+                        utils.log(`âœ… [Fetch] Nova escaleta guardada: ${result.filename}`, 'INFO');
                         utils.status('Escaleta actualitzada! Recalculant...', 'exito');
 
-                        // ─── REGENERAR MANIFEST DES DE LA CÒPIA LOCAL ──
-                        // La extensió treballa amb la còpia de l'escaleta al directori
-                        // del projecte. Després de generar una nova (botó FOTO), es
-                        // regenera el manifest des de l'últim JSON del directori.
+                        // â”€â”€â”€ REGENERAR MANIFEST DES DE LA CÃ’PIA LOCAL â”€â”€
+                        // La extensiÃ³ treballa amb la cÃ²pia de l'escaleta al directori
+                        // del projecte. DesprÃ©s de generar una nova (botÃ³ FOTO), es
+                        // regenera el manifest des de l'Ãºltim JSON del directori.
                         const ctxFoto = {
                             config: config,
                             progData: progData,
@@ -444,18 +495,18 @@ function applySliderLimits() {
                             await window.FASTPASS_UI.Workflows.MainButton._rebuildManifestFromLocal(ctxFoto);
                         }
 
-                        // Forçar recàrrega del context
+                        // ForÃ§ar recÃ rrega del context
                         if (window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context) {
                             await window.FASTPASS_UI.Core.Context.checkContext();
                         }
                     } else {
-                        utils.log('❌ [Fetch] No s\'ha pogut obtenir la foto de l\'escaleta', 'ERROR');
+                        utils.log('âŒ [Fetch] No s\'ha pogut obtenir la foto de l\'escaleta', 'ERROR');
                         utils.status('Error obtenint foto escaleta', 'error');
                     }
                 } catch (e) {
-                    utils.log(`❌ [Fetch] Error: ${e.message}`, 'ERROR');
+                    utils.log(`âŒ [Fetch] Error: ${e.message}`, 'ERROR');
                 } finally {
-                    btnFetchEscaleta.innerText = '📷 FOTO';
+                    btnFetchEscaleta.innerText = 'ðŸ“· FOTO';
                     btnFetchEscaleta.disabled = false;
                 }
             });
@@ -464,7 +515,7 @@ function applySliderLimits() {
         // Context.init() (p.onchange / b.onchange). Eliminem els addEventListener
         // duplicats per evitar doble disparament i possibles race conditions.
 
-        // --- INICIALIZACIÓN DE VALORES ---
+        // --- INICIALIZACIÃ“N DE VALORES ---
         if (FASTPASS_UI.Config && FASTPASS_UI.Config.loadSelection) FASTPASS_UI.Config.loadSelection();
 
         const progInicial = document.getElementById('programa').value;
@@ -475,11 +526,11 @@ function applySliderLimits() {
         // Inicialitzar SRT Editor
         if (window.SrtEditor) {
             window.SrtEditor.init();
-            FASTPASS_UI.Utils.log("✅ SRT Editor inicialitzat");
+            FASTPASS_UI.Utils.log("âœ… SRT Editor inicialitzat");
         }
 
         callContextAudit();
-        FASTPASS_UI.Utils.log("✅ TODOS LOS BOTONES VINCULADOS");
+        FASTPASS_UI.Utils.log("âœ… TODOS LOS BOTONES VINCULADOS");
         initSplitter();
         var btnMode = document.getElementById('btnMode');
         if (btnMode) {
@@ -494,18 +545,18 @@ function applySliderLimits() {
     }
 
     async function callWorkflow(module, method, ...args) {
-        console.log(`🔘 callWorkflow: ${module}.${method}`);
+        console.log(`ðŸ”˜ callWorkflow: ${module}.${method}`);
         if (FASTPASS_UI.Workflows[module] && FASTPASS_UI.Workflows[module][method]) {
             try {
                 await FASTPASS_UI.Workflows[module][method](...args);
             } catch (e) {
-                console.error("💥 Error en Workflow " + module + "." + method + ":", e);
+                console.error("ðŸ’¥ Error en Workflow " + module + "." + method + ":", e);
                 if (FASTPASS_UI.Utils && FASTPASS_UI.Utils.handleError) {
                     FASTPASS_UI.Utils.handleError(e, module + "." + method);
                 }
             }
         } else {
-            console.error("⚠️ Error: " + module + "." + method + " no existe.");
+            console.error("âš ï¸ Error: " + module + "." + method + " no existe.");
         }
     }
 
@@ -531,15 +582,16 @@ function applySliderLimits() {
     }
 })();
 
-// 4. SINCRONIZACIÓN (POLLING DEL SLIDER)
+// 4. SINCRONIZACIÃ“N (POLLING DEL SLIDER)
 FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
-    if (!reframeActive) return;          // polling només amb el reencuadre actiu
+    if (!reframeActive) return;          // polling nomÃ©s amb el reencuadre actiu
     if (isUserDraggingSlider) return;
-    FASTPASS_UI.Utils.callJSX('Anim.x()').then(val => {
+    // Llegeix la X del clip objectiu (el SELECCIONAT, o V1 sota CTI): Anim.sliderApply().
+    FASTPASS_UI.Utils.callJSX('Anim.sliderApply()').then(val => {
         const slider = document.getElementById('slider-move');
         if (slider && val && val !== "undefined" && val !== "") {
             const norm = parseFloat(val);
-            slider.value = Math.round((norm - 0.5) * 2000);   // 0..1 -> -1000..1000
+            slider.value = Math.round(norm * sliderSeqW);   // normalitzat -> px
         }
     });
 };
@@ -549,7 +601,7 @@ document.addEventListener('click', function (e) {
     if (!reframeActive) return;
     var zone = document.getElementById('sliderZone');
     if (zone && !zone.contains(e.target)) {
-        // No desactivar amb els controls de navegació ni KEYFRAME
+        // No desactivar amb els controls de navegaciÃ³ ni KEYFRAME
         var keep = ['btnPrevClip', 'btnNextClip', 'btnKey'];
         var id = e.target && e.target.id;
         if (id && keep.indexOf(id) !== -1) return;
@@ -566,7 +618,7 @@ setInterval(function () {
     }
 }, 500);
 
-// Neteja de memòria al entrar amb el ratolí
+// Neteja de memÃ²ria al entrar amb el ratolÃ­
 window.onmouseenter = function () {
     FASTPASS_UI.Utils.callJSX('System.clear()');
 };
@@ -575,7 +627,7 @@ window.onmouseenter = function () {
 async function warmUpNetwork() {
     var config = FASTPASS_UI.Config.get();
     if (config.rutas) {
-        console.log("🔥 [SYSTEM] Escalfant rutes de xarxa...");
+        console.log("ðŸ”¥ [SYSTEM] Escalfant rutes de xarxa...");
         FASTPASS_UI.Utils.callJSX(`IO.exists('${config.rutas.verticalitzacio.replace(/\\/g, '\\\\')}')`);
         FASTPASS_UI.Utils.callJSX(`IO.exists('${config.rutas.chyrons.replace(/\\/g, '\\\\')}')`);
     }

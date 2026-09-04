@@ -383,6 +383,20 @@ $.global.Tracks = {
 };
 
 $.global.Clips = {
+
+    /**
+     * Helper intern: executa una acció dins d'un UndoGroup amb nom, perquè el
+     * Ctrl+Z de Premiere mostri el nom de l'acció (més fàcil de correlacionar).
+     */
+    _fpUndo: function(name, fn) {
+        var opened = false;
+        try { app.beginUndoGroup(name); opened = true; } catch(e) {}
+        var r;
+        try { r = fn(); } catch(e) { r = "ERR: " + (e.message || e); }
+        if (opened) { try { app.endUndoGroup(); } catch(e2) {} }
+        return r;
+    },
+
     count: function(ti, type) {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.count(ti, type || "video") : 0;
     },
@@ -393,10 +407,32 @@ $.global.Clips = {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.at(ti, t, type || "video") : null;
     },
     remove: function(ti, ci, type) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.remove(ti, ci, type || "video") : "ERR";
+        return this._fpUndo("FASTPASS remove V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.remove(ti, ci, type || "video") : "ERR";
+        });
+    },
+    unlink: function(ti, ci, type) {
+        return this._fpUndo("FASTPASS unlink V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.unlink(ti, ci, type || "video") : "ERR";
+        });
+    },
+    removeLinkedAudio: function(ti, ci) {
+        return this._fpUndo("FASTPASS removeLinkedAudio V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.removeLinkedAudio(ti, ci) : "ERR";
+        });
+    },
+    dedupeAudioAt: function(timeSec) {
+        return this._fpUndo("FASTPASS dedupeAudio", function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.dedupeAudioAt(timeSec) : "ERR";
+        });
+    },
+    audioAround: function(timeSec) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.audioAround(timeSec) : "ERR";
     },
     insert: function(n, ti, s, e, t) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE";
+        return this._fpUndo("FASTPASS insert V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE";
+        });
     },
     getInPoint: function(ti, ci, type) {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.getInPoint(ti, ci, type || "video") : "null";
@@ -426,24 +462,66 @@ $.global.Clips = {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.scenes(ti) : "[]"; 
     },
     clearTrack: function(ti, type) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.clearTrack(ti, type || "video") : "ERR";
+        return this._fpUndo("FASTPASS clear V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.clearTrack(ti, type || "video") : "ERR";
+        });
+    },
+    debugTracks: function(type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.debugTracks(type || "video") : "ERR";
     },
     insertWithBounds: function(n, ti, s, inPt, outPt, t) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insertWithBounds(n, ti, s, inPt, outPt, t) : "ERR_NO_CLIPS_MODULE";
+        return this._fpUndo("FASTPASS insertBounds V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insertWithBounds(n, ti, s, inPt, outPt, t) : "ERR_NO_CLIPS_MODULE";
+        });
     },
     hasClips: function(ti, type) {
         if (!$.global.FASTPASS.Clips) return "false";
         var count = FASTPASS.Clips.count(ti, type || "video");
         return (parseInt(count) > 0) ? "true" : "false";
     },
-    move: function(ti, ci, tgt, type) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.move(ti, ci, tgt, type || "video") : "ERR";
+    move: function(ti, ci, tgt, type, strip) {
+        return this._fpUndo("FASTPASS move V" + ti + "->V" + tgt, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.move(ti, ci, tgt, type || "video", strip || 0) : "ERR";
+        });
     },
-    duplicate: function(ti, ci, tgt, type) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.duplicate(ti, ci, tgt, type || "video") : "ERR";
+    duplicate: function(ti, ci, tgt, type, strip) {
+        return this._fpUndo("FASTPASS dup V" + ti + "->V" + tgt, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.duplicate(ti, ci, tgt, type || "video", strip || 0) : "ERR";
+        });
     },
     trim: function(ti, ci, s, e, type) {
-        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.trim(ti, ci, s, e, type || "video") : "ERR";
+        return this._fpUndo("FASTPASS trim V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.trim(ti, ci, s, e, type || "video") : "ERR";
+        });
+    },
+    moveToRange: function(ti, ci, s, e, type) {
+        return this._fpUndo("FASTPASS moveRange V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.moveToRange(ti, ci, s, e, type || "video") : "ERR";
+        });
+    },
+    itemDuration: function(ti, ci, type) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.itemDuration(ti, ci, type || "video") : "ERR";
+    },
+    insertClipItem: function(n, ti, t, type) {
+        return this._fpUndo("FASTPASS insertClip V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insertClipItem(n, ti, t, type || "video") : "ERR";
+        });
+    },
+    insertClipFrom: function(ti, ci, tgt, t, type) {
+        return this._fpUndo("FASTPASS insertClipFrom V" + tgt, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insertClipFrom(ti, ci, tgt, t, type || "video") : "ERR";
+        });
+    },
+    retrim: function(ti, ci, inPt, outPt, e, type) {
+        return this._fpUndo("FASTPASS retrim V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.retrim(ti, ci, inPt, outPt, e, type || "video") : "ERR";
+        });
+    },
+    getSelectedVideo: function() {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.getSelectedVideo() : "ERR";
+    },
+    setClipLabel: function(ti, ci, colorIdx) {
+        return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.setClipLabel(ti, ci, colorIdx) : "ERR";
     }
 };
 
@@ -471,12 +549,29 @@ $.global.Anim = {
     list: function(ti, ci, cp, pr) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.list(ti, ci, cp, pr) : "[]"; 
     },
-    x: function(v, f) { 
+    x: function(v, f, a) { 
         if (!$.global.FASTPASS.Anim) return "0";
-        return (arguments.length === 0) ? FASTPASS.Anim.x() : FASTPASS.Anim.x(v, f); 
+        if (arguments.length === 0) return FASTPASS.Anim.x();
+        return FASTPASS.Anim.x(v, f, a); 
     },
     limits: function() { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.limits() : "{}"; 
+    },
+    panV2: function(v, f) {
+        if (!$.global.FASTPASS.Anim) return "0";
+        if (arguments.length === 0) return FASTPASS.Anim.panV2();
+        return FASTPASS.Anim.panV2(v, f);
+    },
+    panV2Limits: function() {
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.panV2Limits() : "{}";
+    },
+    sliderApply: function(v, f, a) {
+        if (!$.global.FASTPASS.Anim) return "0";
+        if (arguments.length === 0) return FASTPASS.Anim.sliderApply();
+        return FASTPASS.Anim.sliderApply(v, f, a);
+    },
+    sliderLimits: function() {
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.sliderLimits() : "{}";
     },
     reframe: function(ti, ci) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
@@ -504,6 +599,15 @@ $.global.Anim = {
     },
     setMotionValues: function(ti, ci, valuesJson) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.setMotionValues(ti, ci, valuesJson) : "ERR"; 
+    },
+    getMotionValues: function(ti, ci) { 
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.getMotionValues(ti, ci) : "ERR"; 
+    },
+    probeRange: function() {
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.probeRange() : "ERR";
+    },
+    setDfPreset: function(jsonStr) {
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.setDfPreset(jsonStr) : "ERR";
     }
 };
 

@@ -1203,6 +1203,63 @@
                 });
                 getUtils().status(userMarkers.length + " MARKS Usuari capturats", "exito");
             } catch (e) { getUtils().handleError(e, "capturaUsuarioMarks"); }
+        },
+
+        /**
+         * runAplicarIpdDesdeMarkers: Revisa els markers de la seqüència i aplica la
+         * configuració IPD (escala 144% + pos -94.5,562 + etiqueta) als clips de la
+         * pista MP4 que comencen a cada marker IPD (color turquesa=7), sempre que el
+         * clip estigui ABANS del següent marker d'estructura (color 1 o 6).
+         * Pensat per a una automatització posterior (no cal seleccionar clip a clip).
+         * @returns {number} Nombre de clips modificats
+         */
+        runAplicarIpdDesdeMarkers: async function () {
+            if (!(await getUtils().validateActiveSequence())) return 0;
+            try {
+                const cfg = FASTPASS_UI.Config.get();
+                const T_MP4 = cfg.tracks.video.mp4 || 1;
+
+                // 1. Llegir markers (color: 7=IPD turquesa, 6=estructura blava, 1=estructura vermella)
+                const markersRaw = await callJSX('Markers.get()');
+                let markers = [];
+                try { markers = JSON.parse(markersRaw || "[]"); } catch (eM) {}
+                markers.sort(function (a, b) { return (a.time || 0) - (b.time || 0); });
+                const ipdMarkers = markers.filter(function (m) { return m.color === 7; });
+                log(`📍 [IPD-MARKERS] ${markers.length} markers totals, ${ipdMarkers.length} IPD (color 7)`);
+                if (ipdMarkers.length === 0) {
+                    getUtils().status("No hi ha markers IPD (color turquesa) a la seqüència", "warn");
+                    return 0;
+                }
+
+                // 2. Llegir clips de la pista MP4
+                const dtRaw = await callJSX(`Clips.debugTracks('video')`);
+                let vclips = [];
+                try {
+                    const dt = JSON.parse(dtRaw);
+                    const tr = (dt.tracks || [])[T_MP4 - 1];
+                    if (tr && tr.clips) vclips = tr.clips;
+                } catch (eD) {}
+
+                // 3. Per a cada marker IPD: clip amb start≈time, abans del següent marker d'estructura
+                let modificats = 0;
+                for (const m of ipdMarkers) {
+                    const t = m.time || 0;
+                    const nextStruct = markers.find(function (x) { return (x.color === 1 || x.color === 6) && (x.time || 0) > t + 0.05; });
+                    const lim = nextStruct ? (nextStruct.time || 0) : Infinity;
+                    const clip = vclips.find(function (c) { return Math.abs(c.start - t) < 1.0 && c.start < lim - 0.05; });
+                    if (!clip) {
+                        log(`⚠️ [IPD-MARKERS] Marker IPD a ${t.toFixed(2)}s: cap clip (start≈) abans del següent marker d'estructura (${lim === Infinity ? 'fi' : lim.toFixed(2) + 's'})`, "WARN");
+                        continue;
+                    }
+                    const valsJson = JSON.stringify({ scale: 144, position: [-94.5, 562] });
+                    const resM = await callJSX(`Anim.setMotionValues(${T_MP4}, ${clip.index}, '${valsJson}')`);
+                    const resL = await callJSX(`Clips.setClipLabel(${T_MP4}, ${clip.index}, 15)`);
+                    log(`🎬 [IPD-MARKERS] V${T_MP4}[${clip.index}] a ${clip.start.toFixed(2)}s (marker IPD ${t.toFixed(2)}s) → Motion ${resM} | etiqueta ${resL}`);
+                    modificats++;
+                }
+                getUtils().status(`IPD aplicat a ${modificats} clips des de markers`, modificats ? "exito" : "warn");
+                return modificats;
+            } catch (e) { getUtils().handleError(e, "runAplicarIpdDesdeMarkers"); return 0; }
         }
     };
 

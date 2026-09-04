@@ -97,7 +97,9 @@ FASTPASS.Clips = {
             var track = this._get(trackIdx, type);
             var clip = track.clips[clipIdx];
             if (clip) {
-                clip.remove(true, true);
+                // (false,false): elimina només del timeline, sense moure a la paperera ni
+                // tocar el projecte. Més fiable que (true,true) amb clips vinculats/MP4 compartit.
+                clip.remove(false, false);
                 return "OK";
             }
             return "ERR_NO_CLIP";
@@ -105,8 +107,155 @@ FASTPASS.Clips = {
     },
 
     /**
-     * clearTrack: Elimina tots els clips d'una pista (escombrat invers).
+     * unlink: Desvincula el clip (vídeo o àudio) del seu grup enllaçat, per poder-lo
+     * eliminar o moure SOL sense arrossegar l'altre component.
+     * Tècnica del SDK: setSelected(true) + seq.unlinkSelection().
      */
+    unlink: function(trackIdx, clipIdx, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var track = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+            clip.setSelected(true, true);
+            seq.unlinkSelection();
+            clip.setSelected(false, false);
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * removeLinkedAudio: Elimina el clip d'àudio ENLLAÇAT a un clip de vídeo del timeline.
+     * Útil després d'un overwriteClip que insereix un MP4 amb àudio (el qual deixa un clip
+     * d'àudio enllaçat a A1/A2). Tècnica del SDK: seleccionar el clip de vídeo →
+     * unlinkSelection() → eliminar els clips d'àudio seleccionats que comencen al mateix temps.
+     * @returns {string} "OK:<n>" (n clips d'àudio eliminats) o "ERR:..."
+     */
+    removeLinkedAudio: function(trackIdx, clipIdx) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var track = seq.videoTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+            var tStart = clip.start.seconds;
+
+            // 1. Deseleccionar TOT (vídeo + àudio) perquè la selecció sigui només el clip
+            var _desel = function(trs) {
+                if (!trs) return;
+                for (var i = 0; i < trs.numTracks; i++) {
+                    var tr = trs[i];
+                    if (!tr || !tr.clips) continue;
+                    for (var j = 0; j < tr.clips.numItems; j++) {
+                        try { tr.clips[j].setSelected(false, false); } catch(eS) {}
+                    }
+                }
+            };
+            _desel(seq.videoTracks);
+            _desel(seq.audioTracks);
+
+            // 2. Seleccionar el clip de vídeo (arrossega el seu grup enllaçat)
+            clip.setSelected(true, true);
+            seq.unlinkSelection();
+
+            // 3. Eliminar els clips d'àudio seleccionats que comencen al mateix temps que el vídeo
+            var removed = 0;
+            for (var at = 0; at < seq.audioTracks.numTracks; at++) {
+                var atr = seq.audioTracks[at];
+                if (!atr || !atr.clips) continue;
+                for (var ai = atr.clips.numItems - 1; ai >= 0; ai--) {
+                    var aClip = atr.clips[ai];
+                    if (!aClip) continue;
+                    var sel = false;
+                    try { sel = aClip.isSelected(); } catch(eI) {}
+                    if (sel && Math.abs(aClip.start.seconds - tStart) < 0.1) {
+                        aClip.remove(false, false);
+                        removed++;
+                    }
+                }
+            }
+            clip.setSelected(false, false);
+            return "OK:" + removed;
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * dedupeAudioAt: Neteja els clips d'àudio duplicats a la posició donada.
+     * - A1 (pista 0): conserva el PRIMER clip que comença aquí (l'àudio original del
+     *   programa) i elimina els duplicats que hagin creat els overwriteClip.
+     * - A2, A3... (pistes 1+): elimina TOTS els clips que comencen aquí (són duplicats
+     *   dels overwrite dels MP4, que cauen a les pistes target de l'operador).
+     * @param {number} timeSec - Posició (start) on netejar
+     * @returns {string} "OK:<n>" (n clips eliminats) o "ERR:..."
+     */
+    dedupeAudioAt: function(timeSec) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var target = parseFloat(timeSec);
+            var removed = 0;
+            for (var at = 0; at < seq.audioTracks.numTracks; at++) {
+                var atr = seq.audioTracks[at];
+                if (!atr || !atr.clips) continue;
+                if (at === 0) {
+                    // A1: conservar el primer (original del programa), eliminar la resta
+                    var keep = null;
+                    var dups = [];
+                    for (var i = 0; i < atr.clips.numItems; i++) {
+                        var aClip = atr.clips[i];
+                        if (aClip && Math.abs(aClip.start.seconds - target) < 0.1) {
+                            if (!keep) keep = aClip;
+                            else dups.push(aClip);
+                        }
+                    }
+                    for (var j = 0; j < dups.length; j++) {
+                        try { dups[j].remove(false, false); removed++; } catch(eR) {}
+                    }
+                } else {
+                    // A2/A3...: són duplicats dels overwrite → eliminar-los tots
+                    for (var k = atr.clips.numItems - 1; k >= 0; k--) {
+                        var c2 = atr.clips[k];
+                        if (c2 && Math.abs(c2.start.seconds - target) < 0.1) {
+                            try { c2.remove(false, false); removed++; } catch(eR) {}
+                        }
+                    }
+                }
+            }
+            return "OK:" + removed;
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * audioAround: Diagnòstic. Retorna els clips d'àudio de TOTES les pistes d'àudio
+     * (A1, A2, A3...) que comencen o s'encavalquen amb [timeSec-0.5, timeSec+40].
+     */
+    audioAround: function(timeSec) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var t = parseFloat(timeSec);
+            var out = { tracks: [] };
+            for (var i = 0; i < seq.audioTracks.numTracks; i++) {
+                var atr = seq.audioTracks[i];
+                var arr = [];
+                if (atr && atr.clips) {
+                    for (var j = 0; j < atr.clips.numItems; j++) {
+                        var c = atr.clips[j];
+                        if (!c) continue;
+                        if (c.end.seconds > t - 0.5 && c.start.seconds < t + 40) {
+                            arr.push({ idx: j, name: c.name, start: Math.round(c.start.seconds * 100) / 100, end: Math.round(c.end.seconds * 100) / 100, inPt: Math.round(c.inPoint.seconds * 100) / 100, outPt: Math.round(c.outPoint.seconds * 100) / 100 });
+                        }
+                    }
+                }
+                out.tracks.push({ pista: "A" + (i + 1), clips: arr });
+            }
+            return JSON.stringify(out);
+        } catch(e) { return "ERR: " + e.message; }
+    },
     clearTrack: function(trackIdx, type) {
         try {
             var track = this._get(trackIdx, type || "video");
@@ -798,6 +947,38 @@ FASTPASS.Clips = {
         } catch(e) { return "[]"; }
     },
     /**
+     * getSelectedVideo: Busca el primer clip de VÍDEO seleccionat al timeline
+     * (recorre totes les pistes de vídeo d'abaix cap amunt).
+     * @returns {string} JSON {track (1-based), index, name, start, end} o "null"
+     */
+    getSelectedVideo: function() {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "null";
+            for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+                var track = seq.videoTracks[t];
+                if (!track || !track.clips) continue;
+                for (var i = 0; i < track.clips.numItems; i++) {
+                    var c = track.clips[i];
+                    try {
+                        if (c && c.isSelected()) {
+                            return JSON.stringify({
+                                track: t + 1,
+                                index: i,
+                                name: c.name,
+                                start: c.start.seconds,
+                                end: c.end.seconds
+                            });
+                        }
+                    } catch(eI) {}
+                }
+            }
+            return "null";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+
+    /**
      * createCaptionFromProjectItem: Crea una nova caption track i hi col·loca un SRT.
      * És l'única API disponible per treballar amb subtítols des d'ExtendScript.
      * @param {string} itemName - Nom del .srt al projecte (URI-encoded)
@@ -864,7 +1045,7 @@ FASTPASS.Clips = {
      * @param {string} [type] - "video" (default) o "audio"
      * @returns {string} "OK" o "ERR:..."
      */
-    move: function(trackIdx, clipIdx, targetTrackIdx, type) {
+    move: function(trackIdx, clipIdx, targetTrackIdx, type, stripAudio) {
         try {
             var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             if (!seq) return "ERR_NO_SEQ";
@@ -877,26 +1058,74 @@ FASTPASS.Clips = {
             var tgtTrack = isVideo ? seq.videoTracks[parseInt(targetTrackIdx) - 1] : seq.audioTracks[parseInt(targetTrackIdx) - 1];
             if (!tgtTrack) return "ERR_NO_TARGET_TRACK";
 
-            var tStart = new Time(); tStart.seconds = clip.start.seconds;
-            var tIn = new Time(); tIn.seconds = clip.inPoint.seconds;
-            var tOut = new Time(); tOut.seconds = clip.outPoint.seconds;
+            var tStart = clip.start.seconds;
+            var tIn = clip.inPoint.seconds;
+            // Duració basada en el TIMELINE (end - start), no en el source outPoint.
+            var tDur = clip.end.seconds - clip.start.seconds;
+            var tOut = tIn + tDur;
+
+            // 🎯 CLAU anti-machacado SIMÈTRIC: desactivar les targets del tipus CONTRARI
+            // durant l'overwriteClip. En un overwrite de VÍDEO, no s'insereix l'àudio a A1/A2;
+            // en un overwrite d'ÀUDIO, no es reinsereix el vídeo del MP4 a la pista de vídeo target.
+            var _savedT = [];
+            try {
+                var _otherTracks = isVideo ? seq.audioTracks : seq.videoTracks;
+                if (_otherTracks) {
+                    for (var _x = 0; _x < _otherTracks.numTracks; _x++) {
+                        var _tx = _otherTracks[_x];
+                        if (!_tx) continue;
+                        var _w = true;
+                        try { _w = _tx.getTargeted(); } catch(eG) {}
+                        _savedT.push({ t: _tx, w: _w });
+                        try { _tx.setTargeted(false); } catch(eS) {}
+                    }
+                }
+            } catch(eX) {}
 
             tgtTrack.overwriteClip(clip.projectItem, tStart);
 
-            var newClip = null;
-            for (var i = 0; i < tgtTrack.clips.numItems; i++) {
-                if (Math.abs(tgtTrack.clips[i].start.seconds - tStart.seconds) < 0.1) { newClip = tgtTrack.clips[i]; break; }
-            }
-            if (!newClip) newClip = tgtTrack.clips[tgtTrack.clips.numItems - 1];
-            if (!newClip) return "ERR_CLIP_NOT_FOUND_AFTER_MOVE";
+            try {
+                for (var _y = 0; _y < _savedT.length; _y++) {
+                    try { _savedT[_y].t.setTargeted(_savedT[_y].w); } catch(eR) {}
+                }
+            } catch(eY) {}
 
-            newClip.inPoint = tIn;
-            newClip.outPoint = tOut;
-            var tEnd = new Time(); tEnd.seconds = tStart.seconds + (tOut.seconds - tIn.seconds);
-            newClip.end = tEnd;
+            var newIdx = -1;
+            var newClip = null;
+            // Buscar el clip recien inserit (per nom del projectItem + start). SENSE fallback:
+            // si no es troba, error explícit per NO aplicar trims/motion a un clip equivocat.
+            for (var i = 0; i < tgtTrack.clips.numItems; i++) {
+                var c = tgtTrack.clips[i];
+                if (Math.abs(c.start.seconds - tStart) < 0.1 && c.projectItem && clip.projectItem &&
+                    c.projectItem.name === clip.projectItem.name) { newClip = c; newIdx = i; }
+            }
+            if (!newClip) return "ERR_CLIP_NOT_FOUND_AFTER_MOVE: " + (clip.projectItem.name || "?");
+            if (newClip.projectItem && clip.projectItem && newClip.projectItem.name !== clip.projectItem.name) return "ERR_WRONG_CLIP_AFTER_MOVE: " + newClip.projectItem.name;
+
+            // NOTA: els trims (inPoint/outPoint/end) NO s'apliquen aquí. Premiere ignora el
+            // setter d'inPoint en el MATEIX evalScript que l'overwriteClip. El retrim es fa
+            // DESPRÉS des de JS amb crides JSX separades (com el TROSEJA).
+
+            // Eliminar àudio associat si stripAudio=1 (A1 i A2)
+            if (parseInt(stripAudio) === 1) {
+                try {
+                    var audTracks = seq.audioTracks;
+                    for (var at = 0; at < audTracks.numTracks; at++) {
+                        var aTr = audTracks[at];
+                        if (!aTr || !aTr.clips) continue;
+                        for (var ai = aTr.clips.numItems - 1; ai >= 0; ai--) {
+                            var aCl = aTr.clips[ai];
+                            if (Math.abs(aCl.start.seconds - tStart) < 0.1) {
+                                aCl.remove(true, true);
+                                break;
+                            }
+                        }
+                    }
+                } catch(e) {}
+            }
 
             clip.remove(true, true);
-            return "OK";
+            return "OK:" + newIdx;
         } catch(e) { return "ERR: " + e.message; }
     },
 
@@ -909,7 +1138,7 @@ FASTPASS.Clips = {
      * @param {string} [type] - "video" (default) o "audio"
      * @returns {string} "OK" o "ERR:..."
      */
-    duplicate: function(trackIdx, clipIdx, targetTrackIdx, type) {
+    duplicate: function(trackIdx, clipIdx, targetTrackIdx, type, stripAudio) {
         try {
             var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
             if (!seq) return "ERR_NO_SEQ";
@@ -922,25 +1151,77 @@ FASTPASS.Clips = {
             var tgtTrack = isVideo ? seq.videoTracks[parseInt(targetTrackIdx) - 1] : seq.audioTracks[parseInt(targetTrackIdx) - 1];
             if (!tgtTrack) return "ERR_NO_TARGET_TRACK";
 
-            var tStart = new Time(); tStart.seconds = clip.start.seconds;
-            var tIn = new Time(); tIn.seconds = clip.inPoint.seconds;
-            var tOut = new Time(); tOut.seconds = clip.outPoint.seconds;
+            var tStart = clip.start.seconds;
+            var tIn = clip.inPoint.seconds;
+            // Duració basada en el TIMELINE (end - start), no en el source outPoint:
+            // si el clip original està retallat de forma atípica, el outPoint del
+            // source pot no coincidir amb la durada real del clip a la seqüència.
+            var tDur = clip.end.seconds - clip.start.seconds;
+            var tOut = tIn + tDur;
+
+            // 🎯 CLAU anti-machacado SIMÈTRIC: desactivar les targets del tipus CONTRARI
+            // durant l'overwriteClip. En un overwrite de VÍDEO, Premiere no insereix l'àudio
+            // sencer del MP4 a A1/A2. En un overwrite d'ÀUDIO, no reinsereix el vídeo del MP4
+            // a la pista de vídeo target (V1) — que era el que MACHACAVA el timeline.
+            var _savedT = [];
+            try {
+                var _otherTracks = isVideo ? seq.audioTracks : seq.videoTracks;
+                if (_otherTracks) {
+                    for (var _x = 0; _x < _otherTracks.numTracks; _x++) {
+                        var _tx = _otherTracks[_x];
+                        if (!_tx) continue;
+                        var _w = true;
+                        try { _w = _tx.getTargeted(); } catch(eG) {}
+                        _savedT.push({ t: _tx, w: _w });
+                        try { _tx.setTargeted(false); } catch(eS) {}
+                    }
+                }
+            } catch(eX) {}
 
             tgtTrack.overwriteClip(clip.projectItem, tStart);
 
+            try {
+                for (var _y = 0; _y < _savedT.length; _y++) {
+                    try { _savedT[_y].t.setTargeted(_savedT[_y].w); } catch(eR) {}
+                }
+            } catch(eY) {}
+
+            var newIdx = -1;
             var newClip = null;
+            // Buscar el clip recien inserit (per nom del projectItem + start). SENSE fallback:
+            // si no es troba, error explícit per NO aplicar trims/motion a un clip equivocat.
             for (var i = 0; i < tgtTrack.clips.numItems; i++) {
-                if (Math.abs(tgtTrack.clips[i].start.seconds - tStart.seconds) < 0.1) { newClip = tgtTrack.clips[i]; break; }
+                var c = tgtTrack.clips[i];
+                if (Math.abs(c.start.seconds - tStart) < 0.1 && c.projectItem && clip.projectItem &&
+                    c.projectItem.name === clip.projectItem.name) { newClip = c; newIdx = i; }
             }
-            if (!newClip) newClip = tgtTrack.clips[tgtTrack.clips.numItems - 1];
-            if (!newClip) return "ERR_CLIP_NOT_FOUND_AFTER_DUP";
+            if (!newClip) return "ERR_CLIP_NOT_FOUND_AFTER_DUP: " + (clip.projectItem.name || "?");
+            if (newClip.projectItem && clip.projectItem && newClip.projectItem.name !== clip.projectItem.name) return "ERR_WRONG_CLIP_AFTER_DUP: " + newClip.projectItem.name;
 
-            newClip.inPoint = tIn;
-            newClip.outPoint = tOut;
-            var tEnd = new Time(); tEnd.seconds = tStart.seconds + (tOut.seconds - tIn.seconds);
-            newClip.end = tEnd;
+            // NOTA: els trims (inPoint/outPoint/end) NO s'apliquen aquí. S'ha comprovat que
+            // Premiere ignora el setter d'inPoint en el MATEIX evalScript que l'overwriteClip
+            // (el clip queda mostrant el frame 0 del media). El retrim es fa DESPRÉS, des de JS,
+            // amb crides JSX separades (Clips.inPoint / Clips.end), com fa el TROSEJA amb èxit.
 
-            return "OK";
+            // Eliminar àudio associat si stripAudio=1 (A1 i A2)
+            if (parseInt(stripAudio) === 1) {
+                try {
+                    var audTracks = seq.audioTracks;
+                    for (var at = 0; at < audTracks.numTracks; at++) {
+                        var aTr = audTracks[at];
+                        if (!aTr || !aTr.clips) continue;
+                        for (var ai = aTr.clips.numItems - 1; ai >= 0; ai--) {
+                            var aCl = aTr.clips[ai];
+                            if (Math.abs(aCl.start.seconds - tStart) < 0.1) {
+                                aCl.remove(true, true);
+                                break;
+                            }
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            return "OK:" + newIdx;
         } catch(e) { return "ERR: " + e.message; }
     },
 
@@ -985,4 +1266,289 @@ FASTPASS.Clips = {
             return "OK";
         } catch(e) { return "ERR: " + e.message; }
     },
+
+    /**
+     * debugTracks: Diagnòstic de l'estat de les pistes (nombre, bloquejada, clips amb
+     * start/end). Molt útil per detectar pistes BLOQUEJADES que fan fallar els
+     * overwriteClip/remove de forma silenciosa.
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} JSON {count, tracks:[{index, locked, clips:[{index,name,start,end}]}]}
+     */
+    debugTracks: function(type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var tracks = (type === "audio") ? seq.audioTracks : seq.videoTracks;
+            if (!tracks) return "ERR_NO_TRACKS";
+            var out = { count: tracks.numTracks || 0, tracks: [] };
+            for (var i = 0; i < out.count; i++) {
+                var tr = tracks[i];
+                var t = { index: i, locked: !!(tr && tr.isLocked), clips: [] };
+                if (tr && tr.clips) {
+                    for (var j = 0; j < tr.clips.numItems; j++) {
+                        var c = tr.clips[j];
+                        if (!c) continue;
+                        t.clips.push({ index: j, name: c.name, start: Math.round(c.start.seconds * 100) / 100, end: Math.round(c.end.seconds * 100) / 100 });
+                    }
+                }
+                out.tracks.push(t);
+            }
+            return JSON.stringify(out);
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * retrim: Retalla un clip recentment inserit al rang exacte.
+     * Es crida en un evalScript SEPARAT del overwriteClip (Premiere ignora el setter
+     * d'inPoint en el mateix evalScript que la inserció).
+     * Ordre crític (com insertWithBounds): inPoint → outPoint → end.
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {number} inPtSec - InPoint dins del source
+     * @param {number} outPtSec - OutPoint dins del source
+     * @param {number} endSec - End al timeline (start + (outPt-inPt))
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK:in=X,out=Y,end=Z" o "WARN_INVALID:..." o "ERR:..."
+     */
+    retrim: function(trackIdx, clipIdx, inPtSec, outPtSec, endSec, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var track = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+
+            var inPt = parseFloat(inPtSec);
+            var outPt = parseFloat(outPtSec);
+            var endS = parseFloat(endSec);
+            var tIn = new Time(); tIn.seconds = inPt;
+            var tOut = new Time(); tOut.seconds = outPt;
+            var tEnd = new Time(); tEnd.seconds = endS;
+
+            var ok = false;
+            for (var attempt = 0; attempt < 3 && !ok; attempt++) {
+                clip.inPoint = tIn;
+                clip.outPoint = tOut;
+                clip.end = tEnd;
+                var curIn = Math.round(clip.inPoint.seconds * 100) / 100;
+                var curOut = Math.round(clip.outPoint.seconds * 100) / 100;
+                var curEnd = Math.round(clip.end.seconds * 100) / 100;
+                if (Math.abs(curIn - inPt) < 0.05 && Math.abs(curOut - outPt) < 0.05 && Math.abs(curEnd - endS) < 0.05) ok = true;
+            }
+            if (ok) {
+                return "OK:in=" + clip.inPoint.seconds.toFixed(3) + ",out=" + clip.outPoint.seconds.toFixed(3) + ",end=" + clip.end.seconds.toFixed(3);
+            }
+            return "WARN_INVALID:in=" + clip.inPoint.seconds.toFixed(3) + ",out=" + clip.outPoint.seconds.toFixed(3) + ",end=" + clip.end.seconds.toFixed(3) + ",wantIn=" + inPt + ",wantOut=" + outPt;
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * moveToRange: Mou un clip dins de la MATEIXA pista al rang EXACTE [startSec, endSec]
+     * reasignant clip.start i clip.end en el MATEIX evalScript, PRESERVANT la durada
+     * del clip (no toca inPoint/outPoint: per a imatges fixes/stills el contingut és un
+     * frame únic, així que és irrellevant). Reintenta i verifica el resultat.
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {number} startSec - Nou inici al timeline
+     * @param {number} endSec - Nou final al timeline
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK:start=X,end=Y" o "WARN_MOVE:..." o "ERR:..."
+     */
+    moveToRange: function(trackIdx, clipIdx, startSec, endSec, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var track = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+
+            var wantStart = parseFloat(startSec);
+            var wantEnd = parseFloat(endSec);
+            if (!isFinite(wantStart) || !isFinite(wantEnd)) return "ERR_INVALID_RANGE:" + startSec + "→" + endSec;
+            var tStart = new Time(); tStart.seconds = wantStart;
+            var tEnd = new Time(); tEnd.seconds = wantEnd;
+
+            var ok = false;
+            for (var attempt = 0; attempt < 3 && !ok; attempt++) {
+                clip.start = tStart;
+                clip.end = tEnd;
+                var curStart = clip.start.seconds;
+                var curEnd = clip.end.seconds;
+                if (Math.abs(curStart - wantStart) < 0.05 && Math.abs(curEnd - wantEnd) < 0.05) ok = true;
+            }
+            if (ok) {
+                return "OK:start=" + clip.start.seconds.toFixed(3) + ",end=" + clip.end.seconds.toFixed(3);
+            }
+            return "WARN_MOVE:start=" + clip.start.seconds.toFixed(3) + ",end=" + clip.end.seconds.toFixed(3) + ",wantStart=" + wantStart.toFixed(3) + ",wantEnd=" + wantEnd.toFixed(3);
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * itemDuration: Retorna la durada (en segons) del PROJECT ITEM (media al bin) d'un
+     * clip del timeline. Serveix per saber quant ocupa un overwriteClip d'aquest media
+     * (el duplicat d'un clip d'un MP4 llarg re-insereix TOT el MP4).
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} segons (ex: "1246.32") o "ERR:..."
+     */
+    itemDuration: function(trackIdx, clipIdx, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var track = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip || !clip.projectItem) return "ERR_NO_PROJECT_ITEM";
+            if (typeof clip.projectItem.getDuration !== 'function') return "ERR_NO_DURATION_API";
+            return clip.projectItem.getDuration().seconds.toString();
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * insertClipItem: Insereix un ProjectItem (per nom al bin) en una pista amb
+     * INSERT amb ripple (Track.insertClip): NO pisa res, desplaça els clips posteriors
+     * de la pista cap a la dreta la durada del media insertat.
+     * @param {string} itemName - Nom (URI-encoded) de l'asset al bin
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} timeSec - Posició d'inserció al timeline (segons)
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK" o "ERR:..."
+     */
+    /**
+     * _limitarTargets: Desactiva els targets de TOTES les pistes (vídeo i àudio) EXCEPTE
+     * la pista destí (que es força activa), perquè el insertClip (ripple) afecti NOMÉS la
+     * pista destí. Sense això, el ripple també desplaça/insereix a altres pistes amb target
+     * actiu (i l'àudio enllaçat), cosa que desvirtua els clips veïns (bug DF 2026-09-04).
+     * Retorna una funció per restaurar l'estat original dels targets.
+     */
+    _limitarTargets: function(seq, keepTrack) {
+        var saved = [];
+        try {
+            var all = [];
+            if (seq.videoTracks) { for (var v = 0; v < seq.videoTracks.numTracks; v++) all.push(seq.videoTracks[v]); }
+            if (seq.audioTracks) { for (var a = 0; a < seq.audioTracks.numTracks; a++) all.push(seq.audioTracks[a]); }
+            for (var i = 0; i < all.length; i++) {
+                var tr = all[i];
+                if (!tr) continue;
+                var w = true;
+                try { w = tr.getTargeted(); } catch(eG) {}
+                saved.push({ t: tr, w: w });
+                try { tr.setTargeted(tr === keepTrack); } catch(eS) {}
+            }
+        } catch(eX) {}
+        return function() {
+            for (var j = 0; j < saved.length; j++) {
+                try { saved[j].t.setTargeted(saved[j].w); } catch(eR) {}
+            }
+        };
+    },
+
+
+    insertClipItem: function(itemName, trackIdx, timeSec, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var track = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!track) return "ERR_NO_TRACK";
+            if (typeof track.insertClip !== 'function') return "ERR_NO_INSERTCLIP_API";
+
+            var nameToFind = decodeURIComponent(itemName);
+            var item = FASTPASS.Project.find(nameToFind);
+            if (!item) {
+                var lastDot = nameToFind.lastIndexOf(".");
+                if (lastDot > 0) item = FASTPASS.Project.find(nameToFind.substring(0, lastDot));
+            }
+            if (!item) return "ERR_ITEM_NOT_FOUND:" + nameToFind;
+
+            // 🎯 CLAU anti-machacado: deixar SOLS la pista destí amb target actiu durant
+            // l'insertClip (així el ripple no desplaça ni toca altres pistes ni l'àudio).
+            var _restoreTargets = this._limitarTargets(seq, track);
+            track.insertClip(item, parseFloat(timeSec));
+            _restoreTargets();
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * insertClipFrom: Insereix amb ripple (Track.insertClip) el PROJECT ITEM del clip
+     * font d'una pista en una altra pista a la posició indicada. NO pisa res: desplaça
+     * els clips posteriors de la pista de destí (és la manera segura de "pujar" un clip
+     * d'un MP4 llarg a una pista que ja té contingut, a diferència del duplicate/overwrite).
+     * @param {number} trackIdx - Pista d'origen (1-based)
+     * @param {number} clipIdx - Índex del clip font (0-based)
+     * @param {number} targetTrackIdx - Pista de destí (1-based)
+     * @param {number} timeSec - Posició d'inserció al timeline (segons)
+     * @param {string} [type] - "video" (default) o "audio"
+     * @returns {string} "OK" o "ERR:..."
+     */
+    insertClipFrom: function(trackIdx, clipIdx, targetTrackIdx, timeSec, type) {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var isVideo = (type !== "audio");
+            var srcTrack = isVideo ? seq.videoTracks[parseInt(trackIdx) - 1] : seq.audioTracks[parseInt(trackIdx) - 1];
+            if (!srcTrack || !srcTrack.clips) return "ERR_NO_SRC_TRACK";
+            var clip = srcTrack.clips[parseInt(clipIdx)];
+            if (!clip || !clip.projectItem) return "ERR_NO_CLIP";
+            var tgtTrack = isVideo ? seq.videoTracks[parseInt(targetTrackIdx) - 1] : seq.audioTracks[parseInt(targetTrackIdx) - 1];
+            if (!tgtTrack) return "ERR_NO_TARGET_TRACK";
+            if (typeof tgtTrack.insertClip !== 'function') return "ERR_NO_INSERTCLIP_API";
+
+            // 🎯 CLAU anti-machacado: deixar SOLS la pista destí amb target actiu durant
+            // l'insertClip (el ripple no desplaça ni toca altres pistes ni l'àudio).
+            var _restoreTargets2 = this._limitarTargets(seq, tgtTrack);
+            tgtTrack.insertClip(clip.projectItem, parseFloat(timeSec));
+            _restoreTargets2();
+            return "OK";
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * setClipLabel: Canvia el COLOR D'ETIQUETA d'un clip del timeline (el color que
+     * es veu al clip a la línia de temps).
+     * Vies possibles (es proven en ordre):
+     *   1) TrackItem.setColorLabel  → només aquest clip del timeline (si l'API ho
+     *      exposa al TrackItem; no està documentada però pot existir en versions noves).
+     *   2) ProjectItem.setColorLabel → canvia el color del MEDIA al bin → afecta a TOTS
+     *      els clips del timeline que usin aquest mateix media (comportament estàndard).
+     * @param {number} trackIdx - Pista (1-based)
+     * @param {number} clipIdx - Índex del clip (0-based)
+     * @param {number} colorIdx - Índex de color d'etiqueta (0..15). Ex: 4=Cerulean, 15=Yellow.
+     * @returns {string} "OK:trackItem", "OK:projectItem" o "ERR:..."
+     */
+    setClipLabel: function(trackIdx, clipIdx, colorIdx) {
+        try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "ERR_NO_SEQ";
+            var track = seq.videoTracks[parseInt(trackIdx) - 1];
+            if (!track || !track.clips) return "ERR_NO_TRACK";
+            var clip = track.clips[parseInt(clipIdx)];
+            if (!clip) return "ERR_NO_CLIP";
+            var cIdx = parseInt(colorIdx);
+            if (isNaN(cIdx)) return "ERR_BAD_COLOR";
+
+            // Via 1: TrackItem (només aquest clip del timeline)
+            if (typeof clip.setColorLabel === 'function') {
+                try {
+                    clip.setColorLabel(cIdx);
+                    try { clip.setSelected(false, false); clip.setSelected(true, true); } catch(eSel1) {}
+                    return "OK:trackItem";
+                } catch(eT) {}
+            }
+            // Via 2: ProjectItem (el media del bin → tots els clips d'aquest media)
+            if (clip.projectItem && typeof clip.projectItem.setColorLabel === 'function') {
+                clip.projectItem.setColorLabel(cIdx);
+                try { clip.setSelected(false, false); clip.setSelected(true, true); } catch(eSel2) {}
+                return "OK:projectItem";
+            }
+            return "ERR_NO_COLORLABEL_API";
+        } catch(e) { return "ERR: " + e.message; }
+    }
 }
