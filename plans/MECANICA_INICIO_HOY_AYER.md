@@ -4,6 +4,7 @@
 > **Estado:** PROPUESTA cerrada en diseño · Pendiente de implementar en la próxima sesión
 > **Alcance:** Cambio del mecanismo de arranque de la extensión (botón MAIN) para eliminar la deducción automática de la fecha de trabajo.
 > **Archivo relacionado previo:** `plans/PLAN_RESOLVE_CONTEXT.md` (su paradigma "buscar hoy → si no, ayer" queda **sustituido** por el de este documento).
+> **Revisión 2 (2026-09-04):** definidos los **4 estados del botón MAIN** — MASSA D'HORA (nada accesible), ESPERANT (material en curso, ingesta sin llegar al TC de emisión), CREAR (material útil) y ACTUALITZAR (recarga de datos/media faltante) → ver §6.
 
 ---
 
@@ -30,7 +31,7 @@ Hoy la extensión **deduce** con qué día trabajar mirando la hora del sistema 
 
 ## 2. Decisiones cerradas
 
-1. **WAITING**: si al seleccionar programa+bloque **no hay datos del día objetivo**, el botón pasa a **WAITING**. (Ver §5 y §6 para la definición exacta de "datos".)
+1. **Cuatro estados de producción** para el botón principal (en vez de NEW/UPDATE/GO/OBRIR/LOAD/WAITING): **MASSA D'HORA**, **ESPERANT**, **CREAR** y **ACTUALITZAR** (definidos en §6). LOCKED se conserva solo como excepción (lock de otro autor).
 2. **"Ayer" = el día natural anterior**, siempre. Todos los días hay producción (no hay fines de semana ni festivos especiales).
 3. **Se elimina el bloqueo horario** (`PRE_EMISSION_GUARD_HOURS` y el "ESPERANT EMISSIÓ ... ~X min" derivado de `PROGRAM_START_HOURS`). El día NO se elige nunca por la hora del sistema.
 4. **El botón no muestra la fecha** en su texto. El modo corrección se indica solo en el log/status ("modo correcció: ahir").
@@ -45,8 +46,6 @@ Hoy la extensión **deduce** con qué día trabajar mirando la hora del sistema 
 4. **MAIN (Ctrl+clic)** = modo **corrección**: crea/abre el proyecto de **ayer** con todos los materiales de ayer.
 5. Si en un proyecto de hoy abierto faltan datos o media → **ACTUALITZAR** rastrea y rellena lo que falte **sin salir de la fecha de trabajo** (nunca se busca en el otro día).
 6. Regla transversal: **ningún módulo deduce ni corrige la fecha de trabajo**; todos reciben `ctx.dateDir` ya decidido (hoy|ayer).
-
----
 
 ---
 
@@ -72,7 +71,7 @@ Para decidir si "el día tiene datos / media" hay que rastrear, **siempre contra
 | Patrón de nombre | **Nuevo**: `YYYYMMDD_HHMMSS_PROGRAMA_BLOQUE_....json` → fecha = 1er segmento. **Antiguo**: `TN_VESPRE_20260904_215504.json` → fecha = penúltimo segmento |
 | Función de búsqueda | `EscaletaReader.findLatest(archivo, bloque, datePrefix)` / `findLatestValid(...)` en `js/core/escaleta_io.js`. Con `datePrefix` ya filtra estrictamente (L178-188) |
 | Cómo se data | Por el nombre (`YYYYMMDD`). **Nota**: `_extractDateFromName` de `escaleta_io.js` solo reconoce el formato nuevo; el antiguo lo extrae `utils.extractDateFromEscaletaFilename()`. Hay que unificar (ver §7) |
-| Rol | **Es el "dato" del día.** Sin escaleta de la fecha objetivo ⇒ botón **WAITING** (§6) |
+| Rol | **Es el "dato" del día.** Sin escaleta de la fecha objetivo ⇒ estado **MASSA D'HORA** o **ESPERANT** según haya o no otros artefactos de D en curso (§6) |
 | Fallback permitido | Bloques V1→V5 **del mismo día** si el JSON del bloque no tiene líneas propias. **Nunca** caer a otro día |
 
 ### 5.2 MP4 cleanFeed (MEDIA)
@@ -116,7 +115,7 @@ Para decidir si "el día tiene datos / media" hay que rastrear, **siempre contra
 | Patrón | `Pruebas_{token}_{bloque}_{tema}.prproj` (creado en `_runNew` con token = `wott`, p. ej. `Pruebas_TNV_V1_...`) |
 | Función | `Scan.selectedProject(files, progKey, bloque)` |
 | Problema actual | En `checkContext` se busca con `progKey = archivo_wott || archivo` (p. ej. `TN_VESPRE`), pero `_runNew` **crea** con `wott` (`TNV`) → posible desajuste en la detección del proyecto del mismo día. **Unificar token** (ver §7) |
-| Rol | Determina la conclusión del botón: si existe ⇒ OBRIR/ACTUALITZAR/GO; si no ⇒ NOU |
+| Rol | Determina el estado del botón: si existe ⇒ **ACTUALITZAR**; si no ⇒ **CREAR** (si hay material útil) o **MASSA D'HORA**/**ESPERANT** (§6) |
 
 ### 5.7 Artefactos internos de la carpeta del día (NO son condiciones)
 - Copia local de escaleta (`findInFolder`/`ensureLocalCopy`): `YYYYMMDD_HHMMSS_PROGRAMA_*.json`.
@@ -129,23 +128,60 @@ Para decidir si "el día tiene datos / media" hay que rastrear, **siempre contra
 > **El día "tiene media"** ⇔ existen **MP4 y wotts** de la fecha objetivo (SRT/portadas se rellenan después).
 > **No mezclar nunca**: todos los artefactos que se importen deben datarse con la fecha objetivo; si no hay de esa fecha, se devuelve vacío (no se cae al otro día).
 
+La combinación de estas presencias define los **4 estados del botón MAIN** (§6): **MASSA D'HORA** (nada accesible), **ESPERANT** (material en curso, aún no útil), **CREAR** (material útil y sin proyecto) y **ACTUALITZAR** (proyecto del día ya existe).
+
 ---
 
-## 6. Matriz de decisión del botón MAIN (por fecha objetivo D = hoy | ayer)
+## 6. Estados del botón MAIN (MASSA D'HORA · ESPERANT · CREAR · ACTUALITZAR)
 
-| ¿Proyecto `.prproj` en `destinoBase/…/D`? | ¿Escaleta JSON de D? | Estado botón | Acción |
+Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer con Ctrl+clic) evaluando solo los artefactos accesibles de D. Reemplazan a los estados públicos actuales (NEW/UPDATE/GO/OBRIR/LOAD/WAITING).
+
+### 6.1 Definición de los estados
+
+| Estado | Texto del botón | Cuándo aparece | Qué significa |
 |---|---|---|---|
-| Sí, abierto y activo en Premiere | (da igual) | **ACTUALITZAR** | `UPDATE` |
-| Sí, abierto pero inactivo | (da igual) | **ANAR AL PROJECTE** | `GO` |
-| Sí, cerrado en disco | (da igual) | **OBRIR** | `LOAD` |
-| No | **Sí** (hay datos de D) | **NOU PROJECTE** | `NEW` (el semáforo informa de lo que falte: media/wotts/SRT/portada; se completa con ACTUALITZAR) |
-| No | **No** (sin datos de D) | **WAITING** | No se crea nada. El editor decide: si quería trabajar, Ctrl+clic para el día anterior |
+| **MASSA D'HORA** | `MASSA D'HORA` | No hay **nada accesible** de D: ni escaleta JSON de D, ni MP4/SRT, ni wotts, ni portada. La producción de D todavía no ha empezado o aún no está publicada | Demasiado pronto: no hay nada con lo que trabajar. El botón está deshabilitado (clic normal y Ctrl+clic no hacen nada) |
+| **ESPERANT** | `ESPERANT…` | Hay **archivos de D** pero **aún no son útiles**: la ingesta (MP4 cleanFeed) está en curso y **no ha llegado al TC de emisión** final del bloque, y/o el JSON del día no está cerrado (bloque aún emitiéndose, `findLatestValid` no válido) | La producción de D está en marcha; el material aún no sirve para montar. El botón está deshabilitado (clic normal); Ctrl+clic sí puede servir si lo que se busca es el día anterior |
+| **CREAR** | `CREAR` | Hay **material útil de D** (escaleta JSON de D "válida" para el bloque — cerrada —, haya o no aún toda la media) y **NO existe** `.prproj` de D | Hay material para empezar a trabajar: el clic crea el proyecto del día D. Lo que falte (media/wotts/SRT/portada) se marca en el semáforo y se completa luego con ACTUALITZAR |
+| **ACTUALITZAR** | `ACTUALITZAR` | **Existe** el `.prproj` de D (abierto o cerrado) | El clic abre el proyecto si hace falta y **recarga** los datos o la media faltante de D (nunca de otro día). LOCKED si otro autor tiene el lock |
 
-**Comportamiento del clic:**
-- **Clic normal** → D = hoy (fecha del sistema en ese instante).
-- **Ctrl+clic** (o Cmd+clic en Mac) → D = ayer.
-- El texto del botón **no muestra la fecha** (decisión 4). El modo corrección se refleja en log/status y en el título del semáforo si es necesario.
+### 6.2 Cascada de decisión (por fecha objetivo D)
+
+```
+[1] ¿Existe .prproj de D en disco?
+        │ sí (¿lock de otro autor? → LOCKED)
+        ▼
+    ACTUALITZAR  (abre si hace falta y recarga datos/media de D)
+        │ no
+        ▼
+[2] ¿Existe escaleta JSON de D "válida" para el bloque?   (findLatestValid de D)
+        │ sí                                                     │ no
+        ▼                                                         ▼
+    CREAR                                     ¿Existe algún artefacto de D?
+    (material útil: escaleta cerrada,               (JSON de D en curso, MP4/SRT de D
+     con media presente o a completar)               en ingesta, wotts de D…)
+                                                          │ sí            │ no
+                                                          ▼                ▼
+                                                      ESPERANT       MASSA D'HORA
+```
+
+### 6.3 Detectores concretos (código existente que ya informa de estos estados)
+
+| Detector | Código | Sirve para |
+|---|---|---|
+| JSON no válido / espera estimada | `findLatestValid(archivo, bloque, datePrefix)` → `{ valid:false, estimatedWaitSec }` (`escaleta_io.js`) | Distinguir **ESPERANT** (bloque aún emitiéndose) |
+| Ingesta sin llegar al TC de emisión | Semáforo `sem-mp4`: `mediaStop < blockOut` → `'pending'` (`4_Context.js` updateLights, L444-448) | Detectar **ESPERANT** por MP4 en curso |
+| Nada accesible | `findLatest` de D = `null` **y** `mediaAssets(D)` = vacío **y** `wotts(D)` = vacío | Decidir **MASSA D'HORA** |
+| Material útil | `findLatestValid` de D = `valid:true` (bloque cerrado) | Decidir **CREAR** (si no hay `.prproj`) |
+| Proyecto del día | `Scan.selectedProject` en `destinoBase/…/D/` | Decidir **ACTUALITZAR** vs **CREAR** |
+
+### 6.4 Comportamiento del clic
+
+- **Clic normal** → D = hoy (fecha del sistema en ese instante). Acción según el estado de HOY.
+- **Ctrl+clic** (Cmd+clic en Mac) → D = ayer. El estado y la acción se recalculan **para ayer** (si ayer existe proyecto → ACTUALITZAR/abrir; si no existe pero hay material de ayer → CREAR; si ayer tampoco tiene nada → MASSA D'HORA/aviso).
+- El texto del botón **no muestra la fecha** (decisión 4). El modo corrección se refleja en log/status.
 - La fecha se resuelve **en el momento del clic**, no cuando se cambió el selector (evita arrastrar un `dateDir` obsoleto si el panel lleva abierto desde ayer).
+- Estados **MASSA D'HORA** y **ESPERANT**: clic normal deshabilitado (no hay nada que ejecutar). El editor debe esperar o, si buscaba el día anterior, hacer Ctrl+clic.
 
 ---
 
@@ -154,20 +190,20 @@ Para decidir si "el día tiene datos / media" hay que rastrear, **siempre contra
 | Módulo / archivo | Cambio |
 |---|---|
 | `js/core/state.js` | `State.dateDir` pasa a significar **fecha de trabajo explícita** (hoy o ayer). Se resetea a hoy al cambiar programa/bloque. Valor opcional: `State.workMode: 'today' \| 'yesterday'` para trazabilidad en logs |
-| `js/core/4_Context.js` | ① Eliminar `_getValidDateDir()`/`PROGRAM_START_HOURS`/`PRE_EMISSION_GUARD_HOURS` y el "ESPERANT EMISSIÓ" → sustituir por helper simple `_targetDate(useYesterday)` (hoy = `getFormattedDate()`, ayer = hoy−1 día). ② `checkContext()`: quitar TimeGuard, FIX A1, FIX A2, FIX A3 y la corrección de `dateDir`; escanear SOLO la fecha objetivo (proyecto + escaleta de D). ③ Conclusión del botón según §6. ④ `updateButton()`: los `onclick` deben capturar el evento y pasar `ctrlKey/metaKey` (D=ayer) al action |
+| `js/core/4_Context.js` | ① Eliminar `_getValidDateDir()`/`PROGRAM_START_HOURS`/`PRE_EMISSION_GUARD_HOURS` y el "ESPERANT EMISSIÓ" → sustituir por helper simple `_targetDate(useYesterday)` (hoy = `getFormattedDate()`, ayer = hoy−1 día). ② `checkContext()`: quitar TimeGuard, FIX A1, FIX A2, FIX A3 y la corrección de `dateDir`; escanear SOLO la fecha objetivo. ③ Producir los **4 estados de §6** (cascada 6.2 con los detectores de 6.3). ④ `updateButton()`: textos `MASSA D'HORA`/`ESPERANT…`/`CREAR`/`ACTUALITZAR` (LOCKED como excepción); deshabilitar botón en MASSA D'HORA y ESPERANT; `onclick` captura `ctrlKey/metaKey` y recalcula la acción para D=ayer |
 | `js/workflows/flow_mainButton.js` | ① `runMainAction(action, data)`: `data.dateDir` llega decidido (hoy|ayer). ② `_runNew()`: **eliminar** el bloque D7.1 de deducción/fallback a ayer (L44-88) y usar `ctx.dateDir` recibido. ③ `_runUpdate()/_runLoad()/_runGo()/_setupContext()`: usar `ctx.dateDir` explícito; no re-deducir. ④ Revisar que `_runUpdate` (ACTUALITZAR) importe solo lo faltante de la misma fecha |
 | `js/logic/Scanner.js` | ① **Eliminar** el fallback "Intentant sense filtre de data" de `mediaAssets` (L91-94). ② Revisar/eliminar `_discardOld` (mtime+22h) en `wotts`, `portadas` y media: sustituir por filtro de fecha del proyecto. ③ Extraer helper común `_filterByWorkDate(files, ctx)` = data del nombre → `created` → descartar, y aplicarlo a media/wotts/portadas. ④ Mantener el filtro estricto de wotts/portadas por fecha (2026-09-02) |
 | `js/core/escaleta_io.js` | ① `findLatest`/`findLatestValid`: **siempre** llamarlas con `datePrefix` = fecha objetivo; nunca sin prefijo en el flujo de arranque. ② Unificar la extracción de fecha de ambos formatos de nombre (usar `utils.extractDateFromEscaletaFilename` también en `_extractDateFromName`). ③ Eliminar cualquier reintento a otro día |
 | `js/core/utils.js` | `isDateDirInTemporalWindow` deja de ser necesaria en el flujo de arranque (marcar para revisión/eliminación). `getFormattedDate()` = hoy; añadir `getYesterdayDate()` o equivalente |
 | `js/core/11_Configuracio.js` / mapping | **Unificar token** de proyecto: el nombre creado (`_runNew`) y la búsqueda (`Scan.selectedProject`) deben usar el mismo token (recomendado `wott`, ej. `TNV`), para que el proyecto del día se detecte de forma fiable |
-| `index.html` / bindings | El listener del botón principal ya lo gestiona `updateButton`; comprobar que el clic con Ctrl no se pierde (botón `<button>` con `onclick(ev)`). Sin cambios visuales de texto |
+| `index.html` / bindings | El listener del botón principal ya lo gestiona `updateButton`; comprobar que el clic con Ctrl no se pierde (botón `<button>` con `onclick(ev)`). Textos del botón: los 4 estados (§6.1) sin mostrar fecha |
 | Consumidores de `ctx.dateDir` | `Project_Logic.create`, `Analysis.saveEscaleta`, `SessionManifest`, `_setLogPath`, `naming.getProjectName`, SRT loader, markers: ya reciben `ctx`; **verificar que ninguno re-resuelve fecha por su cuenta** |
 
 ## 8. Reglas anti-contaminación (nuevas)
 
 1. **R1 — Fecha siempre explícita**: toda búsqueda de artefacto se hace con la fecha objetivo (hoy o ayer). Ningún módulo "deduce" ni "corrige" el día.
 2. **R2 — Datar por nombre primero**: la fecha de un archivo se extrae del nombre (`YYYYMMDD`); si no la lleva, de `created`; **nunca de `mtime`**.
-3. **R3 — Vacío si no hay de la fecha**: si no existen artefactos de la fecha objetivo se devuelve `null`/`[]` y el estado (semáforo/WAITING) lo refleja. Prohibido reintentar "sin filtro de fecha" o con otra fecha.
+3. **R3 — Vacío si no hay de la fecha**: si no existen artefactos de la fecha objetivo se devuelve `null`/`[]` y el estado lo refleja (MASSA D'HORA si no hay nada, ESPERANT si solo hay material en curso). Prohibido reintentar "sin filtro de fecha" o con otra fecha.
 4. **R4 — Modo corrección simétrico**: Ctrl+clic aplica las mismas reglas con la fecha de ayer.
 5. **R5 — Nunca mezclar días**: no se importa MP4/SRT/wotts/portada de una fecha distinta a la del proyecto.
 6. **R6 — La fecha se fija al pulsar**: se resuelve en el momento del clic en MAIN (no al cambiar el selector, no al abrir el panel). Cambiar programa/bloque ⇒ volver a hoy.
@@ -180,8 +216,8 @@ Para decidir si "el día tiene datos / media" hay que rastrear, **siempre contra
 > Objetivo: dejar la mecánica nueva funcionando sin romper el resto de flujos (marcadores, DF, SRT…). Cada paso debe poder probarse por separado.
 
 - **P1 · Estado y fecha**: en `state.js`/`utils.js`, helper de fecha (`hoy`, `ayer natural`, formatos `YYYY_MM_DD` / `YYYYMMDD`). Reset a hoy al cambiar programa/bloque.
-- **P2 · Context sin deducción**: `4_Context.js` — eliminar TimeGuard/A1/A2/A3; `checkContext()` escanea únicamente la fecha objetivo y produce la conclusión de §6 (incluye el caso WAITING sin escaleta del día).
-- **P3 · Clic con Ctrl**: `4_Context.js updateButton()` + `flow_mainButton.runMainAction()` — capturar `ctrlKey/metaKey` y resolver la fecha en el momento del clic; pasar `data.dateDir` (hoy|ayer) a todas las acciones.
+- **P2 · Context sin deducción**: `4_Context.js` — eliminar TimeGuard/A1/A2/A3; `checkContext()` escanea únicamente la fecha objetivo y produce los **4 estados de §6** (cascada 6.2: `.prproj` → ACTUALITZAR; escaleta válida → CREAR; artefactos en curso → ESPERANT; nada → MASSA D'HORA).
+- **P3 · Clic con Ctrl**: `4_Context.js updateButton()` + `flow_mainButton.runMainAction()` — capturar `ctrlKey/metaKey` y resolver la fecha en el momento del clic; pasar `data.dateDir` (hoy|ayer) a todas las acciones; deshabilitar el botón en estados MASSA D'HORA/ESPERANT; recalcular el estado para ayer cuando hay Ctrl.
 - **P4 · `_runNew` sin fallback**: eliminar la deducción D7.1 y el fallback a ayer; usar `ctx.dateDir` recibido para carpeta, nombre, manifest y assets.
 - **P5 · Scanner con filtro de fecha duro**: eliminar el reintento sin fecha de `mediaAssets`, retirar `_discardOld` del camino crítico y aplicar `_filterByWorkDate` (nombre → `created`) en media, wotts y portadas.
 - **P6 · Escaleta**: `findLatest*` siempre con `datePrefix` de la fecha objetivo; soportar ambos formatos de nombre de JSON al extraer la fecha; revisar llamadas (no pasar `null`).
@@ -193,20 +229,21 @@ Para decidir si "el día tiene datos / media" hay que rastrear, **siempre contra
 
 | # | Escenario | Resultado esperado |
 |---|---|---|
-| T1 | Hoy 09:00, TNV V1. No hay nada de hoy (ni JSON `20260905` ni media); sí hay todo de ayer `20260904` | Botón **WAITING**. Ctrl+clic → OBRIR (o NOU si no existe) el proyecto de `20260904` con media/wotts de `20260904` |
-| T2 | Hoy 12:00, TNV V1. JSON `20260905` existe; MP4 de `20260905` aún no | Botón **NOU PROJECTE**. Crea proyecto del día `20260905` con escaleta; semáforo de media en rojo. Después de la emisión: **ACTUALITZAR** importa MP4/SRT/wotts de `20260905` sin tocar `20260904` |
-| T3 | Proyecto de hoy abierto y activo | Botón **ACTUALITZAR**. ACTUALITZAR rellena lo faltante de HOY y nunca cambia a ayer |
-| T4 | Con proyecto de hoy abierto, Ctrl+clic | Abre/cambia al proyecto de AYER (GO/LOAD), sin mezclar estados |
-| T5 | Cambiar TNV V1 → TNV V2 (o TNM) tras haber usado modo ayer | `dateDir` vuelve a HOY (no arrastra ayer) |
-| T6 | En `verticalitzacio`/`chyrons` hay MP4/wotts de `20260904` y `20260905`; proyecto de hoy abierto | Solo se listan/importan los de `20260905`; los de `20260904` se ignoran (log con descartados) |
-| T7 | Carpeta del día sin proyecto pero JSON del día incompleto (bloque aún emitiéndose) | Decisión abierta (§11): se crea el proyecto y ACTUALITZAR completa, o WAITING hasta fin de bloque |
+| T1 | Hoy 09:00, TNV V1. No hay nada accesible de hoy (ni JSON `20260905` ni media); sí hay todo de ayer `20260904` | Estado **MASSA D'HORA** (botón deshabilitado). Ctrl+clic → estado recalculado para `20260904` → **ACTUALITZAR** (o **CREAR** si no existe) con media/wotts de ayer |
+| T2 | Hoy 12:00, TNV V1. El JSON de hoy existe pero el bloque aún no está cerrado (aún emitiéndose) o el MP4 de hoy está en ingesta sin llegar al TC de emisión final | Estado **ESPERANT** (botón deshabilitado). Cuando la ingesta llegue al TC final / el JSON cierre, el estado pasa solo a **CREAR** o **ACTUALITZAR** |
+| T3 | Hoy, JSON de `20260905` ya cerrado y MP4/wotts de hoy disponibles; no existe proyecto de hoy | Estado **CREAR**. El clic crea el proyecto del día con escaleta+media; el semáforo informa de lo que aún falte |
+| T4 | Existe el proyecto de hoy (abierto o cerrado) y faltan datos/media | Estado **ACTUALITZAR**. El clic abre el proyecto si hace falta y recarga solo lo de HOY; nunca cambia a ayer |
+| T5 | Con proyecto de hoy abierto, Ctrl+clic | Recalcula el estado para ayer → **ACTUALITZAR**/abrir el proyecto de `20260904`, sin mezclar estados ni materiales |
+| T6 | Cambiar TNV V1 → TNV V2 (o TNM) tras haber usado modo ayer | `dateDir` vuelve a HOY (no arrastra ayer) |
+| T7 | En `verticalitzacio`/`chyrons` hay MP4/wotts de `20260904` y `20260905`; proyecto de hoy abierto | Solo se listan/importan los de `20260905`; los de `20260904` se ignoran (log con descartados) |
 | T8 | A medianoche, panel abierto desde ayer | La fecha se resuelve al pulsar MAIN (hoy real), no la guardada en el selector |
+| T9 | Lock de otro autor sobre el `.prproj` de hoy | Estado **LOCKED** (excepción sobre ACTUALITZAR/CREAR), como hoy |
 
 ## 11. Preguntas abiertas (para cerrar al implementar)
 
-1. **Bloque del día "en emisión"**: si el JSON del día existe pero el bloque aún no ha terminado de emitirse (JSON incompleto), ¿NOU + ACTUALITZAR más tarde (recomendado) o WAITING hasta fin de bloque? Hoy lo gestiona `findLatestValid`.
-2. **Token de proyecto**: ¿confirmamos `wott` (TNV/TNM/TNC) como token único de creación **y** búsqueda del `.prproj` (afecta a proyectos ya existentes con nombre `Pruebas_TN_VESPRE_...` si los hubiera)?
-3. **Filtro duro en wotts/portadas**: cuando un archivo no se puede datar ni por nombre ni por `created`, ¿se descarta (filtro duro) o se conserva como hoy?
+1. **Token de proyecto**: ¿confirmamos `wott` (TNV/TNM/TNC) como token único de creación **y** búsqueda del `.prproj` (afecta a proyectos ya existentes con nombre `Pruebas_TN_VESPRE_...` si los hubiera)?
+2. **Filtro duro en wotts/portadas**: cuando un archivo no se puede datar ni por nombre ni por `created`, ¿se descarta (filtro duro) o se conserva como hoy?
+3. **Causa de "nada accesible"**: MASSA D'HORA asume "el día aún no está publicado". Si la causa es red/permisos (no se pudo ni listar el NAS), ¿mostramos el mismo estado o un estado de ERROR de acceso distinto?
 
 ## 12. Referencias
 
