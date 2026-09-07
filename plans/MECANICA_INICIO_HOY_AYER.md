@@ -319,3 +319,11 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 **Errores JSX `ERR:MOVE_FAILED`:** son el intento 1 (mover por nombre al bin CHY) que falla por la indexación del root recién importado; el intento 2 (`moveByID`) funciona y deja los rótulos en CHY. Se ha limpiado el log: ahora solo avisa si fallan ambos.
 
+
+---
+
+## 16. Col·lisió de chyrons de directe a V6 (2026-09-07)`n
+**Símptoma:** el rètol de localització del directe (Wott_TNV_v1_11i_00.00_..._Directe_PRESENCIAL_Moscou) i el de nom (..._00.01_..._Enviat_No_Cristina Solias) es col·locaven tots dos a **V6** (botó Resto) i se trepitjaven (el Directe comença a 0.0s i l'Enviat No a 1.0s).`n
+**Causa:** no és de programació sinó de condicionat de l'escaleta (els rètols del directe pengen de la línia 11i intro), però els dos rètols anaven a la mateixa pista.`n
+**Fix (low_chyrons.js i low_retols.js, placeChyronResto):** el trackResolver envia a la pista de **Lloc (V7)** els rètols de localització de directe (contenen Directe o rol DIRECTE); la resta de rètols del Resto continuen a V6. Resultat: Directe PRESENCIAL Moscou → V7 @0.0s, Enviat No: Cristina Solias → V6 @1.0s (sense trepitjar-se).`n
+**Pendent de validar:** comprovar que el rètol Directe de V7 no col·lisiona amb futurs Lloc/Data que vagin a V7 en el mateix instant (avui V7 està buida: log [Lloc] Cap chyron per col·locar).`n

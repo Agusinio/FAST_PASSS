@@ -789,7 +789,17 @@
             const isTraduccio = c => (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO");
             await this._placeChyronsByType(
                 c => !isTitol(c) && !isConductor(c) && !isLloc(c) && !isNom(c) && !isTraduccio(c),
-                (c, cfg) => cfg.tracks.video.chyrons,
+                (c, cfg) => {
+                    const rName = (c.name || '').toUpperCase();
+                    const rRol = (c.rol || '').toUpperCase();
+                    // Rètols de LOCALITZACIÓ d'un directe (ex: "Directe PRESENCIAL Moscou"):
+                    // van a la pista de Lloc (V7) per no trepitjar a V6 els chyrons de nom
+                    // consecutius (00.00 Directe + 00.01 Enviat No) del mateix directe.
+                    if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE') {
+                        return cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
+                    }
+                    return cfg.tracks.video.chyrons;
+                },
                 "Resto"
             );
         },
