@@ -71,6 +71,33 @@
                 ctx.dateDir = getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
             }
 
+            // ── RESOLDRE LA CARPETA REAL DEL PROJECTE OBERT (2026-09-07) ──────
+            // El manifest viu a la mateixa carpeta que el .prproj que tenim OBERT a
+            // Premiere. State.dateDir pot apuntar a HOY mentre editem un projecte
+            // d'AHIR (mode correcció amb Ctrl+clic). Per això es deriva la carpeta
+            // des de Project.path() (font de veritat) i es re-alinea ctx.dateDir.
+            try {
+                const activePathRaw = await getUtils().callJSX("FASTPASS.Project.path()");
+                if (activePathRaw && String(activePathRaw).toLowerCase().indexOf('.prproj') !== -1) {
+                    const normPath = String(activePathRaw).replace(/\\/g, '/');
+                    const partsPath = normPath.split('/');
+                    let realDateDir = null;
+                    for (let pi = 0; pi < partsPath.length; pi++) {
+                        if (/^\d{4}_\d{2}_\d{2}$/.test(partsPath[pi])) { realDateDir = partsPath[pi]; break; }
+                    }
+                    const baseNorm = String(ctx.config.rutas.destinoBase).replace(/\\/g, '/').replace(/\/+$/, '');
+                    const dirNorm = String(ctx.progData.directorio).replace(/\\/g, '/');
+                    if (realDateDir && normPath.indexOf(baseNorm) === 0 && normPath.indexOf(baseNorm + '/' + dirNorm) === 0) {
+                        if (ctx.dateDir !== realDateDir) {
+                            log(`📍 [AssemblyContext] Projecte obert de ${realDateDir} (State.dateDir era ${ctx.dateDir}). Alineant context.`, 'INFO');
+                            ctx.dateDir = realDateDir;
+                        }
+                    }
+                }
+            } catch (ePath) {
+                log(`⚠️ [AssemblyContext] No s'ha pogut resoldre la carpeta del projecte obert: ${ePath.message}`);
+            }
+
             const manifestPath = FASTPASS_UI.SessionManifest.getPath(ctx);
             log(`🔍 [AssemblyContext] Cercant manifest a: ${manifestPath}`);
             const manifest = await FASTPASS_UI.SessionManifest.load(ctx);
