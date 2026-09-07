@@ -287,6 +287,11 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 **Fix aplicado (Scanner.wotts / Scanner.portadas):** datación por nombre → `created` → `mtime`; y si **no se puede datar, se DESCARTÁ** (con log `NO datables descartats`) en lugar de conservarse. Nunca se importa un rótulo de día incierto.
 
+**Unificación del mecanismo (2026-09-07, v2):**
+- **Filtro único**: nuevo `Scan.filterByWorkDate(files, dateDir)` (mecanismo único de datación y filtrado) usado por `Scan.wotts`, `Scan.portadas` y la ingesta final.
+- **Ingesta única**: `Project.ingestAssets` (punto único por el que pasan NEW y UPDATE/GO/LOAD) aplica ahora un **filtro final de seguridad**: re-data cada rètol/portada contra `ctx.dateDir` justo antes de importar y descarta los que no sean del día (log `[INGEST] Filtre final wotts/portades per data ...`).
+- **Robustez UNC**: `Utils.readFolder` completa con el listado JSX los `stat` que CEP no puede datar en rutas remotas (evita listas sin fecha → sin descartes por ignorancia).
+
 **Fix FOTO (escaleta_fetch.js + main.js):**
 - **Ctrl+FOTO** → genera la escaleta de **AHIER** (`utils.getYesterdayDateDir()`) en el directorio del día anterior (para comparar/corregir el proyecto de ayer).
 - `fetchNewEscaleta` **valida la respuesta**: si la API devuelve `[]`, `{}` o un JSON de error (`missatge`) → **no guarda** ningún `escaleta_on_demand_*` y avisa.

@@ -295,6 +295,49 @@
         ingestAssets: async function(ctx, wottData, media, portadas) { // <--- Nombre unificado
             utils.log("🎞️ [SYNC] Iniciant ingesta segmentada...");
 
+            // ── FILTRE FINAL DE SEGURETAT (2026-09-07) ─────────────────────────
+            // Mecanisme ÚNIC d'ingesta: passi pel camí que passi (NEW, UPDATE, GO,
+            // LOAD), aquí es torna a datar cada rètol contra ctx.dateDir abans
+            // d'importar-lo. Si un fitxer no és del dia de treball (o no es pot
+            // datar) es DESCARTÀ. Evita wotts/portades d'altres dies.
+            const ScanAPI = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan) || null;
+            if (ScanAPI && typeof ScanAPI.filterByWorkDate === 'function' && ctx && ctx.dateDir) {
+                try {
+                    const chyFolder = ctx.config && ctx.config.rutas && ctx.config.rutas.chyrons;
+                    if (chyFolder) {
+                        const allChy = await utils.readFolder(chyFolder);
+                        const statsByName = {};
+                        (allChy || []).forEach(function (fc) { statsByName[fc.name] = fc; });
+
+                        if (wottData && wottData.list && wottData.list.length > 0) {
+                            const withStats = wottData.list.map(function (w) {
+                                const st = statsByName[w.name] || {};
+                                return { name: w.name, path: w.path, created: st.created, mtime: st.mtime };
+                            });
+                            const resFinal = ScanAPI.filterByWorkDate(withStats, ctx.dateDir);
+                            utils.log('[INGEST] Filtre final wotts per data ' + ctx.dateDir + ': ' + withStats.length + ' -> ' + resFinal.keep.length +
+                                (resFinal.dropped.length ? ' (descartats ' + resFinal.dropped.length + " d'altres dies: " + resFinal.dropped.slice(0, 3).map(function(x){ return x.name; }).join(', ') + '...)' : '') +
+                                (resFinal.noDate.length ? ' (NO datables: ' + resFinal.noDate.slice(0, 3).map(function(x){ return x.name; }).join(', ') + '...)' : ''), 'INFO');
+                            wottData.list = resFinal.keep;
+                        }
+                        if (portadas && portadas.length > 0) {
+                            const withStatsP = portadas.map(function (p) {
+                                const st = statsByName[p.name] || {};
+                                return { name: p.name, path: p.path, created: st.created, mtime: st.mtime };
+                            });
+                            const resP = ScanAPI.filterByWorkDate(withStatsP, ctx.dateDir);
+                            utils.log('[INGEST] Filtre final portades per data ' + ctx.dateDir + ': ' + withStatsP.length + ' -> ' + resP.keep.length +
+                                (resP.dropped.length ? ' (descartades ' + resP.dropped.length + " d'altres dies)" : '') +
+                                (resP.noDate.length ? ' (NO datables: ' + resP.noDate.length + ')' : ''), 'INFO');
+                            portadas.length = 0;
+                            resP.keep.forEach(function (p) { portadas.push(p); });
+                        }
+                    }
+                } catch (eFiltre) {
+                    utils.log('⚠️ [INGEST] Error al filtre final de seguretat: ' + eFiltre.message, 'WARN');
+                }
+            }
+
             // Obtener archivos ya presentes en el proyecto
             const existing = await this._getExistingAssets();
             utils.log(`🔍 Assets existentes: ${existing.wotts.length} wotts, ${existing.media.length} media, ${existing.portadas.length} portadas`);

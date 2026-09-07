@@ -40,6 +40,48 @@
         },
 
         /**
+         * _fileDateYYYYMMDD: Data d'un fitxer (YYYYMMDD) per datar-lo.
+         * Ordre: nom del fitxer → created → mtime. Si no es pot datar → null.
+         * @param {Object} f - { name, created, mtime }
+         */
+        _fileDateYYYYMMDD: function (f) {
+            if (!f) return null;
+            var d = this._extractDateFromFileName(f.name);
+            if (d) return d;
+            var raw = f.created || f.mtime;
+            if (raw) {
+                var cd = new Date(raw);
+                if (!isNaN(cd.getTime())) {
+                    return '' + cd.getFullYear() +
+                        ('0' + (cd.getMonth() + 1)).slice(-2) +
+                        ('0' + cd.getDate()).slice(-2);
+                }
+            }
+            return null;
+        },
+
+        /**
+         * filterByWorkDate: MECANISME ÚNIC de filtrat per la data de treball.
+         * Regla anti-contaminació: si un fitxer no es pot datar, es descarta.
+         * @param {Array} files - Llista { name, created, mtime }
+         * @param {string} dateDir - Data de treball (YYYY_MM_DD) o null (sense filtre)
+         * @returns {{keep:Array, dropped:Array, noDate:Array}}
+         */
+        filterByWorkDate: function (files, dateDir) {
+            var dateTarget = dateDir ? String(dateDir).replace(/_/g, '') : null;
+            if (!dateTarget) return { keep: files || [], dropped: [], noDate: [] };
+            if (!files) return { keep: [], dropped: [], noDate: [] };
+            var keep = [], dropped = [], noDate = [];
+            for (var i = 0; i < files.length; i++) {
+                var fileDate = this._fileDateYYYYMMDD(files[i]);
+                if (!fileDate) noDate.push(files[i]);
+                else if (fileDate !== dateTarget) dropped.push(files[i]);
+                else keep.push(files[i]);
+            }
+            return { keep: keep, dropped: dropped, noDate: noDate };
+        },
+
+        /**
          * _normalize: Redueix una cadena a minúscules sense accents ni símbols.
          * Serveix per comparar el "tema" del projecte amb els noms dels .srt
          * (ex: "DONAPAS BARCELONA" == "Donapas_Barcelona" == "donapasbarcelona").
@@ -187,36 +229,14 @@
                 // la data de creacio/mtime com a fallback) coincideixi amb la data
                 // de treball del projecte (ctx.dateDir). Si no es pot datar, es
                 // DESCARTÀ (anti-contaminació: mai importar rètols d'un dia incert).
+                // MECANISME ÚNIC de filtrat per data (Scan.filterByWorkDate).
                 var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
                 if (dateTarget) {
-                    var beforeCount = filtered.length;
-                    var keep = [];
-                    var droppedDate = [];
-                    var noDatables = [];
-                    for (var wI = 0; wI < filtered.length; wI++) {
-                        var fileDate = this._extractDateFromFileName(filtered[wI].name);
-                        if (!fileDate && (filtered[wI].created || filtered[wI].mtime)) {
-                            var cd = new Date(filtered[wI].created || filtered[wI].mtime);
-                            if (!isNaN(cd.getTime())) {
-                                fileDate = '' + cd.getFullYear() +
-                                    ('0' + (cd.getMonth() + 1)).slice(-2) +
-                                    ('0' + cd.getDate()).slice(-2);
-                            }
-                        }
-                        if (!fileDate) {
-                            // No datable ni per nom ni per created/mtime → es descarta
-                            // (anti-contaminació: mai importar rètols d'un dia incert).
-                            noDatables.push(filtered[wI].name);
-                        } else if (fileDate !== dateTarget) {
-                            droppedDate.push(filtered[wI].name);
-                        } else {
-                            keep.push(filtered[wI]);
-                        }
-                    }
-                    utils.log('[SCAN:wotts] Filtre per data projecte ' + dateTarget + ': ' + beforeCount + ' -> ' + keep.length +
-                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : '') +
-                        (noDatables.length ? ' (NO datables descartats: ' + noDatables.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
-                    filtered = keep;
+                    var resF = this.filterByWorkDate(filtered, ctx.dateDir);
+                    utils.log('[SCAN:wotts] Filtre per data projecte ' + dateTarget + ': ' + filtered.length + ' -> ' + resF.keep.length +
+                        (resF.dropped.length ? ' (descartats ' + resF.dropped.length + " d'altres dies: " + resF.dropped.slice(0, 3).map(function(x){ return x.name; }).join(', ') + '...)' : '') +
+                        (resF.noDate.length ? ' (NO datables descartats: ' + resF.noDate.slice(0, 3).map(function(x){ return x.name; }).join(', ') + '...)' : ''), 'INFO');
+                    filtered = resF.keep;
                     if (filtered.length === 0) {
                         utils.log('[SCAN:wotts] Cap chyron de la data del projecte (' + dateTarget + "). No s'importara cap retol.", 'WARN');
                         return { tema: 'PENDENT', list: [] };
@@ -292,35 +312,14 @@
                 // Mateix criteri que Scan.wotts: nomes portades de la data de
                 // treball del projecte (ctx.dateDir). Data del nom (YYYYMMDD),
                 // o created/mtime com a fallback; si no es pot datar, es descarta.
+                // MECANISME ÚNIC de filtrat per data (Scan.filterByWorkDate).
                 var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
                 if (dateTarget) {
-                    var beforeCount = freshFiles.length;
-                    var keep = [];
-                    var droppedDate = [];
-                    var noDatables = [];
-                    for (var pI = 0; pI < freshFiles.length; pI++) {
-                        var fileDate = this._extractDateFromFileName(freshFiles[pI].name);
-                        if (!fileDate && (freshFiles[pI].created || freshFiles[pI].mtime)) {
-                            var cd = new Date(freshFiles[pI].created || freshFiles[pI].mtime);
-                            if (!isNaN(cd.getTime())) {
-                                fileDate = '' + cd.getFullYear() +
-                                    ('0' + (cd.getMonth() + 1)).slice(-2) +
-                                    ('0' + cd.getDate()).slice(-2);
-                            }
-                        }
-                        if (!fileDate) {
-                            // No datable → es descarta (mai importar portades d'un dia incert).
-                            noDatables.push(freshFiles[pI].name);
-                        } else if (fileDate !== dateTarget) {
-                            droppedDate.push(freshFiles[pI].name);
-                        } else {
-                            keep.push(freshFiles[pI]);
-                        }
-                    }
-                    utils.log('[SCAN:portades] Filtre per data projecte ' + dateTarget + ': ' + beforeCount + ' -> ' + keep.length +
-                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : '') +
-                        (noDatables.length ? ' (NO datables descartats: ' + noDatables.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
-                    freshFiles = keep;
+                    var resF = this.filterByWorkDate(freshFiles, ctx.dateDir);
+                    utils.log('[SCAN:portades] Filtre per data projecte ' + dateTarget + ': ' + freshFiles.length + ' -> ' + resF.keep.length +
+                        (resF.dropped.length ? ' (descartats ' + resF.dropped.length + " d'altres dies: " + resF.dropped.slice(0, 3).map(function(x){ return x.name; }).join(', ') + '...)' : '') +
+                        (resF.noDate.length ? ' (NO datables descartats: ' + resF.noDate.slice(0, 3).map(function(x){ return x.name; }).join(', ') + '...)' : ''), 'INFO');
+                    freshFiles = resF.keep;
                 }
 
                 return freshFiles.map(function (f) { return { name: f.name, path: pathNAS + f.name }; });

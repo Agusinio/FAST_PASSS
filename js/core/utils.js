@@ -225,6 +225,7 @@
             if (result.err === 0) {
                 var filenames = result.data;
                 var filesWithStats = [];
+                var statFails = [];
         
                 var folderPath = path.replace(/[\\/]*$/, "\\");
         
@@ -242,7 +243,32 @@
                         });
                     } else {
                         filesWithStats.push({ name: name, mtime: 0, created: 0 });
+                        statFails.push(name);
                     }
+                }
+
+                // ── Robustesa UNC (2026-09-07) ──────────────────────────────────
+                // Si alguns stat han fallat (comú en rutes remotes), completem les
+                // dates via JSX (scanDirectory retorna modified) per no perdre la
+                // datació dels fitxers. Sense datació, el filtre per dia descartaria
+                // fitxers legítims o (abans del filtre dur) en colaria d'altres dies.
+                if (statFails.length > 0) {
+                    try {
+                        var jsonResult = await this.callJSX(`IO.scanDirectory('${this.escape(path)}')`);
+                        if (jsonResult && jsonResult !== "[]" && jsonResult.indexOf('ERR') !== 0) {
+                            var items = JSON.parse(jsonResult);
+                            var byName = {};
+                            for (var ii = 0; ii < items.length; ii++) byName[items[ii].name] = items[ii];
+                            for (var jj = 0; jj < filesWithStats.length; jj++) {
+                                if ((filesWithStats[jj].mtime === 0 || filesWithStats[jj].created === 0)
+                                    && byName[filesWithStats[jj].name]) {
+                                    var it = byName[filesWithStats[jj].name];
+                                    filesWithStats[jj].mtime = it.modified || 0;
+                                    filesWithStats[jj].created = it.created || it.modified || 0;
+                                }
+                            }
+                        }
+                    } catch (eJsx) { /* el fallback per fitxers no és crític */ }
                 }
                 return filesWithStats;
             } else {
