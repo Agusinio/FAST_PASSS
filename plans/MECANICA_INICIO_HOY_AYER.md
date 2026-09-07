@@ -319,25 +319,45 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 **Errores JSX `ERR:MOVE_FAILED`:** son el intento 1 (mover por nombre al bin CHY) que falla por la indexación del root recién importado; el intento 2 (`moveByID`) funciona y deja los rótulos en CHY. Se ha limpiado el log: ahora solo avisa si fallan ambos.
 
+---
+
+## 16. Col·lisió de chyrons de directe a V6 (2026-09-07)
+
+**Símptoma:** el rètol de localització del directe (`Wott_TNV_v1_11i_00.00_..._Directe_PRESENCIAL_Moscou`) i el de nom (`..._00.01_..._Enviat_No_Cristina Solias`) es col·locaven tots dos a **V6** (botó Resto) i se trepitjaven (el Directe comença a 0.0s i l'Enviat No a 1.0s).
+
+**Causa:** no és de programació sinó de condicionat de l'escaleta (els rètols del directe pengen de la línia `11i` intro), però els dos rètols anaven a la mateixa pista.
+
+**Fix (`flow_chyrons.js` i `flow_retols.js`, `placeChyronResto`):** el trackResolver envia a la pista de **Lloc (V7)** els rètols de localització de directe (contenen `Directe` o rol `DIRECTE`); la resta de rètols del Resto continuen a V6. Resultat: `Directe PRESENCIAL Moscou` → V7 @0.0s, `Enviat No: Cristina Solias` → V6 @1.0s (sense trepitjar-se).
+
+**Pendent de validar:** comprovar que el rètol Directe de V7 no col·lisiona amb futurs Lloc/Data que vagin a V7 en el mateix instant (avui V7 està buida: log `[Lloc] Cap chyron per col·locar`).
 
 ---
 
-## 16. Col·lisió de chyrons de directe a V6 (2026-09-07)`n
-**Símptoma:** el rètol de localització del directe (Wott_TNV_v1_11i_00.00_..._Directe_PRESENCIAL_Moscou) i el de nom (..._00.01_..._Enviat_No_Cristina Solias) es col·locaven tots dos a **V6** (botó Resto) i se trepitjaven (el Directe comença a 0.0s i l'Enviat No a 1.0s).`n
-**Causa:** no és de programació sinó de condicionat de l'escaleta (els rètols del directe pengen de la línia 11i intro), però els dos rètols anaven a la mateixa pista.`n
-**Fix (low_chyrons.js i low_retols.js, placeChyronResto):** el trackResolver envia a la pista de **Lloc (V7)** els rètols de localització de directe (contenen Directe o rol DIRECTE); la resta de rètols del Resto continuen a V6. Resultat: Directe PRESENCIAL Moscou → V7 @0.0s, Enviat No: Cristina Solias → V6 @1.0s (sense trepitjar-se).`n
-**Pendent de validar:** comprovar que el rètol Directe de V7 no col·lisiona amb futurs Lloc/Data que vagin a V7 en el mateix instant (avui V7 està buida: log [Lloc] Cap chyron per col·locar).`n
+## 17. Traduccions i rètols de Programes també a V7 (2026-09-07)
+
+Per criteri de l'usuari, la pista V7 (Lloc) s'usa com a pista de rètols superposats (Lloc/Data + Directe + Programes + Traduccions) i V6 queda només per a noms/Nomcarrec:
+
+- **Traducció**: `placeChyronTraduccio` i `repartirChyronTraduccio`/`placeChyronRepartir` ara insereixen a **V7** (`cfg.tracks.video.lloc`) en lloc de V3 (graf). Logs actualitzats (`→ V7`, «Selecciona Trad (V7) + V1»).
+- **Programes** (rètols de menció d'un altre programa): si arriben pel botó Resto, el trackResolver els envia a **V7** (rol o nom que conté `PROGRAMES`), igual que els de localització de directe (`Directe...`).
+
+Afecta a `flow_chyrons.js` (workflow Chyrons actiu) i `flow_retols.js` (per coherència). El track `v_trad` (9) queda sense ús de moment.
+
 ---
 
-## 17. Traduccions i rètols de Programes tambè a V7 (2026-09-07)`n
-Per criteri de l'usuari, la pista V7 (Lloc) s'usa com a pista de rètols superposats (Lloc/Data + Directe + Programes + Traduccions) i V6 queda només per a noms/Nomcarrec:`n
-- **Traducció**: placeChyronTraduccio i epartirChyronTraduccio/placeChyronRepartir ara insereixen a **V7** (cfg.tracks.video.lloc) en lloc de V3 (graf). Logs actualitzats (→ V7, «Selecciona Trad (V7) + V1»).`n
-- **Programes** (rètols de menció d'un altre programa): si arriben pel botó Resto, el trackResolver els envia a **V7** (rol o nom que conté PROGRAMES), igual que els de localització de directe (Directe...).`n
-Afecta a low_chyrons.js (workflow Chyrons actiu) i low_retols.js (per coherència). El track _trad (9) queda sense ús de moment.`n
----
+## 18. Pipeline OUT automàtic + layout TEST/TREBALL (2026-09-07)
 
-## 18. Pipeline OUT automatic + layout TEST/TREBALL (2026-09-07)`n
-### Com es passa d'un mode a l'altre`n- El boto de la seccio RENDER (emicorni ðŸ§ª en TEST / ðŸ‘¤ en TREBALL) alterna: window.FASTPASS_UI.LayoutMode = 'test' | 'work'.`n- ody.mode-work oculta per CSS tot el que porta la classe .test-only. Per defecte s'inicia en 'test'.`n
-### Layout TREBALL (usuari final)`n- **GRAFICS**: queden nomes Gràfica (= antic tnMarksF6/Gràfics, ara renombrat i fora de test-only), IPD, DblPant, MAPA, TOTEM.`n- **MARCADORS** (OnAir/Dedu/Prev/Correl/Density/OrphanSnap): ara en una seccio separada .test-only - nomes visibles en mode TEST per disparar les fases per separat.`n- **CHYRONS**: es conserva sencer amb el boto Repartir dins.`n
-### IPD (2 mecanismes preservats)`n- Graphics.runIpd (toggle sobre clip seleccionat) - clic normal del boto IPD.`n- Markers.runAplicarIpdDesdeMarkers (revisa els clips que comencen a cada marcador IPD turquesa i aplica IPD si el clip es abans del següent marcador d'estructura) - ara accessible amb **Ctrl+clic** al boto IPD.`n
-### Pipeline OUT (mode TREBALL)`nQuan l'usuari clica **OUT** (grup VIDEO) es dispara unFullPipelineOut() (main.js): OUT (recorte i neteja clasica) -> TROSSEJA -> OnAir -> Deduc -> Prev -> Correl -> Density -> Conduct -> Titol -> Lloc -> Nom -> Resto -> Traduccio. Cada fase es logueja amb [PIPE] i separa 350ms. En mode TEST el boto OUT conserva el comportament antic (només Cut.runCutOut) per provar les peces per separat.`n
+### Com es passa d'un mode a l'altre
+- El botó de la secció RENDER (🧪 en TEST / 👤 en TREBALL) alterna `window.FASTPASS_UI.LayoutMode` = 'test' | 'work'.
+- `body.mode-work` oculta per CSS tot el que porta la classe `.test-only`. Per defecte s'inicia en 'test'.
+
+### Layout TREBALL (usuari final)
+- **GRÀFICS**: queden només `Gràfica` (= antic `btnMarksF6`/Gràfics, ara renombrat i fora de test-only), `IPD`, `DblPant`, `MAPA`, `TOTEM`.
+- **MARCADORS** (OnAir/Dedu/Prev/Correl/Density/OrphanSnap): ara en una secció separada `.test-only` — només visibles en mode TEST per disparar les fases per separat.
+- **CHYRONS**: es conserva sencer amb el botó `Repartir` dins.
+
+### IPD (2 mecanismes preservats)
+- `Graphics.runIpd` (toggle sobre clip seleccionat) — clic normal del botó IPD.
+- `Markers.runAplicarIpdDesdeMarkers` (revisa els clips que comencen a cada marcador IPD turquesa i aplica IPD si el clip és abans del següent marcador d'estructura) — ara accessible amb **Ctrl+clic** al botó IPD.
+
+### Pipeline OUT (mode TREBALL)
+Quan l'usuari clica **OUT** (grup VIDEO) es dispara `runFullPipelineOut()` (main.js): OUT (recorte i neteja clàssica) → TROSSEJA → OnAir → Deduc → Prev → Correl → Density → Conduct → Titol → Lloc → Nom → Resto → Traducció. Cada fase es logueja amb [PIPE] i separa 350 ms. En mode TEST el botó OUT conserva el comportament antic (només `Cut.runCutOut`) per provar les peces per separat.
