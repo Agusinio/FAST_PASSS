@@ -352,8 +352,10 @@ Afecta a `flow_chyrons.js` (workflow Chyrons actiu) i `flow_retols.js` (per cohe
 
 ### Layout TREBALL (usuari final)
 - **GRÀFICS**: queden només `Gràfica` (= antic `btnMarksF6`/Gràfics, ara renombrat i fora de test-only), `IPD`, `DblPant`, `MAPA`, `TOTEM`.
-- **MARCADORS** (OnAir/Dedu/Prev/Correl/Density/OrphanSnap): ara en una secció separada `.test-only` — només visibles en mode TEST per disparar les fases per separat.
-- **CHYRONS**: es conserva sencer amb el botó `Repartir` dins.
+- **CHYRONS**: en mode TREBALL queda **només `Repartir`** (els botons Conductor/Titol/Lloc/Nom/Resto/Traducció porten classe `test-only` i només es veuen en TEST).
+- **MARCADORS** (OnAir/Dedu/Prev/Correl/Density/OrphanSnap): secció `.test-only` — només visibles en mode TEST per disparar les fases per separat.
+
+**Botons uniformes (CSS):** tots els botons de les tirs de GRÀFICS/MARCADORS/CHYRONS tenen ara la mateixa mida fixa (64×30 px) i els grups fan servir l'ample natural (`flex: 0 1 auto` + `flex-wrap`), de manera que un grup pot ser més ample o més estret que l'altre segons quants botons tingui.
 
 ### IPD (2 mecanismes preservats)
 - `Graphics.runIpd` (toggle sobre clip seleccionat) — clic normal del botó IPD.

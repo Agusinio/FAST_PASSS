@@ -147,14 +147,17 @@ input[type="range"]::-webkit-slider-thumb {
     background: var(--color-accent); border: 2px solid #fff; margin-top: -5px; 
 }
 
-/* GRÀFICS + CHYRONS (grup 2 columnes, botons en 2 línies) */
-.graphics-group { display: flex; gap: 4px; margin-bottom: 6px; }
-.graphics-group > .section-container { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
-.graphics-strip { display: flex; flex-wrap: wrap; gap: 8px 4px; align-items: stretch; }
+/* GRÀFICS + MARCADORS + CHYRONS (grups de botons; ample natural per grup) */
+.graphics-group { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; align-items: flex-start; }
+.graphics-group > .section-container { flex: 0 1 auto; min-width: 0; margin-bottom: 0; }
+.graphics-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .graphics-strip button {
-    flex: 1 1 calc(25% - 3px);
-    min-width: 0;
+    flex: 0 0 auto;
+    width: 64px;
+    height: 30px;
+    padding: 0 4px;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-size: 8px;
 }
 
 /* FASE INDICATOR (Multi-fase MARCADORS) */
