@@ -334,3 +334,10 @@ Per criteri de l'usuari, la pista V7 (Lloc) s'usa com a pista de rètols superpo
 - **Traducció**: placeChyronTraduccio i epartirChyronTraduccio/placeChyronRepartir ara insereixen a **V7** (cfg.tracks.video.lloc) en lloc de V3 (graf). Logs actualitzats (→ V7, «Selecciona Trad (V7) + V1»).`n
 - **Programes** (rètols de menció d'un altre programa): si arriben pel botó Resto, el trackResolver els envia a **V7** (rol o nom que conté PROGRAMES), igual que els de localització de directe (Directe...).`n
 Afecta a low_chyrons.js (workflow Chyrons actiu) i low_retols.js (per coherència). El track _trad (9) queda sense ús de moment.`n
+---
+
+## 18. Pipeline OUT automatic + layout TEST/TREBALL (2026-09-07)`n
+### Com es passa d'un mode a l'altre`n- El boto de la seccio RENDER (emicorni ðŸ§ª en TEST / ðŸ‘¤ en TREBALL) alterna: window.FASTPASS_UI.LayoutMode = 'test' | 'work'.`n- ody.mode-work oculta per CSS tot el que porta la classe .test-only. Per defecte s'inicia en 'test'.`n
+### Layout TREBALL (usuari final)`n- **GRAFICS**: queden nomes Gràfica (= antic tnMarksF6/Gràfics, ara renombrat i fora de test-only), IPD, DblPant, MAPA, TOTEM.`n- **MARCADORS** (OnAir/Dedu/Prev/Correl/Density/OrphanSnap): ara en una seccio separada .test-only - nomes visibles en mode TEST per disparar les fases per separat.`n- **CHYRONS**: es conserva sencer amb el boto Repartir dins.`n
+### IPD (2 mecanismes preservats)`n- Graphics.runIpd (toggle sobre clip seleccionat) - clic normal del boto IPD.`n- Markers.runAplicarIpdDesdeMarkers (revisa els clips que comencen a cada marcador IPD turquesa i aplica IPD si el clip es abans del següent marcador d'estructura) - ara accessible amb **Ctrl+clic** al boto IPD.`n
+### Pipeline OUT (mode TREBALL)`nQuan l'usuari clica **OUT** (grup VIDEO) es dispara unFullPipelineOut() (main.js): OUT (recorte i neteja clasica) -> TROSSEJA -> OnAir -> Deduc -> Prev -> Correl -> Density -> Conduct -> Titol -> Lloc -> Nom -> Resto -> Traduccio. Cada fase es logueja amb [PIPE] i separa 350ms. En mode TEST el boto OUT conserva el comportament antic (només Cut.runCutOut) per provar les peces per separat.`n

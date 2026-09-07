@@ -212,7 +212,7 @@ function applySliderLimits() {
         const btnKey = document.getElementById('btnKey');
 
         if (btnIn) btnIn.addEventListener('click', function () { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
-        if (btnOut) btnOut.addEventListener('click', function () { callWorkflow('Cut', 'runCutOut'); });
+        if (btnOut) btnOut.addEventListener("click", function () { runOutHandler(); });
         if (btnScene) btnScene.addEventListener('click', function () { callWorkflow('Cut', 'runScene'); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
         if (btnNextClip) btnNextClip.addEventListener('click', function () { callWorkflow('Cut', 'runNextClip'); });
@@ -349,7 +349,13 @@ function applySliderLimits() {
         const btnGrafDoblePantalla = document.getElementById('btnGrafDoblePantalla');
         const btnGrafMapa = document.getElementById('btnGrafMapa');
         const btnGrafTotem = document.getElementById('btnGrafTotem');
-        if (btnGrafIpd) btnGrafIpd.addEventListener('click', () => callWorkflow('Graphics', 'runIpd'));
+        if (btnGrafIpd) btnGrafIpd.addEventListener("click", function (ev) {
+            if (ev && (ev.ctrlKey || ev.metaKey)) {
+                callWorkflow("Markers", "runAplicarIpdDesdeMarkers");
+            } else {
+                callWorkflow("Graphics", "runIpd");
+            }
+        });
         if (btnGrafDoblePantalla) btnGrafDoblePantalla.addEventListener('click', (e) => callWorkflow('Graphics', 'runDoblePantalla', e));
         if (btnGrafMapa) btnGrafMapa.addEventListener('click', () => callWorkflow('Graphics', 'runMapa'));
         if (btnGrafTotem) btnGrafTotem.addEventListener('click', () => callWorkflow('Graphics', 'runTotem'));
@@ -551,6 +557,58 @@ function applySliderLimits() {
             }
         } else {
             console.error("⚠️ Error: " + module + "." + method + " no existe.");
+        }
+    }
+
+    /**
+     * runFullPipelineOut: Pipeline complet del botó OUT en mode TREBALL.
+     * Ordre: OUT (recorte i neteja), TROSSEJA, OnAir, Deduc, Prev, Correl,
+     * Density, Conduct, Titol, Lloc, Nom, Resto, Traducció.
+     */
+    async function runFullPipelineOut() {
+        const utils = FASTPASS_UI.Utils;
+        const phases = [
+            ['OUT · recorte i neteja', () => callWorkflow('Cut', 'runCutOut')],
+            ['TROSSEJA',               () => callWorkflow('Cut', 'runScene')],
+            ['OnAir (F1)',             () => callWorkflow('Markers', 'placeOnAirMarkers')],
+            ['Deduc (F2)',             () => callWorkflow('Markers', 'placeDeducedOnAirMarkers')],
+            ['Prev (F3)',              () => callWorkflow('Markers', 'placeScheduledMarkers')],
+            ['Correl (F3.5)',          () => callWorkflow('Assembly', 'correlationSnapMarkers')],
+            ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],
+            ['Conduct',                () => callWorkflow('Chyrons', 'placeChyronConductor')],
+            ['Titol',                  () => callWorkflow('Chyrons', 'placeChyronTitol')],
+            ['Lloc',                   () => callWorkflow('Chyrons', 'placeChyronLloc')],
+            ['Nom',                    () => callWorkflow('Chyrons', 'placeChyronNom')],
+            ['Resto',                  () => callWorkflow('Chyrons', 'placeChyronResto')],
+            ['Traducció',              () => callWorkflow('Chyrons', 'placeChyronTraduccio')]
+        ];
+        utils.log('🚀 [PIPE] Pipeline complet post-OUT: ' + phases.map(p => p[0]).join(' → '), 'INFO');
+        for (const ph of phases) {
+            const t0 = Date.now();
+            utils.log('🔄 [PIPE] ' + ph[0] + '...', 'INFO');
+            try {
+                await ph[1]();
+            } catch (e) {
+                utils.log('⚠️ [PIPE] ' + ph[0] + ' ha llançat: ' + e.message, 'ERROR');
+            }
+            await utils.delay(350);
+            utils.log('✅ [PIPE] ' + ph[0] + ' finalitzada (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)', 'INFO');
+        }
+        utils.log('🏁 [PIPE] Pipeline complet finalitzat.', 'INFO');
+        utils.status('Pipeline OUT completat', 'exito');
+    }
+
+    /**
+     * runOutHandler: Comportament del botó OUT segons el layout.
+     *  - mode TEST: només el tancament clàssic (runCutOut), per poder provar les peces per separat.
+     *  - mode TREBALL: dispara el pipeline complet automàtic.
+     */
+    async function runOutHandler() {
+        const layoutMode = window.FASTPASS_UI.LayoutMode || 'test';
+        if (layoutMode === 'work') {
+            await runFullPipelineOut();
+        } else {
+            await callWorkflow('Cut', 'runCutOut');
         }
     }
 

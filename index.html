@@ -93,11 +93,25 @@
             </div>
         </div>
         
-        <!-- GRUP: GRÀFICS + CHYRONS (2 columnes) -->
+        <!-- GRUP: GRÀFICS + MARCADORS + CHYRONS (2 columnes) -->
         <div class="graphics-group">
-        <!-- SECTION: GRÀFICS -->
-        <div class="section-container test-only">
+        <!-- SECTION: GRÀFICS (visibles SEMPRE: mode test i treball) -->
+        <div class="section-container">
             <div class="section-label"><span>GRÀFICS</span></div>
+            <div class="section-content">
+                 <div class="graphics-strip">
+                    <button id="btnMarksF6" class="secondary btn-sq-double-high" title="Col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">Gràfica</button>
+                    <button id="btnGrafIpd" class="secondary btn-sq-double-high" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD des dels marcadors (entre marcador IPD i següent estructural)">IPD</button>
+                    <button id="btnGrafDoblePantalla" class="secondary btn-sq-double-high">DblPant</button>
+                    <button id="btnGrafMapa" class="secondary btn-sq-double-high">MAPA</button>
+                    <button id="btnGrafTotem" class="secondary btn-sq-double-high">TOTEM</button>
+                 </div>
+            </div>
+        </div>
+
+        <!-- SECTION: MARCADORS (TEST ONLY) - el programador dispara les fases per separat -->
+        <div class="section-container test-only">
+            <div class="section-label"><span>MARCADORS</span></div>
             <div class="section-content">
                  <div class="graphics-strip">
                     <button id="btnMarksF1" class="secondary btn-sq-double-high">OnAir</button>
@@ -106,16 +120,11 @@
                     <button id="btnMarksF35" class="secondary btn-sq-double-high">Correl</button>
                     <button id="btnMarksF4" class="secondary btn-sq-double-high">Density</button>
                     <button id="btnMarksF5" class="secondary btn-sq-double-high">OrphanSnap</button>
-                    <button id="btnMarksF6" class="secondary btn-sq-double-high">Gràfics</button>
-                    <button id="btnGrafIpd" class="secondary btn-sq-double-high">IPD</button>
-                    <button id="btnGrafDoblePantalla" class="secondary btn-sq-double-high">DblPant</button>
-                    <button id="btnGrafMapa" class="secondary btn-sq-double-high">MAPA</button>
-                    <button id="btnGrafTotem" class="secondary btn-sq-double-high">TOTEM</button>
                  </div>
             </div>
         </div>
 
-        <!-- SECTION: CHYRONS -->
+        <!-- SECTION: CHYRONS (visibles SEMPRE, amb Repartir) -->
         <div class="section-container">
             <div class="section-label"><span>CHYRONS</span></div>
             <div class="section-content">
@@ -243,6 +252,6 @@
     <script src="js/workflows/flow_assembly.js?v=5"></script>
     <script src="js/core/project_registry.js?v=5"></script>
     <script src="js/editor/srt_editor.js?v=54"></script>
-    <script src="js/main.js?v=22"></script>
+    <script src="js/main.js?v=23"></script>
 </body>
 </html>
