@@ -680,7 +680,7 @@
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const struct = FASTPASS_UI.State.structure;
-            const T_TRAD = cfg.tracks.video.graf;
+            const T_TRAD = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
             if (!struct || struct.length === 0) {
                 log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
                 return;
@@ -767,7 +767,7 @@
                             const placeEnd = (i === N - 1) ? clipStart + clipDur : clipStart + slotDur * (i + 1);
                             const escapedName = getUtils().escape(group[i].name);
                             await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, ${placeEnd}, 'video')`);
-                            log(`      ✅ [${i+1}/${N}] → V3 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s`);
+                            log(`      ✅ [${i+1}/${N}] → V7 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s`);
                             placedCount++;
                         }
                     }
@@ -792,10 +792,12 @@
                 (c, cfg) => {
                     const rName = (c.name || '').toUpperCase();
                     const rRol = (c.rol || '').toUpperCase();
-                    // Rètols de LOCALITZACIÓ d'un directe (ex: "Directe PRESENCIAL Moscou"):
-                    // van a la pista de Lloc (V7) per no trepitjar a V6 els chyrons de nom
-                    // consecutius (00.00 Directe + 00.01 Enviat No) del mateix directe.
-                    if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE') {
+                    // Rètols de LOCALITZACIÓ d'un directe (ex: "Directe PRESENCIAL Moscou")
+                    // i rètols de PROGRAMES (menció d'un altre programa): van a la pista de
+                    // Lloc (V7) per no trepitjar a V6 els chyrons de nom consecutius
+                    // (00.00 Directe + 00.01 Enviat No) del mateix directe.
+                    if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE' ||
+                        rName.indexOf('PROGRAMES') !== -1 || rRol.indexOf('PROGRAMES') !== -1) {
                         return cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
                     }
                     return cfg.tracks.video.chyrons;
@@ -808,7 +810,7 @@
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const T_V1 = cfg.tracks.video.mp4;
-            const T_V3 = cfg.tracks.video.graf;
+            const T_TRAD = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
             const struct = FASTPASS_UI.State.structure || [];
             const rolByName = new Map();
             for (const entry of struct) {
@@ -818,7 +820,7 @@
             }
             try {
                 const v1Count = parseInt(await callJSX(`Clips.count(${T_V1}, 'video')`) || '0');
-                const v3Count = parseInt(await callJSX(`Clips.count(${T_V3}, 'video')`) || '0');
+                const v3Count = parseInt(await callJSX(`Clips.count(${T_TRAD}, 'video')`) || '0');
                 const selectedV1 = [];
                 for (let i = 0; i < v1Count; i++) {
                     const raw = await callJSX(`Clips.get(${T_V1}, ${i}, 'video')`);
@@ -828,15 +830,15 @@
                 }
                 const selectedV3 = [];
                 for (let i = 0; i < v3Count; i++) {
-                    const raw = await callJSX(`Clips.get(${T_V3}, ${i}, 'video')`);
+                    const raw = await callJSX(`Clips.get(${T_TRAD}, ${i}, 'video')`);
                     if (!raw || raw === 'null') continue;
                     const clip = JSON.parse(raw);
                     if (clip.selected) selectedV3.push(clip);
                 }
-                log(`🎯 [Repartir] V1: ${selectedV1.length}, V3: ${selectedV3.length}`);
+                log(`🎯 [Repartir] V1: ${selectedV1.length}, Trad (V7): ${selectedV3.length}`);
                 if (selectedV3.length === 0 || selectedV1.length === 0) {
-                    log("⚠️ [Repartir] Selecciona V3 + V1 amb Ctrl+clic.", "WARN");
-                    getUtils().status("Selecciona V3 + V1", "warn");
+                    log("⚠️ [Repartir] Selecciona Trad (V7) + V1 amb Ctrl+clic.", "WARN");
+                    getUtils().status("Selecciona Trad (V7) + V1", "warn");
                     return;
                 }
                 selectedV3.sort((a, b) => a.start - b.start);
@@ -853,8 +855,8 @@
                 log(`📦 [Repartir] ${groups.length} tram(s)`);
 
                 let placedCount = 0;
-                await callJSX(`Clips.clearTrack(${T_V3}, 'video')`);
-                log(`   🧹 [Repartir] V3 netejat`);
+                await callJSX(`Clips.clearTrack(${T_TRAD}, 'video')`);
+                log(`   🧹 [Repartir] V7 (trad) netejat`);
 
                 const rangeStart = selectedV1[0].start;
                 const rangeEnd = selectedV1[selectedV1.length - 1].end;
@@ -888,8 +890,8 @@
                             const newStart = rangeStart + slotDur * s;
                             const newEnd = (s === M - 1) ? rangeEnd : rangeStart + slotDur * (s + 1);
                             const escapedName = getUtils().escape(chy.name);
-                            await callJSX(`Clips.insert('${escapedName}', ${T_V3}, ${newStart}, ${newEnd}, 'video')`);
-                            log(`      ✅ [${seqNum}/${M}] → V3 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s`);
+                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${newStart}, ${newEnd}, 'video')`);
+                            log(`      ✅ [${seqNum}/${M}] → V7 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s`);
                             placedCount++;
                         } else log(`      ⬜ [${seqNum}/${M}] buit`);
                         if (s % 3 === 2) await getUtils().delay(100);

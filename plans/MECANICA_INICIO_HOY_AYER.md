@@ -327,3 +327,10 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 **Causa:** no és de programació sinó de condicionat de l'escaleta (els rètols del directe pengen de la línia 11i intro), però els dos rètols anaven a la mateixa pista.`n
 **Fix (low_chyrons.js i low_retols.js, placeChyronResto):** el trackResolver envia a la pista de **Lloc (V7)** els rètols de localització de directe (contenen Directe o rol DIRECTE); la resta de rètols del Resto continuen a V6. Resultat: Directe PRESENCIAL Moscou → V7 @0.0s, Enviat No: Cristina Solias → V6 @1.0s (sense trepitjar-se).`n
 **Pendent de validar:** comprovar que el rètol Directe de V7 no col·lisiona amb futurs Lloc/Data que vagin a V7 en el mateix instant (avui V7 està buida: log [Lloc] Cap chyron per col·locar).`n
+---
+
+## 17. Traduccions i rètols de Programes tambè a V7 (2026-09-07)`n
+Per criteri de l'usuari, la pista V7 (Lloc) s'usa com a pista de rètols superposats (Lloc/Data + Directe + Programes + Traduccions) i V6 queda només per a noms/Nomcarrec:`n
+- **Traducció**: placeChyronTraduccio i epartirChyronTraduccio/placeChyronRepartir ara insereixen a **V7** (cfg.tracks.video.lloc) en lloc de V3 (graf). Logs actualitzats (→ V7, «Selecciona Trad (V7) + V1»).`n
+- **Programes** (rètols de menció d'un altre programa): si arriben pel botó Resto, el trackResolver els envia a **V7** (rol o nom que conté PROGRAMES), igual que els de localització de directe (Directe...).`n
+Afecta a low_chyrons.js (workflow Chyrons actiu) i low_retols.js (per coherència). El track _trad (9) queda sense ús de moment.`n

@@ -613,7 +613,7 @@
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const struct = FASTPASS_UI.State.structure;
-            const T_TRAD = cfg.tracks.video.graf; // V3
+            const T_TRAD = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
 
             if (!struct || struct.length === 0) {
                 log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
@@ -726,7 +726,7 @@
                             const placeEnd = (i === N - 1) ? clipStart + clipDur : clipStart + slotDur * (i + 1);
                             const escapedName = getUtils().escape(group[i].name);
                             await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, ${placeEnd}, 'video')`);
-                            log(`      ✅ [${i+1}/${N}] ${group[i].name.substring(0, 40)}... → V3 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s (dur=${(placeEnd - placeTime).toFixed(2)}s)`);
+                            log(`      ✅ [${i+1}/${N}] ${group[i].name.substring(0, 40)}... → V7 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s (dur=${(placeEnd - placeTime).toFixed(2)}s)`);
                             placedCount++;
                         }
                     }
@@ -757,10 +757,12 @@
                 (c, cfg) => {
                     const rName = (c.name || '').toUpperCase();
                     const rRol = (c.rol || '').toUpperCase();
-                    // Rètols de LOCALITZACIÓ d'un directe (ex: "Directe PRESENCIAL Moscou"):
-                    // van a la pista de Lloc (V7) per no trepitjar a V6 els chyrons de nom
-                    // consecutius (00.00 Directe + 00.01 Enviat No) del mateix directe.
-                    if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE') {
+                    // Rètols de LOCALITZACIÓ d'un directe (ex: "Directe PRESENCIAL Moscou")
+                    // i rètols de PROGRAMES (menció d'un altre programa): van a la pista de
+                    // Lloc (V7) per no trepitjar a V6 els chyrons de nom consecutius
+                    // (00.00 Directe + 00.01 Enviat No) del mateix directe.
+                    if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE' ||
+                        rName.indexOf('PROGRAMES') !== -1 || rRol.indexOf('PROGRAMES') !== -1) {
                         return cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
                     }
                     return cfg.tracks.video.chyrons;
@@ -805,11 +807,11 @@
         },
 
         /**
-         * REPARTIR TRADUCCIONS: Redistribueix les traduccions seleccionades a V3
+         * REPARTIR TRADUCCIONS: Redistribueix les traduccions seleccionades a V7 (trad)
          * uniformement sobre els clips V1 seleccionats, ignorant flashes.
          * 
          * Flux:
-         *   1. Llegeix clips V3 (graf) i V1 (mp4) seleccionats
+         *   1. Llegeix clips V7 (trad) i V1 (mp4) seleccionats
          *   2. Agrupa traduccions per proximitat temporal (< 3s gap = mateix tram)
          *   3. Per cada tram, fusiona clips V1 contigus (saltant flashes < 0.5s)
          *   4. Reparteix N traduccions uniformement sobre el rang combinat V1
@@ -819,7 +821,7 @@
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const T_V1 = cfg.tracks.video.mp4;
-            const T_V3 = cfg.tracks.video.graf;
+            const T_TRAD = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
 
             // Indexar state.structure per obtenir rol des del nom del clip
             const struct = FASTPASS_UI.State.structure || [];
@@ -833,9 +835,9 @@
             }
 
             try {
-                // 1. Llegir clips seleccionats a V1 i V3
+                // 1. Llegir clips seleccionats a V1 i V7
                 const v1Count = parseInt(await callJSX(`Clips.count(${T_V1}, 'video')`) || '0');
-                const v3Count = parseInt(await callJSX(`Clips.count(${T_V3}, 'video')`) || '0');
+                const v3Count = parseInt(await callJSX(`Clips.count(${T_TRAD}, 'video')`) || '0');
 
                 const selectedV1 = [];
                 for (let i = 0; i < v1Count; i++) {
@@ -847,17 +849,17 @@
 
                 const selectedV3 = [];
                 for (let i = 0; i < v3Count; i++) {
-                    const raw = await callJSX(`Clips.get(${T_V3}, ${i}, 'video')`);
+                    const raw = await callJSX(`Clips.get(${T_TRAD}, ${i}, 'video')`);
                     if (!raw || raw === 'null') continue;
                     const clip = JSON.parse(raw);
                     if (clip.selected) selectedV3.push(clip);
                 }
 
-                log(`🎯 [Repartir] V1 seleccionats: ${selectedV1.length}, V3 seleccionats: ${selectedV3.length}`);
+                log(`🎯 [Repartir] V1 seleccionats: ${selectedV1.length}, Trad (V7) seleccionats: ${selectedV3.length}`);
 
                 if (selectedV3.length === 0) {
-                            log("⚠️ [Repartir] No hi ha traduccions seleccionades a V3. Selecciona les traduccions (V3) + clips V1 amb Ctrl+clic.", "WARN");
-                    getUtils().status("⚠️ Selecciona traduccions a V3", "warn");
+                            log("⚠️ [Repartir] No hi ha traduccions seleccionades a V7. Selecciona les traduccions (V7) + clips V1 amb Ctrl+clic.", "WARN");
+                    getUtils().status("⚠️ Selecciona traduccions a V7", "warn");
                     return;
                 }
                 if (selectedV1.length === 0) {
@@ -887,9 +889,9 @@
 
                 let placedCount = 0;
 
-                // 4. Eliminar V3 complet abans de reinsertar res
-                await callJSX(`Clips.clearTrack(${T_V3}, 'video')`);
-                log(`   🧹 [Repartir] Tot el track V3 netejat`);
+                // 4. Eliminar V7 complet abans de reinsertar res
+                await callJSX(`Clips.clearTrack(${T_TRAD}, 'video')`);
+                log(`   🧹 [Repartir] Tot el track V7 (trad) netejat`);
 
                 // Rang complet de TOTS els clips V1 seleccionats
                 const rangeStart = selectedV1[0].start;
@@ -933,8 +935,8 @@
                             const newEnd = (s === M - 1) ? rangeEnd : rangeStart + slotDur * (s + 1);
                             const escapedName = getUtils().escape(chy.name);
                             
-                            await callJSX(`Clips.insert('${escapedName}', ${T_V3}, ${newStart}, ${newEnd}, 'video')`);
-                            log(`      ✅ [${seqNum}/${M}] "${chy.name.substring(0, 30)}..." → V3 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s (dur=${(newEnd - newStart).toFixed(2)}s)`);
+                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${newStart}, ${newEnd}, 'video')`);
+                            log(`      ✅ [${seqNum}/${M}] "${chy.name.substring(0, 30)}..." → V7 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s (dur=${(newEnd - newStart).toFixed(2)}s)`);
                             placedCount++;
                         } else {
                             log(`      ⬜ [${seqNum}/${M}] buit (traducció absent)`);
