@@ -5,6 +5,7 @@
 > **Alcance:** Cambio del mecanismo de arranque de la extensión (botón MAIN) para eliminar la deducción automática de la fecha de trabajo.
 > **Archivo relacionado previo:** `plans/PLAN_RESOLVE_CONTEXT.md` (su paradigma "buscar hoy → si no, ayer" queda **sustituido** por el de este documento).
 > **Revisión 2 (2026-09-04):** definidos los **4 estados del botón MAIN** — MASSA D'HORA (nada accesible), ESPERANT (material en curso, ingesta sin llegar al TC de emisión), CREAR (material útil) y ACTUALITZAR (recarga de datos/media faltante) → ver §6.
+> **IMPLEMENTADO (2026-09-04):** integrada la mecánica en código (ver §13). Falta validación en runtime con Premiere y los escenarios T1-T9.
 
 ---
 
@@ -189,8 +190,8 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 | Módulo / archivo | Cambio |
 |---|---|
-| `js/core/state.js` | `State.dateDir` pasa a significar **fecha de trabajo explícita** (hoy o ayer). Se resetea a hoy al cambiar programa/bloque. Valor opcional: `State.workMode: 'today' \| 'yesterday'` para trazabilidad en logs |
-| `js/core/4_Context.js` | ① Eliminar `_getValidDateDir()`/`PROGRAM_START_HOURS`/`PRE_EMISSION_GUARD_HOURS` y el "ESPERANT EMISSIÓ" → sustituir por helper simple `_targetDate(useYesterday)` (hoy = `getFormattedDate()`, ayer = hoy−1 día). ② `checkContext()`: quitar TimeGuard, FIX A1, FIX A2, FIX A3 y la corrección de `dateDir`; escanear SOLO la fecha objetivo. ③ Producir los **4 estados de §6** (cascada 6.2 con los detectores de 6.3). ④ `updateButton()`: textos `MASSA D'HORA`/`ESPERANT…`/`CREAR`/`ACTUALITZAR` (LOCKED como excepción); deshabilitar botón en MASSA D'HORA y ESPERANT; `onclick` captura `ctrlKey/metaKey` y recalcula la acción para D=ayer |
+| `js/core/state.js` | `State.dateDir` pasa a significar **fecha de trabajo explícita** (hoy o ayer). Se resetea a hoy al cambiar programa/bloque. Campo real: `State.workTarget: 'today' \| 'yesterday'` |
+| `js/core/4_Context.js` | ① Eliminado `_getValidDateDir()`/`PROGRAM_START_HOURS`/`PRE_EMISSION_GUARD_HOURS` y el "ESPERANT EMISSIÓ" → sustituido por `_targetDateDir()` (hoy = fecha del sistema; ayer = día natural anterior si `State.workTarget==='yesterday'`). ② `checkContext()`: eliminados TimeGuard, FIX A1, FIX A2, FIX A3 y la corrección de `dateDir`; escanea SOLO la fecha objetivo. ③ Produce los **4 estados de §6** (cascada 6.2 con los detectores de 6.3). ④ `updateButton()`: textos `MASSA D'HORA`/`ESPERANT…`/`CREAR`/`ACTUALITZAR` (LOCKED como excepción); MASSA/ESPERANT **no deshabilitan** el botón (clic normal = aviso; **Ctrl+clic = evaluar AHIR**); `onclick` centralizado en `Context._onMainClick(ev, action, data)`. ⑤ R6: en el clic se recalcula si `data.dateDir` no coincide con la fecha objetivo actual |
 | `js/workflows/flow_mainButton.js` | ① `runMainAction(action, data)`: `data.dateDir` llega decidido (hoy|ayer). ② `_runNew()`: **eliminar** el bloque D7.1 de deducción/fallback a ayer (L44-88) y usar `ctx.dateDir` recibido. ③ `_runUpdate()/_runLoad()/_runGo()/_setupContext()`: usar `ctx.dateDir` explícito; no re-deducir. ④ Revisar que `_runUpdate` (ACTUALITZAR) importe solo lo faltante de la misma fecha |
 | `js/logic/Scanner.js` | ① **Eliminar** el fallback "Intentant sense filtre de data" de `mediaAssets` (L91-94). ② Revisar/eliminar `_discardOld` (mtime+22h) en `wotts`, `portadas` y media: sustituir por filtro de fecha del proyecto. ③ Extraer helper común `_filterByWorkDate(files, ctx)` = data del nombre → `created` → descartar, y aplicarlo a media/wotts/portadas. ④ Mantener el filtro estricto de wotts/portadas por fecha (2026-09-02) |
 | `js/core/escaleta_io.js` | ① `findLatest`/`findLatestValid`: **siempre** llamarlas con `datePrefix` = fecha objetivo; nunca sin prefijo en el flujo de arranque. ② Unificar la extracción de fecha de ambos formatos de nombre (usar `utils.extractDateFromEscaletaFilename` también en `_extractDateFromName`). ③ Eliminar cualquier reintento a otro día |
@@ -253,4 +254,25 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 - `js/logic/Scanner.js` (`mediaAssets`, `_filterMediaByDate`, `wotts`, `portadas`, `_discardOld`).
 - `js/core/escaleta_io.js` (`findLatest`, `findLatestValid`, `findInFolder`, `ensureLocalCopy`).
 - `js/core/utils.js` (`getFormattedDate`, `isDateDirInTemporalWindow`, `extractDateFromEscaletaFilename`).
+
+
+---
+
+## 13. Implementación (2026-09-04) — cambios aplicados
+
+| Archivo | Cambio aplicado |
+|---|---|
+| `js/core/state.js` | Añadido `workTarget: 'today'` (+ reset en `reset()`). |
+| `js/core/4_Context.js` | `_targetDateDir()` (hoy / ayer natural según `workTarget`); `_onMainClick(ev, action, data)` (clic normal ejecuta; Ctrl+clic evalúa AHIR y ejecuta, luego restaura HOY); `checkContext()` sin TimeGuard/FIX A1/A2/A3, con estados **MASSA D'HORA / ESPERANT / CREAR / ACTUALITZAR**; semáforo reutiliza el `getStatus` del día; `updateButton` con los 4 textos y onclick central; debounce con `{force:true}` para los recálculos de clic |
+| `js/core/escaleta_io.js` | `getStatus(programArchivo, blockId, datePrefix)` filtra por día; `_extractDateFromName` reconoce formato nuevo (fecha al inicio) y antiguo (fecha al final) en `findLatest` y `findLatestValid` |
+| `js/logic/Scanner.js` | `mediaAssets` **sin** reintento "sin filtro de fecha"; `wotts` y `portadas` **sin** `_discardOld` (guarda mtime 22h) — el filtro por fecha del proyecto es el único criterio |
+| `js/workflows/flow_mainButton.js` | `_runNew` **sin** deducción D7.1 ni fallback a ayer: `ctx.dateDir` llega fijado desde checkContext (hoy o ayer) |
+| `js/main.js` | Botón FOTO de escaleta usa `Context._targetDateDir()` (fecha de trabajo explícita) en vez del TimeGuard |
+
+**Pendiente — validación en runtime (Premiere):**
+- Escenarios **T1-T9** de §10 (especialmente MASSA D'HORA ↔ Ctrl+clic = AHIR, y ESPERANT durante la ingesta).
+- Comprobar que el botón ACTUALITZAR (estado LOAD) abre el proyecto cerrado y recarga solo datos/media de su fecha.
+- Verificar semáforo (ESC/MP4/WOT/SRT) tras crear/abrir proyecto.
+- Confirmar token de proyecto (`wott`) como único (pregunta abierta §11).
+- `isDateDirInTemporalWindow` queda sin uso en el flujo de arranque (se mantiene por compatibilidad; candidata a eliminación en P9).
 

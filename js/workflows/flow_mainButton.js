@@ -41,51 +41,11 @@
             try {
                 const ctx = await this._setupContext();
 
-                // ─── D7.1: Resoldre dateDir des de la data d'emissió de l'escaleta ──
-                // La data d'emissió del bloc és la FONT ÚNICA de dateDir per a tots
-                // els artefactes del projecte (directoris, manifests, .prproj, anàlisi).
-                // S'extreu del nom del fitxer JSON d'escaleta abans de qualsevol save
-                // per garantir coherència entre tots els artefactes persistits.
-                try {
-                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-                    if (reader) {
-                        // REGLA D'OR: NUNCA canviar de dia. El datePrefix restringeix
-                        // la cerca al dia actual (o al que ja tingui ctx.dateDir).
-                        // El fallback seqüencial V1→V5 dins de findLatest garanteix
-                        // que si V1 no existeix, s'usi V2 del MATEIX dia (no d'un altre).
-                        var datePrefixD71 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                        var earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixD71);
-                        // Fallback a ahir si avui no hi ha JSON (finestra 22h)
-                        if (!earlyMeta && datePrefixD71) {
-                            var yesterday = new Date();
-                            yesterday.setDate(yesterday.getDate() - 1);
-                            var dd2 = ('0' + yesterday.getDate()).slice(-2);
-                            var mm2 = ('0' + (yesterday.getMonth() + 1)).slice(-2);
-                            var datePrefixYesterday = '' + yesterday.getFullYear() + mm2 + dd2;
-                            earlyMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefixYesterday);
-                            if (earlyMeta) {
-                                log('📅 [dateDir] Cap JSON d\'avui. Intentant ahir (' + datePrefixYesterday + ')...');
-                            }
-                        }
-                        if (earlyMeta && earlyMeta.filename) {
-                            const emissionDate = getUtils().extractDateFromEscaletaFilename(earlyMeta.filename);
-                            if (emissionDate && getUtils().isDateDirInTemporalWindow(emissionDate)) {
-                                const oldDate = ctx.dateDir;
-                                ctx.dateDir = emissionDate;
-                                if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
-                                    window.FASTPASS_UI.State.dateDir = emissionDate;
-                                }
-                                log(`📅 [dateDir] Data d'emissió del bloc: ${emissionDate} (corregida des de ${oldDate} del sistema)`);
-                            } else {
-                                log(`⚠️ [dateDir] No s'ha pogut extreure data del fitxer: ${earlyMeta.filename}. Usant data del sistema: ${ctx.dateDir}`);
-                            }
-                        } else {
-                            log(`⚠️ [dateDir] Cap escaleta trobada per a ${ctx.progData.archivo}. Usant data del sistema: ${ctx.dateDir}`);
-                        }
-                    }
-                } catch (eDate) {
-                    log(`⚠️ [dateDir] Error determinant data d'emissió: ${eDate.message}. Usant data del sistema: ${ctx.dateDir}`);
-                }
+                // ── MECÀNICA D'INICI (2026-09-04) ─────────────────────────────────
+                // dateDir ve DECIDIT des de checkContext: HOY per defecte, o AHIR
+                // si es va fer Ctrl+clic a MAIN. No es dedueix ni es corregeix aquí
+                // (eliminat l'antic D7.1 i el fallback a AHIR de la finestra 22h).
+                log('[dateDir] Data de treball: ' + ctx.dateDir + ' (fixada a checkContext)');
 
                 // ─── Extreure el TEMA del primer ítem estructural del bloc ──
                 // Mateixa lògica que l'extracció de tema dels chyrons:

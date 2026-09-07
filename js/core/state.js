@@ -9,6 +9,9 @@ FASTPASS_UI.State = {
     isKeyframeMode: false,
     activeSequenceName: "",
     lastOpenedProjectName: "",
+    // MECÀNICA D'INICI (2026-09-04): data de treball explícita.
+    //   'today' (defecte) | 'yesterday' (mode correcció amb Ctrl+clic a MAIN)
+    workTarget: "today",
     
     masterTheme: null,
     srt: null,
@@ -36,6 +39,8 @@ FASTPASS_UI.State = {
         this.srt = null;
         this.hierarchy = {};
         this.lastOpenedProjectName = "";
+        this.workTarget = "today";
+        this.dateDir = null;
         this._escaletaCache = null;
         this.markerPhase = 1;
     }

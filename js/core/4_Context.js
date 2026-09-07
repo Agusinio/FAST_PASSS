@@ -13,62 +13,95 @@
 
     let _lastCheckAt = 0; // Guard de debounce
 
-    // ─── Hores d'inici de cada programa (hora del dia, ex: 14.5 = 14:30) ───
-    const PROGRAM_START_HOURS = {
-        TNV: 21.0,
-        TNM: 14.5,
-        TNC: 13.8333  // 13:50
-    };
-    const PRE_EMISSION_GUARD_HOURS = 2; // 2h abans de l'emissio, bloquejar
+    // ─── MECÀNICA D'INICI (2026-09-04) ────────────────────────────────────────
+    // La data de treball NO es dedueix de l'hora del programa ni dels repositoris.
+    //   - Defecte: HOY (data del sistema) en seleccionar Programa+Bloque.
+    //   - Mode correcció: AYER (Ctrl+clic a MAIN) → dia natural anterior.
+    // S'ha eliminat el TimeGuard (PROGRAM_START_HOURS / PRE_EMISSION_GUARD_HOURS).
 
     FASTPASS_UI.Core.Context = {
         
         // Reporte de activos para UI "externa"
         missing: { wotts: false, media: false, srt: false, portada: false },
 
+        // Últim estat calculat per checkContext (per al Ctrl+clic de MAIN)
+        _lastConclusion: null,
+        _lastButtonData: null,
+
         /**
-         * _getValidDateDir: Determina la data de treball segons l'hora actual
-         * i l'hora d'inici del programa.
-         *
-         * Retorna { dateDir, action, waitMsg }
-         *   action = "today" | "yesterday" | "block"
+         * _targetDateDir: Retorna la data de treball (YYYY_MM_DD).
+         * @returns {string} Data del sistema (HOY) o dia natural anterior (AYER)
+         *                   si State.workTarget === 'yesterday'.
          */
-        _getValidDateDir: function(progData, existingDateDir) {
-            var now = new Date();
-            var nowHour = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
-            var shortProg = progData.wott || 'TNV';
-            var programStartHour = PROGRAM_START_HOURS[shortProg];
-            if (!programStartHour) {
-                return {
-                    dateDir: existingDateDir || getUtils().getFormattedDate().replace(/"/g, "").trim(),
-                    action: 'today',
-                    waitMsg: null
-                };
+        _targetDateDir: function () {
+            const useYesterday = !!(window.FASTPASS_UI && window.FASTPASS_UI.State &&
+                window.FASTPASS_UI.State.workTarget === 'yesterday');
+            const d = new Date();
+            if (useYesterday) d.setDate(d.getDate() - 1);
+            const dd = ('0' + d.getDate()).slice(-2);
+            const mm = ('0' + (d.getMonth() + 1)).slice(-2);
+            return '' + d.getFullYear() + '_' + mm + '_' + dd;
+        },
+
+        /**
+         * _onMainClick: Handler central del botó MAIN.
+         *   - Clic normal → executa l'acció de l'estat visible (CREAR/ACTUALITZAR...).
+         *   - Ctrl+clic (mode correcció) → recalcula l'estat per AHIR i executa.
+         * @param {Event|null} ev
+         * @param {string|null} action - 'NEW' | 'UPDATE' | 'GO' | 'LOAD' | null
+         * @param {Object|null} data
+         */
+        async _onMainClick(ev, action, data) {
+            const u = getUtils();
+            const useYesterday = !!(ev && (ev.ctrlKey || ev.metaKey));
+            try {
+                if (!useYesterday) {
+                    if (!action) {
+                        const st = this._lastConclusion;
+                        if (st === 'MASSA') u.status("MASSA D'HORA: avui encara no hi ha res publicat", "warn");
+                        else if (st === 'ESPERANT') u.status('ESPERANT: la ingesta encara no ha arribat al TC final. Torna-hi més tard', "warn");
+                        return;
+                    }
+                    // R6: la data de treball es fixa EN EL MOMENT DEL CLIC. Si l'estat
+                    // visible ha quedat obsolet (p. ex. ha passat la mitjanit) es recalcula.
+                    let act = action;
+                    let dt = data;
+                    const targetNow = this._targetDateDir();
+                    if (!dt || !dt.dateDir || dt.dateDir !== targetNow) {
+                        u.log('[MAIN] Data de treball canviada. Recalculant estat...', 'DEBUG');
+                        await this.checkContext({ force: true });
+                        const stR = this._lastConclusion;
+                        const dtR = this._lastButtonData;
+                        if (!(stR === 'NEW' || stR === 'UPDATE' || stR === 'GO' || stR === 'LOAD')) {
+                            u.status('Estat del dia canviat (' + stR + '). Reintenta-ho.', 'warn');
+                            return;
+                        }
+                        act = (stR === 'NEW') ? 'NEW' : stR;
+                        dt = dtR;
+                    }
+                    await FASTPASS_UI.Workflows.MainButton.runMainAction(act, dt);
+                    return;
+                }
+                // ── MODO CORRECCIÓN: Ctrl+clic → AYER ──
+                const St = window.FASTPASS_UI.State;
+                u.log('🔄 [MAIN] Ctrl+clic → mode correcció (AHIR).', 'INFO');
+                St.workTarget = 'yesterday';
+                await this.checkContext({ force: true });
+                const stA = this._lastConclusion;
+                const dataA = this._lastButtonData;
+                if (stA === 'NEW' || stA === 'UPDATE' || stA === 'GO' || stA === 'LOAD') {
+                    const actA = (stA === 'NEW') ? 'NEW' : stA;
+                    u.log('🔄 [MAIN] Correcció AHIR → ' + stA + (dataA && dataA.name ? ' · ' + dataA.name : ''), 'INFO');
+                    await FASTPASS_UI.Workflows.MainButton.runMainAction(actA, dataA);
+                } else {
+                    u.log('⚠️ [MAIN] Mode correcció: AHIR sense material útil (estat ' + stA + ')', 'WARN');
+                    u.status('AHIR: sense material per corregir', 'warn');
+                }
+                St.workTarget = 'today';
+                await this.checkContext({ force: true });
+            } catch (e) {
+                u.handleError(e, 'onMainClick');
             }
-
-            var todayFormatted = getUtils().getFormattedDate().replace(/"/g, "").trim();
-            var yesterday = new Date(now);
-            yesterday.setDate(yesterday.getDate() - 1);
-            var yy = yesterday.getFullYear();
-            var mm = ('0' + (yesterday.getMonth() + 1)).slice(-2);
-            var dd = ('0' + yesterday.getDate()).slice(-2);
-            var yesterdayFormatted = yy + '_' + mm + '_' + dd;
-
-            if (nowHour < programStartHour - PRE_EMISSION_GUARD_HOURS) {
-                getUtils().log('🕐 [TimeGuard] ' + shortProg + ': ' + nowHour.toFixed(1) + 'h < ' + (programStartHour - PRE_EMISSION_GUARD_HOURS).toFixed(1) + 'h → AHIER', 'DEBUG');
-                return { dateDir: existingDateDir || yesterdayFormatted, action: 'yesterday', waitMsg: null };
-            }
-
-            if (nowHour < programStartHour) {
-                var waitMin = Math.ceil((programStartHour - nowHour) * 60);
-                var startTimeStr = Math.floor(programStartHour) + ':' + ('0' + Math.round((programStartHour % 1) * 60)).slice(-2);
-                var waitMsg = 'ESPERANT EMISSIÓ ' + startTimeStr + '... ~' + waitMin + ' min';
-                getUtils().log('🚫 [TimeGuard] ' + shortProg + ': ' + nowHour.toFixed(1) + 'h < ' + programStartHour.toFixed(1) + 'h (inici). Bloqueig. ' + waitMsg, 'INFO');
-                return { dateDir: todayFormatted, action: 'block', waitMsg: waitMsg };
-            }
-
-            getUtils().log('🕐 [TimeGuard] ' + shortProg + ': ' + nowHour.toFixed(1) + 'h ≥ ' + programStartHour.toFixed(1) + 'h → AVUI', 'DEBUG');
-            return { dateDir: existingDateDir || todayFormatted, action: 'today', waitMsg: null };
         },
 
         async checkContext() {
@@ -80,7 +113,8 @@
         
             // 📍 DEBOUNCE
             const now = Date.now();
-            if (now - _lastCheckAt < 1000) return;
+            const _opts = (arguments && arguments.length) ? arguments[0] : null;
+            if (!(_opts && _opts.force) && now - _lastCheckAt < 1000) return;
             _lastCheckAt = now;
         
             try {
@@ -103,6 +137,7 @@
                     getUtils().log('🔄 [checkContext] Programa canviat (' + lastProg + ' → ' + progId + '). Resetejant dateDir.', 'DEBUG');
                     if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.dateDir = null;
+                        window.FASTPASS_UI.State.workTarget = 'today';
                     }
                 }
                 // Resetear dateDir també si canvia el bloc dins del mateix programa.
@@ -113,9 +148,9 @@
                     getUtils().log('🔄 [checkContext] Bloc canviat (' + lastBloc + ' → ' + elBloc.value + '). Resetejant dateDir.', 'DEBUG');
                     if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.dateDir = null;
+                        window.FASTPASS_UI.State.workTarget = 'today';
                     }
                 }
-                const existingDateDir = (window.FASTPASS_UI && window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir);
                 // Guardar programa actual per a la següent comparació
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State && progId) {
                     window.FASTPASS_UI.State.lastProgram = progId;
@@ -128,25 +163,11 @@
                     config: config,
                     progData: config.mapeoProgramas[elProg.value],
                     bloque: elBloc.value,
-                    dateDir: existingDateDir || getUtils().getFormattedDate().replace(/"/g, "").trim()
+                    dateDir: this._targetDateDir()
                 };
 
-                // ── TimeGuard (2026-07-01): Determinar data de treball segons
-                // l'hora d'emissió del programa ──
-                var timeGuard = this._getValidDateDir(ctx.progData, existingDateDir);
-                ctx.dateDir = timeGuard.dateDir;
-
-                if (timeGuard.action === 'block') {
-                    this.updateButton('WAITING', {
-                        msg: timeGuard.waitMsg,
-                        config: config,
-                        progData: ctx.progData,
-                        bloque: ctx.bloque,
-                        dateDir: ctx.dateDir,
-                        name: 'WAITING'
-                    });
-                    return;
-                }
+                // MECÀNICA D'INICI (2026-09-04): data explícita HOY (o AHIR amb Ctrl+clic).
+                getUtils().log('[dateDir] Data de treball: ' + ctx.dateDir + ((window.FASTPASS_UI.State && window.FASTPASS_UI.State.workTarget === 'yesterday') ? ' (AHIR, mode correcció)' : ' (HOY)'), 'DEBUG');
 
                 // Actualizar estado global
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
@@ -164,169 +185,68 @@
                 }
             
                 // 3. LÒGICA DE NEGOCI (Usant el teu Scanner.js)
-                const progKey = ctx.progData.archivo_wott || ctx.progData.archivo;
+                const progKey = ctx.progData.wott || ctx.progData.archivo;
                 let existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
                     projectFiles,
                     progKey,
                     ctx.bloque
                 );
 
-                // ── FIX A1: Si no s'ha trobat projecte al dateDir actual, escanejar
-                // directoris germans (DD_MM_YYYY) sota progData.directorio. Això resol
-                // el cas on State.dateDir és del programa anterior o de la data del sistema,
-                // però el projecte real està en un altre directori de data.
+                // ── MECÀNICA D'INICI (2026-09-04) ────────────────────────────────
+                // Estats del botó: MASSA D'HORA / ESPERANT / CREAR / ACTUALITZAR.
+                // Si el projecte del dia ja existeix → ACTUALITZAR (s'obri/recarrega);
+                // només quan NO existeix projecte s'avalua si el dia té material útil.
+                let semaforoData = {
+                    esc: { found: false, ready: false },
+                    mp4: false, wot: false, srt: false
+                };
+                let earlyState = null;
+                const readerE = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                if (readerE) {
+                    const datePrefixD = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                    try {
+                        semaforoData.esc = await readerE.getStatus(ctx.progData.archivo, ctx.bloque, datePrefixD);
+                    } catch (eSt) {
+                        getUtils().log('⚠️ [checkContext] Error llegint estat de l\'escaleta: ' + eSt.message, 'DEBUG');
+                    }
+                }
+
                 if (!existingProjectName) {
-                    const parentPath = config.rutas.destinoBase + ctx.progData.directorio + "/";
-                    const dateDirs = await getUtils().readFolder(parentPath);
-                    if (dateDirs && dateDirs.length > 0) {
-                        // Filtrar només directoris amb format YYYY_MM_DD
-                        const datePattern = /^\d{4}_\d{2}_\d{2}$/;
-                        const candidateDirs = dateDirs
-                            .filter(function(d) { return datePattern.test(d.name); })
-                            .sort(function(a, b) { return new Date(b.mtime) - new Date(a.mtime); });
-                        
-                        getUtils().log("🔍 [checkContext] Escanejant " + candidateDirs.length + " directoris germans per trobar projecte " + progKey + "_" + ctx.bloque, "DEBUG");
-                        
-                        for (var di = 0; di < candidateDirs.length; di++) {
-                            // 🔒 FIX B1: Només acceptar directoris dins de la finestra temporal
-                            // (avui, o ahir si hora < 4 AM). Evita trobar projectes obsolets
-                            // de dies anteriors quan el dateDir actual està buit.
-                            if (!getUtils().isDateDirInTemporalWindow(candidateDirs[di].name)) {
-                                continue;
-                            }
-                            const candidatePath = parentPath + candidateDirs[di].name + "/";
-                            const candidateFiles = await getUtils().readFolder(candidatePath);
-                            if (candidateFiles && candidateFiles.length > 0) {
-                                const match = FASTPASS_UI.Logic.Scan.selectedProject(
-                                    candidateFiles, progKey, ctx.bloque
-                                );
-                                if (match) {
-                                    // Trobat! Actualitzar dateDir i reescanejar
-                                    const oldDateDir = ctx.dateDir;
-                                    ctx.dateDir = candidateDirs[di].name;
-                                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
-                                        window.FASTPASS_UI.State.dateDir = candidateDirs[di].name;
-                                    }
-                                    existingProjectName = match;
-                                    folderPath = candidatePath;
-                                    projectFiles = candidateFiles;
-                                    getUtils().log("✅ [checkContext] Projecte trobat a dir germà: " + candidateDirs[di].name + " (dateDir corregit des de " + oldDateDir + ")", "DEBUG");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // ── FIX A2: Si encara no s'ha trobat, intentar deduir dateDir des de
-                    // l'escaleta JSON (font única de veritat). Si l'escaleta té data d'emissió
-                    // diferent de la del sistema o State, es corregeix i es re-escaneja.
-                    if (!existingProjectName) {
+                    // Ingesta en curs = el cleanFeed encara no ha arribat al TC de sortida del bloc.
+                    let ingestaEnCurs = false;
+                    if (semaforoData.esc && semaforoData.esc.mediaStop && semaforoData.esc.blockOut && readerE) {
                         try {
-                            const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-                            if (reader) {
-                                var datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
-                                const escMeta = await reader.findLatest(ctx.progData.archivo, ctx.bloque, datePrefix);
-                                if (escMeta && escMeta.filename) {
-                                    const emissionDate = getUtils().extractDateFromEscaletaFilename(escMeta.filename);
-                                    // BUG #2 FIX (2026-06-09): Validar que la data extreta de l'escaleta
-                                    // estigui dins de la finestra temporal (avui o ahir si <4AM).
-                                    // Evita que FIX A2 sobrescrigui dateDir amb una data obsoleta
-                                    // (ex: JSON del 03/06 quan avui és 08/06).
-                                    // FIX A2 no té mtime (data extreta de JSON), però el fallback date-based
-                                    // ara accepta ahir sense restricció horària
-                                    if (emissionDate && emissionDate !== ctx.dateDir && getUtils().isDateDirInTemporalWindow(emissionDate)) {
-                                        const oldDateDir = ctx.dateDir;
-                                        ctx.dateDir = emissionDate;
-                                        if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
-                                            window.FASTPASS_UI.State.dateDir = emissionDate;
-                                        }
-                                        // Re-escanejar amb el dateDir corregit
-                                        folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
-                                        projectFiles = await getUtils().readFolder(folderPath);
-                                        existingProjectName = FASTPASS_UI.Logic.Scan.selectedProject(
-                                            projectFiles, progKey, ctx.bloque
-                                        );
-                                        getUtils().log("📅 [checkContext] dateDir corregit des d'escaleta: " + oldDateDir + " → " + emissionDate + (existingProjectName ? " (projecte trobat!)" : " (sense projecte)"), "DEBUG");
-                                    }
-                                }
-                            }
-                        } catch (eDate) {
-                            getUtils().log("⚠️ [checkContext] Error deduint dateDir d'escaleta: " + eDate.message, "DEBUG");
-                        }
+                            const stopSecs = readerE.tcToSeconds(semaforoData.esc.mediaStop);
+                            const outSecs = readerE.tcToSeconds(semaforoData.esc.blockOut);
+                            ingestaEnCurs = (stopSecs < outSecs);
+                        } catch (eIng) { /* TC no comparable */ }
+                    }
+
+                    if (!semaforoData.esc || !semaforoData.esc.found) {
+                        // Sense JSON del dia D: hi ha MP4/SRT o chyrons del dia (ingesta/preparació en curs)?
+                        let mediaD = null;
+                        let wotsD = null;
+                        const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
+                        try { if (sc && sc.mediaAssets) mediaD = await sc.mediaAssets(ctx); } catch (eM) { /* sense xarxa */ }
+                        try { if (sc && sc.wotts) wotsD = await sc.wotts(ctx); } catch (eW) { /* sense xarxa */ }
+                        const hasIngesta = !!(mediaD && (mediaD.mp4 || mediaD.srt));
+                        const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
+                        earlyState = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
+                    } else if (!semaforoData.esc.ready || ingestaEnCurs) {
+                        earlyState = 'ESPERANT';
                     }
                 }
-                // ── FIX A3 (2026-06-29): Validar JSON suficientment recent ──
-                // Si el bloc encara s'està emetent (cap JSON posterior al final del bloc),
-                // mostrar missatge d'espera en lloc de permetre NEW/LOAD amb dades obsoletes.
-                // Guarda de 22h: si avui no hi ha dades (programa futur), intentar ahir.
-                var jsonValid = true;
-                var waitingMsg = null;
-                try {
-                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-                    if (reader && reader.findLatestValid) {
-                        var datePrefixA3 = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
 
-                        // Intent 1: datePrefix actual (avui)
-                        var validResult = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixA3);
-
-                        // ── Guarda de 22h: si avui falla, intentar ahir ──
-                        // Quan falten >2h per a l'emissió del programa d'avui,
-                        // els JSONs són del dia anterior. Ex: obrint TNM a les 12:00,
-                        // l'emissió és a les 14:30 → dateDir=today però JSONs=today no tenen dades.
-                        if (!validResult || !validResult.valid) {
-                            var yesterday = new Date();
-                            yesterday.setDate(yesterday.getDate() - 1);
-                            var yyyy = yesterday.getFullYear();
-                            var mm = ('0' + (yesterday.getMonth() + 1)).slice(-2);
-                            var dd = ('0' + yesterday.getDate()).slice(-2);
-                            var datePrefixYesterday = '' + yyyy + mm + dd;
-
-                            if (datePrefixA3 !== datePrefixYesterday) {
-                                getUtils().log('🔁 [checkContext] FIX A3: intentant ahir (' + datePrefixYesterday + ') per guarda 22h...', 'DEBUG');
-                                var validResultYesterday = await reader.findLatestValid(ctx.progData.archivo, ctx.bloque, datePrefixYesterday);
-                                if (validResultYesterday && validResultYesterday.valid) {
-                                    validResult = validResultYesterday;
-                                    // Corregir dateDir a ahir
-                                    var emissionDateYesterday = yyyy + '_' + mm + '_' + dd;
-                                    ctx.dateDir = emissionDateYesterday;
-                                    if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
-                                        window.FASTPASS_UI.State.dateDir = emissionDateYesterday;
-                                    }
-                                    getUtils().log('📅 [checkContext] dateDir corregit a ahir: ' + emissionDateYesterday, 'DEBUG');
-                                }
-                            }
-                        }
-
-                        if (validResult && !validResult.valid) {
-                            jsonValid = false;
-                            if (validResult.estimatedWaitSec !== null && validResult.estimatedWaitSec > 0) {
-                                var waitMin = Math.ceil(validResult.estimatedWaitSec / 60);
-                                waitingMsg = 'ESPERANT DADES... ~' + waitMin + ' min';
-                                getUtils().log('⏳ [checkContext] Bloc ' + ctx.bloque + ' encara emetent-se. Espera estimada: ~' + waitMin + ' min (fi ítem ' + (validResult.num || '?') + ': ' + validResult.source + ')', 'INFO');
-                            } else if (validResult.error) {
-                                waitingMsg = 'SENSE DADES';
-                                getUtils().log('⚠️ [checkContext] ' + validResult.error, 'DEBUG');
-                            } else {
-                                waitingMsg = 'ESPERANT DADES...';
-                            }
-                        }
-                    }
-                } catch (eValid) {
-                    getUtils().log('⚠️ [checkContext] Error validant JSON: ' + eValid.message, 'DEBUG');
-                }
-
-                if (!jsonValid) {
-                    this.updateButton('WAITING', {
-                        msg: waitingMsg || 'ESPERANT DADES...',
-                        config: config,
-                        progData: ctx.progData,
-                        bloque: ctx.bloque,
-                        dateDir: ctx.dateDir,
-                        name: 'WAITING'
-                    });
+                if (earlyState) {
+                    const data = { ...ctx, name: earlyState };
+                    data.semaforo = semaforoData;
+                    this._lastConclusion = earlyState;
+                    this._lastButtonData = data;
+                    this.updateLights(elProg.value, ctx.bloque, null, false, semaforoData);
+                    this.updateButton(earlyState, data);
                     return;
                 }
-            
+
                 let conclusion = 'NEW';
                 let lockOwner = null;
                 let lockFile = null;
@@ -415,20 +335,9 @@
             
                 getUtils().log("🔍 Conclusión contexto: " + conclusion + (existingProjectName ? " (projecte: " + existingProjectName + ")" : ""), "DEBUG");
                 
-                // 🚦 [NOU] SEMÀFOR: Recollir estats d'assets
-                let semaforoData = {
-                    esc: { found: false, ready: false },
-                    mp4: false, wot: false, srt: false
-                };
-
+                // [NOU] SEMAFOR: completar estats d'assets (esc ja avaluat a la fase anterior)
                 try {
-                    // 1. Escaleta JSON
-                    const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
-                    if (reader) {
-                        semaforoData.esc = await reader.getStatus(ctx.progData.archivo, ctx.bloque);
-                    }
-
-                    // 2. Assets al projecte (només si el projecte està obert o en UPDATE)
+                    // 2. Assets al projecte (nomes si el projecte esta obert o en UPDATE)
                     if (conclusion === 'UPDATE' || conclusion === 'GO') {
                         const [hasMp4, chyItemsRaw, hasSrt, mediaFiles] = await Promise.all([
                             getUtils().callJSX("hasClips(1, 'video')"),
@@ -485,7 +394,9 @@
                     data.isLockOwned = lockOwner.trim() === ctx.config.autor.trim();
                 }
                 
-                this.updateLights(ctx.programa, ctx.bloque, null, (conclusion === 'UPDATE'), semaforoData);
+                this.updateLights(elProg.value, ctx.bloque, null, (conclusion === 'UPDATE'), semaforoData);
+                this._lastConclusion = conclusion;
+                this._lastButtonData = data;
                 this.updateButton(conclusion, data);
             
             } catch (e) {
@@ -565,27 +476,36 @@
 
             switch (state) {
                 case 'NEW':
-                    btn.innerText = "NOU PROJECTE";
-                    btn.className = "square-large btn-new"; // Asegúrate que btn-new existe o usa estilos inline
-                    btn.onclick = function() { 
-                        FASTPASS_UI.Workflows.MainButton.runMainAction('NEW', data); 
+                    btn.innerText = "CREAR";
+                    btn.className = "square-large btn-new";
+                    btn.onclick = function (ev) {
+                        FASTPASS_UI.Core.Context._onMainClick(ev, 'NEW', data);
                     };
                     break;
                 case 'UPDATE':
-                    btn.innerText = "ACTUALITZAR";
-                    btn.onclick = function() { 
-                        FASTPASS_UI.Workflows.MainButton.runMainAction('UPDATE', data); 
-                    };
-                    break;
                 case 'GO':
-                    btn.innerText = "ANAR AL PROJECTE";
-                    btn.onclick = function() { 
-                        FASTPASS_UI.Workflows.MainButton.runMainAction('GO', data); 
+                case 'LOAD':
+                    btn.innerText = "ACTUALITZAR";
+                    btn.className = "square-large btn-new";
+                    btn.onclick = function (ev) {
+                        FASTPASS_UI.Core.Context._onMainClick(ev, state, data);
                     };
                     break;
-                case 'LOAD':
-                    btn.innerText = "OBRIR";
-                    btn.onclick = () => FASTPASS_UI.Workflows.MainButton.runMainAction('LOAD', data);
+                case 'MASSA':
+                    btn.innerText = "MASSA D'HORA";
+                    btn.className = "square-large";
+                    btn.title = "Avui encara no hi ha res publicat. Ctrl+clic = treballar amb AHIR.";
+                    btn.onclick = function (ev) {
+                        FASTPASS_UI.Core.Context._onMainClick(ev, null, data);
+                    };
+                    break;
+                case 'ESPERANT':
+                    btn.innerText = "ESPERANT...";
+                    btn.className = "square-large";
+                    btn.title = "La ingesta encara no ha arribat al TC final. Ctrl+clic = treballar amb AHIR.";
+                    btn.onclick = function (ev) {
+                        FASTPASS_UI.Core.Context._onMainClick(ev, null, data);
+                    };
                     break;
                 case 'WAITING':
                     btn.innerText = data.msg || "ESPERANT...";
@@ -595,7 +515,7 @@
                     btn.disabled = false;
                     btn.style.border = "1px solid #dc3545";
                     btn.style.color = "#dc3545";
-                    btn.onclick = function() {
+                    btn.onclick = function(ev) {
                         const forceData = { ...data, forceOverride: true };
                         FASTPASS_UI.Workflows.MainButton.runMainAction('LOAD', forceData);
                     };

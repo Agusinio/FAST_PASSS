@@ -89,8 +89,9 @@
 
                 var validFiles = this._filterMediaByDate(allFiles, datePrefix, prefix);
                 if (validFiles.length === 0) {
-                    utils.log('⚠️ [SCAN:media] Cap MP4/SRT amb data ' + datePrefix + '. Intentant sense filtre de data...', 'DEBUG');
-                    validFiles = this._filterMediaByDate(allFiles, null, prefix);
+                    // MECÀNICA D'INICI (2026-09-04): NO es reintenta sense filtre de data.
+                    // Si no hi ha MP4/SRT de la data de treball, es retorna buit (mai d'altre dia).
+                    utils.log('⚠️ [SCAN:media] Cap MP4/SRT amb data ' + datePrefix + '. Retornant buit (no es busca en altres dies).', 'DEBUG');
                 }
 
                 if (validFiles.length === 0) return { mp4: null, srt: null };
@@ -175,10 +176,8 @@
                     var name = f.name.toUpperCase();
                     return name.indexOf(prefix) !== -1 && name.endsWith('.MOV');
                 });
-                const freshFiles = this._discardOld(filtered, ctx.config.guarda || 22);
-    
-                if (freshFiles.length === 0) return { tema: 'PENDENT', list: [] };
-                filtered = freshFiles;
+                // MECÀNICA D'INICI (2026-09-04): eliminada la guarda per mtime (22h).
+                // El filtre per data del projecte (a continuació) és l'únic criteri vàlid.
 
                 // ---- FILTRE PER DATA DEL PROJECTE (2026-09-02) ----
                 // La guarda per mtime (22h) NO es suficient: un chyron d'ahir
@@ -276,7 +275,9 @@
                     return name.indexOf(prefix) !== -1 && name.endsWith('.PNG') && name.indexOf('TEMA-TITOL') !== -1;
                 });
     
-                let freshFiles = this._discardOld(filtered, ctx.config.guarda || 22);
+                // MECÀNICA D'INICI (2026-09-04): eliminada la guarda per mtime (22h);
+                // el filtre per data (a continuació) ja restringeix al dia de treball.
+                let freshFiles = filtered;
 
                 // ---- FILTRE PER DATA DEL PROJECTE (2026-09-02) ----
                 // Mateix criteri que Scan.wotts: nomes portades de la data de

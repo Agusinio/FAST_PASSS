@@ -135,11 +135,15 @@
                 return null;
             }
 
-            // Helper: extreu YYYYMMDD del prefix del nom (nou format)
+            // Helper: extreu YYYYMMDD del nom (format nou: prefix; format antic: penúltim segment)
             function _extractDateFromName(name) {
                 var parts = name.split('_');
                 if (parts.length >= 1 && /^\d{8}$/.test(parts[0])) {
-                    return parts[0]; // "20260618"
+                    return parts[0]; // "20260618" (format nou)
+                }
+                // Format antic: TN_VESPRE_20260618_215504.json → data al penúltim segment
+                if (parts.length >= 2 && /^\d{8}$/.test(parts[parts.length - 2]) && /^\d{6}$/.test(parts[parts.length - 1])) {
+                    return parts[parts.length - 2];
                 }
                 return null;
             }
@@ -399,6 +403,8 @@
             function _extractDateFromName(name) {
                 var parts = name.split('_');
                 if (parts.length >= 1 && /^\d{8}$/.test(parts[0])) return parts[0];
+                // Format antic: data al penúltim segment (TN_VESPRE_20260618_215504.json)
+                if (parts.length >= 2 && /^\d{8}$/.test(parts[parts.length - 2]) && /^\d{6}$/.test(parts[parts.length - 1])) return parts[parts.length - 2];
                 return null;
             }
 
@@ -516,10 +522,11 @@
      * getStatus: Obté un estat resumit per al semàfor.
      * @param {string} programArchivo
      * @param {string} blockId
+     * @param {string} [datePrefix] - Prefix YYYYMMDD per restringir al dia de treball.
      * @returns {Promise<{ found: boolean, ready: boolean, timestamp: string }>}
      */
-    ER.getStatus = async function (programArchivo, blockId) {
-        var latest = await this.findLatest(programArchivo, blockId);
+    ER.getStatus = async function (programArchivo, blockId, datePrefix) {
+        var latest = await this.findLatest(programArchivo, blockId, datePrefix);
         if (!latest) return { found: false, ready: false };
 
         var data = await this.load(latest.path);

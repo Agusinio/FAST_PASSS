@@ -440,26 +440,19 @@ function applySliderLimits() {
                     // escaletaId es opcional: si no ve de config, es dedueix per programa dins de fetchNewEscaleta
                     const blocId = elBloc.value;
 
-                    // ── FIX FOTO (2026-09-02) ──────────────────────────────────
-                    // La foto sempre ha de ser de l'emissió CORRENT. Si el TimeGuard
-                    // va fixar State.dateDir a AHIR durant la matinada (o en una
-                    // sessió anterior) i ara ja estem en horari d'emissió d'avui, la
-                    // consulta a digition tornaria l'escaleta d'ahir i la guardaria al
-                    // directori d'ahir. Per això es torna a resoldre la data amb el
-                    // TimeGuard (sense arrossegar la data obsoleta) i es sincronitza
-                    // State.dateDir perquè la resta del flujo la faci servir.
+                    // MECANICA D'INICI (2026-09-04): la foto es guarda a la DATA DE
+                    // TREBALL explicita (HOY per defecte; AHIR en mode correccio amb
+                    // Ctrl+clic). Eliminat el TimeGuard FOTO (deduccio per hora).
                     let fotoDateDir = utils.getFormattedDate().replace(/"/g, "").trim();
                     try {
-                        const oldDateDir = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.dateDir) || null;
                         const coreCtx = window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
-                        if (coreCtx && coreCtx._getValidDateDir) {
-                            // null com a existingDateDir → no arrossegar data obsoleta
-                            const tg = coreCtx._getValidDateDir(progData, null);
-                            if (tg && tg.dateDir) fotoDateDir = tg.dateDir;
-                            utils.log('📅 [Fetch] TimeGuard FOTO: dateDir ' + fotoDateDir + ' (action=' + (tg && tg.action) + ') | State tenia: ' + (oldDateDir || 'null'), 'INFO');
+                        if (coreCtx && coreCtx._targetDateDir) {
+                            fotoDateDir = coreCtx._targetDateDir();
+                            const wt = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.workTarget) || 'today';
+                            utils.log('[Fetch] FOTO data de treball: ' + fotoDateDir + ' (workTarget=' + wt + ')', 'INFO');
                         }
                     } catch (eDate) {
-                        utils.log('⚠️ [Fetch] No s\'ha pogut validar la data (TimeGuard): ' + eDate.message, 'WARN');
+                        utils.log('[Fetch] No s\'ha pogut resoldre la data de treball: ' + eDate.message, 'WARN');
                     }
                     if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.dateDir = fotoDateDir;
