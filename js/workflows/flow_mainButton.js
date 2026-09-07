@@ -81,6 +81,7 @@
                                     return ta - tb;
                                 });
                                 var firstStructural = null;
+                                var firstOffOfd = null;
                                 for (var li = 0; li < lines.length; li++) {
                                     var item = lines[li];
                                     if (!item.titol) continue;
@@ -98,6 +99,10 @@
                                     if (!firstStructural) {
                                         firstStructural = { titol: item.titol, num: item.num };
                                     }
+                                    var fontU = String(item.font || '').toUpperCase().trim();
+                                    if (!firstOffOfd && (fontU === 'OFF' || fontU === 'OFD')) {
+                                        firstOffOfd = { titol: item.titol, num: item.num, font: fontU };
+                                    }
                                     if (!isReserved && upper.length > 2) {
                                         sanitizedTheme = getUtils().sanitizeName(item.titol).toUpperCase();
                                         log('🏷️ [Theme] Tema extret del JSON: "' + sanitizedTheme + '" (item ' + (item.num || '?') + ')');
@@ -107,22 +112,32 @@
                                 // ── Reconstrucció de tema (2026-09-07) ─────────────────
                                 // Si tots els items estructurals del bloc tenen títol amb
                                 // token reservat (ex: V1 = GF/INTRO/DIFERIT/IPD/INSERT),
-                                // es pren el primer estructural i se li treu el prefix
-                                // reservat, per no acabar amb el fallback genèric INTRO.
-                                if (!sanitizedTheme && firstStructural) {
-                                    var cleanT = firstStructural.titol;
-                                    for (var ri2 = 0; ri2 < RESERVED_THEMES.length; ri2++) {
-                                        var patT = RESERVED_THEMES[ri2];
-                                        var reT = new RegExp('^[+*\\-\\s]*' + patT + '[\\s\\-\\*:+]*', 'i');
-                                        if (reT.test(cleanT)) {
-                                            cleanT = cleanT.replace(reT, '').trim();
-                                            break;
+                                // es prioritza l'item OFF/OFD del bloc; si no n'hi ha,
+                                // el primer estructural. En tots dos casos s'elimina del
+                                // títol qualsevol PREFIX que sigui paraula reservada.
+                                if (!sanitizedTheme && (firstOffOfd || firstStructural)) {
+                                    var temaSrc = firstOffOfd || firstStructural;
+                                    var cleanT = temaSrc.titol;
+                                    for (var pass = 0; pass < 5; pass++) {
+                                        var before = cleanT;
+                                        cleanT = cleanT.replace(/^[+*\-:\.\s]+/, '').trim();
+                                        for (var ri2 = 0; ri2 < RESERVED_THEMES.length; ri2++) {
+                                            var patT = RESERVED_THEMES[ri2];
+                                            var upT = cleanT.toUpperCase();
+                                            if (upT.indexOf(patT.toUpperCase()) === 0) {
+                                                var restT = cleanT.substring(patT.length);
+                                                if (restT === '' || /^[\s+*\-:.\/]/.test(restT)) {
+                                                    cleanT = restT.trim();
+                                                    break;
+                                                }
+                                            }
                                         }
+                                        if (cleanT === before) break;
                                     }
-                                    cleanT = cleanT.replace(/^[+*\-:\s]+/, '').trim();
+                                    cleanT = cleanT.replace(/^[+*\-:\.\s]+/, '').replace(/[+*\-:\s]+$/, '').trim();
                                     if (cleanT.length > 2) {
                                         sanitizedTheme = getUtils().sanitizeName(cleanT).toUpperCase();
-                                        log('🏷️ [Theme] Tema reconstruït des del 1r estructural: "' + sanitizedTheme + '" (item ' + (firstStructural.num || '?') + ')');
+                                        log('🏷️ [Theme] Tema reconstruït des del ' + (temaSrc.font || '1r estructural') + ': "' + sanitizedTheme + '" (item ' + (temaSrc.num || '?') + ')');
                                     }
                                 }
                             }

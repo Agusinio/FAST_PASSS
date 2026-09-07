@@ -312,9 +312,10 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 **Causa:** el bloque V1 de la escaleta del 06 tiene sus items estructurales con títulos que empiezan por **tokens reservados** (`GF FOTO…`, `intro`, `DIFERIT…`, `IPD…`, `INSERT…`) → el extractor de tema del JSON no encontraba ningún título "limpio" y caía al fallback; y el fallback del Scanner (posición 5 del nombre del `.mov`: `Wott_TNV_v1_11i_00.01_intro_…`) devolvía `intro` → `INTRO`.
 
-**Fix (`flow_mainButton.js _runNew`):** si todos los items estructurales del bloque están reservados, se toma el **primer estructural** y se le **quita el prefijo reservado** (`DIFERIT CRISTINA SOLIAS CONVERSES UCRAÏNA…` → `CRISTINA SOLIAS CONVERSES UCRAÏNA I RÚSSIA`) → nombre real del tema. Log: `[Theme] Tema reconstruït des del 1r estructural`.
+**Fix (`flow_mainButton.js _runNew`):** si todos los items estructurales del bloque están reservados, se elige el **item `OFF`/`OFD`** del bloque (por `font`); si no hay, el **primer estructural**. En ambos casos se eliminan del título **todos los prefijos reservados** (`+++IPD UCRAÏNA+++` → `UCRAÏNA`; `DIFERIT CRISTINA SOLIAS CONVERSES UCRAÏNA I RÚSSIA` → `CRISTINA SOLIAS…`). Log: `[Theme] Tema reconstruït des del OFD/…`.
 
 **Nota log:** los mensajes `[Theme]` no aparecían en `FASTPASS.log` porque `_setLogPath` (más abajo en `_runNew`) resetea el archivo después de la extracción del tema.
+
 
 **Errores JSX `ERR:MOVE_FAILED`:** son el intento 1 (mover por nombre al bin CHY) que falla por la indexación del root recién importado; el intento 2 (`moveByID`) funciona y deja los rótulos en CHY. Se ha limpiado el log: ahora solo avisa si fallan ambos.
 
