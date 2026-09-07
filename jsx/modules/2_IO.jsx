@@ -40,7 +40,9 @@ FASTPASS.IO = (function () {
                         name: f.name,
                         path: f.fsName,
                         modified: f.modified.getTime(),
-                        created: f.created ? f.created.getTime() : f.modified.getTime(),
+                        // Data de CREACIÓ real. Mai fer servir modified com a created:
+                        // el mtime del NAS pot estar desplaçat per processos nocturns.
+                        created: f.created ? f.created.getTime() : 0,
                         size: sz
                     });
                 }

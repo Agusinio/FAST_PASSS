@@ -287,7 +287,12 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 **Fix aplicado (Scanner.wotts / Scanner.portadas):** datación por nombre → `created` → `mtime`; y si **no se puede datar, se DESCARTÁ** (con log `NO datables descartats`) en lugar de conservarse. Nunca se importa un rótulo de día incierto.
 
-**Unificación del mecanismo (2026-09-07, v2):**
+**Causa raíz definitiva (2026-09-07, v3) — mtime desplazado por proceso nocturno:**
+- Todos los `.mov` del NAS tienen `LastWriteTime` (mtime) = **02:31 del día siguiente** a su creación (los del 05 → 06-02:31; los del 06 → 07-02:31). Algún proceso nocturno toca los ficheros.
+- `Utils.readFolder` usaba `created = creationTime || mtime`; como CEP no expone `creationTime`, databa por **mtime desplazado +1 día** → al pedir el día 06 entraban los del 05 (mtime=06) y se descartaban los del 06 (mtime=07).
+- **Fix**: el filtrado usa **solo la fecha/hora de CREACIÓN real** (`File.created` en ExtendScript / `creationTime` en CEP). `Utils.readFolder` en rutas UNC lee siempre vía JSX (`scanDirectory` → `File.created`); `File.created` nunca cae a `modified`; `Scan._fileDateYYYYMMDD` ya no usa `mtime` como fuente.
+**Unificación del mecanismo (v2):**
+
 - **Filtro único**: nuevo `Scan.filterByWorkDate(files, dateDir)` (mecanismo único de datación y filtrado) usado por `Scan.wotts`, `Scan.portadas` y la ingesta final.
 - **Ingesta única**: `Project.ingestAssets` (punto único por el que pasan NEW y UPDATE/GO/LOAD) aplica ahora un **filtro final de seguridad**: re-data cada rètol/portada contra `ctx.dateDir` justo antes de importar y descarta los que no sean del día (log `[INGEST] Filtre final wotts/portades per data ...`).
 - **Robustez UNC**: `Utils.readFolder` completa con el listado JSX los `stat` que CEP no puede datar en rutas remotas (evita listas sin fecha → sin descartes por ignorancia).

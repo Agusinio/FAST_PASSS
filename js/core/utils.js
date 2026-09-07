@@ -219,82 +219,96 @@
         },
 
         readFolder: async function(path) {
-            // 1. Intentar con CEP (más rápido para rutas locales)
+            // ── FILTRAT PER DATA DE CREACIÓ (2026-09-07) ───────────────────────
+            // Els fitxers del NAS (wotts .mov, portades .png, SRT...) poden tenir el
+            // mtime DESPLAÇAT per processos nocturns (ex: 02:31 del dia següent).
+            // La data FIABLE és la de CREACIÓ (creationTime / File.created), que cap
+            // procés modifica. Per això en rutes UNC es llegeix SEMPRE via JSX
+            // (scanDirectory → File.created) i mai s'usa mtime com a created.
+            var isUnc = (path || '').indexOf('\\\\') === 0 || (path || '').indexOf('//') === 0;
+            if (isUnc) {
+                return await this._readFolderViaJsx(path);
+            }
+
+            // Rutes locals: CEP (més ràpid). creationTime directe; mai mtime com a created.
             var result = window.cep.fs.readdir(path);
-            
             if (result.err === 0) {
                 var filenames = result.data;
                 var filesWithStats = [];
-                var statFails = [];
-        
                 var folderPath = path.replace(/[\\/]*$/, "\\");
-        
+                var needCreated = [];
+
                 for (var i = 0; i < filenames.length; i++) {
                     var name = filenames[i];
                     var fullPath = folderPath + name;
-        
                     var stat = window.cep.fs.stat(fullPath);
-                    
-                    if (stat.err === 0) {
-                        filesWithStats.push({
-                            name: name,
-                            mtime: stat.data.mtime,
-                            created: stat.data.creationTime || stat.data.mtime
-                        });
-                    } else {
-                        filesWithStats.push({ name: name, mtime: 0, created: 0 });
-                        statFails.push(name);
-                    }
+                    var created = (stat.err === 0) ? stat.data.creationTime : null;
+                    filesWithStats.push({
+                        name: name,
+                        mtime: (stat.err === 0) ? stat.data.mtime : 0,
+                        created: created
+                    });
+                    if (!created || isNaN(created) || created === 0) needCreated.push(name);
                 }
 
-                // ── Robustesa UNC (2026-09-07) ──────────────────────────────────
-                // Si alguns stat han fallat (comú en rutes remotes), completem les
-                // dates via JSX (scanDirectory retorna modified) per no perdre la
-                // datació dels fitxers. Sense datació, el filtre per dia descartaria
-                // fitxers legítims o (abans del filtre dur) en colaria d'altres dies.
-                if (statFails.length > 0) {
-                    try {
-                        var jsonResult = await this.callJSX(`IO.scanDirectory('${this.escape(path)}')`);
-                        if (jsonResult && jsonResult !== "[]" && jsonResult.indexOf('ERR') !== 0) {
-                            var items = JSON.parse(jsonResult);
-                            var byName = {};
-                            for (var ii = 0; ii < items.length; ii++) byName[items[ii].name] = items[ii];
-                            for (var jj = 0; jj < filesWithStats.length; jj++) {
-                                if ((filesWithStats[jj].mtime === 0 || filesWithStats[jj].created === 0)
-                                    && byName[filesWithStats[jj].name]) {
-                                    var it = byName[filesWithStats[jj].name];
-                                    filesWithStats[jj].mtime = it.modified || 0;
-                                    filesWithStats[jj].created = it.created || it.modified || 0;
-                                }
+                // Si CEP no exposa creationTime (comú), completar amb File.created via JSX.
+                if (needCreated.length > 0) {
+                    var jsxMap = await this._scanDirectoryMap(path);
+                    if (jsxMap) {
+                        for (var j = 0; j < filesWithStats.length; j++) {
+                            var it2 = jsxMap[filesWithStats[j].name];
+                            if (!it2) continue;
+                            if (!filesWithStats[j].created || isNaN(filesWithStats[j].created) || filesWithStats[j].created === 0) {
+                                filesWithStats[j].created = it2.created || 0;
                             }
                         }
-                    } catch (eJsx) { /* el fallback per fitxers no és crític */ }
+                    }
                 }
                 return filesWithStats;
             } else {
-                // 2. Si CEP falla (error 3: acceso denegado o ruta UNC), usar ExtendScript
-                this.log(`⚠️ CEP error ${result.err} leyendo carpeta, intentando via JSX: ${path}`, "DEBUG");
-                try {
-                    var jsonResult = await this.callJSX(`IO.scanDirectory('${this.escape(path)}')`);
-                    if (jsonResult && jsonResult !== "[]") {
-                        var items = JSON.parse(jsonResult);
-                        // Convertir al formato esperado: { name, mtime }
-                        var converted = items.map(function(item) {
-                            return {
-                                name: item.name,
-                                mtime: item.modified || 0,
-                                created: item.created || item.modified || 0,
-                                size: item.size || 0
-                            };
-                        });
-                        return converted;
-                    }
-                    return [];
-                } catch (e) {
-                    this.log(`💥 Error en scanDirectory JSX: ${e.message}`, "ERROR");
-                    return [];
-                }
+                this.log(`CEP error ${result.err} leyendo carpeta, intentando via JSX: ${path}`, "DEBUG");
+                return await this._readFolderViaJsx(path);
             }
+        },
+
+        /**
+         * _scanDirectoryMap: Llista la carpeta via JSX (File.created) i la retorna
+         * com a mapa name → { modified, created, size }.
+         */
+        _scanDirectoryMap: async function(path) {
+            try {
+                var jsonResult = await this.callJSX(`IO.scanDirectory('${this.escape(path)}')`);
+                if (!jsonResult || jsonResult === "[]" || jsonResult.indexOf('ERR') === 0) return null;
+                var items = JSON.parse(jsonResult);
+                var map = {};
+                for (var k = 0; k < items.length; k++) {
+                    map[items[k].name] = {
+                        modified: items[k].modified || 0,
+                        created: items[k].created || 0,
+                        size: items[k].size || 0
+                    };
+                }
+                return map;
+            } catch (e) {
+                this.log(`💥 Error en scanDirectory JSX: ${e.message}`, "ERROR");
+                return null;
+            }
+        },
+
+        /**
+         * _readFolderViaJsx: Llegeix la carpeta completament via JSX (rutas UNC).
+         * created prové de File.created (data de creació real, fiable).
+         */
+        _readFolderViaJsx: async function(path) {
+            var jsxMap = await this._scanDirectoryMap(path);
+            if (!jsxMap) return [];
+            var out = [];
+            for (var name in jsxMap) {
+                if (!jsxMap.hasOwnProperty(name)) continue;
+                var it = jsxMap[name];
+                out.push({ name: name, mtime: it.modified, created: it.created, size: it.size });
+            }
+            return out;
         },
 
         /**

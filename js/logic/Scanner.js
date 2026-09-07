@@ -41,16 +41,17 @@
 
         /**
          * _fileDateYYYYMMDD: Data d'un fitxer (YYYYMMDD) per datar-lo.
-         * Ordre: nom del fitxer → created → mtime. Si no es pot datar → null.
-         * @param {Object} f - { name, created, mtime }
+         * FILTRAT PER DATA DE CREACIÓ (2026-09-07): es fa servir NOMÉS la data de
+         * creació real (el mtime del NAS pot estar desplaçat per processos nocturns).
+         * Ordre: nom del fitxer → created. Si no es pot datar → null.
+         * @param {Object} f - { name, created }
          */
         _fileDateYYYYMMDD: function (f) {
             if (!f) return null;
             var d = this._extractDateFromFileName(f.name);
             if (d) return d;
-            var raw = f.created || f.mtime;
-            if (raw) {
-                var cd = new Date(raw);
+            if (f.created) {
+                var cd = new Date(f.created);
                 if (!isNaN(cd.getTime())) {
                     return '' + cd.getFullYear() +
                         ('0' + (cd.getMonth() + 1)).slice(-2) +
