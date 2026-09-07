@@ -276,3 +276,21 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 - Confirmar token de proyecto (`wott`) como único (pregunta abierta §11).
 - `isDateDirInTemporalWindow` queda sin uso en el flujo de arranque (se mantiene por compatibilidad; candidata a eliminación en P9).
 
+
+---
+
+## 14. Incidente 2026-09-07 — wotts de otro día en el proyecto de ayer (fijado)
+
+**Síntoma:** el proyecto `Pruebas_TNV_V1_INTRO` (día 2026_09_06) importó al bin CHY los rótulos `Wott_TNV_v1_01_...PORT DE CEUTA...` cuyo `creationTime` es del **05/09** (los del tema UCRANIA del 06 son las piezas 11-13).
+
+**Causa raíz (código):** los `.mov` automáticos (`Wott_TNV_vX_...`) **no llevan la fecha en el nombre** (solo un código `.0057xxxx`). Tras eliminar `_discardOld` (guarda mtime 22h) en la integración de la mecánica HOY/AYER, la datación dependía solo de `created`; cuando `readFolder` no puede datar el archivo, el criterio anterior **"no datable → se conserva"** dejaba pasar rótulos de otros días (el NAS guarda juntos del 31/08 al 06/09).
+
+**Fix aplicado (Scanner.wotts / Scanner.portadas):** datación por nombre → `created` → `mtime`; y si **no se puede datar, se DESCARTÁ** (con log `NO datables descartats`) en lugar de conservarse. Nunca se importa un rótulo de día incierto.
+
+**Fix FOTO (escaleta_fetch.js + main.js):**
+- **Ctrl+FOTO** → genera la escaleta de **AHIER** (`utils.getYesterdayDateDir()`) en el directorio del día anterior (para comparar/corregir el proyecto de ayer).
+- `fetchNewEscaleta` **valida la respuesta**: si la API devuelve `[]`, `{}` o un JSON de error (`missatge`) → **no guarda** ningún `escaleta_on_demand_*` y avisa.
+- La hora de la consulta se toma del JSON **del mismo día** pedido (antes, del más reciente de cualquier día).
+
+**Pendiente de validar en Premiere:** re-crear/actualizar el proyecto del 06 con el nuevo filtro y comprobar que el bin CHY solo contiene los `Wott_TNV_v1_*` con `created = 2026-09-06` (los del 05 deben quedar descartados en el log).
+

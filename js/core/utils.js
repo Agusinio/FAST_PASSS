@@ -380,6 +380,19 @@
         },
 
         /**
+         * getYesterdayDateDir: Retorna la data del dia natural anterior (YYYY_MM_DD).
+         * MECÀNICA D'INICI (2026-09-04): usada pel Ctrl+clic (mode correcció) i Ctrl+FOTO.
+         * @returns {string} Ex: "2026_09_06"
+         */
+        getYesterdayDateDir: function() {
+            var d = new Date();
+            d.setDate(d.getDate() - 1);
+            var dd = ("0" + d.getDate()).slice(-2);
+            var mm = ("0" + (d.getMonth() + 1)).slice(-2);
+            return "" + d.getFullYear() + "_" + mm + "_" + dd;
+        },
+
+        /**
          * Valida que un dateDir (DD_MM_YYYY) estigui dins de la finestra
          * temporal permesa per a la cerca de projectes en directoris germans.
          *

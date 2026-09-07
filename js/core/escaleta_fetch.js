@@ -86,7 +86,8 @@
         try {
             var reader = window.FASTPASS_UI.EscaletaReader;
             if (reader && reader.findLatest && reader.load) {
-                var meta = await reader.findLatest(programArchivo, blockId);
+                var datePrefixHora = dateDir ? dateDir.replace(/_/g, '') : null; // mateix dia que la foto
+                var meta = await reader.findLatest(programArchivo, blockId, datePrefixHora);
                 if (meta) {
                     var jsonData = await reader.load(meta.path);
                     if (jsonData && jsonData.cleanFeed && jsonData.cleanFeed.mediaStart) {
@@ -115,6 +116,24 @@
 
             if (!rawResult || rawResult === '' || rawResult.indexOf('ERR') === 0) {
                 log('\u274C [ER:Fetch] Error a la crida API: ' + rawResult);
+                return null;
+            }
+
+            // ── Validació de resposta (2026-09-07) ─────────────────────────────
+            // Si l'API no té emissió per a la data/hora demanada retorna [] (o un
+            // JSON d'error { missatge }). En aquests casos NO es guarda cap
+            // escaleta_on_demand buida que pugui contaminar el directori del projecte.
+            var trimmedRaw = String(rawResult || '').trim();
+            var respuestaValida = false;
+            if (trimmedRaw && trimmedRaw !== '[]' && trimmedRaw !== '{}') {
+                try {
+                    var parsedRaw = JSON.parse(trimmedRaw);
+                    respuestaValida = !!(parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)
+                        && !parsedRaw.missatge && parsedRaw.escaleta && parsedRaw.cleanFeed);
+                } catch (ePars) { respuestaValida = false; }
+            }
+            if (!respuestaValida) {
+                log('\u274C [ER:Fetch] Resposta buida o no valida per a ' + dataStr + ' (hora ' + horaStr + '). No es guarda cap on_demand.', 'ERROR');
                 return null;
             }
 

@@ -414,7 +414,7 @@ function applySliderLimits() {
         // --- BOTÓ FER FOTO ESCALETA ---
         const btnFetchEscaleta = document.getElementById('btnFetchEscaleta');
         if (btnFetchEscaleta) {
-            btnFetchEscaleta.addEventListener('click', async function () {
+            btnFetchEscaleta.addEventListener('click', async function (ev) {
                 const reader = window.FASTPASS_UI.EscaletaReader;
                 const utils = window.FASTPASS_UI.Utils;
                 if (!reader || !reader.fetchNewEscaleta) {
@@ -440,17 +440,18 @@ function applySliderLimits() {
                     // escaletaId es opcional: si no ve de config, es dedueix per programa dins de fetchNewEscaleta
                     const blocId = elBloc.value;
 
-                    // MECANICA D'INICI (2026-09-04): la foto es guarda a la DATA DE
-                    // TREBALL explicita (HOY per defecte; AHIR en mode correccio amb
-                    // Ctrl+clic). Eliminat el TimeGuard FOTO (deduccio per hora).
-                    let fotoDateDir = utils.getFormattedDate().replace(/"/g, "").trim();
+                    // Ctrl+FOTO → foto de l'escaleta d'AHIR (per comparar/corregir el dia anterior).
+                    const useYesterdayFoto = !!(ev && (ev.ctrlKey || ev.metaKey));
+                    let fotoDateDir = useYesterdayFoto
+                        ? utils.getYesterdayDateDir()
+                        : utils.getFormattedDate().replace(/\"/g, "").trim();
                     try {
                         const coreCtx = window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
-                        if (coreCtx && coreCtx._targetDateDir) {
+                        if (coreCtx && coreCtx._targetDateDir && !useYesterdayFoto) {
                             fotoDateDir = coreCtx._targetDateDir();
-                            const wt = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.workTarget) || 'today';
-                            utils.log('[Fetch] FOTO data de treball: ' + fotoDateDir + ' (workTarget=' + wt + ')', 'INFO');
                         }
+                        const wt = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.workTarget) || 'today';
+                        utils.log('[Fetch] FOTO data de treball: ' + fotoDateDir + (useYesterdayFoto ? ' (Ctrl+FOTO = AHIR)' : ' (workTarget=' + wt + ')'), 'INFO');
                     } catch (eDate) {
                         utils.log('[Fetch] No s\'ha pogut resoldre la data de treball: ' + eDate.message, 'WARN');
                     }

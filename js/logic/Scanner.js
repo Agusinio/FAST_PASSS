@@ -184,29 +184,38 @@
                 // generat fa menys de 22h encara hi cap dins la guarda, de manera
                 // que s'importarien retols que NO pertanyen al projecte actual.
                 // Exigim que la data del fitxer (extreta del nom si el porta, o de
-                // la data de creacio com a fallback) coincideixi amb la data de
-                // treball del projecte (ctx.dateDir). Si no es pot datar el fitxer,
-                // es conserva per no trencar formats antics sense data al nom.
+                // la data de creacio/mtime com a fallback) coincideixi amb la data
+                // de treball del projecte (ctx.dateDir). Si no es pot datar, es
+                // DESCARTÀ (anti-contaminació: mai importar rètols d'un dia incert).
                 var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
                 if (dateTarget) {
                     var beforeCount = filtered.length;
                     var keep = [];
                     var droppedDate = [];
+                    var noDatables = [];
                     for (var wI = 0; wI < filtered.length; wI++) {
                         var fileDate = this._extractDateFromFileName(filtered[wI].name);
-                        if (!fileDate && filtered[wI].created) {
-                            var cd = new Date(filtered[wI].created);
+                        if (!fileDate && (filtered[wI].created || filtered[wI].mtime)) {
+                            var cd = new Date(filtered[wI].created || filtered[wI].mtime);
                             if (!isNaN(cd.getTime())) {
                                 fileDate = '' + cd.getFullYear() +
                                     ('0' + (cd.getMonth() + 1)).slice(-2) +
                                     ('0' + cd.getDate()).slice(-2);
                             }
                         }
-                        if (fileDate && fileDate !== dateTarget) { droppedDate.push(filtered[wI].name); }
-                        else { keep.push(filtered[wI]); }
+                        if (!fileDate) {
+                            // No datable ni per nom ni per created/mtime → es descarta
+                            // (anti-contaminació: mai importar rètols d'un dia incert).
+                            noDatables.push(filtered[wI].name);
+                        } else if (fileDate !== dateTarget) {
+                            droppedDate.push(filtered[wI].name);
+                        } else {
+                            keep.push(filtered[wI]);
+                        }
                     }
                     utils.log('[SCAN:wotts] Filtre per data projecte ' + dateTarget + ': ' + beforeCount + ' -> ' + keep.length +
-                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
+                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : '') +
+                        (noDatables.length ? ' (NO datables descartats: ' + noDatables.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
                     filtered = keep;
                     if (filtered.length === 0) {
                         utils.log('[SCAN:wotts] Cap chyron de la data del projecte (' + dateTarget + "). No s'importara cap retol.", 'WARN');
@@ -281,28 +290,36 @@
 
                 // ---- FILTRE PER DATA DEL PROJECTE (2026-09-02) ----
                 // Mateix criteri que Scan.wotts: nomes portades de la data de
-                // treball del projecte (ctx.dateDir). Data del nom (YYYYMMDD) o
-                // de la creacio com a fallback; si no es pot datar, es conserva.
+                // treball del projecte (ctx.dateDir). Data del nom (YYYYMMDD),
+                // o created/mtime com a fallback; si no es pot datar, es descarta.
                 var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
                 if (dateTarget) {
                     var beforeCount = freshFiles.length;
                     var keep = [];
                     var droppedDate = [];
+                    var noDatables = [];
                     for (var pI = 0; pI < freshFiles.length; pI++) {
                         var fileDate = this._extractDateFromFileName(freshFiles[pI].name);
-                        if (!fileDate && freshFiles[pI].created) {
-                            var cd = new Date(freshFiles[pI].created);
+                        if (!fileDate && (freshFiles[pI].created || freshFiles[pI].mtime)) {
+                            var cd = new Date(freshFiles[pI].created || freshFiles[pI].mtime);
                             if (!isNaN(cd.getTime())) {
                                 fileDate = '' + cd.getFullYear() +
                                     ('0' + (cd.getMonth() + 1)).slice(-2) +
                                     ('0' + cd.getDate()).slice(-2);
                             }
                         }
-                        if (fileDate && fileDate !== dateTarget) { droppedDate.push(freshFiles[pI].name); }
-                        else { keep.push(freshFiles[pI]); }
+                        if (!fileDate) {
+                            // No datable → es descarta (mai importar portades d'un dia incert).
+                            noDatables.push(freshFiles[pI].name);
+                        } else if (fileDate !== dateTarget) {
+                            droppedDate.push(freshFiles[pI].name);
+                        } else {
+                            keep.push(freshFiles[pI]);
+                        }
                     }
                     utils.log('[SCAN:portades] Filtre per data projecte ' + dateTarget + ': ' + beforeCount + ' -> ' + keep.length +
-                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
+                        (droppedDate.length ? ' (descartats ' + droppedDate.length + " d'altres dies: " + droppedDate.slice(0, 3).join(', ') + '...)' : '') +
+                        (noDatables.length ? ' (NO datables descartats: ' + noDatables.slice(0, 3).join(', ') + '...)' : ''), 'INFO');
                     freshFiles = keep;
                 }
 
