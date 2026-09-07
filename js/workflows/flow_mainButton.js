@@ -80,6 +80,7 @@
                                     var tb = reader.tcToSeconds(b.horaEntradaOnAir || b.horaEntradaPrevista || '00:00:00');
                                     return ta - tb;
                                 });
+                                var firstStructural = null;
                                 for (var li = 0; li < lines.length; li++) {
                                     var item = lines[li];
                                     if (!item.titol) continue;
@@ -94,10 +95,34 @@
                                             break;
                                         }
                                     }
+                                    if (!firstStructural) {
+                                        firstStructural = { titol: item.titol, num: item.num };
+                                    }
                                     if (!isReserved && upper.length > 2) {
                                         sanitizedTheme = getUtils().sanitizeName(item.titol).toUpperCase();
                                         log('🏷️ [Theme] Tema extret del JSON: "' + sanitizedTheme + '" (item ' + (item.num || '?') + ')');
                                         break;
+                                    }
+                                }
+                                // ── Reconstrucció de tema (2026-09-07) ─────────────────
+                                // Si tots els items estructurals del bloc tenen títol amb
+                                // token reservat (ex: V1 = GF/INTRO/DIFERIT/IPD/INSERT),
+                                // es pren el primer estructural i se li treu el prefix
+                                // reservat, per no acabar amb el fallback genèric INTRO.
+                                if (!sanitizedTheme && firstStructural) {
+                                    var cleanT = firstStructural.titol;
+                                    for (var ri2 = 0; ri2 < RESERVED_THEMES.length; ri2++) {
+                                        var patT = RESERVED_THEMES[ri2];
+                                        var reT = new RegExp('^[+*\\-\\s]*' + patT + '[\\s\\-\\*:+]*', 'i');
+                                        if (reT.test(cleanT)) {
+                                            cleanT = cleanT.replace(reT, '').trim();
+                                            break;
+                                        }
+                                    }
+                                    cleanT = cleanT.replace(/^[+*\-:\s]+/, '').trim();
+                                    if (cleanT.length > 2) {
+                                        sanitizedTheme = getUtils().sanitizeName(cleanT).toUpperCase();
+                                        log('🏷️ [Theme] Tema reconstruït des del 1r estructural: "' + sanitizedTheme + '" (item ' + (firstStructural.num || '?') + ')');
                                     }
                                 }
                             }

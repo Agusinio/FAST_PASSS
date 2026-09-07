@@ -304,3 +304,17 @@ Los estados se calculan contra la **fecha objetivo D** (hoy por defecto; ayer co
 
 **Pendiente de validar en Premiere:** re-crear/actualizar el proyecto del 06 con el nuevo filtro y comprobar que el bin CHY solo contiene los `Wott_TNV_v1_*` con `created = 2026-09-06` (los del 05 deben quedar descartados en el log).
 
+---
+
+## 15. Nombres de proyecto/seqüència en fallback «INTRO» (2026-09-07, fijado)
+
+**Síntoma:** el proyecto `Pruebas_TNV_V1_INTRO` y la secuencia `TNV_INTRO` usan el nombre del fallback aunque la escaleta esté accesible.
+
+**Causa:** el bloque V1 de la escaleta del 06 tiene sus items estructurales con títulos que empiezan por **tokens reservados** (`GF FOTO…`, `intro`, `DIFERIT…`, `IPD…`, `INSERT…`) → el extractor de tema del JSON no encontraba ningún título "limpio" y caía al fallback; y el fallback del Scanner (posición 5 del nombre del `.mov`: `Wott_TNV_v1_11i_00.01_intro_…`) devolvía `intro` → `INTRO`.
+
+**Fix (`flow_mainButton.js _runNew`):** si todos los items estructurales del bloque están reservados, se toma el **primer estructural** y se le **quita el prefijo reservado** (`DIFERIT CRISTINA SOLIAS CONVERSES UCRAÏNA…` → `CRISTINA SOLIAS CONVERSES UCRAÏNA I RÚSSIA`) → nombre real del tema. Log: `[Theme] Tema reconstruït des del 1r estructural`.
+
+**Nota log:** los mensajes `[Theme]` no aparecían en `FASTPASS.log` porque `_setLogPath` (más abajo en `_runNew`) resetea el archivo después de la extracción del tema.
+
+**Errores JSX `ERR:MOVE_FAILED`:** son el intento 1 (mover por nombre al bin CHY) que falla por la indexación del root recién importado; el intento 2 (`moveByID`) funciona y deja los rótulos en CHY. Se ha limpiado el log: ahora solo avisa si fallan ambos.
+

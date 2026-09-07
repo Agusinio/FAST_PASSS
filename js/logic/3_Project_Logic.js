@@ -365,16 +365,22 @@
                     for (const wott of newWotts) {
                         const escapedName = encodeURIComponent(wott.name);
                         const safeName = escapedName.replace(/'/g, "\\'");
-                        
-                        // Intento 1: Por nombre exacto
+
+                        // Intento 1: per nom exacte (pot fallar si el root encara indexa)
                         let moveRes = await callJSX(`FASTPASS.Project.move('${safeName}', 'CHY')`);
-                        
-                        // Intento 2: Si falla, extraemos el ID (ej: 336346) y movemos por ID
                         if (moveRes !== "OK") {
+                            // Intento 2: extreiem l'ID (ex: 336346) i movem per ID
                             const idMatch = wott.name.match(/[0-9]{6}/);
                             if (idMatch) {
                                 const wottID = idMatch[0];
-                                await callJSX(`FASTPASS.Project.moveByID('${wottID}', 'CHY')`);
+                                const moveByRes = await callJSX(`FASTPASS.Project.moveByID('${wottID}', 'CHY')`);
+                                if (moveByRes === "OK") {
+                                    utils.log(`📦 [INGEST] Rètol mogut a CHY via ID: ${wott.name.substring(0, 60)}...`, "INFO");
+                                } else {
+                                    utils.log(`❌ [INGEST] No s'ha pogut moure rètol a CHY (ni per nom ni per ID): ${wott.name}`, "ERROR");
+                                }
+                            } else {
+                                utils.log(`❌ [INGEST] No s'ha pogut moure rètol a CHY (sense ID al nom): ${wott.name}`, "ERROR");
                             }
                         }
                     }
