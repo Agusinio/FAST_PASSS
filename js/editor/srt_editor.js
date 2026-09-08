@@ -111,27 +111,32 @@
                 self._persistMarkers();
             });
 
-            // Botó esquerre:
-            //  - Clic sobre un marcador (tol visual real en píxels) → es prepara el drag.
-            //    Si hi ha moviment s'arrossega el marcador; un click simple (sense moure)
-            //    posiciona el playhead a través de l'event 'click'.
-            //  - Clic en qualsevol altre punt → posiciona el playhead directament.
+            // Botó esquerre (per disseny):
+            //  - Zona superior (timeline/clips) → SOLS el cabezal (playhead), mai drag.
+            //  - Zona inferior (waveform) → ARROSSEGAR els marcadors (acordió/moure).
+            // Un click simple sobre un marcador (sense moviment) posiciona el playhead.
             this._canvas.addEventListener('mousedown', function (e) {
                 if (e.button !== 0) return;
                 var sec = self._canvasXToSec(e);
-                // Captura amb tolerància estricta (píxels reals), valida a TOT el canvas
-                // (zona de clips, regle o waveform): es pot arrossegar el marcador des de
-                // qualsevol punt del timeline, no només des de la zona inferior.
-                var idx = self._markerAtSec(sec, false);
-                if (idx >= 0) {
-                    self._dragIdx = idx;
-                    self._didDrag = false;
-                    e.preventDefault();
+                // Tol ampliada per capturar el marcador per ARROSSEGAR-lo (wideTol=true).
+                var idx = self._markerAtSec(sec, true);
+                if (idx < 0) {
+                    // Cap marcador a sota: posicionar el playhead immediatament.
+                    log("🖱 MOUSEDOWN canvas → media=" + sec.toFixed(2) + "s");
+                    self.setPlayhead(sec);
+                    self._suppressClick = true; // el clic següent no ha de repetir el seek
                     return;
                 }
-                log("🖱 MOUSEDOWN canvas → media=" + sec.toFixed(2) + "s");
-                self.setPlayhead(sec);
-                self._suppressClick = true; // el clic següent no ha de repetir el seek
+                if (!self._inLowerZone(e)) {
+                    // Zona superior: el clic esquerre només mou el playhead
+                    // (els marcadors s'editen des de la zona inferior).
+                    self.setPlayhead(sec);
+                    self._suppressClick = true; // el clic següent no ha de repetir el seek
+                    return;
+                }
+                self._dragIdx = idx;
+                self._didDrag = false;
+                e.preventDefault();
             });
 
             // El drag es segueix a nivell de document (com a la barra de zoom): si el
