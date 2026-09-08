@@ -112,40 +112,37 @@
             });
 
             // Botó esquerre:
-            //  - Zona superior (timeline/clips) → posicionar el playhead.
-            //  - Zona inferior (waveform) sobre un marcador → arrossegar-lo (acordió/moure).
-            // El click NOMÉS se suprimeix si hi ha hagut moviment real (_didDrag);
-            // un click simple sobre un marcador posiciona el playhead normalment.
+            //  - Clic sobre un marcador (tol visual real en píxels) → es prepara el drag.
+            //    Si hi ha moviment s'arrossega el marcador; un click simple (sense moure)
+            //    posiciona el playhead a través de l'event 'click'.
+            //  - Clic en qualsevol altre punt → posiciona el playhead directament.
             this._canvas.addEventListener('mousedown', function (e) {
                 if (e.button !== 0) return;
                 var sec = self._canvasXToSec(e);
-                // Tol ampliada per capturar el marcador per ARROSSEGAR-lo (wideTol=true).
-                var idx = self._markerAtSec(sec, true);
-                if (idx < 0) {
-                    // Cap marcador a sota: posicionar el playhead immediatament.
-                    log("🖱 MOUSEDOWN canvas → media=" + sec.toFixed(2) + "s");
-                    self.setPlayhead(sec);
-                    self._suppressClick = true; // el clic següent no ha de repetir el seek
+                // Captura amb tolerància estricta (píxels reals), valida a TOT el canvas
+                // (zona de clips, regle o waveform): es pot arrossegar el marcador des de
+                // qualsevol punt del timeline, no només des de la zona inferior.
+                var idx = self._markerAtSec(sec, false);
+                if (idx >= 0) {
+                    self._dragIdx = idx;
+                    self._didDrag = false;
+                    e.preventDefault();
                     return;
                 }
-                if (!self._inLowerZone(e)) {
-                    // Zona superior: el clic esquerre només mou el playhead
-                    // (els marcadors s'editen des de la zona inferior).
-                    self.setPlayhead(sec);
-                    self._suppressClick = true; // el clic següent no ha de repetir el seek
-                    return;
-                }
-                self._dragIdx = idx;
-                self._didDrag = false;
-                e.preventDefault();
+                log("🖱 MOUSEDOWN canvas → media=" + sec.toFixed(2) + "s");
+                self.setPlayhead(sec);
+                self._suppressClick = true; // el clic següent no ha de repetir el seek
             });
-            this._canvas.addEventListener('mousemove', function (e) {
+
+            // El drag es segueix a nivell de document (com a la barra de zoom): si el
+            // cursor surt del canvas a mig arrossegament, el marcador NO es deixa anar.
+            var dragMove = function (e) {
                 if (self._dragIdx >= 0) {
                     self._didDrag = true;
                     self._applyMarkerDrag(self._canvasXToSec(e));
                     self.render();
                 }
-            });
+            };
             var endDrag = function () {
                 if (self._dragIdx >= 0) {
                     if (self._didDrag) {
@@ -157,8 +154,10 @@
                     self._didDrag = false;
                 }
             };
+            document.addEventListener('mousemove', dragMove);
+            document.addEventListener('mouseup', endDrag);
+            this._canvas.addEventListener('mousemove', dragMove);
             this._canvas.addEventListener('mouseup', endDrag);
-            this._canvas.addEventListener('mouseleave', endDrag);
 
             this._scrollWrap = this._canvas.parentElement;
             this._initZoomBar();
@@ -1065,13 +1064,17 @@
             // Tolerància de captura. Amb wideTol=true (arrossegament) s'usa el més gran
             // entre la tol en píxels (12/pps) i un mínim en segons (20s per defecte) per
             // no "pillar-se els dits" en zooms amples. Amb wideTol=false (crear/esborrar
-            // marcadors amb clic dret) es manté la tol estricta en píxels.
+            // marcadors amb clic dret / drag normal) es manté la tol estricta en píxels.
             var tolPx = this._MARKER_TOL_PX / this._pixelsPerSec;
             var tol = (wideTol) ? Math.max(tolPx, this._MARKER_TOL_MIN_SEC || 0) : tolPx;
+            // Sempre es captura el marcador MÉS PROPER dins de la tol (no el primer que
+            // la compleixi): evita agafar un marcador llunyà si n'hi ha un de més a prop.
+            var best = -1, bestD = Infinity;
             for (var i = 0; i < this._markers.length; i++) {
-                if (Math.abs(this._markers[i] - sec) <= tol) return i;
+                var d = Math.abs(this._markers[i] - sec);
+                if (d <= tol && d < bestD) { bestD = d; best = i; }
             }
-            return -1;
+            return best;
         },
 
         /**
