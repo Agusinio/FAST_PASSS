@@ -133,21 +133,6 @@ function applySliderLimits() {
 (function () {
     'use strict';
 
-    function logLayoutWidth() {
-        var left = document.querySelector('.upper-left');
-        var right = document.querySelector('.right-zone');
-        var mainUpper = document.querySelector('.main-upper');
-        if (!left) return;
-        var lw = Math.round(left.getBoundingClientRect().width);
-        var lh = Math.round(left.getBoundingClientRect().height);
-        var rw = right ? Math.round(right.getBoundingClientRect().width) : 0;
-        var rh = right ? Math.round(right.getBoundingClientRect().height) : 0;
-        var tw = mainUpper ? Math.round(mainUpper.getBoundingClientRect().width) : 0;
-        var msg = 'Columna: ' + lw + '×' + lh + 'px | Vídeo: ' + rw + '×' + rh + 'px | Total: ' + tw + 'px';
-        console.log('📐 [LAYOUT] ' + msg);
-        var info = document.getElementById('layoutInfo');
-        if (info) info.textContent = '📐 ' + msg;
-    }
 
     function applyLayoutMode(mode) {
         if (mode === 'work') {
@@ -192,7 +177,6 @@ function applySliderLimits() {
             dragging = false;
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-            logLayoutWidth();
         };
         document.addEventListener('mouseup', stop);
     }
@@ -542,8 +526,6 @@ function applySliderLimits() {
             });
         }
         applyLayoutMode(window.FASTPASS_UI.LayoutMode || 'test');
-        logLayoutWidth();
-        window.addEventListener('resize', logLayoutWidth);
     }
 
     async function callWorkflow(module, method, ...args) {

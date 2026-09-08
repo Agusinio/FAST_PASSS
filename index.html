@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=34">
+    <link rel="stylesheet" href="./style.css?v=35">
 </head>
 <body>
     <div id="main-content">
@@ -17,7 +17,8 @@
             <div class="section-content">
                 <div class="setup-top-row">
                     <div class="semaforo-strip">
-                    <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">
+                    <div style="display: flex; justify-content: flex-end; gap: 4px; margin-bottom: 4px;">
+                        <button id="btnMode" class="icon-button" title="Alternar layout TEST / TREBALL">🧪</button>
                         <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
                     </div>
                     <div class="semaforo-item" title="Estat de l'Escaleta JSON (Servidor)">
@@ -96,7 +97,7 @@
         <!-- FILA TEST1: GRÀFICS + MARCADORS · FILA TREBALL1: GRÀFICS + CHYRONS (vertical) -->
         <div class="graphics-group">
         <!-- SECTION: GRÀFICS (sempre visible) -->
-        <div class="section-container sq-group">
+        <div class="section-container sq-group" id="secGrafics">
             <div class="section-label"><span>GRÀFICS</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
@@ -110,7 +111,7 @@
         </div>
 
         <!-- SECTION: MARCADORS (TEST ONLY) - fila 1 en TEST -->
-        <div class="section-container sq-group test-only">
+        <div class="section-container sq-group test-only" id="secMarcadors">
             <div class="section-label"><span>MARCADORS</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
@@ -127,10 +128,10 @@
         <div class="row-break test-only"></div>
 
         <!-- SECTION: CHYRONS - en TREBALL botons en vertical (COLOCAR/REPART); en TEST graella 4 columnes -->
-        <div class="section-container sq-group">
+        <div class="section-container sq-group" id="secChyrons">
             <div class="section-label"><span>CHYRONS</span></div>
             <div class="section-content">
-                 <div class="graphics-strip cols-4 chy-vertical">
+                 <div class="graphics-strip cols-4 chy-strip">
                     <button id="btnChyronColocar" class="secondary" title="Col·loca TOTS els chyrons: Conductor, Titol, Lloc, Nom, Resto i Traducció (verifica primer els marcadors)">COLOCAR</button>
                     <button id="btnChyronRepartir" class="secondary" title="Reparteix les traduccions seleccionades">REPART</button>
                     <button id="btnChyronConductor" class="secondary test-only" title="Col·loca el Conductor (TEST)">COND</button>
@@ -144,7 +145,7 @@
         </div>
 
         <!-- SECTION: SUBTÍTOLS (sempre visible) - mateixa fila amb RENDER en TREBALL -->
-        <div class="section-container">
+        <div class="section-container" id="secSubtitols">
             <div class="section-label"><span>SUBTÍTOLS</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
@@ -160,7 +161,7 @@
         <div class="row-break test-only"></div>
 
         <!-- SECTION: RENDER (sempre visible) - mateixa fila amb SUBTÍTOLS en TREBALL -->
-        <div class="section-container">
+        <div class="section-container" id="secRender">
             <div class="section-label"><span>RENDER</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
@@ -168,10 +169,6 @@
                     <button id="btnRenderPortada" class="secondary" title="Render / exporta la portada">PORT</button>
                     <button id="btnRenderClose" class="secondary" title="Tanca la peça">TANC</button>
                  </div>
-                <div style="display:flex; align-items:center; gap:6px; margin-top:6px; max-width:100%;">
-                    <button id="btnMode" class="icon-button" title="Alternar layout TEST / TREBALL" style="flex:0 0 auto;">🧪</button>
-                    <div id="layoutInfo" style="font-size:9px; color:#fff; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📐 —</div>
-                </div>
             </div>
         </div>
         </div>
@@ -250,6 +247,6 @@
     <script src="js/workflows/flow_assembly.js?v=5"></script>
     <script src="js/core/project_registry.js?v=5"></script>
     <script src="js/editor/srt_editor.js?v=55"></script>
-    <script src="js/main.js?v=24"></script>
+    <script src="js/main.js?v=25"></script>
 </body>
 </html>

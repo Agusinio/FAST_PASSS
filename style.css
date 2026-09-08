@@ -33,11 +33,11 @@ body {
 .main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
 .upper-left { flex: 0 0 370px; min-width: 0; }
 .right-zone {
-    flex: 1 1 auto;
-    min-width: 200px;
-    max-width: min(46vw, calc((100vh - 44px) * 0.62));
+    flex: 0 1 auto;
+    min-width: 0;
     display: flex; flex-direction: column;
     gap: 4px;
+    align-items: center;
     justify-content: center;               /* vídeo centrat verticalment */
     align-self: stretch;
     overflow: hidden;
@@ -60,7 +60,7 @@ body {
 #srtVideoWrap {
     position: relative;
     align-self: center;
-    height: 100%;
+    width: min(100%, calc((100vh - 30px) * 0.5625)); /* 9/16 de l'altura visible del panell */
     max-width: 100%;
     aspect-ratio: 9 / 16;            /* canvas vertical com el projecte */
     background: #000; border-radius: 4px; overflow: hidden;
@@ -169,8 +169,14 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 8px;
     border-radius: 6px;
 }
-/* En mode TREBALL el grup CHYRONS es mostra en vertical (COLOCAR / REPART) */
-.mode-work .graphics-strip.chy-vertical { display: flex; flex-direction: column; }
+/* En mode TREBALL: fila1 = GRÀFICS + SUBTÍTOLS · fila2 = CHYRONS + RENDER */
+.mode-work #secGrafics { order: 10; }
+.mode-work #secSubtitols { order: 20; }
+.mode-work .row-break { order: 25; }
+.mode-work #secChyrons { order: 30; }
+.mode-work #secRender { order: 40; }
+/* CHYRONS en TREBALL: els botons visibles (COLOCAR/REPART) en una sola fila horitzontal */
+.mode-work .graphics-strip.chy-strip { grid-template-columns: repeat(2, 34px); }
 /* Separador de fila dins del .graphics-group */
 .row-break { flex-basis: 100%; width: 0; height: 0; margin: 0; padding: 0; }
 
