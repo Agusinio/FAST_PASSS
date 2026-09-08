@@ -618,16 +618,16 @@ function applySliderLimits() {
         } catch (eI) {
             utils.log('⚠️ [CHY] No s\'ha pogut llegir els marcadors per revisar IPD: ' + eI.message, 'ERROR');
         }
-        ipdMarkers = (ipdMarkers || []).filter(m => m && m.color === 7);
+        ipdMarkers = (ipdMarkers || []).filter(m => m && (m.color === 7 || String(m.comments || m.title || '').toUpperCase().indexOf('IPD') !== -1));
         if (ipdMarkers.length > 0) {
-            utils.log(`🔎 [CHY] ${ipdMarkers.length} marcador(s) IPD detectat(s) → col·locant zoom+posició als clips del tram fins al següent estructural...`, 'INFO');
+            utils.log(`🔎 [CHY] ${ipdMarkers.length} marcador(s) IPD detectat(s) (turquesa o títol amb IPD) → col·locant zoom+posició als clips del tram fins al següent estructural...`, 'INFO');
             try {
                 await callWorkflow('Markers', 'runAplicarIpdDesdeMarkers');
             } catch (eI2) {
                 utils.log('⚠️ [CHY] La revisió IPD ha llançat: ' + eI2.message, 'ERROR');
             }
         } else {
-            utils.log('➖ [CHY] Sense marcadors IPD (color turquesa): no cal revisar IPD.', 'INFO');
+            utils.log('➖ [CHY] Sense marcadors IPD (turquesa o títol amb IPD): no cal revisar IPD.', 'INFO');
         }
     }
 

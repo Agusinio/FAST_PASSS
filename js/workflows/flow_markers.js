@@ -1208,9 +1208,11 @@
         /**
          * runAplicarIpdDesdeMarkers: Revisa els markers de la seqüència i aplica la
          * configuració IPD (escala 144% + pos -94.5,562 + etiqueta) als clips de la
-         * pista MP4 que comencen a cada marker IPD (color turquesa=7), sempre que el
-         * clip estigui ABANS del següent marker d'estructura (color 1 o 6).
-         * Pensat per a una automatització posterior (no cal seleccionar clip a clip).
+         * pista MP4 que comencen a cada marker IPD, sempre que el clip estigui ABANS
+         * del següent marker d'estructura (color 1 o 6).
+         * Un marker és "IPD" si és turquesa (color 7) o si el seu comentari/títol
+         * conté "IPD" (els ítems IPD porten "IPD" al títol de l'escaleta).
+         * Pensat per a l'automatització de COLOCAR (no cal seleccionar clip a clip).
          * @returns {number} Nombre de clips modificats
          */
         runAplicarIpdDesdeMarkers: async function () {
@@ -1224,10 +1226,16 @@
                 let markers = [];
                 try { markers = JSON.parse(markersRaw || "[]"); } catch (eM) {}
                 markers.sort(function (a, b) { return (a.time || 0) - (b.time || 0); });
-                const ipdMarkers = markers.filter(function (m) { return m.color === 7; });
-                log(`📍 [IPD-MARKERS] ${markers.length} markers totals, ${ipdMarkers.length} IPD (color 7)`);
+                // IPD = marcador turquesa (color 7) o qualsevol marcador que tingui
+                // "IPD" al comentari/títol (el pipeline ja comenta "num - títol" i els
+                // ítems IPD porten "IPD" al títol). Així no depèn del color.
+                const ipdMarkers = markers.filter(function (m) {
+                    const comment = String(m.comments || m.title || '').toUpperCase();
+                    return m.color === 7 || comment.indexOf('IPD') !== -1;
+                });
+                log(`📍 [IPD-MARKERS] ${markers.length} markers totals, ${ipdMarkers.length} IPD (turquesa o amb 'IPD' al títol)`);
                 if (ipdMarkers.length === 0) {
-                    getUtils().status("No hi ha markers IPD (color turquesa) a la seqüència", "warn");
+                    getUtils().status("No hi ha markers IPD a la seqüència (turquesa o títol amb IPD)", "warn");
                     return 0;
                 }
 
