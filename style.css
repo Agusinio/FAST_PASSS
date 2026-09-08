@@ -171,9 +171,14 @@ input[type="range"]::-webkit-slider-thumb {
 .graphics-strip button {
     width: 30px;
     height: 30px;
-    padding: 0 2px;
-    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-    font-size: 7px;
+    padding: 0 1px;
+    overflow: hidden;
+    white-space: normal;         /* textos llargs (COLOCAR/REPART) es parteixen en 2 línies */
+    overflow-wrap: anywhere;
+    text-align: center;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1.05;
     border-radius: 5px;
 }
 /* Ordre en TEST: fila1 MARCADORS+CHYRONS · fila2 GRÀFICS+SUBTÍTOLS · fila3 RENDER */

@@ -681,12 +681,15 @@ function sizeVideoToFit() {
     try {
         var wrap = document.getElementById('srtVideoWrap');
         var zone = document.querySelector('.right-zone');
-        if (!wrap || !zone) return;
+        var col = document.querySelector('.upper-left');
+        if (!wrap || !zone || !col) return;
         var aw = zone.clientWidth;
-        var ah = Math.min(zone.clientHeight, (window.innerHeight || 600) - 8);
+        /* Alçada de referència: la columna de controls (botons) que el visor té al costat.
+           Mesurar la pròpia zona del vídeo s'inflava sola (auto-referència). */
+        var ah = col.offsetHeight;
         if (aw <= 0 || ah <= 0) return;
         var w = Math.min(aw, Math.floor(ah * 9 / 16));
-        wrap.style.width = w + 'px';
+        wrap.style.width = w + 'px';   /* l'alçada la deriva l'aspect-ratio 9/16 */
     } catch (e) { /* no crític */ }
 }
 window.addEventListener('resize', sizeVideoToFit);
