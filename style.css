@@ -45,6 +45,10 @@ body {
     overflow: hidden;
 }
 
+/* En TREBALL el visor queda ancorat al fons de la zona dreta: al nivell dels grups
+   de botons (GRF/SUB/CHY/REN), que són l'últim bloc de la columna. */
+.mode-work .right-zone { justify-content: flex-end; }
+
 /* DIVISOR per redimensionar la columna esquerra */
 #splitter {
     flex: 0 0 5px;
@@ -176,9 +180,9 @@ input[type="range"]::-webkit-slider-thumb {
     white-space: normal;         /* textos llargs (COLOCAR/REPART) es parteixen en 2 línies */
     overflow-wrap: anywhere;
     text-align: center;
-    font-size: 9px;
-    font-weight: 800;
-    line-height: 1.05;
+    font-size: 8px;              /* discreta, com els botons IN/OUT de la zona VÍDEO */
+    font-weight: 700;
+    line-height: 1.1;
     border-radius: 5px;
 }
 /* Ordre en TEST: fila1 MARCADORS+CHYRONS · fila2 GRÀFICS+SUBTÍTOLS · fila3 RENDER */

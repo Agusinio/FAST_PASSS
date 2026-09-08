@@ -683,10 +683,14 @@ function sizeVideoToFit() {
         var zone = document.querySelector('.right-zone');
         var col = document.querySelector('.upper-left');
         if (!wrap || !zone || !col) return;
+        /* TREBALL: el visor fa l'alçada dels grups de botons (GRF/SUB/CHY/REN).
+           TEST: manté l'alçada de tota la columna de controls. */
+        var ref = (document.body.classList.contains('mode-work'))
+            ? document.querySelector('.graphics-group')
+            : col;
+        if (!ref) ref = col;
         var aw = zone.clientWidth;
-        /* Alçada de referència: la columna de controls (botons) que el visor té al costat.
-           Mesurar la pròpia zona del vídeo s'inflava sola (auto-referència). */
-        var ah = col.offsetHeight;
+        var ah = ref.offsetHeight;
         if (aw <= 0 || ah <= 0) return;
         var w = Math.min(aw, Math.floor(ah * 9 / 16));
         wrap.style.width = w + 'px';   /* l'alçada la deriva l'aspect-ratio 9/16 */
