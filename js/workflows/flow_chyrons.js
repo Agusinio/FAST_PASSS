@@ -557,6 +557,40 @@
             return null;
         },
 
+        /**
+         * _extractMarkerTitle: Extrau el TÍTOL del comentari d'un marcador estructural.
+         * Format del comentari: "num - títol" → retorna la part després de " - ".
+         */
+        _extractMarkerTitle: function (comment) {
+            var c = String(comment || '').trim();
+            var dash = c.indexOf(' - ');
+            if (dash < 0) return c;
+            return c.substring(dash + 3).trim();
+        },
+
+        /**
+         * _isPresenterTitle: Determina si el títol del primer ítem del bloc correspon a
+         * una peça de PLATÓ/presentació (hi ha presentador en càmera). Criteri: el títol
+         * comença per tokens de presentació (OFF / OFD / DONA PAS / CONN / INTRO /
+         * DIRECTE / BON DIA / SALUTACIÓ...). Els blocs de NOMÉS vídeo no els tenen i,
+         * per tant, NO han de rebre chyron de presentador.
+         */
+        _isPresenterTitle: function (title) {
+            if (!title) return false;
+            var clean = String(title).toUpperCase()
+                .replace(/[ÁÀ]/g, 'A').replace(/[ÉÈ]/g, 'E').replace(/[ÍÌ]/g, 'I')
+                .replace(/[ÓÒ]/g, 'O').replace(/[ÚÙ]/g, 'U')
+                .replace(/[^A-Z0-9]/g, '');
+            var tokens = [
+                'OFF', 'OFD', 'OFT', 'DONAPAS', 'DONA', 'CONNEXIO', 'CONN',
+                'INTRO', 'DIRECTE', 'BONDIA', 'BONDIADIA', 'SALUTACIO'
+            ];
+            for (var i = 0; i < tokens.length; i++) {
+                if (clean.indexOf(tokens[i]) === 0) return true;
+            }
+            return false;
+        },
+
         placeChyronConductor: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
@@ -601,6 +635,18 @@
                 const isFirstItem = true; // sempre es el primer item del bloc
 
                 log(`[Conductor] Primer item del bloc: ${targetId} @ ${targetTime.toFixed(2)}s`);
+
+                // ── Guarda de presentador ──────────────────────────────────────────
+                // Només es col·loca el chyron de presentador si el primer ítem del bloc
+                // és de plató/presentació: títol que comença per OFF / DONA PAS / CONN /
+                // INTRO / DIRECTE... (els blocs de NOMÉS vídeo no porten presentador).
+                const firstTitle = this._extractMarkerTitle(firstMarker.comments || "");
+                if (!this._isPresenterTitle(firstTitle)) {
+                    log(`⏭️ [Conductor] Primer ítem (${targetId}) NO és de plató: "${firstTitle || '(sense títol)'}". Ometent conductor.`, "WARN");
+                    getUtils().status("Bloc sense presentador: conductor omès", "warn");
+                    return;
+                }
+                log(`🎙️ [Conductor] Primer ítem de plató confirmat: "${firstTitle}"`);
 
                 // Calcular posició del conductor
                 let conductTime;
