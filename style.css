@@ -155,20 +155,22 @@ input[type="range"]::-webkit-slider-thumb {
     background: var(--color-accent); border: 2px solid #fff; margin-top: -5px; 
 }
 
-/* GRÀFICS + MARCADORS + CHYRONS + SUBTÍTOLS + RENDER (grups de botons quadrats i fileres) */
+/* GRÀFICS + MARCADORS + CHYRONS + SUBTÍTOLS + RENDER (grups de botons quadrats, fileres) */
 .graphics-group { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; align-items: flex-start; }
 .graphics-group > .section-container { flex: 0 1 auto; min-width: 0; margin-bottom: 0; }
-.graphics-group > .section-container.sq-group { max-width: 176px; }
-.graphics-strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.graphics-strip { display: grid; gap: 4px; align-items: center; }
+.graphics-strip.cols-3 { grid-template-columns: repeat(3, 34px); }
+.graphics-strip.cols-4 { grid-template-columns: repeat(4, 34px); }
 .graphics-strip button {
-    flex: 0 0 auto;
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     padding: 0 2px;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
     font-size: 8px;
     border-radius: 6px;
 }
+/* En mode TREBALL el grup CHYRONS es mostra en vertical (COLOCAR / REPART) */
+.mode-work .graphics-strip.chy-vertical { display: flex; flex-direction: column; }
 /* Separador de fila dins del .graphics-group */
 .row-break { flex-basis: 100%; width: 0; height: 0; margin: 0; padding: 0; }
 

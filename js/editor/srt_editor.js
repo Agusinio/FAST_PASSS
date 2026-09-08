@@ -397,10 +397,15 @@
                     u.status("El manifest no té el rang del bloc (executa NOU primer)", "warn");
                     return;
                 }
+                // Margen de captura GARANTITZAT per banda en la càrrega per blocs de 15 min.
+                // Preferim que sobri una mica de temps (subtítols limítrofs de la peça veïna)
+                // a perdre text del bloc: recuperar subtítols perduts és complex.
                 const handles = (config.handles != null) ? config.handles : 20;
-                const winStart = worldStart - handles;
-                const winEnd = worldEnd + handles;
-                log("🚨 SRT_EMERGENCIA: bloc world [" + worldStart.toFixed(1) + "s → " + worldEnd.toFixed(1) + "s], finestra ±" + handles + "s");
+                const srtAir = 20; // segons mínims garantits a cada banda del bloc
+                const marginSecs = Math.max(handles, srtAir);
+                const winStart = worldStart - marginSecs;
+                const winEnd = worldEnd + marginSecs;
+                log("🚨 SRT_EMERGENCIA: bloc world [" + worldStart.toFixed(1) + "s → " + worldEnd.toFixed(1) + "s], finestra ±" + marginSecs + "s (garantida)");
 
                 // 3. Programa → carpeta dels blocs de 15 min
                 const progMap = { TNM: 'migdia', TNV: 'vespre', TNC: 'comarques' };

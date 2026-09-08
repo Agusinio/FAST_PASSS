@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=33">
+    <link rel="stylesheet" href="./style.css?v=34">
 </head>
 <body>
     <div id="main-content">
@@ -93,13 +93,13 @@
             </div>
         </div>
         
-        <!-- FILA 1 (TEST): GRÀFICS + MARCADORS · (TREBALL): GRÀFICS + CHYRONS -->
+        <!-- FILA TEST1: GRÀFICS + MARCADORS · FILA TREBALL1: GRÀFICS + CHYRONS (vertical) -->
         <div class="graphics-group">
         <!-- SECTION: GRÀFICS (sempre visible) -->
         <div class="section-container sq-group">
             <div class="section-label"><span>GRÀFICS</span></div>
             <div class="section-content">
-                 <div class="graphics-strip">
+                 <div class="graphics-strip cols-3">
                     <button id="btnMarksF6" class="secondary" title="Gràfica — col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">GRAF</button>
                     <button id="btnGrafIpd" class="secondary" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD (marcador IPD → següent estructural)">IPD</button>
                     <button id="btnGrafDoblePantalla" class="secondary" title="Doble Pantalla V2/V3">DP</button>
@@ -113,7 +113,7 @@
         <div class="section-container sq-group test-only">
             <div class="section-label"><span>MARCADORS</span></div>
             <div class="section-content">
-                 <div class="graphics-strip">
+                 <div class="graphics-strip cols-3">
                     <button id="btnMarksF1" class="secondary" title="F1 · Marcadors OnAir (TC real d'emissió)">OnAir</button>
                     <button id="btnMarksF2" class="secondary" title="F2 · Marcadors OnAir deduïts">Dedu</button>
                     <button id="btnMarksF3" class="secondary" title="F3 · Marcadors previstos (coincidències)">Prev</button>
@@ -126,11 +126,11 @@
 
         <div class="row-break test-only"></div>
 
-        <!-- SECTION: CHYRONS - fila 2 amb SUBTÍTOLS (en TREBALL: COLOCAR + REPARTIR; la resta test-only) -->
+        <!-- SECTION: CHYRONS - en TREBALL botons en vertical (COLOCAR/REPART); en TEST graella 4 columnes -->
         <div class="section-container sq-group">
             <div class="section-label"><span>CHYRONS</span></div>
             <div class="section-content">
-                 <div class="graphics-strip">
+                 <div class="graphics-strip cols-4 chy-vertical">
                     <button id="btnChyronColocar" class="secondary" title="Col·loca TOTS els chyrons: Conductor, Titol, Lloc, Nom, Resto i Traducció (verifica primer els marcadors)">COLOCAR</button>
                     <button id="btnChyronRepartir" class="secondary" title="Reparteix les traduccions seleccionades">REPART</button>
                     <button id="btnChyronConductor" class="secondary test-only" title="Col·loca el Conductor (TEST)">COND</button>
@@ -143,38 +143,34 @@
             </div>
         </div>
 
-        <!-- SECTION: SUBTÍTOLS (sempre visible) - fila 2 amb CHYRONS -->
+        <!-- SECTION: SUBTÍTOLS (sempre visible) - mateixa fila amb RENDER en TREBALL -->
         <div class="section-container">
             <div class="section-label"><span>SUBTÍTOLS</span></div>
             <div class="section-content">
-                <div style="display:flex; flex-direction:column; gap:6px;">
-                    <div style="display:flex; gap:4px; flex-wrap:nowrap;">
-                        <button id="btnSrtLoad" class="secondary srt-top">CARREGAR</button>
-                        <button id="btnSrtExport" class="secondary srt-top">EXPORTAR</button>
-                        <button id="btnSrtReset" class="secondary srt-top" style="background:#5a2a2a; color:#f99;">RESET</button>
-                    </div>
-                    <div style="display:flex; gap:6px;">
-                        <button id="btnSrtIn" class="secondary srt-inout">IN</button>
-                        <button id="btnSrtOut" class="secondary srt-inout">OUT</button>
-                    </div>
-                </div>
+                 <div class="graphics-strip cols-3">
+                    <button id="btnSrtLoad" class="secondary" title="Carrega el SRT del dia (per blocs)">CAR</button>
+                    <button id="btnSrtExport" class="secondary" title="Exporta el SRT">EXP</button>
+                    <button id="btnSrtReset" class="secondary" style="background:#5a2a2a; color:#f99;" title="RESET / neteja subtítols">RES</button>
+                    <button id="btnSrtIn" class="secondary" title="IN del subtítol seleccionat">IN</button>
+                    <button id="btnSrtOut" class="secondary" title="OUT del subtítol seleccionat">OUT</button>
+                 </div>
             </div>
         </div>
 
-        <div class="row-break"></div>
+        <div class="row-break test-only"></div>
 
-        <!-- SECTION: RENDER (sempre visible) - fila pròpia -->
+        <!-- SECTION: RENDER (sempre visible) - mateixa fila amb SUBTÍTOLS en TREBALL -->
         <div class="section-container">
             <div class="section-label"><span>RENDER</span></div>
             <div class="section-content">
-                <div class="render-strip">
-                    <button id="btnRenderVideo" class="secondary srt-inout">VÍDEO</button>
-                    <button id="btnRenderPortada" class="secondary srt-inout">PORTADA</button>
-                    <button id="btnRenderClose" class="secondary srt-inout">TANCAR</button>
-                </div>
-                <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">
+                 <div class="graphics-strip cols-3">
+                    <button id="btnRenderVideo" class="secondary" title="Render / exporta el vídeo">VID</button>
+                    <button id="btnRenderPortada" class="secondary" title="Render / exporta la portada">PORT</button>
+                    <button id="btnRenderClose" class="secondary" title="Tanca la peça">TANC</button>
+                 </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:6px; max-width:100%;">
                     <button id="btnMode" class="icon-button" title="Alternar layout TEST / TREBALL" style="flex:0 0 auto;">🧪</button>
-                    <div id="layoutInfo" style="font-size:12px; color:#fff; flex:1;">📐 —</div>
+                    <div id="layoutInfo" style="font-size:9px; color:#fff; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📐 —</div>
                 </div>
             </div>
         </div>
@@ -253,7 +249,7 @@
     <script src="js/workflows/flow_config.js?v=5"></script>
     <script src="js/workflows/flow_assembly.js?v=5"></script>
     <script src="js/core/project_registry.js?v=5"></script>
-    <script src="js/editor/srt_editor.js?v=54"></script>
+    <script src="js/editor/srt_editor.js?v=55"></script>
     <script src="js/main.js?v=24"></script>
 </body>
 </html>
