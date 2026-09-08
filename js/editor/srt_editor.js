@@ -526,6 +526,7 @@
             if (!v) return false;
             var url = "file:////" + mediaPath.replace(/\\/g, "/");
             log("📝 SRT_EDIT: Vídeo → " + url);
+            v.preload = "auto";
             v.src = url;
             v.load();
             var ok = await this._waitVideoReady(v, 8000);
@@ -553,6 +554,7 @@
                     log("⚠️ SRT_EDIT: copia del MP4 fallida → " + copyResult);
                     return false;
                 }
+                v.preload = "auto";
                 v.src = "file:///C:/temp/fastpass_media.mp4";
                 v.load();
                 var ok = await this._waitVideoReady(v, 8000);
@@ -608,10 +610,47 @@
         _syncVideo: function (mediaSec) {
             var v = document.getElementById('srtVideo');
             if (!v || !v.src) return;
-            if (v.readyState >= 2) {
-                var d = Math.abs(v.currentTime - mediaSec);
-                if (d > 0.12) { v.currentTime = mediaSec; }
+            if (v.readyState < 2) return;
+            var run = !!this._isPlaying;   // reproducció activa (botó PLAY)
+            // Mantenir el <video> reproduint/pausat segons l'estat.
+            try {
+                if (run && v.paused) { var pr = v.play(); if (pr && pr.catch) pr.catch(function () { }); }
+                else if (!run && !v.paused) v.pause();
+            } catch (eP) { }
+            var d = v.currentTime - mediaSec;
+            var ad = Math.abs(d);
+            if (run) {
+                // Reproducció real: correcció SUAU amb playbackRate. Es fa un seek
+                // només si el desfàs és gran (salt/pèrdua de sincronia) → evita els
+                // talls i frames negres que causava el servo de seeks cada 0.12s.
+                if (ad > 1.0) {
+                    try { v.currentTime = mediaSec; } catch (eS) { }
+                    if (Math.abs(v.playbackRate - 1) > 0.005) { try { v.playbackRate = 1; } catch (eR) { } }
+                } else if (ad > 0.12) {
+                    // d>0 → el vídeo va per davant → frenar; d<0 → va endarrerit → accelerar.
+                    var rate = (d > 0)
+                        ? Math.max(0.90, 1 - ad * 0.4)
+                        : Math.min(1.12, 1 + ad * 0.4);
+                    if (Math.abs(v.playbackRate - rate) > 0.005) {
+                        try { v.playbackRate = rate; } catch (eR2) { }
+                    }
+                } else if (Math.abs(v.playbackRate - 1) > 0.005) {
+                    try { v.playbackRate = 1; } catch (eR3) { }
+                }
+            } else {
+                // Parat: posició exacta (seek només si el desfàs és perceptible).
+                try { if (Math.abs(v.playbackRate - 1) > 0.005) v.playbackRate = 1; } catch (eR4) { }
+                if (ad > 0.15) { try { v.currentTime = mediaSec; } catch (eS2) { } }
             }
+        },
+
+        _setVideoRunning: function (run) {
+            var v = document.getElementById('srtVideo');
+            if (!v || !v.src) return;
+            try {
+                if (run) { if (v.paused) { var pr = v.play(); if (pr && pr.catch) pr.catch(function () { }); } }
+                else { if (!v.paused) v.pause(); }
+            } catch (e) { }
         },
 
         _startPolling: function () {
@@ -801,6 +840,8 @@
             this._pendingSeek = null; // si hi ha un seek pendent, cancel·lar-lo
             var btn = document.getElementById('btnSrtPlay');
             var self = this;
+            // Reproduir/pausar el <video> del visor segons l'estat (no "servo" de seeks).
+            this._setVideoRunning(this._isPlaying);
             if (this._isPlaying) {
                 if (this._playheadLocal) {
                     // PLAY LOCAL (més enllà de l'OUT): avançar el playhead a 1x en MEDIA
