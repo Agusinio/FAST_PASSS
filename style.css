@@ -31,7 +31,7 @@ body {
 
 /* NOVA ZONA VERTICAL DRETA */
 .main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
-.upper-left { flex: 0 0 370px; min-width: 0; }
+.upper-left { flex: 0 1 340px; min-width: 0; }
 .right-zone {
     flex: 0 1 auto;
     min-width: 0;
@@ -156,8 +156,12 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* GRÀFICS + MARCADORS + CHYRONS + SUBTÍTOLS + RENDER (grups de botons quadrats, fileres) */
-.graphics-group { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; align-items: flex-start; }
+.graphics-group { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; align-items: stretch; }
 .graphics-group > .section-container { flex: 0 1 auto; min-width: 0; margin-bottom: 0; }
+/* Etiquetes de secció: versió completa en TEST, abreujada (més baixa) en TREBALL */
+.section-label span.lbl-short { display: none; }
+.mode-work .section-label span.lbl-full { display: none; }
+.mode-work .section-label span.lbl-short { display: inline; }
 .graphics-strip { display: grid; gap: 4px; align-items: center; }
 .graphics-strip.cols-3 { grid-template-columns: repeat(3, 34px); }
 .graphics-strip.cols-4 { grid-template-columns: repeat(4, 34px); }
