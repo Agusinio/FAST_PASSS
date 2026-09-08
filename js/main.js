@@ -606,6 +606,29 @@ function applySliderLimits() {
         }
         utils.log('🏁 [CHY] Tots els chyrons col·locats.', 'INFO');
         utils.status('Chyrons col·locats', 'exito');
+
+        // ── IPD (auto): si hi ha algun marcador IPD (color turquesa=7) a la seqüència,
+        //    repassa els clips del tram (des del marcador IPD fins al següent marcador
+        //    d'estructura) i hi col·loca l'efecte de ZOOM + POSICIÓ (mecànica IPD aplicada,
+        //    mai toggle: no reverteix els clips que ja tinguin l'efecte).
+        let ipdMarkers = [];
+        try {
+            const markersRaw = await utils.callJSX('Markers.get()');
+            try { ipdMarkers = JSON.parse(markersRaw || '[]'); } catch (eM) {}
+        } catch (eI) {
+            utils.log('⚠️ [CHY] No s\'ha pogut llegir els marcadors per revisar IPD: ' + eI.message, 'ERROR');
+        }
+        ipdMarkers = (ipdMarkers || []).filter(m => m && m.color === 7);
+        if (ipdMarkers.length > 0) {
+            utils.log(`🔎 [CHY] ${ipdMarkers.length} marcador(s) IPD detectat(s) → col·locant zoom+posició als clips del tram fins al següent estructural...`, 'INFO');
+            try {
+                await callWorkflow('Markers', 'runAplicarIpdDesdeMarkers');
+            } catch (eI2) {
+                utils.log('⚠️ [CHY] La revisió IPD ha llançat: ' + eI2.message, 'ERROR');
+            }
+        } else {
+            utils.log('➖ [CHY] Sense marcadors IPD (color turquesa): no cal revisar IPD.', 'INFO');
+        }
     }
 
     /**

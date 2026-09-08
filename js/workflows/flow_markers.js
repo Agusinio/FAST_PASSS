@@ -1242,6 +1242,9 @@
 
                 // 3. Per a cada marker IPD: clip amb start≈time, abans del següent marker d'estructura
                 let modificats = 0;
+                // Estats previs guardats perquè el botó IPD (toggle manual) pugui revertir
+                // exacte un clip que hagi col·locat aquesta automatització.
+                const states = (window.FASTPASS_UI._ipdStates = window.FASTPASS_UI._ipdStates || {});
                 for (const m of ipdMarkers) {
                     const t = m.time || 0;
                     const nextStruct = markers.find(function (x) { return (x.color === 1 || x.color === 6) && (x.time || 0) > t + 0.05; });
@@ -1250,6 +1253,19 @@
                     if (!clip) {
                         log(`⚠️ [IPD-MARKERS] Marker IPD a ${t.toFixed(2)}s: cap clip (start≈) abans del següent marker d'estructura (${lim === Infinity ? 'fi' : lim.toFixed(2) + 's'})`, "WARN");
                         continue;
+                    }
+                    const stateKey = T_MP4 + ':' + clip.start.toFixed(3);
+                    if (states[stateKey] === undefined) {
+                        const curRaw = await callJSX(`Anim.getMotionValues(${T_MP4}, ${clip.index})`);
+                        if (curRaw && String(curRaw).indexOf('ERR') !== 0) {
+                            try {
+                                const c = JSON.parse(curRaw);
+                                states[stateKey] = {
+                                    scale: c.scale, position: c.position, scaleWidth: c.scaleWidth,
+                                    cropLeft: c.cropLeft, cropTop: c.cropTop, cropRight: c.cropRight, cropBottom: c.cropBottom
+                                };
+                            } catch (eS) {}
+                        }
                     }
                     const valsJson = JSON.stringify({ scale: 144, position: [-94.5, 562] });
                     const resM = await callJSX(`Anim.setMotionValues(${T_MP4}, ${clip.index}, '${valsJson}')`);
