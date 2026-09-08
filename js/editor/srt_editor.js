@@ -331,6 +331,7 @@
             try {
                 var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
                 var projFolder = await callJSX("Context.folder()");
+                if (projFolder && String(projFolder).indexOf('ERR') !== 0) this._projectKey = projFolder;
                 if (wg && projFolder) {
                     var binPath = await wg.getBinPath(projFolder);
                     if (binPath) {
@@ -1350,6 +1351,7 @@
                 try { window.cep.fs.makedir("C:/temp"); } catch (e1) { }
                 var data = JSON.stringify({
                     srtName: this._srtName,
+                    projectKey: this._projectKey || '',
                     markers: this._markers.slice(),
                     originalMarkers: (this._originalMarkers || []).slice(),
                     updatedAt: new Date().toISOString()
@@ -1363,13 +1365,29 @@
                 var res = window.cep.fs.readFile(this._markersFilePath());
                 if (res && res.err === 0 && res.data) {
                     var parsed = JSON.parse(res.data);
-                    if (parsed && parsed.srtName === this._srtName && Array.isArray(parsed.markers)) {
+                    // Només es restaura si és del MATEIX projecte/sessió: la persistència
+                    // local és per recuperar la sessió en curs, no per portar marques de
+                    // projectes o sessions anteriors al carregar un SRT nou.
+                    var keyActual = this._projectKey || '';
+                    if (!keyActual) {
+                        try {
+                            var pf = await callJSX("Context.folder()");
+                            keyActual = (pf && String(pf).indexOf('ERR') !== 0) ? String(pf) : '';
+                            this._projectKey = keyActual;
+                        } catch (eK) { }
+                    }
+                    var sameProject = !!(keyActual && parsed && parsed.projectKey && parsed.projectKey === keyActual);
+                    if (parsed && parsed.srtName === this._srtName && Array.isArray(parsed.markers) && sameProject) {
                         this._markers = parsed.markers.filter(function (m) { return typeof m === 'number' && isFinite(m); });
                         this._markers.sort(function (a, b) { return a - b; });
                         var om = Array.isArray(parsed.originalMarkers) ? parsed.originalMarkers : parsed.markers;
                         this._originalMarkers = om.filter(function (m) { return typeof m === 'number' && isFinite(m); });
                         this._originalMarkers.sort(function (a, b) { return a - b; });
-                        if (this._markers.length > 0) log("📝 SRT_EDIT: " + this._markers.length + " marcadors restaurats (local)");
+                        if (this._markers.length > 0) log("📝 SRT_EDIT: " + this._markers.length + " marcadors restaurats (local, mateixa sessió)");
+                    } else if (parsed && parsed.srtName === this._srtName && parsed.projectKey && keyActual && !sameProject) {
+                        // Restes d'un altre projecte: netejar per no contaminar sessions futures.
+                        log("📝 SRT_EDIT: Marcadors locals d'un altre projecte descartats (neteja).", "WARN");
+                        try { window.cep.fs.writeFile(this._markersFilePath(), ''); } catch (eCl) { }
                     }
                 }
             } catch (e) { }

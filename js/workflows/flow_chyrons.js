@@ -676,11 +676,10 @@
                 let targetTime = null;
 
                 if (linesEsc && linesEsc.length > 0) {
-                    // 1) Primer ítem de plató de l'escaleta del bloc (ja ordenada per hora).
+                    // 1) Primer ítem de plató de l'escaleta del bloc.
                     for (let li = 0; li < linesEsc.length; li++) {
                         if (this._isPresenterLine(linesEsc[li])) {
                             itemPlato = linesEsc[li];
-                            isFirstItem = (li === 0);
                             break;
                         }
                     }
@@ -691,17 +690,23 @@
                     }
                     targetId = String(itemPlato.num || '').trim();
                     const mkPlato = findMarkerByPrefix(targetId);
-                    log(`[Conductor] ítem de plató: ${targetId} "${(itemPlato.titol || '').substring(0, 60)}"${isFirstItem ? ' (PRIMER del bloc)' : ''}${mkPlato ? ' @ marcador ' + mkPlato.time.toFixed(2) + 's' : ' (sense marcador propi)'}`);
+                    const primerMarcadorTime = (structuralMarkers.length > 0) ? structuralMarkers[0].time : null;
                     if (mkPlato) {
                         targetTime = mkPlato.time;
-                    } else if (isFirstItem) {
-                        // Primer ítem del bloc sense marcador (p. ex. 05dp): inici del bloc.
+                        // És l'ítem que OBRE el bloc si no hi ha cap marcador estructural anterior.
+                        isFirstItem = !structuralMarkers.some(function (sm) { return sm.time < mkPlato.time - 0.05; });
+                        log(`[Conductor] ítem de plató: ${targetId} @ marcador ${targetTime.toFixed(2)}s${isFirstItem ? ' (OBRE el bloc)' : ''}`);
+                    } else if (primerMarcadorTime === null || primerMarcadorTime >= 2.0) {
+                        // Plató sense marcador propi i sense cap ítem marcat a l'inici
+                        // (p. ex. el 05dp d'un donapas que OBRE el bloc) → va a l'inici
+                        // del clip del bloc, on surt la presentadora.
+                        isFirstItem = true;
                         targetTime = (clipsV1.length > 0) ? clipsV1[0].start : 0;
+                        log(`🎙️ [Conductor] ítem de plató ${targetId} sense marcador propi i sense ítems previs marcats → OBRE el bloc (inici ${targetTime.toFixed(2)}s).`);
                     } else {
-                        // ítem de plató posterior sense marcador propi: usem el primer
-                        // marcador com a base aproximada (cas poc habitual; queda loguejat).
-                        const baseMk = structuralMarkers[0];
-                        targetTime = baseMk ? baseMk.time : 0;
+                        // Plató posterior sense marcador propi: cas poc habitual; base = primer marcador.
+                        isFirstItem = false;
+                        targetTime = primerMarcadorTime;
                         log('⚠️ [Conductor] ítem de plató posterior sense marcador propi; base ' + targetTime.toFixed(2) + 's. Verifica la posició.', 'WARN');
                     }
                 } else {

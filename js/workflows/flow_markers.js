@@ -1255,7 +1255,16 @@
                 const states = (window.FASTPASS_UI._ipdStates = window.FASTPASS_UI._ipdStates || {});
                 for (const m of ipdMarkers) {
                     const t = m.time || 0;
-                    const nextStruct = markers.find(function (x) { return (x.color === 1 || x.color === 6) && (x.time || 0) > t + 0.05; });
+                    // El següent marcador ESTRUCTURAL és el primer marcador per davant que
+                    // tingui comentari de ítem ("num - títol") o color blau (6): un cop
+                    // aplicats els marcadors, els estructurales queden validats per l'usuari
+                    // i no hem de dependre del color exacte (l'IPD pot ser ell mateix un
+                    // marcador estructural blau amb "IPD" al títol).
+                    const nextStruct = markers.find(function (x) {
+                        if ((x.time || 0) <= t + 0.05) return false;
+                        const cm = String(x.comments || x.title || '').trim();
+                        return x.color === 6 || /^\d+[a-z]?\s*-\s*.+$/i.test(cm);
+                    });
                     const lim = nextStruct ? (nextStruct.time || 0) : Infinity;
                     // TOTS els clips del TRAM: des del marcador IPD fins al següent marker
                     // d'estructura/bloc (l'ítem IPD pot estar trocejat en diversos clips).
