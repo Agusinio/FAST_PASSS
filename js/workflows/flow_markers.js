@@ -1257,28 +1257,35 @@
                     const t = m.time || 0;
                     const nextStruct = markers.find(function (x) { return (x.color === 1 || x.color === 6) && (x.time || 0) > t + 0.05; });
                     const lim = nextStruct ? (nextStruct.time || 0) : Infinity;
-                    const clip = vclips.find(function (c) { return Math.abs(c.start - t) < 1.0 && c.start < lim - 0.05; });
-                    if (!clip) {
-                        log(`⚠️ [IPD-MARKERS] Marker IPD a ${t.toFixed(2)}s: cap clip (start≈) abans del següent marker d'estructura (${lim === Infinity ? 'fi' : lim.toFixed(2) + 's'})`, "WARN");
+                    // TOTS els clips del TRAM: des del marcador IPD fins al següent marker
+                    // d'estructura/bloc (l'ítem IPD pot estar trocejat en diversos clips).
+                    const clipsTramo = vclips.filter(function (c) {
+                        return c.start >= t - 1.0 && c.start < lim - 0.05;
+                    });
+                    if (clipsTramo.length === 0) {
+                        log(`⚠️ [IPD-MARKERS] Marker IPD a ${t.toFixed(2)}s: cap clip al tram abans del següent marker d'estructura (${lim === Infinity ? 'fi' : lim.toFixed(2) + 's'})`, "WARN");
                         continue;
                     }
-                    const stateKey = T_MP4 + ':' + clip.start.toFixed(3);
-                    if (states[stateKey] === undefined) {
-                        const curRaw = await callJSX(`Anim.getMotionValues(${T_MP4}, ${clip.index})`);
-                        if (curRaw && String(curRaw).indexOf('ERR') !== 0) {
-                            try {
-                                const c = JSON.parse(curRaw);
-                                states[stateKey] = {
-                                    scale: c.scale, position: c.position, scaleWidth: c.scaleWidth,
-                                    cropLeft: c.cropLeft, cropTop: c.cropTop, cropRight: c.cropRight, cropBottom: c.cropBottom
-                                };
-                            } catch (eS) {}
+                    log(`🎯 [IPD-MARKERS] Marker IPD a ${t.toFixed(2)}s: ${clipsTramo.length} clip(s) al tram → ${lim === Infinity ? 'fi' : 'fins ' + lim.toFixed(2) + 's'}`);
+                    for (const clip of clipsTramo) {
+                        const stateKey = T_MP4 + ':' + clip.start.toFixed(3);
+                        if (states[stateKey] === undefined) {
+                            const curRaw = await callJSX(`Anim.getMotionValues(${T_MP4}, ${clip.index})`);
+                            if (curRaw && String(curRaw).indexOf('ERR') !== 0) {
+                                try {
+                                    const c = JSON.parse(curRaw);
+                                    states[stateKey] = {
+                                        scale: c.scale, position: c.position, scaleWidth: c.scaleWidth,
+                                        cropLeft: c.cropLeft, cropTop: c.cropTop, cropRight: c.cropRight, cropBottom: c.cropBottom
+                                    };
+                                } catch (eS) { }
+                            }
                         }
+                        const valsJson = JSON.stringify({ scale: 144, position: [-94.5, 562] });
+                        const resM = await callJSX(`Anim.setMotionValues(${T_MP4}, ${clip.index}, '${valsJson}')`);
+                        log(`🎬 [IPD-MARKERS] V${T_MP4}[${clip.index}] a ${clip.start.toFixed(2)}s (marker IPD ${t.toFixed(2)}s) → Motion ${resM}`);
+                        modificats++;
                     }
-                    const valsJson = JSON.stringify({ scale: 144, position: [-94.5, 562] });
-                    const resM = await callJSX(`Anim.setMotionValues(${T_MP4}, ${clip.index}, '${valsJson}')`);
-                    log(`🎬 [IPD-MARKERS] V${T_MP4}[${clip.index}] a ${clip.start.toFixed(2)}s (marker IPD ${t.toFixed(2)}s) → Motion ${resM}`);
-                    modificats++;
                 }
                 getUtils().status(`IPD aplicat a ${modificats} clips des de markers`, modificats ? "exito" : "warn");
                 return modificats;
