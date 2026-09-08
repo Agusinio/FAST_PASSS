@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=36">
+    <link rel="stylesheet" href="./style.css?v=37">
 </head>
 <body>
     <div id="main-content">
@@ -17,32 +17,28 @@
             <div class="section-content">
                 <div class="setup-top-row">
                     <div class="semaforo-strip">
-                    <div style="display: flex; justify-content: flex-end; gap: 4px; margin-bottom: 4px;">
-                        <button id="btnMode" class="icon-button" title="Alternar layout TEST / TREBALL">🧪</button>
-                        <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
+                        <div class="semaforo-item" title="Estat de l'Escaleta JSON (Servidor)">
+                            <div id="sem-esc" class="light off"></div>
+                            <span>ESC</span>
+                        </div>
+                        <div class="semaforo-item" title="MP4 CleanFeed al projecte/timeline">
+                            <div id="sem-mp4" class="light off"></div>
+                            <span>MP4</span>
+                        </div>
+                        <div class="semaforo-item" title="Rètols (Wotts) al Bin CHY">
+                            <div id="sem-wot" class="light off"></div>
+                            <span>WOT</span>
+                        </div>
+                        <div class="semaforo-item" title="Subtítols projectats al timeline">
+                            <div id="sem-srt" class="light off"></div>
+                            <span>SRT</span>
+                        </div>
                     </div>
-                    <div class="semaforo-item" title="Estat de l'Escaleta JSON (Servidor)">
-                        <div id="sem-esc" class="light off"></div>
-                        <span>ESC</span>
-                    </div>
-                    <div class="semaforo-item" title="MP4 CleanFeed al projecte/timeline">
-                        <div id="sem-mp4" class="light off"></div>
-                        <span>MP4</span>
-                    </div>
-                    <div class="semaforo-item" title="Rètols (Wotts) al Bin CHY">
-                        <div id="sem-wot" class="light off"></div>
-                        <span>WOT</span>
-                    </div>
-                    <div class="semaforo-item" title="Subtítols projectats al timeline">
-                        <div id="sem-srt" class="light off"></div>
-                        <span>SRT</span>
-                    </div>
-                    </div>
-                    <button id="btnFetchEscaleta" class="secondary btn-sq-double-high" title="Fer foto actualitzada de l'escaleta via API digition (Ctrl+clic = foto d'AHIR, per corregir/comparar el dia anterior)" style="background:#5a2a2a; color:#f99;">📷 FOTO</button>
+                    <button id="btnFetchEscaleta" class="secondary btn-foto" title="Fer foto actualitzada de l'escaleta via API digition (Ctrl+clic = foto d'AHIR, per corregir/comparar el dia anterior)" style="background:#5a2a2a; color:#f99;">📷 FOTO</button>
                 </div>
                 <div class="setup-grid">
                     <div class="setup-inputs">
-                        
+
                         <div class="inline-input-group">
                             <label for="programa">PROG:</label>
                             <select id="programa"><option value="">Tria...</option></select>
@@ -62,10 +58,14 @@
                             <label for="conductor">COND:</label>
                             <select id="conductor"><option value="">Tria...</option></select>
                         </div>
-                        
+
                     </div>
-                    <div class="setup-button-container">
+                    <div class="setup-actions">
                         <button id="btnMainAction" class="btn-big-sq">NOU</button>
+                        <div class="setup-actions-mini">
+                            <button id="btnMode" class="icon-button" title="Alternar layout TEST / TREBALL">🧪</button>
+                            <button id="btnSetup" class="icon-button red" title="Configuració">⚙️</button>
+                        </div>
                     </div>
                 </div>
             </div>

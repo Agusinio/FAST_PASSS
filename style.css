@@ -60,7 +60,8 @@ body {
 #srtVideoWrap {
     position: relative;
     align-self: center;
-    width: min(100%, calc((100vh - 30px) * 0.5625)); /* 9/16 de l'altura visible del panell */
+    height: 100%;
+    width: auto;
     max-width: 100%;
     aspect-ratio: 9 / 16;            /* canvas vertical com el projecte */
     background: #000; border-radius: 4px; overflow: hidden;
@@ -114,14 +115,17 @@ button.btn-big-sq { width: var(--boto-gran-vip); height: var(--boto-gran-vip); f
 button.btn-big-sq-full { width: 150%; height: var(--boto-gran-vip); font-size: 10px; }
 
 /* SETUP */
-.setup-grid { display: grid; grid-template-columns: 1fr var(--boto-gran-vip); gap: 10px; align-items: center; }
+.setup-grid { display: grid; grid-template-columns: 1fr var(--boto-gran-vip); gap: 10px; align-items: start; }
 .setup-top-row {
-    display: grid; grid-template-columns: 1fr var(--boto-gran-vip); gap: 10px;
+    display: grid; grid-template-columns: 1fr auto; gap: 10px;
     align-items: center; margin-bottom: 8px;
 }
-.setup-inputs { display: flex; flex-direction: column; gap: 6px; }
-.inline-input-group { display: grid; grid-template-columns: 35px 1fr; align-items: center; gap: 4px; }
-select { background: #000; color: #fff; border: 1px solid #444; height: 20px; font-size: 10px; border-radius: 3px; }
+.setup-inputs { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.setup-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.setup-actions-mini { display: flex; gap: 4px; justify-content: center; }
+.inline-input-group { display: grid; grid-template-columns: 35px minmax(0, 1fr); align-items: center; gap: 4px; }
+select { background: #000; color: #fff; border: 1px solid #444; height: 20px; font-size: 10px; border-radius: 3px; width: 100%; min-width: 0; }
+button.btn-foto { height: var(--boto-std-sq); white-space: nowrap; padding: 0 8px; font-size: 9px; }
 
 /* VÍDEO TACTICAL 2.9.5 */
 .video-tactical-layout { display: flex; flex-direction: column; gap: var(--gap); }
@@ -286,12 +290,13 @@ button.btn-debug {
 .light.error { background: #dc3545; box-shadow: 0 0 5px #dc3545; }
 .light.off { background: #333; box-shadow: none; }
 
-.semaforo-strip { 
-    display: flex; gap: 12px; padding: 4px 8px; 
+.semaforo-strip {
+    display: flex; gap: 8px; padding: 2px 6px;
+    align-items: center; flex-wrap: nowrap; min-width: 0;
     background: rgba(0,0,0,0.2); border-radius: 4px; border: 1px solid #333;
 }
-.semaforo-item { display: flex; align-items: center; gap: 6px; }
-.semaforo-item span { font-size: 8px; font-weight: 800; color: #777; letter-spacing: 0.5px; }
+.semaforo-item { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; justify-content: center; }
+.semaforo-item span { font-size: 8px; font-weight: 800; color: #777; letter-spacing: 0.5px; white-space: nowrap; }
 
 .phase-indicator {
     display: inline-block;
