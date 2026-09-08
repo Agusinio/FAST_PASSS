@@ -22,9 +22,12 @@
         _originalEntries: [],
         _pixelsPerSec: 20,
         _maxSec: 120,
-        _trackHeight: 30,      // capa de clips més baixeta (vista compacta)
-        _waveformHeight: 38,
         _rulerHeight: 18,
+        // Disposició compacta superposada: la WF és el FONS de la zona de treball i
+        // els clips de subtítols hi queden superposats (semitransparents). Així es
+        // suprimeix la franja separada de clips → timeline més baix.
+        _workZoneH: 40,          // alçada de la zona única WF+clips (per sota la regla)
+        _waveformGain: 2.8,   // amplifica visualment la WF (àudio ~-9dB)
         _playheadSec: 0,
         _pollInterval: null,
         _srtPath: "",
@@ -34,7 +37,6 @@
         _isDirty: false,
         _waveformPeaks: null,
         _waveformPPS: 480,
-        _waveformGain: 2.8,   // amplifica visualment la WF (àudio ~-9dB)
         _wfCacheKey: "",
         _wfPixelHeights: null,
         _waveformSegments: [],
@@ -80,11 +82,11 @@
                 self.setPlayhead(sec);
             });
 
-            // Click dret (zona superior): crear marcador (o esborrar-lo si ja n'hi ha un a sota).
+            // Click dret (zona de treball): crear marcador (o esborrar-lo si ja n'hi ha un a sota).
             this._canvas.addEventListener('contextmenu', function (e) {
                 e.preventDefault();
-                // La zona inferior (waveform) es reserva per MOURE els marcadors.
-                if (self._inLowerZone(e)) return;
+                // La regla no és zona de marcadors (només cabezal).
+                if (self._inRulerZone(e)) return;
                 var rawSec = self._canvasXToSec(e);
 
                 // 1) Borrar si el clic cau sobre un marcador existent (mateixa tol que el drag).
@@ -111,25 +113,24 @@
                 self._persistMarkers();
             });
 
-            // Botó esquerre (per disseny):
-            //  - Zona superior (timeline/clips) → SOLS el cabezal (playhead), mai drag.
-            //  - Zona inferior (waveform) → ARROSSEGAR els marcadors (acordió/moure).
+            // Botó esquerre (disseny compacte):
+            //  - REGLA → SOLS el cabezal (playhead), mai drag.
+            //  - Zona de treball (WF de fons + clips superposats) → arrossegar els marcadors.
             // Un click simple sobre un marcador (sense moviment) posiciona el playhead.
             this._canvas.addEventListener('mousedown', function (e) {
                 if (e.button !== 0) return;
                 var sec = self._canvasXToSec(e);
+                if (self._inRulerZone(e)) {
+                    log("🖱 MOUSEDOWN canvas (regla) → media=" + sec.toFixed(2) + "s");
+                    self.setPlayhead(sec);
+                    self._suppressClick = true; // el clic següent no ha de repetir el seek
+                    return;
+                }
                 // Tol ampliada per capturar el marcador per ARROSSEGAR-lo (wideTol=true).
                 var idx = self._markerAtSec(sec, true);
                 if (idx < 0) {
                     // Cap marcador a sota: posicionar el playhead immediatament.
                     log("🖱 MOUSEDOWN canvas → media=" + sec.toFixed(2) + "s");
-                    self.setPlayhead(sec);
-                    self._suppressClick = true; // el clic següent no ha de repetir el seek
-                    return;
-                }
-                if (!self._inLowerZone(e)) {
-                    // Zona superior: el clic esquerre només mou el playhead
-                    // (els marcadors s'editen des de la zona inferior).
                     self.setPlayhead(sec);
                     self._suppressClick = true; // el clic següent no ha de repetir el seek
                     return;
@@ -840,12 +841,13 @@
             }
         },
 
-        // Layout de les dues zones (superior: regle + clips; inferior: waveform).
+        // Layout únic compacte: regla a dalt + UNA zona de treball on la WF fa de
+        // fons i els clips de subtítols hi queden superposats (semitransparents).
         _getLayout: function () {
-            var trackY = this._rulerHeight + 4;
-            var waveformY = trackY + this._trackHeight + 4;
-            var canvasH = waveformY + this._waveformHeight + 4;
-            return { trackY: trackY, waveformY: waveformY, canvasH: canvasH };
+            var zoneTop = this._rulerHeight + 1;   // la zona comença just sota la regla
+            var zoneH = this._workZoneH || 40;
+            var canvasH = zoneTop + zoneH + 1;
+            return { rulerHeight: this._rulerHeight, zoneTop: zoneTop, zoneH: zoneH, canvasH: canvasH };
         },
 
         // Coordenada Y del cursor en l'espai del canvas (compensa l'escalat CSS).
@@ -855,9 +857,10 @@
             return (e.clientY - rect.top) * scaleY;
         },
 
-        // Zona inferior = waveform (on s'arrosseguen els marcadors).
-        _inLowerZone: function (e) {
-            return this._eventY(e) >= this._getLayout().waveformY;
+        // La REGLA és l'única zona del cabezal: tot el que queda per sota
+        // (zona de treball WF+clips) és zona de marcadors.
+        _inRulerZone: function (e) {
+            return this._eventY(e) < this._getLayout().rulerHeight;
         },
 
         render: function () {
@@ -874,11 +877,11 @@
             ctx.fillRect(0, 0, canvasW, L.canvasH);
             
             this._drawRuler(ctx);
-            this._drawTrack(ctx, L.trackY);
-            // Separador visual entre la zona superior (timeline) i la inferior (waveform)
-            ctx.fillStyle = '#4a4a4a';
-            ctx.fillRect(0, L.waveformY - 3, canvasW, 1);
-            this._drawWaveform(ctx, L.waveformY);
+            // Capes superposades a la zona de treball: primer la WF (fons) i per
+            // sobre els clips de subtítols semitransparents → es veuen les pauses
+            // d'àudio a través dels clips per encaixar els subtítols.
+            this._drawWaveform(ctx, L.zoneTop, L.zoneH);
+            this._drawTrack(ctx, L.zoneTop, L.zoneH);
             // El playhead es dibuixa ABAIX dels marcadors perquè no els tapi
             // (els marcadors sempre visibles durant el drag).
             this._drawPlayhead();
@@ -921,32 +924,32 @@
             }
         },
 
-        _drawTrack: function (ctx, y) {
-            var blockH = this._trackHeight - 4;
-            ctx.fillStyle = '#2a1e4f';
-            ctx.fillRect(0, y, this._canvas.width, this._trackHeight);
-            ctx.fillStyle = '#8877aa';
-            ctx.font = '9px sans-serif';
-            ctx.fillText('SUBTÍTOLS (clips)', 3, y + 10);
+        // Clips de subtítols SEMITRANSPARENTS superposats a la WF (fons): el fill
+        // translúcid deixa veure les pauses d'àudio per sota i encaixar els
+        // subtítols sense necessitar una franja pròpia per als clips.
+        _drawTrack: function (ctx, y, h) {
+            var bh = h - 3;               // alçada del bloc del clip (marge vertical)
+            var by = y + 1;
             for (var i = 0; i < this._entries.length; i++) {
                 var e = this._entries[i];
                 var x = this._secToX(e.startSec);
                 var w = (e.endSec - e.startSec) * this._pixelsPerSec;
                 if (w < 2) w = 2;
-                ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.fillRect(x + 1, y + 2 + 1, w, blockH);
-                ctx.fillStyle = '#8f4ad4';
-                ctx.fillRect(x, y + 2, w, blockH);
+                ctx.fillStyle = 'rgba(143,74,212,0.45)';   // lila translúcid
+                ctx.fillRect(x, by, w, bh);
+                if (w >= 4) {
+                    ctx.strokeStyle = 'rgba(210,175,255,0.9)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x + 0.5, by, w - 1, bh);
+                }
             }
         },
 
-        _drawWaveform: function (ctx, y) {
-            var wh = this._waveformHeight;
+        // WF com a FONS de tota la zona de treball, sense atenuar (cal veure bé les
+        // pauses d'àudio per encaixar els subtítols). h = alçada de la zona.
+        _drawWaveform: function (ctx, y, h) {
             ctx.fillStyle = '#0d2818';
-            ctx.fillRect(0, y, this._canvas.width, wh);
-            ctx.fillStyle = '#77cc99';
-            ctx.font = '9px sans-serif';
-            ctx.fillText('WAVEFORM · arrossega marcador', 3, y + 10);
+            ctx.fillRect(0, y, this._canvas.width, h);
             if (this._waveformPeaks && this._waveformPeaks.length > 0) {
                 // Espai de MEDIA del clip (identitat): la WF coincideix amb els
                 // subtítols del SRT (que viuen en temps de media). El cabezal
@@ -962,15 +965,12 @@
                 ctx.fillStyle = '#22cc66';
                 for (var px = 0; px < H.length; px++) {
                     var g = Math.min(1, H[px] * (this._waveformGain || 1));
-                    var h = g * (wh - 2);
-                    if (h < 1) h = 1;
-                    ctx.fillRect(px, y + wh - h, 1, h);
+                    var hcol = g * (h - 2);
+                    if (hcol < 1) hcol = 1;
+                    ctx.fillRect(px, y + h - hcol, 1, hcol);
                 }
-            } else {
-                // Sense dades: fons verd fosc buit
-                ctx.fillStyle = '#0a1a0a';
-                ctx.fillRect(0, y + 2, this._canvas.width, wh - 4);
             }
+            // Sense dades la zona queda amb el fons verd fosc de la WF.
         },
 
         /**
