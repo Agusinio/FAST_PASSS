@@ -343,6 +343,8 @@ function applySliderLimits() {
         if (btnChyronResto) btnChyronResto.addEventListener('click', () => callWorkflow('Chyrons', 'placeChyronResto'));
         const btnChyronRepartir = document.getElementById('btnChyronRepartir');
         if (btnChyronRepartir) btnChyronRepartir.addEventListener('click', () => callWorkflow('Chyrons', 'repartirChyronTraduccio'));
+        const btnChyronColocar = document.getElementById('btnChyronColocar');
+        if (btnChyronColocar) btnChyronColocar.addEventListener('click', () => runPlaceAllChyrons());
 
         // --- BOTONS GRÀFICS (IPD, Doble Pantalla, MAPA, TOTEM) ---
         const btnGrafIpd = document.getElementById('btnGrafIpd');
@@ -561,9 +563,10 @@ function applySliderLimits() {
     }
 
     /**
-     * runFullPipelineOut: Pipeline complet del botó OUT en mode TREBALL.
+     * runFullPipelineOut: Marcadors del botó OUT en mode TREBALL.
      * Ordre: OUT (recorte i neteja), TROSSEJA, OnAir, Deduc, Prev, Correl,
-     * Density, Conduct, Titol, Lloc, Nom, Resto, Traducció.
+     * Density. Els chyrons es col·loquen després (botó COLOCAR), un cop
+     * l'usuari ha verificat els marcadors.
      */
     async function runFullPipelineOut() {
         const utils = FASTPASS_UI.Utils;
@@ -574,15 +577,9 @@ function applySliderLimits() {
             ['Deduc (F2)',             () => callWorkflow('Markers', 'placeDeducedOnAirMarkers')],
             ['Prev (F3)',              () => callWorkflow('Markers', 'placeScheduledMarkers')],
             ['Correl (F3.5)',          () => callWorkflow('Assembly', 'correlationSnapMarkers')],
-            ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],
-            ['Conduct',                () => callWorkflow('Chyrons', 'placeChyronConductor')],
-            ['Titol',                  () => callWorkflow('Chyrons', 'placeChyronTitol')],
-            ['Lloc',                   () => callWorkflow('Chyrons', 'placeChyronLloc')],
-            ['Nom',                    () => callWorkflow('Chyrons', 'placeChyronNom')],
-            ['Resto',                  () => callWorkflow('Chyrons', 'placeChyronResto')],
-            ['Traducció',              () => callWorkflow('Chyrons', 'placeChyronTraduccio')]
+            ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')]
         ];
-        utils.log('🚀 [PIPE] Pipeline complet post-OUT: ' + phases.map(p => p[0]).join(' → '), 'INFO');
+        utils.log('🚀 [PIPE] Marcadors post-OUT: ' + phases.map(p => p[0]).join(' → ') + '. Verifica els marcadors i usa COLOCAR per als chyrons.', 'INFO');
         for (const ph of phases) {
             const t0 = Date.now();
             utils.log('🔄 [PIPE] ' + ph[0] + '...', 'INFO');
@@ -594,8 +591,38 @@ function applySliderLimits() {
             await utils.delay(350);
             utils.log('✅ [PIPE] ' + ph[0] + ' finalitzada (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)', 'INFO');
         }
-        utils.log('🏁 [PIPE] Pipeline complet finalitzat.', 'INFO');
-        utils.status('Pipeline OUT completat', 'exito');
+        utils.log('🏁 [PIPE] Marcadors col·locats. Verifica la seqüència i prem COLOCAR per posar els chyrons.', 'INFO');
+        utils.status('Marcadors col·locats — prem COLOCAR', 'exito');
+    }
+
+    /**
+     * runPlaceAllChyrons: Col·loca TOTS els chyrons del bloc (botó COLOCAR).
+     * Ordre: Conductor, Titol, Lloc, Nom, Resto, Traducció.
+     */
+    async function runPlaceAllChyrons() {
+        const utils = FASTPASS_UI.Utils;
+        const phases = [
+            ['Conduct',   () => callWorkflow('Chyrons', 'placeChyronConductor')],
+            ['Titol',     () => callWorkflow('Chyrons', 'placeChyronTitol')],
+            ['Lloc',      () => callWorkflow('Chyrons', 'placeChyronLloc')],
+            ['Nom',       () => callWorkflow('Chyrons', 'placeChyronNom')],
+            ['Resto',     () => callWorkflow('Chyrons', 'placeChyronResto')],
+            ['Traducció', () => callWorkflow('Chyrons', 'placeChyronTraduccio')]
+        ];
+        utils.log('🚀 [CHY] Col·locant TOTS els chyrons: ' + phases.map(p => p[0]).join(' → '), 'INFO');
+        for (const ph of phases) {
+            const t0 = Date.now();
+            utils.log('🔄 [CHY] ' + ph[0] + '...', 'INFO');
+            try {
+                await ph[1]();
+            } catch (e) {
+                utils.log('⚠️ [CHY] ' + ph[0] + ' ha llançat: ' + e.message, 'ERROR');
+            }
+            await utils.delay(350);
+            utils.log('✅ [CHY] ' + ph[0] + ' finalitzat (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)', 'INFO');
+        }
+        utils.log('🏁 [CHY] Tots els chyrons col·locats.', 'INFO');
+        utils.status('Chyrons col·locats', 'exito');
     }
 
     /**

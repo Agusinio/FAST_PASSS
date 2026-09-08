@@ -350,16 +350,24 @@ Afecta a `flow_chyrons.js` (workflow Chyrons actiu) i `flow_retols.js` (per cohe
 - El botó de la secció RENDER (🧪 en TEST / 👤 en TREBALL) alterna `window.FASTPASS_UI.LayoutMode` = 'test' | 'work'.
 - `body.mode-work` oculta per CSS tot el que porta la classe `.test-only`. Per defecte s'inicia en 'test'.
 
-### Layout TREBALL (usuari final)
-- **GRÀFICS**: queden només `Gràfica` (= antic `btnMarksF6`/Gràfics, ara renombrat i fora de test-only), `IPD`, `DblPant`, `MAPA`, `TOTEM`.
-- **CHYRONS**: en mode TREBALL queda **només `Repartir`** (els botons Conductor/Titol/Lloc/Nom/Resto/Traducció porten classe `test-only` i només es veuen en TEST).
-- **MARCADORS** (OnAir/Dedu/Prev/Correl/Density/OrphanSnap): secció `.test-only` — només visibles en mode TEST per disparar les fases per separat.
+### Layout (TEST)
+- **Fila 1**: GRÀFICS + MARCADORS · **Fila 2**: CHYRONS + SUBTÍTOLS · **Fila 3**: RENDER (separades amb `.row-break`).
 
-**Botons uniformes (CSS):** tots els botons de les tirs de GRÀFICS/MARCADORS/CHYRONS tenen ara la mateixa mida fixa (64×30 px) i els grups fan servir l'ample natural (`flex: 0 1 auto` + `flex-wrap`), de manera que un grup pot ser més ample o més estret que l'altre segons quants botons tingui.
+### Layout TREBALL (usuari final)
+- **Fila 1**: GRÀFICS + CHYRONS a la mateixa fila (MARCADORS i els botons de chyron individuals queden ocults per `.test-only`).
+- **GRÀFICS**: `GRAF` (ex-`Gràfics`/F6 → placeGraphicMarkers), `IPD`, `DP`, `MAPA`, `TOTEM` — botons quadrats amb acrònim (tooltip amb el nom complet).
+- **CHYRONS**: botons **`COLOCAR`** (col·loca Conductor+Titol+Lloc+Nom+Resto+Traducció via `runPlaceAllChyrons`) i **`REPART`** (repartir traduccions). Els botons individuals (COND/TITOL/LLOC/NOM/RESTO/TRAD) són `test-only`.
+- **MARCADORS** (OnAir/Dedu/Prev/Correl/Dens/Orphan): secció `.test-only`.
+
+**Botons quadrats (CSS):** tots els botons de les tirs fan 38×38 px (font 8 px, acrònims, tooltip complet). Els grups tenen ample natural limitat (`max-width: 176px`), així GRÀFICS i MARCADORS (o CHYRONS en TREBALL) caben a la mateixa fila.
 
 ### IPD (2 mecanismes preservats)
 - `Graphics.runIpd` (toggle sobre clip seleccionat) — clic normal del botó IPD.
-- `Markers.runAplicarIpdDesdeMarkers` (revisa els clips que comencen a cada marcador IPD turquesa i aplica IPD si el clip és abans del següent marcador d'estructura) — ara accessible amb **Ctrl+clic** al botó IPD.
+- `Markers.runAplicarIpdDesdeMarkers` (revisa els clips que comencen a cada marcador IPD turquesa i aplica IPD si el clip és abans del següent marcador d'estructura) — accessible amb **Ctrl+clic** al botó IPD.
 
-### Pipeline OUT (mode TREBALL)
-Quan l'usuari clica **OUT** (grup VIDEO) es dispara `runFullPipelineOut()` (main.js): OUT (recorte i neteja clàssica) → TROSSEJA → OnAir → Deduc → Prev → Correl → Density → Conduct → Titol → Lloc → Nom → Resto → Traducció. Cada fase es logueja amb [PIPE] i separa 350 ms. En mode TEST el botó OUT conserva el comportament antic (només `Cut.runCutOut`) per provar les peces per separat.
+### Pipeline OUT (mode TREBALL) — NOMÉS MARCADORS
+Quan l'usuari clica **OUT** (grup VIDEO) es dispara `runFullPipelineOut()` (main.js): OUT (recorte i neteja clàssica) → TROSSEJA → OnAir → Deduc → Prev → Correl → Density. **Ja NO col·loca chyrons**: l'usuari ha de verificar els marcadors i després prémer **COLOCAR** (grup CHYRONS) per posar Conductor → Titol → Lloc → Nom → Resto → Traducció (`runPlaceAllChyrons`). Cada fase es logueja ([PIPE] / [CHY]) i separa 350 ms. En mode TEST el botó OUT conserva el comportament antic (només `Cut.runCutOut`).
+
+### Vídeo i subtítols (CSS)
+- **Right-zone** ara creix per omplir l'espai (`flex: 1 1 auto; min-width 200px; max-width min(46vw, 62% de l'altura)`) → el visor 9:16 deixa de ser una columna fixa estreta.
+- **Subtítols del visor**: marges més grans (`bottom: 12%`, padding lateral `9%`), més interlineat (1.45) i ombra doble perquè no es perdi text als extrems.

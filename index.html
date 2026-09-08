@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=32">
+    <link rel="stylesheet" href="./style.css?v=33">
 </head>
 <body>
     <div id="main-content">
@@ -93,57 +93,57 @@
             </div>
         </div>
         
-        <!-- GRUP: GRÀFICS + MARCADORS + CHYRONS (2 columnes) -->
+        <!-- FILA 1 (TEST): GRÀFICS + MARCADORS · (TREBALL): GRÀFICS + CHYRONS -->
         <div class="graphics-group">
-        <!-- SECTION: GRÀFICS (visibles SEMPRE: mode test i treball) -->
+        <!-- SECTION: GRÀFICS (sempre visible) -->
         <div class="section-container">
             <div class="section-label"><span>GRÀFICS</span></div>
             <div class="section-content">
                  <div class="graphics-strip">
-                    <button id="btnMarksF6" class="secondary btn-sq-double-high" title="Col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">Gràfica</button>
-                    <button id="btnGrafIpd" class="secondary btn-sq-double-high" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD des dels marcadors (entre marcador IPD i següent estructural)">IPD</button>
-                    <button id="btnGrafDoblePantalla" class="secondary btn-sq-double-high">DblPant</button>
-                    <button id="btnGrafMapa" class="secondary btn-sq-double-high">MAPA</button>
-                    <button id="btnGrafTotem" class="secondary btn-sq-double-high">TOTEM</button>
+                    <button id="btnMarksF6" class="secondary" title="Gràfica — col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">GRAF</button>
+                    <button id="btnGrafIpd" class="secondary" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD (marcador IPD → següent estructural)">IPD</button>
+                    <button id="btnGrafDoblePantalla" class="secondary" title="Doble Pantalla V2/V3">DP</button>
+                    <button id="btnGrafMapa" class="secondary" title="Mapa zoom">MAPA</button>
+                    <button id="btnGrafTotem" class="secondary" title="Tòtem">TOTEM</button>
                  </div>
             </div>
         </div>
 
-        <!-- SECTION: MARCADORS (TEST ONLY) - el programador dispara les fases per separat -->
+        <!-- SECTION: MARCADORS (TEST ONLY) - fila 1 en TEST -->
         <div class="section-container test-only">
             <div class="section-label"><span>MARCADORS</span></div>
             <div class="section-content">
                  <div class="graphics-strip">
-                    <button id="btnMarksF1" class="secondary btn-sq-double-high">OnAir</button>
-                    <button id="btnMarksF2" class="secondary btn-sq-double-high">Dedu</button>
-                    <button id="btnMarksF3" class="secondary btn-sq-double-high">Prev</button>
-                    <button id="btnMarksF35" class="secondary btn-sq-double-high">Correl</button>
-                    <button id="btnMarksF4" class="secondary btn-sq-double-high">Density</button>
-                    <button id="btnMarksF5" class="secondary btn-sq-double-high">OrphanSnap</button>
+                    <button id="btnMarksF1" class="secondary" title="F1 · Marcadors OnAir (TC real d'emissió)">OnAir</button>
+                    <button id="btnMarksF2" class="secondary" title="F2 · Marcadors OnAir deduïts">Dedu</button>
+                    <button id="btnMarksF3" class="secondary" title="F3 · Marcadors previstos (coincidències)">Prev</button>
+                    <button id="btnMarksF35" class="secondary" title="F3.5 · CorrelationSnap a corts de vídeo">Correl</button>
+                    <button id="btnMarksF4" class="secondary" title="F4 · DensitySnap / faros">Dens</button>
+                    <button id="btnMarksF5" class="secondary" title="F5 · OrphanSnap (marcadors orfes a corts propers)">Orphan</button>
                  </div>
             </div>
         </div>
 
-        <!-- SECTION: CHYRONS (en TREBALL queda només Repartir; la resta són test-only) -->
+        <div class="row-break test-only"></div>
+
+        <!-- SECTION: CHYRONS - fila 2 amb SUBTÍTOLS (en TREBALL: COLOCAR + REPARTIR; la resta test-only) -->
         <div class="section-container">
             <div class="section-label"><span>CHYRONS</span></div>
             <div class="section-content">
                  <div class="graphics-strip">
-                    <button id="btnChyronConductor" class="secondary btn-sq-double-high test-only">Conductor</button>
-                    <button id="btnChyronTitol" class="secondary btn-sq-double-high test-only">Titol</button>
-                    <button id="btnChyronLloc" class="secondary btn-sq-double-high test-only">Lloc</button>
-                    <button id="btnChyronNom" class="secondary btn-sq-double-high test-only">Nom</button>
-                    <button id="btnChyronResto" class="secondary btn-sq-double-high test-only">Resto</button>
-                    <button id="btnChyronTraduccio" class="secondary btn-sq-double-high test-only">Traducció</button>
-                    <button id="btnChyronRepartir" class="secondary btn-sq-double-high">Repartir</button>
+                    <button id="btnChyronColocar" class="secondary" title="Col·loca TOTS els chyrons: Conductor, Titol, Lloc, Nom, Resto i Traducció (verifica primer els marcadors)">COLOCAR</button>
+                    <button id="btnChyronRepartir" class="secondary" title="Reparteix les traduccions seleccionades">REPART</button>
+                    <button id="btnChyronConductor" class="secondary test-only" title="Col·loca el Conductor (TEST)">COND</button>
+                    <button id="btnChyronTitol" class="secondary test-only" title="Col·loca el Tema-Titol (TEST)">TITOL</button>
+                    <button id="btnChyronLloc" class="secondary test-only" title="Col·loca Lloc/Data (TEST)">LLOC</button>
+                    <button id="btnChyronNom" class="secondary test-only" title="Col·loca Nom/Càrrec (TEST)">NOM</button>
+                    <button id="btnChyronResto" class="secondary test-only" title="Col·loca la resta de chyrons (TEST)">RESTO</button>
+                    <button id="btnChyronTraduccio" class="secondary test-only" title="Col·loca traduccions (TEST)">TRAD</button>
                  </div>
             </div>
         </div>
-        </div>
 
-        <!-- GRUP: SUBTÍTOLS + RENDER (2 columnes) -->
-        <div class="graphics-group">
-        <!-- SECTION: SUBTÍTOLS EDITOR -->
+        <!-- SECTION: SUBTÍTOLS (sempre visible) - fila 2 amb CHYRONS -->
         <div class="section-container">
             <div class="section-label"><span>SUBTÍTOLS</span></div>
             <div class="section-content">
@@ -161,7 +161,9 @@
             </div>
         </div>
 
-        <!-- SECTION: RENDER -->
+        <div class="row-break"></div>
+
+        <!-- SECTION: RENDER (sempre visible) - fila pròpia -->
         <div class="section-container">
             <div class="section-label"><span>RENDER</span></div>
             <div class="section-content">
@@ -252,6 +254,6 @@
     <script src="js/workflows/flow_assembly.js?v=5"></script>
     <script src="js/core/project_registry.js?v=5"></script>
     <script src="js/editor/srt_editor.js?v=54"></script>
-    <script src="js/main.js?v=23"></script>
+    <script src="js/main.js?v=24"></script>
 </body>
 </html>
