@@ -25,15 +25,17 @@ body {
     background-color: var(--color-fons); color: var(--color-text);
     display: flex; flex-direction: column; height: 100vh; overflow: hidden;
     font-size: 11px;
-    /* Ample mínim de la finestra: per sota d'això el contingut es manté i apareix
-       scroll horitzontal en lloc de trencar el layout (botons fora del seu grup). */
-    min-width: 640px;
+    /* NOTA: no posar min-width aquí — congelaria tot el layout (inclòs el timeline).
+       El mínim s'aplica només a la franja de controls (.upper-left / .main-upper)
+       perquè el timeline inferior s'estrenyi amb la finestra. */
 }
 
 #main-content { flex-grow: 1; overflow-y: auto; overflow-x: auto; padding: 10px; }
 
 /* NOVA ZONA VERTICAL DRETA */
-.main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
+/* L'ample mínim només s'aplica a la franja de controls (no al body) perquè el
+   timeline de subtítols, que està per sota, s'estrenyi amb la finestra de l'extensió. */
+.main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; min-width: 640px; }
 .upper-left { flex: 0 1 340px; min-width: 0; }
 .right-zone {
     flex: 1 1 auto;
