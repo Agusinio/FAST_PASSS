@@ -683,17 +683,18 @@ function sizeVideoToFit() {
         var zone = document.querySelector('.right-zone');
         var col = document.querySelector('.upper-left');
         if (!wrap || !zone || !col) return;
-        /* TREBALL: el visor fa l'alçada dels grups de botons (GRF/SUB/CHY/REN).
-           TEST: manté l'alçada de tota la columna de controls. */
-        var ref = (document.body.classList.contains('mode-work'))
-            ? document.querySelector('.graphics-group')
-            : col;
-        if (!ref) ref = col;
+        /* 1) Anul·lar la mida del visor perquè no infli l'alçada de la columna en mesurar
+              (si partís de 280px d'amplada, estiraria la fila i la mesura sortiria gran). */
+        wrap.style.width = '10px';
+        wrap.style.height = '0';
+        /* 2) Alçada real de tota la columna de controls: INICI + VÍDEO + GRF/SUB + CHY/REN. */
         var aw = zone.clientWidth;
-        var ah = ref.offsetHeight;
+        var ah = col.offsetHeight;   /* la lectura força el reflow amb el visor petit */
         if (aw <= 0 || ah <= 0) return;
+        /* 3) Amplada 9:16; l'alçada la deriva l'aspect-ratio (i queda 1:1 amb la columna). */
         var w = Math.min(aw, Math.floor(ah * 9 / 16));
-        wrap.style.width = w + 'px';   /* l'alçada la deriva l'aspect-ratio 9/16 */
+        wrap.style.width = w + 'px';
+        wrap.style.height = 'auto';
     } catch (e) { /* no crític */ }
 }
 window.addEventListener('resize', sizeVideoToFit);

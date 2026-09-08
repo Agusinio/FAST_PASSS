@@ -45,9 +45,8 @@ body {
     overflow: hidden;
 }
 
-/* En TREBALL el visor queda ancorat al fons de la zona dreta: al nivell dels grups
-   de botons (GRF/SUB/CHY/REN), que són l'últim bloc de la columna. */
-.mode-work .right-zone { justify-content: flex-end; }
+/* En TREBALL el visor fa l'alçada de tota la columna de controls (INICI+VÍDEO+grups),
+   mesurada per JS amb el visor anul·lat perquè no s'auto-infli. */
 
 /* DIVISOR per redimensionar la columna esquerra */
 #splitter {
@@ -64,7 +63,8 @@ body {
     position: relative;
     align-self: flex-start;
     height: auto;
-    width: 280px;            /* amplada ajustada per JS (sizeVideoToFit) */
+    width: 10px;             /* amplada ajustada per JS (sizeVideoToFit); inicial ínfima */
+    height: 0;               /* perquè en el primer paint no infli la columna */
     max-width: 100%;
     aspect-ratio: 9 / 16;            /* canvas vertical com el projecte */
     background: #000; border-radius: 4px; overflow: hidden;
