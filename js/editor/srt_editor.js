@@ -22,7 +22,7 @@
         _originalEntries: [],
         _pixelsPerSec: 20,
         _maxSec: 120,
-        _trackHeight: 38,
+        _trackHeight: 30,      // capa de clips més baixeta (vista compacta)
         _waveformHeight: 38,
         _rulerHeight: 18,
         _playheadSec: 0,
