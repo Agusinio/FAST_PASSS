@@ -526,6 +526,7 @@ function applySliderLimits() {
             });
         }
         applyLayoutMode(window.FASTPASS_UI.LayoutMode || 'test');
+        if (typeof sizeVideoToFit === 'function') sizeVideoToFit();
     }
 
     async function callWorkflow(module, method, ...args) {
@@ -670,7 +671,28 @@ document.addEventListener('click', function (e) {
     }
 });
 
+
+/**
+ * sizeVideoToFit: Dimensiona el visor de vídeo (9:16) perquè quedi pegat a la
+ * columna de botons i es redueixi quan la vista es compacta.
+ * Amplada = min(ample disponible, 9/16 de l'altura de la columna).
+ */
+function sizeVideoToFit() {
+    try {
+        var wrap = document.getElementById('srtVideoWrap');
+        var zone = document.querySelector('.right-zone');
+        if (!wrap || !zone) return;
+        var aw = zone.clientWidth;
+        var ah = Math.min(zone.clientHeight, (window.innerHeight || 600) - 8);
+        if (aw <= 0 || ah <= 0) return;
+        var w = Math.min(aw, Math.floor(ah * 9 / 16));
+        wrap.style.width = w + 'px';
+    } catch (e) { /* no crític */ }
+}
+window.addEventListener('resize', sizeVideoToFit);
+
 setInterval(function () {
+    sizeVideoToFit();
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
         FASTPASS_UI.Sync.updateSliderFromPremiere();
     }

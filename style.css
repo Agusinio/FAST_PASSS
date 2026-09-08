@@ -25,18 +25,21 @@ body {
     background-color: var(--color-fons); color: var(--color-text);
     display: flex; flex-direction: column; height: 100vh; overflow: hidden;
     font-size: 11px;
+    /* Ample mínim de la finestra: per sota d'això el contingut es manté i apareix
+       scroll horitzontal en lloc de trencar el layout (botons fora del seu grup). */
+    min-width: 640px;
 }
 
-#main-content { flex-grow: 1; overflow-y: auto; padding: 10px; }
+#main-content { flex-grow: 1; overflow-y: auto; overflow-x: auto; padding: 10px; }
 
 /* NOVA ZONA VERTICAL DRETA */
 .main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
 .upper-left { flex: 0 1 340px; min-width: 0; }
 .right-zone {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-width: 0;
     display: flex; flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     align-self: stretch;
     overflow: hidden;
@@ -55,9 +58,9 @@ body {
 /* VISOR DE VÍDEO (PLAN_VIDEO_PREVIEW) — canvas vertical 9:16 com el projecte */
 #srtVideoWrap {
     position: relative;
-    align-self: center;
-    height: 100%;
-    width: auto;
+    align-self: flex-start;
+    height: auto;
+    width: 280px;            /* amplada ajustada per JS (sizeVideoToFit) */
     max-width: 100%;
     aspect-ratio: 9 / 16;            /* canvas vertical com el projecte */
     background: #000; border-radius: 4px; overflow: hidden;
@@ -183,7 +186,7 @@ input[type="range"]::-webkit-slider-thumb {
 #secRender     { order: 7; }
 /* En mode TREBALL: graella fixa 2×2 (sense wrap) → fila1 GRÀFICS+SUBTÍTOLS, fila2 CHYRONS+RENDER.
    Gràfics i Subtítols NO poden baixar de fila: sempre queden junts a la fila superior. */
-.mode-work .graphics-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; align-items: stretch; }
+.mode-work .graphics-group { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 4px; align-items: stretch; }
 .mode-work .graphics-group > .row-break { display: none; }
 .mode-work #secGrafics { grid-column: 1; grid-row: 1; }
 .mode-work #secSubtitols { grid-column: 2; grid-row: 1; }
