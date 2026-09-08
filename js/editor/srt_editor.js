@@ -436,6 +436,25 @@
                     }
                 }
                 candidates.sort(function (a, b) { return a.startSec - b.startSec; });
+                // Assegurar el fitxer de 15 min SEGÜENT si el darrer seleccionat pot
+                // tenir frases que creuen el tall (la part final aniria a l'arxiu següent
+                // i la darrera frase del bloc es perdria sense ell).
+                if (candidates.length > 0) {
+                    const lastCand = candidates[candidates.length - 1];
+                    for (let i = 0; i < files.length; i++) {
+                        const name2 = files[i].name || '';
+                        if (!name2.toUpperCase().endsWith('.SRT')) continue;
+                        if (name2.indexOf(prefix) !== 0) continue;
+                        const t2 = this._parseSrt15Times(name2);
+                        if (!t2) continue;
+                        if (t2.startSec >= lastCand.endSec - 0.5 && t2.startSec < lastCand.endSec + 60 * 16) {
+                            if (!candidates.some(function (c) { return c.startSec === t2.startSec; })) {
+                                candidates.push({ name: name2, path: dir + '\\' + name2, startSec: t2.startSec, endSec: t2.endSec });
+                            }
+                        }
+                    }
+                    candidates.sort(function (a, b) { return a.startSec - b.startSec; });
+                }
                 log("🚨 SRT_EMERGENCIA: " + candidates.length + " arxius de 15 min seleccionats");
                 if (candidates.length === 0) { u.status("No s'ha trobat cap SRT de 15 min per al bloc", "warn"); return; }
 
@@ -449,7 +468,9 @@
                     for (let e = 0; e < entries.length; e++) {
                         const ent = entries[e];
                         const realStart = cand.startSec + ent.startSec;
-                        const realEnd = cand.startSec + ent.endSec;
+                        // Recórrer el final de la frase al límit de la finestra (bloc+marge):
+                        // el SRT no ha d'estirar-se a la peça veïna més enllà del handle.
+                        const realEnd = Math.min(cand.startSec + ent.endSec, winEnd);
                         if (realEnd <= winStart || realStart >= winEnd) continue;
                         const ns = realStart - worldStart;
                         const ne = realEnd - worldStart;
