@@ -36,14 +36,10 @@ body {
     flex: 0 1 auto;
     min-width: 0;
     display: flex; flex-direction: column;
-    gap: 4px;
     align-items: center;
-    justify-content: center;               /* vídeo centrat verticalment */
+    justify-content: center;
     align-self: stretch;
     overflow: hidden;
-    background-color: var(--color-fons-seccio);
-    border: 1px solid var(--color-vora); border-radius: 8px;
-    padding: 4px;
 }
 
 /* DIVISOR per redimensionar la columna esquerra */
@@ -167,24 +163,34 @@ input[type="range"]::-webkit-slider-thumb {
 .mode-work .section-label span.lbl-full { display: none; }
 .mode-work .section-label span.lbl-short { display: inline; }
 .graphics-strip { display: grid; gap: 4px; align-items: center; }
-.graphics-strip.cols-3 { grid-template-columns: repeat(3, 34px); }
-.graphics-strip.cols-4 { grid-template-columns: repeat(4, 34px); }
+.graphics-strip.cols-3 { grid-template-columns: repeat(3, 30px); }
+.graphics-strip.cols-4 { grid-template-columns: repeat(4, 30px); }
 .graphics-strip button {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     padding: 0 2px;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-    font-size: 8px;
-    border-radius: 6px;
+    font-size: 7px;
+    border-radius: 5px;
 }
-/* En mode TREBALL: fila1 = GRÀFICS + SUBTÍTOLS · fila2 = CHYRONS + RENDER */
-.mode-work #secGrafics { order: 10; }
-.mode-work #secSubtitols { order: 20; }
-.mode-work .row-break { order: 25; }
-.mode-work #secChyrons { order: 30; }
-.mode-work #secRender { order: 40; }
-/* CHYRONS en TREBALL: els botons visibles (COLOCAR/REPART) en una sola fila horitzontal */
-.mode-work .graphics-strip.chy-strip { grid-template-columns: repeat(2, 34px); }
+/* Ordre en TEST: fila1 MARCADORS+CHYRONS · fila2 GRÀFICS+SUBTÍTOLS · fila3 RENDER */
+#secMarcadors { order: 1; }
+#secChyrons    { order: 2; }
+.graphics-group > .row-break.test-only { order: 3; }
+#secGrafics    { order: 4; }
+#secSubtitols  { order: 5; }
+.graphics-group > .row-break:not(.test-only) { order: 6; }
+#secRender     { order: 7; }
+/* En mode TREBALL: graella fixa 2×2 (sense wrap) → fila1 GRÀFICS+SUBTÍTOLS, fila2 CHYRONS+RENDER.
+   Gràfics i Subtítols NO poden baixar de fila: sempre queden junts a la fila superior. */
+.mode-work .graphics-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; align-items: stretch; }
+.mode-work .graphics-group > .row-break { display: none; }
+.mode-work #secGrafics { grid-column: 1; grid-row: 1; }
+.mode-work #secSubtitols { grid-column: 2; grid-row: 1; }
+.mode-work #secChyrons { grid-column: 1; grid-row: 2; }
+.mode-work #secRender { grid-column: 2; grid-row: 2; }
+/* CHYRONS en TREBALL: COLOCAR/REPART en una sola fila horitzontal */
+.mode-work .graphics-strip.chy-strip { grid-template-columns: repeat(2, 30px); }
 /* Separador de fila dins del .graphics-group */
 .row-break { flex-basis: 100%; width: 0; height: 0; margin: 0; padding: 0; }
 
