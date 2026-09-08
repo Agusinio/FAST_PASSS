@@ -591,6 +591,25 @@
             return false;
         },
 
+        /**
+         * _isPresenterLine: Indica si una línia/ítem de l'escaleta correspon a una peça
+         * de PLATÓ/presentació (la presentadora surt en càmera). Criteris:
+         *  - num amb sufix de plató: i, dp, dir, lead, f, off (els vídeos no en tenen)
+         *  - o el títol comença per tokens de presentació (OFF/DONA PAS/CONN/INTRO...)
+         */
+        _isPresenterLine: function (line) {
+            if (!line) return false;
+            var num = String(line.num || '').toLowerCase().trim();
+            var m = num.match(/^\d+(.*)$/);
+            if (m && m[1]) {
+                var suf = m[1];
+                if (suf === 'i' || suf === 'dp' || suf === 'dir' || suf === 'lead' || suf === 'f' || suf === 'off') {
+                    return true;
+                }
+            }
+            return this._isPresenterTitle(line.titol) || this._isPresenterTitle(line.tipus || line.font);
+        },
+
         placeChyronConductor: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
@@ -620,33 +639,89 @@
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
                 const STRUCTURAL_RE = /^\d+[a-z]?\s*-\s*.+$/i;
                 const structuralMarkers = allMarkers.filter(m => STRUCTURAL_RE.test((m.comments || "").trim()));
-                if (structuralMarkers.length === 0) {
-                    log("⚠️ [Conductor] No hi ha marcadors estructurals.", "WARN");
-                    return;
-                }
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // El conductor es colÂ·loca al PRIMER item estructural del bloc:
-                // el marcador estructural mes primerenc del timeline (ja ordenat per temps).
-                // No cal dependre de State.structure ni de structureById.
-                const firstMarker = structuralMarkers[0];
-                const targetId = (firstMarker.comments || "").split("-")[0].trim();
-                const targetTime = firstMarker.time;
-                const isFirstItem = true; // sempre es el primer item del bloc
-
-                log(`[Conductor] Primer item del bloc: ${targetId} @ ${targetTime.toFixed(2)}s`);
-
-                // ── Guarda de presentador ──────────────────────────────────────────
-                // Només es col·loca el chyron de presentador si el primer ítem del bloc
-                // és de plató/presentació: títol que comença per OFF / DONA PAS / CONN /
-                // INTRO / DIRECTE... (els blocs de NOMÉS vídeo no porten presentador).
-                const firstTitle = this._extractMarkerTitle(firstMarker.comments || "");
-                if (!this._isPresenterTitle(firstTitle)) {
-                    log(`⏭️ [Conductor] Primer ítem (${targetId}) NO és de plató: "${firstTitle || '(sense títol)'}". Ometent conductor.`, "WARN");
-                    getUtils().status("Bloc sense presentador: conductor omès", "warn");
-                    return;
+                // ── Trobar l'ítem de PLATÓ on col·locar el conductor ─────────────
+                // El conductor va sobre el PRIMER ítem de plató/presentació del bloc
+                // (donapas/off/intro/directe...), que pot NO tenir marcador propi
+                // (p. ex. el 05dp d'un donapas que obra el bloc). Per això es llegeix
+                // l'escaleta del bloc (AssemblyContext), no només els marcadors.
+                const assembly = window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.AssemblyContext;
+                let linesEsc = null;
+                let clipsV1 = [];
+                if (assembly && typeof assembly.loadAssemblyContext === 'function') {
+                    try {
+                        const ctxData = await assembly.loadAssemblyContext();
+                        if (ctxData && ctxData.lines && ctxData.lines.length > 0) {
+                            linesEsc = ctxData.lines;
+                            try { clipsV1 = await getClipsLogic().getTrackClips(1, "video"); } catch (eC) { }
+                        }
+                    } catch (eCtx) {
+                        log('⚠️ [Conductor] No s\'ha pogut carregar el context d\'assemblatge: ' + eCtx.message);
+                    }
                 }
-                log(`🎙️ [Conductor] Primer ítem de plató confirmat: "${firstTitle}"`);
+
+                const findMarkerByPrefix = function (num) {
+                    if (!num) return null;
+                    const key = String(num).toLowerCase();
+                    return structuralMarkers.find(function (mk) {
+                        const pre = (mk.comments || "").split("-")[0].trim().toLowerCase();
+                        return pre === key;
+                    }) || null;
+                };
+
+                let itemPlato = null;
+                let isFirstItem = false;
+                let targetId = null;
+                let targetTime = null;
+
+                if (linesEsc && linesEsc.length > 0) {
+                    // 1) Primer ítem de plató de l'escaleta del bloc (ja ordenada per hora).
+                    for (let li = 0; li < linesEsc.length; li++) {
+                        if (this._isPresenterLine(linesEsc[li])) {
+                            itemPlato = linesEsc[li];
+                            isFirstItem = (li === 0);
+                            break;
+                        }
+                    }
+                    if (!itemPlato) {
+                        log('⏭️ [Conductor] Cap ítem de plató (donapas/off/intro/directe...) a l\'escaleta del bloc. Ometent conductor.', 'WARN');
+                        getUtils().status('Bloc sense presentador: conductor omès', 'warn');
+                        return;
+                    }
+                    targetId = String(itemPlato.num || '').trim();
+                    const mkPlato = findMarkerByPrefix(targetId);
+                    log(`[Conductor] ítem de plató: ${targetId} "${(itemPlato.titol || '').substring(0, 60)}"${isFirstItem ? ' (PRIMER del bloc)' : ''}${mkPlato ? ' @ marcador ' + mkPlato.time.toFixed(2) + 's' : ' (sense marcador propi)'}`);
+                    if (mkPlato) {
+                        targetTime = mkPlato.time;
+                    } else if (isFirstItem) {
+                        // Primer ítem del bloc sense marcador (p. ex. 05dp): inici del bloc.
+                        targetTime = (clipsV1.length > 0) ? clipsV1[0].start : 0;
+                    } else {
+                        // ítem de plató posterior sense marcador propi: usem el primer
+                        // marcador com a base aproximada (cas poc habitual; queda loguejat).
+                        const baseMk = structuralMarkers[0];
+                        targetTime = baseMk ? baseMk.time : 0;
+                        log('⚠️ [Conductor] ítem de plató posterior sense marcador propi; base ' + targetTime.toFixed(2) + 's. Verifica la posició.', 'WARN');
+                    }
+                } else {
+                    // ── Fallback: només marcadors (guarda per títol) ──
+                    if (structuralMarkers.length === 0) {
+                        log("⚠️ [Conductor] No hi ha marcadors estructurals.", "WARN");
+                        return;
+                    }
+                    const firstMarker = structuralMarkers[0];
+                    targetId = (firstMarker.comments || "").split("-")[0].trim();
+                    targetTime = firstMarker.time;
+                    isFirstItem = true;
+                    const firstTitle = this._extractMarkerTitle(firstMarker.comments || "");
+                    if (!this._isPresenterTitle(firstTitle)) {
+                        log(`⏭️ [Conductor] Primer ítem (${targetId}) NO és de plató: "${firstTitle || '(sense títol)'}". Ometent conductor.`, "WARN");
+                        getUtils().status("Bloc sense presentador: conductor omès", "warn");
+                        return;
+                    }
+                    log(`[Conductor] (fallback marcadors) ítem de plató: ${targetId} @ ${targetTime.toFixed(2)}s`);
+                }
 
                 // Calcular posició del conductor
                 let conductTime;
