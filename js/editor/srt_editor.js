@@ -323,15 +323,15 @@
             this._waveformPeaks = null;
             this._markers = [];
             this._originalMarkers = [];
-            await this._restoreMarkers();
-            // _restoreMarkers ja restaura tant _markers (posicions actuals) com
-            // _originalMarkers (posicions originals); no cal sincronitzar-los aquí.
 
             // Carregar waveform des del fitxer .bin (WAV 8-bit 480Hz, 1 byte = 1 peak)
             try {
                 var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
                 var projFolder = await callJSX("Context.folder()");
                 if (projFolder && String(projFolder).indexOf('ERR') !== 0) this._projectKey = projFolder;
+                // Els marcadors es guarden a la CARPETA DEL PROJECTE (al costat del
+                // manifest), no a C:/temp, perquè cada projecte tingui els seus.
+                await this._restoreMarkers();
                 if (wg && projFolder) {
                     var binPath = await wg.getBinPath(projFolder);
                     if (binPath) {
@@ -1364,7 +1364,13 @@
          */
         _markersFilePath: function () {
             var safe = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
-            return "C:/temp/fastpass_srt_markers_" + safe + ".json";
+            // Els marcadors viuen a la CARPETA DEL PROJECTE (al costat del manifest
+            // .fastpass.json), de manera que cada projecte té els seus propis marcadors
+            // i no s'interfereixen entre projectes. Fallback local si no hi ha projecte.
+            var base = (this._projectKey && String(this._projectKey).indexOf('ERR') !== 0)
+                ? this._projectKey
+                : 'C:/temp';
+            return String(base).replace(/[\\/]+$/, '').replace(/\\/g, '/') + '/fastpass_srt_markers_' + safe + '.json';
         },
 
         _persistMarkers: function () {
@@ -1377,13 +1383,42 @@
                     originalMarkers: (this._originalMarkers || []).slice(),
                     updatedAt: new Date().toISOString()
                 });
-                window.cep.fs.writeFile(this._markersFilePath(), data);
-            } catch (e) { }
+                var pathMarkers = this._markersFilePath();
+                var wRes = window.cep.fs.writeFile(pathMarkers, data);
+                // Si la carpeta del projecte (UNC) no es pot escriure amb cep.fs
+                // (alguns entorns no ho permeten), cau a C:/temp per no perdre els marcadors.
+                if (wRes && wRes.err !== 0 && String(pathMarkers).indexOf('C:/temp') !== 0) {
+                    var safe = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
+                    window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safe + ".json", data);
+                }
+            } catch (e) {
+                try {
+                    var safe2 = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
+                    window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safe2 + ".json",
+                        JSON.stringify({
+                            srtName: this._srtName,
+                            projectKey: this._projectKey || '',
+                            markers: this._markers.slice(),
+                            originalMarkers: (this._originalMarkers || []).slice(),
+                            updatedAt: new Date().toISOString()
+                        }));
+                } catch (e2) { }
+            }
         },
 
         _restoreMarkers: async function () {
             try {
                 var res = window.cep.fs.readFile(this._markersFilePath());
+                // Si la carpeta del projecte (UNC) no és llegible amb cep.fs, provar
+                // el respaldo local C:/temp (sempre amb la comprovació de projectKey).
+                if (!(res && res.err === 0 && res.data)) {
+                    var pMarkers = this._markersFilePath();
+                    if (String(pMarkers).indexOf('C:/temp') !== 0) {
+                        var safeAlt = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
+                        var altRes = window.cep.fs.readFile("C:/temp/fastpass_srt_markers_" + safeAlt + ".json");
+                        if (altRes && altRes.err === 0 && altRes.data) res = altRes;
+                    }
+                }
                 if (res && res.err === 0 && res.data) {
                     var parsed = JSON.parse(res.data);
                     // Només es restaura si és del MATEIX projecte/sessió: la persistència
