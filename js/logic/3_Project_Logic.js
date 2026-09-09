@@ -478,13 +478,20 @@
         
             // C. PORTADES (Múltiples PNGs) -> Bin PORTADES
             if (portadas && portadas.length > 0) {
-                // Filtrar portadas que no estan al projecte (comparació per nom base,
-                // tolerant a extensió i a sufixos " 1" dels duplicats).
+                // ── Detecció robusta de duplicats (mateixa lògica que els wotts) ──
+                // Es compara pel darrer ID numèric de 6+ dígits del nom o pel nom base.
+                const idDeP = function (n) {
+                    const m = String(n).match(/(\d{6,})/g);
+                    return m ? m[m.length - 1] : null;
+                };
                 const cleanNameP = function (n) {
                     try { n = decodeURIComponent(n); } catch (e) { }
                     return String(n).replace(/\.(png|jpg|jpeg)$/i, '').replace(/\s+\d+$/i, '').trim().toLowerCase();
                 };
                 const newPortadas = portadas.filter(p => !existing.portadas.some(function (ep) {
+                    const epId = idDeP(ep);
+                    const pId = idDeP(p.name);
+                    if (pId && epId && epId === pId) return true;
                     return cleanNameP(ep) === cleanNameP(p.name);
                 }));
                 if (newPortadas.length === 0) {
@@ -499,12 +506,28 @@
                     const safePortadas = newPortadas.map(p => p.path.replace(/\\/g, "/"));
                     await utils.importList(safePortadas, "root");
             
-                    // 3. Moverlas una a una al Bin PORTADES
+                    // 3. Moverlas una a una al Bin PORTADES (amb fallback per ID,
+                    //    com es fa amb els wotts).
+                    await utils.delay(200);
                     for (const p of newPortadas) {
                         const escapedName = encodeURIComponent(p.name);
                         const safeName = escapedName.replace(/'/g, "\\'");
                         const safeBinName = encodeURIComponent('PORTADES').replace(/'/g, "\\'");
-                        await callJSX(`FASTPASS.Project.move('${safeName}', '${safeBinName}')`);
+                        let moveRes = await callJSX(`FASTPASS.Project.move('${safeName}', '${safeBinName}')`);
+                        if (moveRes !== "OK") {
+                            const idMatch = p.name.match(/[0-9]{6}/);
+                            if (idMatch) {
+                                const portId = idMatch[0];
+                                const moveByRes = await callJSX(`FASTPASS.Project.moveByID('${portId}', '${safeBinName}')`);
+                                if (moveByRes === "OK") {
+                                    utils.log(`🖼️ [PORTADES] Portada moguda al bin via ID: ${p.name.substring(0, 70)}...`, "INFO");
+                                } else {
+                                    utils.log(`❌ [PORTADES] No s'ha pogut moure la portada al bin (ni per nom ni per ID): ${p.name}`, "ERROR");
+                                }
+                            } else {
+                                utils.log(`❌ [PORTADES] No s'ha pogut moure la portada al bin (sense ID al nom): ${p.name}`, "ERROR");
+                            }
+                        }
                     }
                 }
             }
