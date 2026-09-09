@@ -214,6 +214,26 @@
                 if (!existingProjectName) {
                     // Ingesta en curs = el cleanFeed encara no ha arribat al TC de sortida del bloc.
                     let ingestaEnCurs = false;
+
+                    // ── ESCALETA LOCAL (FOTO on_demand) ────────────────────────────
+                    // Si el servidor encara no té el JSON del dia (el bloc acaba d'emetre
+                    // i la publicació triga), la "foto" generada amb el botó FOTO ja viu al
+                    // directori del dia (escaleta_on_demand_*.json o còpia del NAS). Si
+                    // existeix i conté el bloc, es considera la escaleta vàlida → l'estat
+                    // passa de "MASSA D'HORA" a "CREAR".
+                    if ((!semaforoData.esc || !semaforoData.esc.found)
+                        && readerE && typeof readerE.lookupLocalStatus === 'function') {
+                        try {
+                            const localEsc = await readerE.lookupLocalStatus(ctx);
+                            if (localEsc && localEsc.found) {
+                                semaforoData.esc = localEsc;
+                                getUtils().log('📷 [checkContext] Escaleta local detectada (FOTO/on_demand): ' + localEsc.filename, 'INFO');
+                            }
+                        } catch (eLoc) {
+                            getUtils().log('⚠️ [checkContext] Error buscant escaleta local: ' + eLoc.message, 'DEBUG');
+                        }
+                    }
+
                     if (semaforoData.esc && semaforoData.esc.mediaStop && semaforoData.esc.blockOut && readerE) {
                         try {
                             const stopSecs = readerE.tcToSeconds(semaforoData.esc.mediaStop);
@@ -223,7 +243,8 @@
                     }
 
                     if (!semaforoData.esc || !semaforoData.esc.found) {
-                        // Sense JSON del dia D: hi ha MP4/SRT o chyrons del dia (ingesta/preparació en curs)?
+                        // Sense JSON del dia D (ni remot ni local): hi ha MP4/SRT o chyrons
+                        // del dia (ingesta/preparació en curs)?
                         let mediaD = null;
                         let wotsD = null;
                         const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
@@ -440,9 +461,11 @@
             // 🚦 Luces nuevas (Semáforo)
             if (semaforoData) {
                 // ESC: Escaleta
-                if (!semaforoData.esc.found) set('sem-esc', 'error', 'No se ha trobat JSON al servidor');
-                else if (!semaforoData.esc.ready) set('sem-esc', 'pending', `JSON trobat (${semaforoData.esc.timestamp}) però BLOC NO READY`);
-                else set('sem-esc', 'ready', `Escaleta OK (${semaforoData.esc.timestamp})`);
+                if (!semaforoData.esc.found) set('sem-esc', 'error', "No s'ha trobat cap escaleta (servidor ni FOTO local)");
+                else if (!semaforoData.esc.ready) set('sem-esc', 'pending', `Escaleta ${semaforoData.esc.local ? 'local (FOTO)' : 'trobada'} però BLOC NO READY`);
+                else set('sem-esc', 'ready', semaforoData.esc.local
+                    ? `Escaleta OK (FOTO local: ${semaforoData.esc.filename})`
+                    : `Escaleta OK (${semaforoData.esc.timestamp})`);
 
                 // MP4: CleanFeed
                 const mp4Title = semaforoData.mp4 === 'pending' ? 'El stream no ha arribat al final del bloc' : (semaforoData.mp4 === 'error' ? 'Pista V1 buida' : 'CleanFeed OK');

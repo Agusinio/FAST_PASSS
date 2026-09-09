@@ -836,7 +836,10 @@ FASTPASS.Anim = {
 
 
     /**
-     * addKF: Crea (o activa) un keyframe de Position al CTI amb el valor actual.
+     * addKF: Botó KEYFRAME (toggle) sobre el clip OBJECTIU del slider (el clip de
+     * vídeo SELECCIONAT; si no n'hi ha, la V1 sota el CTI).
+     * - Sense key a l'instant del CTI → CREA el key de Position amb el valor actual.
+     * - Amb key a l'instant del CTI → EL TREU (i desactiva l'animació si era l'únic).
      * Usat pel botó KEYFRAME.
      */
     addKF: function() {
@@ -845,21 +848,46 @@ FASTPASS.Anim = {
             if (!seq) return "ERR_NO_SEQ";
             var cti = seq.getPlayerPosition();
             if (!cti) return "ERR_NO_CTI";
-            var info = FASTPASS.Clips.at(1, cti.seconds, "video");
-            if (!info || info === "null") return "ERR_NO_CLIP_AT_CTI";
 
-            var idx = JSON.parse(info).index;
-            var track = seq.videoTracks[0];
-            if (!track || !track.clips) return "ERR_NO_TRACK";
-            var clip = track.clips[idx];
-            if (!clip) return "ERR_NO_CLIP";
-            // Els keyframes de Motion d'un clip es referencien en el temps del CLIP
-            // (media time), NO en el del timeline.
-            var tKey = clip.inPoint.seconds + (cti.seconds - clip.start.seconds);
+            // 🎯 Objectiu = el MATEIX que el slider: el clip SELECCIONAT (o V1 sota
+            // el CTI com a fallback). Abans el KEYFRAME queia SEMPRE a la V1 del
+            // playhead i, en seleccionar un altre clip sense moure el cabezal (o en
+            // V2/V3), el key es col·locava al clip del primer keyframe en comptes del
+            // clip seleccionat.
+            var target = this._sliderTarget(seq);
+            if (!target) return "ERR_NO_SLIDER_TARGET";
+            var clip = target.clip;
+            var trackN = target.track;
+            // Els clips de fons (PNG/JPG) no s'animen mai amb KF (mateix criteri slider).
+            if (this._esImatgeFons(clip)) return "OK_IGNORAT_IMATGE_FONS";
 
             var mp = this._getMotionProps(clip);
             if (!mp || !mp.pos) return "ERR_NO_MOTION";
             var pPos = mp.pos;
+
+            // Els keyframes de Motion d'un clip es referencien en el temps del CLIP
+            // (media time), NO en el del timeline.
+            var tKey = clip.inPoint.seconds + (cti.seconds - clip.start.seconds);
+
+            // ── TOGGLE (QUITA): si el clip ja té un key a l'instant del CTI, el
+            // botó KEYFRAME l'ELIMINA. Si amb això la propietat queda amb 0 o 1 keys,
+            // es desactiva l'animació (timeVarying=false) i el clip torna al mode
+            // SLIDER.
+            var kIdx0 = this._get(pPos, tKey);
+            if (kIdx0 !== -1) {
+                try { pPos.removeKey(kIdx0); } catch(eRm) {}
+                var nKeys0 = 0;
+                try {
+                    var _ka = (typeof pPos.getKeys === 'function') ? pPos.getKeys() : null;
+                    nKeys0 = (_ka && _ka.length) ? _ka.length : ((pPos.numKeys) ? pPos.numKeys : 0);
+                } catch(eKn) {
+                    try { nKeys0 = (pPos.numKeys) ? pPos.numKeys : 0; } catch(eKn2) {}
+                }
+                // Amb un sol key la propietat no està realment animada → mode SLIDER.
+                if (nKeys0 <= 1) { try { pPos.setTimeVarying(false); } catch(eTv) {} }
+                try { clip.setSelected(false, false); clip.setSelected(true, true); } catch(eSel0) {}
+                return "OK_REMOVED track=" + trackN + " tKey=" + tKey.toFixed(3) + " keysLeft=" + nKeys0;
+            }
 
             var currentVal = null;
             var capturedRaw = null;   // per diagnòstic
@@ -900,12 +928,13 @@ FASTPASS.Anim = {
                 currentVal = [rawXk, rawYk];
             }
 
+            // ── No existeix cap key a l'instant del CTI → CREAR-LO amb el valor
+            // capturat (ja s'ha comprovat amb kIdx0 que el punt està lliure).
+            pPos.setTimeVarying(true);
+            pPos.setValue(currentVal, true);   // despertar motor
+            pPos.addKey(tKey);
+            // Índex real del key acabat de crear (el motor pot reordenar).
             var kIdx = this._get(pPos, tKey);
-            if (kIdx === -1) {
-                pPos.setTimeVarying(true);
-                pPos.setValue(currentVal, true);   // despertar motor
-                pPos.addKey(tKey);
-            }
             // Escriure el valor del key pel seu TEMPS, no per índex: el motor
             // NewWorld espera el temps com a primer argument (veure
             // KEYFRAMES_REFERENCE §4: setValueAtKey(t1, [0.5,0.5], true)).
@@ -947,8 +976,49 @@ FASTPASS.Anim = {
 
             return "OK pos=" + JSON.stringify(currentVal) + " cap=" + JSON.stringify(capturedRaw) +
                 " check=" + checkStr + " tKey=" + tKey.toFixed(3) + " cti=" + cti.seconds.toFixed(3) +
-                " start=" + clip.start.seconds.toFixed(3) + " inPt=" + clip.inPoint.seconds.toFixed(3);
+                " track=" + trackN + " start=" + clip.start.seconds.toFixed(3) +
+                " inPt=" + clip.inPoint.seconds.toFixed(3);
         } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
+     * modeInfo: Estat del clip OBJECTIU del slider (el SELECCIONAT, o V1 sota CTI
+     * com a fallback): { track, start, name, kf }. kf=true si la Position del clip
+     * està animada (timeVarying). Ho fa servir la UI per canviar automàticament al
+     * mode del clip quan canvia la selecció: sense keyframes → mode SLIDER;
+     * amb keyframes → mode KEYFRAME.
+     */
+    modeInfo: function() {
+        try {
+            var seq = (FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "null";
+            var target = this._sliderTarget(seq);
+            if (!target) return "null";
+            var clip = target.clip;
+            var kf = false;
+            try {
+                var mp = this._getMotionProps(clip);
+                if (mp && mp.pos) {
+                    if (typeof mp.pos.isTimeVarying === 'function') {
+                        kf = !!mp.pos.isTimeVarying();
+                    }
+                    if (!kf) {
+                        var _mk = (typeof mp.pos.getKeys === 'function') ? mp.pos.getKeys() : null;
+                        kf = !!(_mk && _mk.length >= 1);
+                    }
+                }
+            } catch(eM) {}
+            var _nm = "";
+            try { _nm = clip.projectItem ? String(clip.projectItem.name) : ""; } catch(eN) {}
+            var _st = "";
+            try { _st = (clip.start && clip.start.seconds != null) ? clip.start.seconds.toFixed(2) : ""; } catch(eS) {}
+            return JSON.stringify({
+                track: (target.track != null) ? String(target.track) : "",
+                start: _st,
+                name: _nm,
+                kf: kf
+            });
+        } catch(e) { return "null"; }
     },
 
     /**

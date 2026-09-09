@@ -560,6 +560,96 @@
     // ----------------------------------------------------------------
 
     /**
+     * lookupLocalStatus: Comprova si al directori del projecte del dia hi ha una
+     * escaleta local — còpia del NAS (YYYYMMDD_HHMMSS_*.json) o la "foto" generada
+     * amb el botó FOTO (escaleta_on_demand_*.json) — i retorna el seu estat en el
+     * mateix format que getStatus.
+     *
+     * S'usa a checkContext com a FONT ALTERNATIVA quan el servidor central encara
+     * no té el JSON del dia (bloc acabat d'emetre): si la foto local existeix, la
+     * extensió pot passar de "MASSA D'HORA" a "CREAR".
+     *
+     * @param {Object} ctx - Context (config, progData, dateDir, bloque)
+     * @returns {Promise<{found, ready, local, filename, timestamp, mediaStop, blockOut, wottsExpected, totalExpected}>}
+     */
+    ER.lookupLocalStatus = async function (ctx) {
+        if (!ctx || !ctx.config || !ctx.progData || !ctx.dateDir) {
+            return { found: false, ready: false };
+        }
+        try {
+            var folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + '/' + ctx.dateDir;
+            var raw = await callJSX("IO.listFolder('" + this._escapePath(folderPath) + "')");
+            if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) {
+                return { found: false, ready: false };
+            }
+            var files;
+            try { files = JSON.parse(raw); } catch (eP) { return { found: false, ready: false }; }
+            if (!files || files.length === 0) return { found: false, ready: false };
+
+            var progKey = (ctx.progData.archivo || '').toUpperCase();
+            var candidates = files.filter(function (f) {
+                var name = String(f.name || '');
+                if (name.toLowerCase().indexOf('.json') !== name.length - 5) return false;
+                var isNasCopy = /^\d{8}_\d{6}_/.test(name);
+                var isOnDemand = name.indexOf('escaleta_on_demand') === 0;
+                if (!isNasCopy && !isOnDemand) return false;
+                // Les còpies del NAS han de contenir el programa; les on_demand no
+                // porten programa al nom (es consideren del dia/projecte actiu).
+                if (progKey) return name.toUpperCase().indexOf(progKey) !== -1 || isOnDemand;
+                return true;
+            });
+            if (candidates.length === 0) return { found: false, ready: false };
+
+            candidates.sort(function (a, b) { return (b.modified || 0) - (a.modified || 0); });
+
+            // Iterar de més recent a més antic: el primer que contingui el bloc és la
+            // foto/escaleta vàlida (igual que getStatus sobre el repositori central).
+            for (var ci = 0; ci < candidates.length; ci++) {
+                var cand = candidates[ci];
+                var path = folderPath.replace(/[\\/]+$/, '\\') + cand.name;
+                var data = await this.load(path);
+                if (!data) continue;
+                var block = this.getBlock(data, ctx.bloque);
+                if (!block) continue;
+
+                var mediaScan = data.cleanFeed ? data.cleanFeed : {};
+                var lines = this.getLinesForBlock(data, ctx.bloque);
+                var wottsExpected = lines
+                    .filter(function (l) { return l.num && (l.teVideo || ['OFT', 'BVI'].indexOf(l.font) !== -1); })
+                    .map(function (l) { return l.num; });
+
+                // Igual que getStatus: en el nou format el bloc es reconstrueix → ready=true.
+                // La foto on_demand es genera un cop el bloc ja s'ha emès, per tant el pla
+                // és definitiu.
+                var isReady = !!(block && (block.ready || true));
+                var isOnDemand = String(cand.name).indexOf('escaleta_on_demand') === 0;
+                log('📷 [ER:IO] Escaleta local vàlida per al bloc ' + ctx.bloque + ': ' + cand.name);
+                return {
+                    found: true,
+                    ready: isReady,
+                    local: true,
+                    filename: cand.name,
+                    timestamp: isOnDemand ? 'FOTO' : String(cand.name).split('_').slice(-2).join('_').replace('.json', ''),
+                    mediaStop: mediaScan.mediaStop || null,
+                    blockOut: block.out || null,
+                    wottsExpected: Array.from(new Set(wottsExpected)),
+                    totalExpected: wottsExpected.length
+                };
+            }
+
+            // Hi ha candidats locals però cap conté el bloc demanat.
+            if (candidates.length > 0) {
+                log('⚠️ [ER:IO] Escaleta local sense bloc ' + ctx.bloque + ': ' + candidates[0].name);
+                return { found: true, ready: false, local: true, filename: candidates[0].name };
+            }
+            return { found: false, ready: false };
+        } catch (e) {
+            log('⚠️ [ER:IO] Error en lookupLocalStatus: ' + e.message);
+            return { found: false, ready: false };
+        }
+    };
+
+    /**
      * load: Llegeix el JSON des de la ruta UNC via bridge JSX i el parseja.
      * Cacheja el resultat a window.FASTPASS_UI.State._escaletaCache
      * per evitar parsejar el mateix JSON de 7000+ línies fins a 5 cops per workflow.

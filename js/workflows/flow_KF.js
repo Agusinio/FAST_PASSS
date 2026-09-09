@@ -14,12 +14,39 @@
 
         runAddKF: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            log("💎 Col·locant keyframe al cabezal...");
+            log("💎 Toggle keyframe al clip objectiu (el SELECCIONAT)...");
             console.log('DEBUG runAddKF: called');
             try {
                 const res = await callJSX("Anim.addKF()");
+                const st = window.FASTPASS_UI.State;
+
+                // KEY tret (el clip ja tenia un key a l'instant del CTI).
+                if (res && res.indexOf("OK_REMOVED") === 0) {
+                    if (st) st.isKeyframeMode = false;
+                    getUtils().status("Keyframe eliminat", "warn");
+                    // El mode real el decideixen els keys que quedin: consultem
+                    // el clip objectiu per no quedar-nos amb un mode obsolet.
+                    try {
+                        const mi = await callJSX("Anim.modeInfo()");
+                        if (mi && mi !== "null") {
+                            const o = JSON.parse(mi);
+                            if (st) st.isKeyframeMode = !!o.kf;
+                        }
+                    } catch (eM) {}
+                    if (getUtils().forceLog) getUtils().forceLog("🔬 addKF TRACE: " + res);
+                    log("✅ Keyframe tret del clip objectiu. " + res);
+                    return;
+                }
+
+                // Clip de fons (PNG/JPG): no s'anima mai.
+                if (res && res.indexOf("OK_IGNORAT") === 0) {
+                    getUtils().status("Clip de fons: no es pot animar", "warn");
+                    log("⚠️ addKF ignorat (clip de fons). " + res, "WARN");
+                    return;
+                }
+
                 if (res && res.indexOf("OK") === 0) {
-                    if (window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = true;
+                    if (st) st.isKeyframeMode = true;
                     getUtils().status("Keyframe col·locat", "exito");
                     const diag = await callJSX("Anim.debugPos()");
                     const diagKF = await callJSX("Anim.debugKF()");
@@ -27,7 +54,7 @@
                     if (getUtils().forceLog) {
                         getUtils().forceLog("🔬 addKF TRACE: " + res + " || DebugPos: " + diag + " || DebugKF: " + diagKF);
                     }
-                    log("✅ Keyframe col·locat al cabezal. Mode KF activat. " + res);
+                    log("✅ Keyframe col·locat al clip objectiu. Mode KF activat. " + res);
                 } else {
                     getUtils().status("Error Keyframe", "error");
                     if (getUtils().forceLog) getUtils().forceLog("🔬 addKF ERROR: " + res);

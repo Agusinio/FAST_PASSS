@@ -56,6 +56,14 @@
         _isPlaying: false,
         _playheadLocal: false,  // playhead més enllà de l'OUT (desacoblat de Premiere)
         _zoomBarDragging: false,  // s'està arrossegant la barra de zoom (no auto-scroll)
+        // Control del visor de vídeo (PLAY fluït sense micro-tirons):
+        _lastSubsHtml: "",    // últim text de l'overlay escrit (evita innerHTML repetit sobre el <video>)
+        _lastPlyLogT: 0,      // throttle del log "⏱ PLY" (escriure al fitxer a cada poll tensa la UI)
+        _lastVideoSeekT: 0,   // histèresi entre re-anclatges (seek) del <video> en PLAY
+        _lastVideoDrift: 0,   // últim desfàs mesurat v.currentTime − playhead (diagnòstic)
+        _srtFingerprint: "",  // empremta del contingut del SRT carregat: els marcadors només
+                              // es restauren si el SRT és el MATEIX (evita portar marques antigues
+                              // d'una altra peça/sessió que comparteix el nom 'emergencia_EMERGENCIA')
         _markers: [],
         _originalMarkers: [],
         _dragIdx: -1,
@@ -313,6 +321,9 @@
             this._originalEntries = this._entries.map(function (e) { return { index: e.index, timeStr: e.timeStr, texts: e.texts.slice(), startSec: e.startSec, endSec: e.endSec }; });
             this._srtPath = srtPath;
             this._srtName = srtPath.split('\\').pop().replace(/\.srt$/i, '');
+            // Empremta del contingut: els marcadors persistits només es poden restaurar
+            // si el SRT és exactament el mateix (vegeu _restoreMarkers).
+            this._srtFingerprint = this._fingerprintSrt();
             if (this._entries.length > 0) {
                 this._maxSec = this._entries[this._entries.length - 1].endSec + 10;
             }
@@ -633,37 +644,49 @@
             var v = document.getElementById('srtVideo');
             if (!v || !v.src) return;
             if (v.readyState < 2) return;
-            var run = !!this._isPlaying;   // reproducció activa (botó PLAY)
-            // Mantenir el <video> reproduint/pausat segons l'estat.
-            try {
-                if (run && v.paused) { var pr = v.play(); if (pr && pr.catch) pr.catch(function () { }); }
-                else if (!run && !v.paused) v.pause();
-            } catch (eP) { }
+            // El <video> només es posa en marxa quan el CTI real confirma el PLAY
+            // (timelineRunning) o en el PLAY LOCAL; així no s'avança a Premiere
+            // durant l'arrencada (qe.play pot tardar uns 100-300ms).
+            var run = !!(this._isPlaying && (this._timelineRunning || this._playheadLocal));
             var d = v.currentTime - mediaSec;
             var ad = Math.abs(d);
-            if (run) {
-                // Reproducció real: correcció SUAU amb playbackRate. Es fa un seek
-                // només si el desfàs és gran (salt/pèrdua de sincronia) → evita els
-                // talls i frames negres que causava el servo de seeks cada 0.12s.
-                if (ad > 1.0) {
-                    try { v.currentTime = mediaSec; } catch (eS) { }
-                    if (Math.abs(v.playbackRate - 1) > 0.005) { try { v.playbackRate = 1; } catch (eR) { } }
-                } else if (ad > 0.12) {
-                    // d>0 → el vídeo va per davant → frenar; d<0 → va endarrerit → accelerar.
-                    var rate = (d > 0)
-                        ? Math.max(0.90, 1 - ad * 0.4)
-                        : Math.min(1.12, 1 + ad * 0.4);
-                    if (Math.abs(v.playbackRate - rate) > 0.005) {
-                        try { v.playbackRate = rate; } catch (eR2) { }
+            var nowT = (window.performance && performance.now) ? performance.now() : Date.now();
+            try {
+                if (run) {
+                    if (v.paused) {
+                        // Transició d'arrencada: alinear el <video> al playhead abans de
+                        // reproduir per no començar amb un desfàs que forci seeks.
+                        if (ad > 0.05) { try { v.currentTime = mediaSec; } catch (eA) { } }
+                        var pr = v.play(); if (pr && pr.catch) pr.catch(function () { });
                     }
-                } else if (Math.abs(v.playbackRate - 1) > 0.005) {
-                    try { v.playbackRate = 1; } catch (eR3) { }
+                } else if (!v.paused) {
+                    v.pause();
+                }
+            } catch (eP) { }
+            // Re-llegir el drift (un seek d'alineació pot haver mogut v.currentTime).
+            d = v.currentTime - mediaSec;
+            ad = Math.abs(d);
+            if (run) {
+                // Reproducció real: el <video> és la FONT de la imatge i corre a 1x
+                // nativa (els clips del timeline van SEMPRE al 100%). Per tant NO es
+                // toca el playbackRate (rate ≠ 1 trenca la cadència i provoca els
+                // micro-tirons); només es re-ancla amb un seek quan el desfàs és gran
+                // (canvi de clip a una altra pista o deriva de rellotge), amb una
+                // histèresi per no encadenar seeks.
+                try { if (Math.abs(v.playbackRate - 1) > 0.005) v.playbackRate = 1; } catch (eR0) { }
+                if (ad > 0.6 && (nowT - (this._lastVideoSeekT || 0)) > 250) {
+                    this._lastVideoSeekT = nowT;
+                    try { v.currentTime = mediaSec; } catch (eS) { }
+                    if (getUtils().forceLog) {
+                        getUtils().forceLog("🎞️ VSYNC seek (PLAY): drift=" + d.toFixed(2) + "s → media=" + mediaSec.toFixed(2));
+                    }
                 }
             } else {
                 // Parat: posició exacta (seek només si el desfàs és perceptible).
                 try { if (Math.abs(v.playbackRate - 1) > 0.005) v.playbackRate = 1; } catch (eR4) { }
                 if (ad > 0.15) { try { v.currentTime = mediaSec; } catch (eS2) { } }
             }
+            this._lastVideoDrift = d;
         },
 
         _setVideoRunning: function (run) {
@@ -699,7 +722,34 @@
                 if (estTl < 0) estTl = 0;
                 var mPh = self._mediaAtSec(estTl);
                 var ph = (mPh < 0) ? estTl : mPh;
-                self._playheadSec += (ph - self._playheadSec) * 0.6;
+                // En PLAY amb el <video> natiu corrent i ben sincronitzat amb el CTI
+                // (drift petit), el rellotge mostrat és el del PROPI vídeo: és la font
+                // de la imatge i corre natiu a 1x. Seguir-lo en lloc de fer-lo seguir
+                // evita els micro-tirons del servo de seeks/rate. Si el drift creix
+                // (>0.35s) tornem al mode perseguidor i _syncVideo re-ancla amb seek.
+                var vT = -1;
+                if (self._timelineRunning && !self._playheadLocal && (self._pendingSeek === null || self._pendingSeek === undefined)) {
+                    var vEl = document.getElementById('srtVideo');
+                    if (vEl && vEl.src && !vEl.paused && vEl.readyState >= 2) {
+                        try { vT = vEl.currentTime; } catch (eVT) { vT = -1; }
+                    }
+                }
+                if (vT >= 0 && self._timelineRunning) {
+                    var _vDrift = vT - ph;
+                    if (Math.abs(_vDrift) < 0.35) {
+                        // Sincronitzat: el rellotge mostrat és el del propi vídeo.
+                        self._playheadSec = vT;
+                    } else if (Math.abs(_vDrift) > 0.6) {
+                        // Salt de clip (canvi de pista/media no contigu) o deriva gran:
+                        // re-anclar directe perquè _syncVideo faci UN sol seek (no dos).
+                        self._playheadSec = ph;
+                    } else {
+                        // Desfàs mitjà: segueix amb el filtre suau.
+                        self._playheadSec += (ph - self._playheadSec) * 0.6;
+                    }
+                } else {
+                    self._playheadSec += (ph - self._playheadSec) * 0.6;
+                }
                 if (Math.abs(self._playheadSec - self._lastLocalT) < 0.02) return;
                 self._lastLocalT = self._playheadSec;
                 self.render();
@@ -766,12 +816,30 @@
                             this._playheadSec = realPh;
                             log("🎯 PLY salt tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " (Δ=" + ctiDelta.toFixed(2) + ")");
                         } else {
+                            // Transició parat → PLAY: alinear el playhead a l'instant real
+                            // (el vídeo encara està pausat i arrencarà alineat al següent tick).
+                            var _wasRunning = this._timelineRunning;
                             this._timelineRunning = true;
-                            log("⏱ PLY tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " show=" + this._playheadSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms");
+                            if (!_wasRunning) {
+                                this._playheadSec = realPh;
+                                this._lastCtiSec = sec;   // perquè el següent poll no el vegi com a salt
+                            }
+                            // Log throttled: escriure al fitxer a cada poll (250ms) tensa la
+                            // UI i pot provocar talls al <video>. Com a màxim 1/s.
+                            var _nowLog = (window.performance && performance.now) ? performance.now() : Date.now();
+                            if ((_nowLog - (this._lastPlyLogT || 0)) > 1000) {
+                                this._lastPlyLogT = _nowLog;
+                                log("⏱ PLY tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " show=" + this._playheadSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms driftV=" + (this._lastVideoDrift || 0).toFixed(2));
+                            }
                         }
                         this._lastCtiSec = sec;
                         this._updatePreview(this._playheadSec);
-                        this._syncVideo(this._playheadSec);
+                        // El <video> en PLAY el condueix el _localPlayInterval (reloj del
+                        // propi vídeo); aquí només es reposiciona quan el CTI està parat
+                        // o ha fet un salt (seek/scrub).
+                        if (!this._timelineRunning) {
+                            this._syncVideo(this._playheadSec);
+                        }
                     }
                 }
                 this._pollCount = (this._pollCount || 0) + 1;
@@ -862,8 +930,9 @@
             this._pendingSeek = null; // si hi ha un seek pendent, cancel·lar-lo
             var btn = document.getElementById('btnSrtPlay');
             var self = this;
-            // Reproduir/pausar el <video> del visor segons l'estat (no "servo" de seeks).
-            this._setVideoRunning(this._isPlaying);
+            // El <video> s'ha de posar en marxa ALINEAT quan el CTI confirmi el PLAY
+            // (ho fa _syncVideo al tick de 100ms); aquí només s'atura en PAUSA.
+            if (!this._isPlaying) this._setVideoRunning(false);
             if (this._isPlaying) {
                 if (this._playheadLocal) {
                     // PLAY LOCAL (més enllà de l'OUT): avançar el playhead a 1x en MEDIA
@@ -871,12 +940,24 @@
                     log("▶▶ PLAY LOCAL (més enllà de l'OUT): media=" + this._playheadSec.toFixed(2));
                     this._timelineRunning = true;
                     this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
+                    this._setVideoRunning(true);
                     if (btn) btn.innerHTML = '⏸ PAUSA';
                     if (this._pollInterval) clearInterval(this._pollInterval);
                     this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
                     return;
                 }
                 log("▶▶ PLAY inici: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
+                // Anclar el <video> al punt de sortida abans de deixar-lo córrer a 1x:
+                // evita començar amb un drift gran que forci un seek durant la marxa.
+                try {
+                    var vPlay = document.getElementById('srtVideo');
+                    if (vPlay && vPlay.src && vPlay.readyState >= 2) {
+                        if (Math.abs(vPlay.currentTime - this._playheadSec) > 0.05) {
+                            vPlay.currentTime = this._playheadSec;
+                        }
+                        try { vPlay.playbackRate = 1; } catch (eR9) { }
+                    }
+                } catch (eP9) { }
                 callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().play();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
                     log("📝 SRT: PLAY result: " + result);
                 });
@@ -1092,9 +1173,14 @@
                 if (ctiSec >= this._entries[i].startSec && ctiSec < this._entries[i].endSec) { entry = this._entries[i]; break; }
             }
             var text = entry ? entry.texts.join('<br>') : '';
-            // Overlay de subtítols sobre el vídeo (PLAN_VIDEO_PREVIEW)
-            var subs = document.getElementById('srtVideoSubs');
-            if (subs) subs.innerHTML = text;
+            // Overlay de subtítols sobre el vídeo (PLAN_VIDEO_PREVIEW).
+            // ⚡ Només s'escriu quan canvia el text: un innerHTML repetit a 10Hz sobre
+            // el <video> força repintats de la composició i pot provocar talls visuals.
+            if (text !== this._lastSubsHtml) {
+                this._lastSubsHtml = text;
+                var subs = document.getElementById('srtVideoSubs');
+                if (subs) subs.innerHTML = text;
+            }
         },
 
         _drawMarkers: function (ctx) {
@@ -1358,6 +1444,30 @@
         },
 
         /**
+         * _fingerprintSrt: Empremta ràpida del contingut del SRT carregat (nombre
+         * d'entrades + seqüència de temps start/end). Dos SRT que comparteixen nom
+         * (p. ex. 'emergencia_EMERGENCIA') però amb subtítols diferents (altra peça
+         * o sessió) obtenen empremtes diferents → els marcadors no es porten d'una
+         * peça a l'altra.
+         */
+        _fingerprintSrt: function () {
+            var e = this._entries || [];
+            if (e.length === 0) return '';
+            var max = Math.min(e.length, 600);
+            var s = String(e.length) + '|' + (e[0].startSec || 0) + '-' + (e[0].endSec || 0) + '|' + (e[e.length - 1].endSec || 0);
+            for (var i = 0; i < max; i++) {
+                s += '|' + (e[i].startSec || 0) + '-' + (e[i].endSec || 0);
+            }
+            // Hash FNV-1a de 32 bits → cadena curta i estable per comparar.
+            var h = 2166136261;
+            for (var j = 0; j < s.length; j++) {
+                h ^= s.charCodeAt(j);
+                h = (h * 16777619) >>> 0;
+            }
+            return h.toString(36) + '_' + String(e.length);
+        },
+
+        /**
          * _markersFilePath: ruta d'un fitxer LOCAL petit per als marcadors.
          * Evita reescriure el manifest de 224 ítems (53KB) al NAS en cada operació,
          * que era la causa dels cuelgues (IO.writeTxt bloquejava ExtendScript ~25s).
@@ -1378,6 +1488,7 @@
                 try { window.cep.fs.makedir("C:/temp"); } catch (e1) { }
                 var data = JSON.stringify({
                     srtName: this._srtName,
+                    srtFingerprint: this._srtFingerprint || '',
                     projectKey: this._projectKey || '',
                     markers: this._markers.slice(),
                     originalMarkers: (this._originalMarkers || []).slice(),
@@ -1389,7 +1500,14 @@
                 // (alguns entorns no ho permeten), cau a C:/temp per no perdre els marcadors.
                 if (wRes && wRes.err !== 0 && String(pathMarkers).indexOf('C:/temp') !== 0) {
                     var safe = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
-                    window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safe + ".json", data);
+                    window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safe + ".json", JSON.stringify({
+                        srtName: this._srtName,
+                        srtFingerprint: this._srtFingerprint || '',
+                        projectKey: this._projectKey || '',
+                        markers: this._markers.slice(),
+                        originalMarkers: (this._originalMarkers || []).slice(),
+                        updatedAt: new Date().toISOString()
+                    }));
                 }
             } catch (e) {
                 try {
@@ -1397,6 +1515,7 @@
                     window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safe2 + ".json",
                         JSON.stringify({
                             srtName: this._srtName,
+                            srtFingerprint: this._srtFingerprint || '',
                             projectKey: this._projectKey || '',
                             markers: this._markers.slice(),
                             originalMarkers: (this._originalMarkers || []).slice(),
@@ -1433,17 +1552,33 @@
                         } catch (eK) { }
                     }
                     var sameProject = !!(keyActual && parsed && parsed.projectKey && parsed.projectKey === keyActual);
-                    if (parsed && parsed.srtName === this._srtName && Array.isArray(parsed.markers) && sameProject) {
+                    var sameSrt = !!(parsed && parsed.srtName === this._srtName);
+                    // El contingut del SRT ha de ser el mateix: si la peça/sessió actual ha
+                    // regenerat el SRT (mateix nom 'emergencia_EMERGENCIA' però altra peça),
+                    // els marcadors antics ja no pertanyen a aquest contingut → es descarten.
+                    var sameContent = !!(this._srtFingerprint && parsed && parsed.srtFingerprint && parsed.srtFingerprint === this._srtFingerprint);
+                    if (sameSrt && sameContent && Array.isArray(parsed.markers) && sameProject) {
                         this._markers = parsed.markers.filter(function (m) { return typeof m === 'number' && isFinite(m); });
                         this._markers.sort(function (a, b) { return a - b; });
                         var om = Array.isArray(parsed.originalMarkers) ? parsed.originalMarkers : parsed.markers;
                         this._originalMarkers = om.filter(function (m) { return typeof m === 'number' && isFinite(m); });
                         this._originalMarkers.sort(function (a, b) { return a - b; });
-                        if (this._markers.length > 0) log("📝 SRT_EDIT: " + this._markers.length + " marcadors restaurats (local, mateixa sessió)");
-                    } else if (parsed && parsed.srtName === this._srtName && parsed.projectKey && keyActual && !sameProject) {
-                        // Restes d'un altre projecte: netejar per no contaminar sessions futures.
-                        log("📝 SRT_EDIT: Marcadors locals d'un altre projecte descartats (neteja).", "WARN");
+                        if (this._markers.length > 0) log("📝 SRT_EDIT: " + this._markers.length + " marcadors restaurats (local, mateixa sessió i mateix contingut SRT)");
+                    } else if (parsed && (parsed.srtName || parsed.projectKey || parsed.srtFingerprint)) {
+                        // Restes d'un altre projecte o d'un SRT anterior amb el mateix nom
+                        // (p. ex. 'emergencia_EMERGENCIA' regenerat per a una altra peça):
+                        // netejar-les per no contaminar la sessió actual.
+                        var motiu = !sameProject ? "d'un altre projecte" : (!sameSrt ? "d'un altre SRT" : "d'un SRT amb el mateix nom però contingut diferent");
+                        log("📝 SRT_EDIT: Marcadors locals " + motiu + " descartats (neteja).", "WARN");
                         try { window.cep.fs.writeFile(this._markersFilePath(), ''); } catch (eCl) { }
+                        // Netejar també el respaldo C:/temp (el que normalment conté les restes).
+                        try {
+                            var safeCl = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
+                            var pathCl = this._markersFilePath();
+                            if (String(pathCl).indexOf('C:/temp') !== 0) {
+                                window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safeCl + ".json", '');
+                            }
+                        } catch (eCl2) { }
                     }
                 }
             } catch (e) { }
@@ -1714,7 +1849,7 @@
 
         reset: function () {
             this.stop();
-            this._entries = []; this._loadedEntries = []; this._originalEntries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = "";
+            this._entries = []; this._loadedEntries = []; this._originalEntries = []; this._playheadSec = 0; this._isDirty = false; this._srtPath = ""; this._srtName = ""; this._srtFingerprint = "";
             this._waveformPeaks = null; this._waveformPPS = 480; this._wfCacheKey = ""; this._wfPixelHeights = null; this._isPlaying = false;
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             this._wfMediaStart = 0; this._wfMediaEnd = 0;

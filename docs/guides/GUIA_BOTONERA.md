@@ -30,7 +30,7 @@ Eines d'edició ràpida al Timeline.
     - Desa el projecte.
 *   **◀ / ▶**: Navegació ràpida entre el clip anterior i el següent de la pista activa.
 *   **Slider (Posició X)**: Permet moure horitzontalment el vídeo de la pista V1 en temps real. Molt útil per re-enquadrar cares o accions en el format vertical 9:16. Fent **doble clic** es reseteja al centre (304px).
-*   **KEY**: *Funció per inserir keyframes de moviment (en desenvolupament).*
+*   **KEY**: *Toggle de keyframes sobre el clip SELECCIONAT: sense key a l'instant del CTI → el crea (mode keyframe); amb key ja existent → l'elimina. En canviar de clip s'adopta el mode d'origen del clip (sense keyframes → slider; amb keyframes → keyframe).*
 
 ---
 

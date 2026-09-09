@@ -84,7 +84,7 @@ cabezal actual, i segueix el cabezal en play/pausa/scrubbing.
 |---|---|
 | `file://` a UNC no carrega (seguretat CEP) | Copiar MP4 a `C:\temp` amb `cep.fs` i servir-lo local |
 | Codec no suportat (algun MP4 `-c copy` amb àudio AAC rar) | Recodificar només si cal (posteriorment, amb ffmpeg) |
-| `seek` freqüent lent (MP4 GOP llarg) | Llindar de correcció 0,12 s + només corregir quan drift > llindar |
+| `seek` freqüent lent (MP4 GOP llarg) | Rate sempre 1x (cadència nativa sense micro-tirons); re-anclatge només amb drift >0,6 s i histèresi de 250 ms. En reproducció estable el rellotge mostrat és el del propi `<video>` (es fa servir `v.currentTime`), no un servo de seeks/rate |
 | Velocitat del montatge (r>1) no coincideix amb reproducció nativa | Es resol per disseny: el vídeo és un "visor" conduït pel cabezal (seek), no es reprodueix a 1× |
 | Àudio doble (vídeo + Premiere) | `<video muted>` |
 | Layout estret del panell | Columna dreta ~40%, object-fit:contain |

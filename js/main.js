@@ -11,6 +11,9 @@ var FASTPASS_UI = window.FASTPASS_UI || {};
 FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; 
 var isUserDraggingSlider = false;
 var reframeActive = false;
+// Últim clip objectiu detectat per Sync.syncKfMode (track@start@nom). Serveix per
+// saber quan l'usuari canvia de clip i adoptar el mode (slider/keyframe) d'origen.
+var lastKfClipId = "";
 // Escala física del slider en PÍXELS: slider.min=-351, slider.max=959.
 // seqW (amplada del frame) es guarda per convertir px <-> normalitzat.
 var sliderSeqW = 608;
@@ -24,6 +27,15 @@ function setReframeActive(on) {
     if (!on && window.FASTPASS_UI.State) window.FASTPASS_UI.State.isKeyframeMode = false;
     if (on) applySliderLimits();
     FASTPASS_UI.Utils.log(on ? "🎛️ Reencuadre manual ACTIVAT (actua sobre el clip SELECCIONAT)" : "🛑 Reencuadre manual desactivat", "DEBUG");
+    // En activar, mostra el mode d'origen del clip objectiu (ja sincronitzat pel poll).
+    if (on && window.FASTPASS_UI.State && FASTPASS_UI.Utils) {
+        var kfMod = !!window.FASTPASS_UI.State.isKeyframeMode;
+        FASTPASS_UI.Utils.status("Reencuadre actiu · mode " + (kfMod ? "KEYFRAME" : "SLIDER"), kfMod ? "exito" : "warn");
+    }
+    // Forçar una sincronització immediata del mode (el poll només corre amb reframe actiu).
+    if (on && window.FASTPASS_UI.Sync && window.FASTPASS_UI.Sync.syncKfMode) {
+        try { window.FASTPASS_UI.Sync.syncKfMode(); } catch (eSync) { }
+    }
 }
 
 /**
@@ -481,9 +493,11 @@ function applySliderLimits() {
                             await window.FASTPASS_UI.Workflows.MainButton._rebuildManifestFromLocal(ctxFoto);
                         }
 
-                        // Forçar recàrrega del context
+                        // Forçar recàrrega del context (force=true per saltar el debounce
+                        // de checkContext: la foto on_demand acabada de generar s'ha de
+                        // detectar en aquest mateix instant, no en el següent poll).
                         if (window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context) {
-                            await window.FASTPASS_UI.Core.Context.checkContext();
+                            await window.FASTPASS_UI.Core.Context.checkContext({ force: true });
                         }
                     } else {
                         utils.log('❌ [Fetch] No s\'ha pogut obtenir la foto de l\'escaleta', 'ERROR');
@@ -681,7 +695,38 @@ FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
     });
 };
 
-// 5. DESACTIVAR EL REENCUADRE QUAN ES TOCA UN ALTRE CONTROL
+// 5. SINCRONITZACIÓ DEL MODE (SLIDER / KEYFRAME) AMB EL CLIP SELECCIONAT
+FASTPASS_UI.Sync.syncKfMode = function () {
+    if (!window.FASTPASS_UI.Utils || !window.FASTPASS_UI.Utils.isJsxReady) return;
+    // El clip objectiu (Anim.modeInfo) és el SELECCIONAT (o V1 sota CTI com a
+    // fallback), el mateix sobre el qual actuen el slider i el botó KEYFRAME.
+    FASTPASS_UI.Utils.callJSX('Anim.modeInfo()').then(function (raw) {
+        if (!raw || raw === "null" || raw.indexOf("ERR") === 0) return;
+        var o;
+        try { o = JSON.parse(raw); } catch (eP) { return; }
+        var clipId = (o.track || "") + "@" + (o.start || "") + "@" + (o.name || "");
+        var kf = !!o.kf;
+        if (clipId !== lastKfClipId) {
+            // Ha canviat el clip → adoptem el mode "d'origen" d'aquest clip:
+            // sense keyframes → mode SLIDER; amb keyframes → mode KEYFRAME.
+            lastKfClipId = clipId;
+            if (FASTPASS_UI.State) FASTPASS_UI.State.isKeyframeMode = kf;
+            var nom = o.name ? (' "' + o.name + '"') : '';
+            var trackTxt = o.track ? ("V" + o.track) : "?";
+            FASTPASS_UI.Utils.log("🎬 Clip " + trackTxt + nom + " → mode " + (kf ? "KEYFRAME (té keyframes)" : "SLIDER (sense keyframes)"), "DEBUG");
+            // El status només es mostra amb el reencuadre actiu (l'usuari està a la
+            // zona del slider); així no pisa els missatges d'altres workflows.
+            if (reframeActive) {
+                FASTPASS_UI.Utils.status("Clip " + trackTxt + ": mode " + (kf ? "KEYFRAME" : "SLIDER"), kf ? "exito" : "warn");
+            }
+        } else if (FASTPASS_UI.State && kf !== !!FASTPASS_UI.State.isKeyframeMode) {
+            // El mode del mateix clip ha canviat (s'ha afegit o eliminat un key).
+            FASTPASS_UI.State.isKeyframeMode = kf;
+        }
+    });
+};
+
+// 6. DESACTIVAR EL REENCUADRE QUAN ES TOCA UN ALTRE CONTROL
 document.addEventListener('click', function (e) {
     if (!reframeActive) return;
     var zone = document.getElementById('sliderZone');
@@ -706,14 +751,20 @@ function sizeVideoToFit() {
         var zone = document.querySelector('.right-zone');
         var col = document.querySelector('.upper-left');
         if (!wrap || !zone || !col) return;
+        var aw = zone.clientWidth;
+        var ah = col.offsetHeight;
+        if (aw <= 0 || ah <= 0) return;
+        // Si les mesures no han canviat, NO tocar estils del visor de vídeo:
+        // reescriure width/height a cada poll (500ms) invalida el layout de la
+        // zona del <video> i pot provocar talls durant la reproducció.
+        if (wrap._fitAw === aw && wrap._fitAh === ah) return;
+        wrap._fitAw = aw;
+        wrap._fitAh = ah;
         /* 1) Anul·lar la mida del visor perquè no infli l'alçada de la columna en mesurar
               (si partís de 280px d'amplada, estiraria la fila i la mesura sortiria gran). */
         wrap.style.width = '10px';
         wrap.style.height = '0';
         /* 2) Alçada real de tota la columna de controls: INICI + VÍDEO + GRF/SUB + CHY/REN. */
-        var aw = zone.clientWidth;
-        var ah = col.offsetHeight;   /* la lectura força el reflow amb el visor petit */
-        if (aw <= 0 || ah <= 0) return;
         /* 3) Amplada 9:16; l'alçada la deriva l'aspect-ratio (i queda 1:1 amb la columna). */
         var w = Math.min(aw, Math.floor(ah * 9 / 16));
         wrap.style.width = w + 'px';
@@ -723,9 +774,19 @@ function sizeVideoToFit() {
 window.addEventListener('resize', sizeVideoToFit);
 
 setInterval(function () {
+    // Mentre el visor SRT està reproduint, NO es fa cap mesura de layout ni JSX
+    // extern (Registry/slider/reframe): competirien amb el polling del cabezal
+    // (250ms) i causarien talls al <video>. Fora de la reproducció es manté tot.
+    var _sr = window.FASTPASS_UI && FASTPASS_UI.Editor && FASTPASS_UI.Editor.SrtEditor;
+    var _visorRunning = !!(_sr && (_sr._isPlaying || _sr._timelineRunning));
+    if (_visorRunning) return;
     sizeVideoToFit();
     if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
         FASTPASS_UI.Sync.updateSliderFromPremiere();
+    }
+    // El mode slider/keyframe només és rellevant amb el reencuadre actiu.
+    if (reframeActive && FASTPASS_UI.Sync && FASTPASS_UI.Sync.syncKfMode) {
+        FASTPASS_UI.Sync.syncKfMode();
     }
     if (FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
         FASTPASS_UI.Registry.poll();
