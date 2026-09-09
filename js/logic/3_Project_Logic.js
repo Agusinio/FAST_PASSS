@@ -344,8 +344,31 @@
 
             // A. RÈTOLS (Wotts) -> Bin CHY
             if (wottData && wottData.list && wottData.list.length > 0) {
+                // ── Detecció robusta de duplicats ──────────────────────────────────
+                // Un wott "ja existeix" si el seu ID numèric (darrera seqüència de 6+
+                // dígits del nom) ja és al bin CHY, o si el nom base coincideix.
+                // Evita reimportar quan Premiere ja el té (fins i tot amb sufix " 1"
+                // que afegeix en importar dos cops el mateix fitxer).
+                const idDe = function (n) {
+                    const m = String(n).match(/(\d{6,})/g);
+                    return m ? m[m.length - 1] : null;
+                };
+                const cleanBase = function (n) {
+                    try { n = decodeURIComponent(n); } catch (e) { }
+                    return String(n).replace(/\.(mov|mp4|png|srt)$/i, '').replace(/\s+\d+$/i, '').trim().toLowerCase();
+                };
+                const jaExisteix = function (w) {
+                    const wName = (w && w.name) ? w.name : String(w);
+                    const wId = idDe(wName);
+                    return (existing.wotts || []).some(function (ew) {
+                        const ewName = (ew && ew.name) ? ew.name : String(ew);
+                        if (wId) { const eId = idDe(ewName); if (eId && eId === wId) return true; }
+                        return cleanBase(ewName) === cleanBase(wName);
+                    });
+                };
+
                 // Filtrar wotts que aún no están en el proyecto
-                const newWotts = wottData.list.filter(w => !existing.wotts.includes(w.name));
+                const newWotts = wottData.list.filter(w => !jaExisteix(w));
                 if (newWotts.length === 0) {
                     utils.log("✅ Todos los wotts ya están en el proyecto. Se omite importación.");
                 } else {
@@ -455,8 +478,15 @@
         
             // C. PORTADES (Múltiples PNGs) -> Bin PORTADES
             if (portadas && portadas.length > 0) {
-                // Filtrar portadas que no están en el proyecto
-                const newPortadas = portadas.filter(p => !existing.portadas.includes(p.name));
+                // Filtrar portadas que no estan al projecte (comparació per nom base,
+                // tolerant a extensió i a sufixos " 1" dels duplicats).
+                const cleanNameP = function (n) {
+                    try { n = decodeURIComponent(n); } catch (e) { }
+                    return String(n).replace(/\.(png|jpg|jpeg)$/i, '').replace(/\s+\d+$/i, '').trim().toLowerCase();
+                };
+                const newPortadas = portadas.filter(p => !existing.portadas.some(function (ep) {
+                    return cleanNameP(ep) === cleanNameP(p.name);
+                }));
                 if (newPortadas.length === 0) {
                     utils.log("✅ Todas las portadas ya están en el proyecto. Se omite importación.");
                 } else {
