@@ -292,8 +292,22 @@
         /**
          * ingestAssets: Centralitza l'escaneig i ingesta de materials (Wotts, MP4, SRT, Portada).
          */
-        ingestAssets: async function(ctx, wottData, media, portadas) { // <--- Nombre unificado
+        ingestAssets: async function (ctx, wottData, media, portadas, opts) { // <--- Nombre unificado
             utils.log("🎞️ [SYNC] Iniciant ingesta segmentada...");
+            // ── GUARDA "CAPA JA PRESENT" (només en ACTUALITZAR/LOAD/GO) ────────
+            // Si el projecte ja té el clip de vídeo de treball a V1 i/o subtítols
+            // montats, no cal importar MP4/SRT "equivalents" encara que el nom no
+            // coincideixi (els fitxers d'emergència poden tenir noms diferents).
+            const skipMedia = !!(opts && opts.skipMediaIfLayerPresent);
+            let capaVideoPresent = false;
+            let capaSrtPresent = false;
+            if (skipMedia) {
+                try { capaVideoPresent = (await callJSX("hasClips(1, 'video')")) === "true"; } catch (eCv) { }
+                try { capaSrtPresent = (await callJSX("hasClips(1, 'subtitle')")) === "true"; } catch (eCs) { }
+                if (capaVideoPresent || capaSrtPresent) {
+                    utils.log(`[INGEST] Capa ja present al projecte (vídeo=${capaVideoPresent}, subtítols=${capaSrtPresent}). No es reimportaran MP4/SRT equivalents.`, 'INFO');
+                }
+            }
 
             // ── FILTRE FINAL DE SEGURETAT (2026-09-07) ─────────────────────────
             // Mecanisme ÚNIC d'ingesta: passi pel camí que passi (NEW, UPDATE, GO,
@@ -414,8 +428,11 @@
             const mediaList = [];
 
             // (TO DO UPDATE #1) NO reimportar el MP4 si ja existeix un clip al projecte.
-            // existing.media només llista el root, així que fem una cerca RECURSIVA
-            // (root + bins) amb Project.find, tolerant amb/sense extensió.
+            // A més, en actualitzar, si la CAPA de vídeo ja és present a V1 no es
+            // reimporta cap MP4 equivalent encara que el nom no coincideixi.
+            if (media?.mp4?.path && !mp4Exists && !(skipMedia && capaVideoPresent)) {
+                mediaList.push(media.mp4.path.replace(/\\/g, "/"));
+            }
             let mp4Exists = false;
             if (media?.mp4?.path) {
                 const mp4Enc = encodeURIComponent(media.mp4.name);
@@ -437,7 +454,12 @@
             // Així CARREGAR troba exactament un .srt al costat del .prproj,
             // sense dependre del bin de Premiere (que pot tenir .srt residuals).
             let srtImportPath = null;
-            if (media?.srt?.path) {
+            // En actualitzar, si la capa de subtítols ja és present al projecte no es
+            // copia ni s'importa cap SRT equivalent (el nom pot no coincidir).
+            if (skipMedia && capaSrtPresent && media?.srt?.path) {
+                utils.log("🟡 [INGEST] Ja hi ha subtítols montats al projecte. No s'importa el SRT equivalent.", 'INFO');
+            }
+            if (media?.srt?.path && !(skipMedia && capaSrtPresent)) {
                 const destFolder = (ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir)
                     .replace(/\\/g, "/").replace(/\/+$/, "");
                 const localSrt = destFolder + "/" + media.srt.name;

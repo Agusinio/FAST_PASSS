@@ -949,7 +949,9 @@
             log("🎞️ [SYNC] Ingestant assets i fixant focus...");
             
             // 1. Ingesta (Rètols, Media)
-            await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada);
+            // En ACTUALITZAR/LOAD/GO el projecte ja existeix: si ja té la capa de vídeo
+            // (V1) i/o de subtítols, no es reimporten MP4/SRT equivalents.
+            await FASTPASS_UI.Logic.Project.ingestAssets(ctx, assets.wotts, assets.media, assets.portada, { skipMediaIfLayerPresent: true });
 
             // 2. (TO DO UPDATE #2) NO col·locar el SRT a la pista de subtítols aquí.
             // El SRT es gestiona únicament via l'editor SRT (CARREGAR + EXPORTAR),
