@@ -498,30 +498,26 @@
                     log(`📌 [Titol] Al principi @ ${placeTime.toFixed(2)}s`);
                 }
 
-                // Buscar el Tema‑Titol al primer element amb sufix (dp, i, f, lead) que en tingui
+                // Buscar el Tema‑Titol al PRIMER ítem de l'escaleta/estructura del bloc
+                // que en tingui (no al primer marcador del timeline: l'ítem que porta el
+                // tema — p. ex. el 01dp de la primera notícia — pot no tenir marcador propi).
                 const SUFFIX_PRIORITY = ['dp', 'i', 'lead', 'f'];
                 let temaTitolChy = null;
-                for (const mk of structuralMarkers) {
-                    const rawId = (mk.comments || "").split("-")[0].trim();
-                    const baseMatch = rawId.match(/^(\d+)/);
-                    if (!baseMatch) continue;
-                    const base = baseMatch[1];
-                    let entry = structureById[rawId] || null;
-                    if (!entry) {
-                        for (const suf of SUFFIX_PRIORITY) {
-                            if (structureById[base + suf]) { entry = structureById[base + suf]; break; }
-                        }
-                    }
-                    if (!entry || !entry.chyrons) continue;
+                const seenTt = {};
+                for (const entry of struct || []) {
+                    if (!entry || !entry.id || seenTt[entry.id]) continue;
+                    seenTt[entry.id] = true;
+                    if (!entry.chyrons || entry.chyrons.length === 0) continue;
                     const tt = entry.chyrons.find(c =>
                         (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
                     );
                     if (tt) { temaTitolChy = tt; break; }
                 }
                 if (!temaTitolChy) {
-                    log("⚠️ [Titol] Cap Tema‑Titol trobat.", "WARN");
+                    log("⚠️ [Titol] Cap Tema‑Titol trobat a l'estructura. No es congela res (fes un ACTUALITZAR per portar els rètols).", "WARN");
                     return;
                 }
+                log(`🎯 [Titol] Tema‑Titol escollit: ${String(temaTitolChy.name).substring(0, 70)}`);
 
                 // Estirar fins al final del bloc (Out Point, durada, o final del darrer clip V1)
                 let seqEnd = null;
