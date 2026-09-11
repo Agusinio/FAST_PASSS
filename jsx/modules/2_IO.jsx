@@ -37,7 +37,12 @@ FASTPASS.IO = (function () {
                         }
                     }
                     result.push({
-                        name: f.name,
+                        // ⚠️ File.name d'ExtendScript pot venir URL-encoded en algunes rutes
+                        // UNC (ex: 'Conductor_Enric%20Pinyol%20Leal.mov'). El desfem aquí perquè
+                        // tots els consumidors del JS rebin el nom real (espais i accents).
+                        name: (function (nm) {
+                            try { return decodeURIComponent(String(nm)); } catch (e) { return String(nm); }
+                        })(f.name),
                         path: f.fsName,
                         modified: f.modified.getTime(),
                         // Data de CREACIÓ real. Mai fer servir modified com a created:
