@@ -1,3 +1,25 @@
+## Actualització (2026-09-09): PLAY LOCAL desacoblat + caché de vídeo
+
+**Decisió**: el botó **▶ del editor SRT reprodueix el clip a 1× de forma autònoma**, sense
+tocar Premiere (ni `qe.play()` ni `Timeline.set()` durant la reproducció).
+
+Motiu: els subtítols viuen en **temps de MEDIA del mateix clip** que mostra el `<video>`,
+per tant el moviment natiu del vídeo **ja és** la sincronia correcta. Anclar el visor al
+CTI de Premiere obligava a seeks i interpolacions a cada poll → micro-tirons constants.
+
+- Al ▶: `_playheadLocal = true`; el tick de 100 ms fa `_playheadSec = v.currentTime` i
+  pinta canvas + overlay. **Zero seeks, zero polls del CTI** (`_pollTick` fa return).
+- Límit de parada: una mica després de l'últim subtítol i mai més enllà de `v.duration`.
+- Al ⏸ (o en clicar al canvas): s'atura el vídeo i es fa **una sola** `Timeline.set()` per
+  alinear el cabezal de Premiere; a partir d'aquí torna el mode seguidor (scrub).
+- El mode seguidor (pausa/scrub) es manté: seeks al media que correspon al CTI.
+
+**Caché de vídeo**: `_ensureLocalVideo` manté una còpia local reutilitzable per peça a
+`C:/temp/fastpass_video_<tag>.mp4` (+ sidecar `.json` amb `size`/`mtime` de l'origen).
+Es re-copia només si l'origen canvia. Reproduir en local fa els seeks/scrub instantanis
+(sobre la UNC, cada seek re-llegeix de xarxa).
+
+
 # PLAN: Visor de vídeo + subtítols a l'editor SRT (opció A, sense ffmpeg)
 
 ## Objectiu

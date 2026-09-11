@@ -39,3 +39,6 @@ graphify-out/
 # ffmpeg local (no es pusheja, es copia amb la instal·lacio)
 bin/ffmpeg/
 
+# Cline: datos locales (historial de conversaciones, ajustes y secretos) - NO versionar
+.cline/
+

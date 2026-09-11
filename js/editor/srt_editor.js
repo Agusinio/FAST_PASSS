@@ -537,6 +537,15 @@
         _hideEditor: function () {
             var container = document.getElementById('srtEditorContainer');
             if (container) container.style.display = 'none';
+            // Estat de reproducció del visor a zero (PLAY local desacoblat)
+            this._isPlaying = false;
+            this._playheadLocal = false;
+            this._timelineRunning = false;
+            this._mediaStop = 0;
+            try {
+                var btnP = document.getElementById('btnSrtPlay');
+                if (btnP) btnP.innerHTML = '▶ PLAY';
+            } catch (eB) { }
             // Aturar i buidar el visor de vídeo (PLAN_VIDEO_PREVIEW)
             try {
                 var v = document.getElementById('srtVideo');
@@ -557,6 +566,30 @@
         _loadVideo: async function (mediaPath) {
             var v = document.getElementById('srtVideo');
             if (!v) return false;
+
+            // ── 1. CÒPIA LOCAL REUTILITZABLE (caché de vídeo per peça) ──────────
+            // Reproduir sempre des d'una còpia local fa els seeks/scrub instantanis
+            // (sobre la UNC del NAS, cada seek re-llegeix de xarxa). Es reutilitza
+            // mentre l'origen no canviï (size + mtime al sidecar).
+            try {
+                var cached = await this._ensureLocalVideo(mediaPath);
+                if (cached) {
+                    v.preload = "auto";
+                    v.src = "file:///" + cached;
+                    v.load();
+                    var okC = await this._waitVideoReady(v, 10000);
+                    if (okC) {
+                        log("✅ SRT_EDIT: Vídeo carregat (còpia local: " + cached + ")");
+                        await this._seekVideoToPlayhead();
+                        return true;
+                    }
+                    log("⚠️ SRT_EDIT: la còpia local no carrega → provant file:// directa");
+                }
+            } catch (eCach) {
+                log("⚠️ SRT_EDIT: caché vídeo: " + eCach.message);
+            }
+
+            // ── 2. Fallback: file:// directa (UNC) ──────────────────────────────
             var url = "file:////" + mediaPath.replace(/\\/g, "/");
             log("📝 SRT_EDIT: Vídeo → " + url);
             v.preload = "auto";
@@ -570,6 +603,67 @@
             }
             log("⚠️ SRT_EDIT: file:// directa bloquejada → copiant a C:\\temp...");
             return await this._loadVideoFallback(mediaPath);
+        },
+
+        /**
+         * _ensureLocalVideo: Garanteix una còpia LOCAL reutilitzable del MP4 de la peça
+         * a C:/temp/fastpass_video_<tag>.mp4 i en retorna la ruta (o null si no es pot).
+         * No re-copia si l'origen no ha canviat (mida + data al sidecar .json).
+         * Caché de vídeo: els seeks sobre un fitxer local són instàntanis.
+         */
+        _ensureLocalVideo: async function (mediaPath) {
+            try {
+                var tag = String(this._waveformMediaTag || '').replace(/[^A-Za-z0-9_\-]/g, '_');
+                if (!tag) {
+                    tag = String(mediaPath || '').split(/[\\/]/).pop().replace(/\.mp4$/i, '').replace(/[^A-Za-z0-9_\-]/g, '_');
+                }
+                if (!tag) return null;
+                try { window.cep.fs.makedir("C:/temp"); } catch (e0) { }
+                var localPath = "C:/temp/fastpass_video_" + tag + ".mp4";
+                var sidecar = "C:/temp/fastpass_video_" + tag + ".json";
+
+                // Estat de l'origen (mida + mtime) via ExtendScript.
+                var safeSrc = String(mediaPath).replace(/\\/g, "/").replace(/'/g, "");
+                var statRaw = await callJSX("(function(){try{var f=new File('" + safeSrc + "');if(!f.exists)return'null';return JSON.stringify({size:f.length,mod:Number(f.modified)});}catch(e){return'null'}})()");
+                var st = null;
+                try { st = (statRaw && statRaw !== 'null') ? JSON.parse(statRaw) : null; } catch (eSt) { st = null; }
+                if (!st) {
+                    log("⚠️ SRT_EDIT: no es pot llegir l'estat del MP4 origen; file:// directa");
+                    return null;
+                }
+
+                var localExists = (await callJSX("IO.exists('" + localPath.replace(/'/g, "") + "')")) === "true";
+                var prev = null;
+                try {
+                    var pr = window.cep.fs.readFile(sidecar);
+                    if (pr && pr.err === 0 && pr.data) prev = JSON.parse(pr.data);
+                } catch (eP) { prev = null; }
+                var upToDate = localExists && prev
+                    && (Number(prev.size) === Number(st.size))
+                    && (Number(prev.mod) === Number(st.mod));
+                if (upToDate) return localPath;
+
+                log("📦 SRT_EDIT: creant còpia local de vídeo (" + tag + ", " + Math.round(st.size / 1048576) + " MB)...");
+                var cp = await callJSX(
+                    "(function(){try{try{new Folder('C:/temp').create()}catch(e0){}"
+                    + "var s=new File('" + safeSrc + "');var d=new File('" + localPath.replace(/'/g, "") + "');"
+                    + "if(d.exists)d.remove();var ok=s.copy(d);return ok?'OK':'ERR:copy=false'}catch(e){return'ERR:'+e.message}})()"
+                );
+                if (cp !== "OK") {
+                    log("⚠️ SRT_EDIT: còpia local de vídeo fallida → " + cp);
+                    return null;
+                }
+                try {
+                    window.cep.fs.writeFile(sidecar, JSON.stringify({
+                        src: mediaPath, size: st.size, mod: st.mod, at: new Date().toISOString()
+                    }));
+                } catch (eW) { }
+                log("✅ SRT_EDIT: còpia local de vídeo creada: " + localPath);
+                return localPath;
+            } catch (e) {
+                log("⚠️ SRT_EDIT: _ensureLocalVideo error: " + e.message);
+                return null;
+            }
         },
 
         _loadVideoFallback: async function (mediaPath) {
@@ -674,7 +768,9 @@
                 // (canvi de clip a una altra pista o deriva de rellotge), amb una
                 // histèresi per no encadenar seeks.
                 try { if (Math.abs(v.playbackRate - 1) > 0.005) v.playbackRate = 1; } catch (eR0) { }
-                if (ad > 0.6 && (nowT - (this._lastVideoSeekT || 0)) > 250) {
+                // En PLAY LOCAL no es fan seeks correctius: el playhead s'ancora a
+                // v.currentTime, així que mai hi ha deriva (només l'alineació d'arrencada).
+                if (!this._playheadLocal && ad > 0.6 && (nowT - (this._lastVideoSeekT || 0)) > 250) {
                     this._lastVideoSeekT = nowT;
                     try { v.currentTime = mediaSec; } catch (eS) { }
                     if (getUtils().forceLog) {
@@ -708,6 +804,35 @@
             if (this._localPlayInterval) clearInterval(this._localPlayInterval);
             this._localPlayInterval = setInterval(function () {
                 var now = (window.performance && performance.now) ? performance.now() : Date.now();
+
+                // ── PLAY LOCAL (desacoblat): el <video> és el rellotge mestre ──────
+                // Subtítols i canvas viuen en temps de MEDIA del mateix clip, així que
+                // n'hi ha prou de seguir v.currentTime. Sense seeks, sense CTI, sense
+                // cap interpolació: zero correccions → reproducció nativa fluida.
+                if (self._isPlaying && self._playheadLocal) {
+                    var vL = document.getElementById('srtVideo');
+                    if (vL && vL.src && vL.readyState >= 2) {
+                        if (vL.ended) {
+                            // El clip s'ha acabat abans del límit de subtítols → pausar.
+                            log("⏹ PLAY local: final del clip (" + vL.duration.toFixed(2) + "s)");
+                            self.togglePlay();
+                            return;
+                        }
+                        if (!vL.paused) {
+                            self._playheadSec = vL.currentTime;
+                            if (self._mediaStop && self._playheadSec >= self._mediaStop) {
+                                log("⏹ PLAY local: final del material (" + self._playheadSec.toFixed(2) + "s)");
+                                self.togglePlay();   // pausa: atura el vídeo i alinea el CTI
+                                return;
+                            }
+                            self.render();
+                            self._updatePreview(self._playheadSec);
+                        }
+                        // Pausat sense 'ended' (buffering) → no fer res.
+                    }
+                    return;
+                }
+
                 var estTl;
                 if (self._pendingSeek !== null && self._pendingSeek !== undefined) {
                     // Seek pendent (clic al canvas): usar el target per no derivar
@@ -760,6 +885,12 @@
 
         _pollTick: async function () {
             try {
+                // PLAY LOCAL: el visor és autònom → no cal consultar el CTI de Premiere.
+                // Evitar aquest evalScript cada 400ms elimina qualsevol micro-stutter.
+                if (this._isPlaying && this._playheadLocal) {
+                    this._pollCount = (this._pollCount || 0) + 1;
+                    return;
+                }
                 var now0 = (window.performance && performance.now) ? performance.now() : Date.now();
                 var cti = await callJSX("Timeline.get()");
                 var now1 = (window.performance && performance.now) ? performance.now() : Date.now();
@@ -930,59 +1061,74 @@
             this._pendingSeek = null; // si hi ha un seek pendent, cancel·lar-lo
             var btn = document.getElementById('btnSrtPlay');
             var self = this;
-            // El <video> s'ha de posar en marxa ALINEAT quan el CTI confirmi el PLAY
-            // (ho fa _syncVideo al tick de 100ms); aquí només s'atura en PAUSA.
-            if (!this._isPlaying) this._setVideoRunning(false);
             if (this._isPlaying) {
-                if (this._playheadLocal) {
-                    // PLAY LOCAL (més enllà de l'OUT): avançar el playhead a 1x en MEDIA
-                    // sense dependre del CTI de Premiere (que es queda al final físic).
-                    log("▶▶ PLAY LOCAL (més enllà de l'OUT): media=" + this._playheadSec.toFixed(2));
-                    this._timelineRunning = true;
-                    this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
-                    this._setVideoRunning(true);
-                    if (btn) btn.innerHTML = '⏸ PAUSA';
-                    if (this._pollInterval) clearInterval(this._pollInterval);
-                    this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
-                    return;
+                // ── ▶ PLAY LOCAL (desacoblat del timeline de Premiere) ──────────────
+                // Els subtítols viuen en temps de MEDIA del MATEIX clip que reprodueix
+                // el <video>: el moviment natiu del vídeo a 1× ÉS la sincronia correcta.
+                // No es toca Premiere (ni qe.play ni Timeline.set): el visor és autònom
+                // i per tant no pateix els seeks ni els polls del cabezal.
+                if (this._mediaStop > 0 && this._playheadSec >= this._mediaStop - 0.02) {
+                    this._playheadSec = this._axisOrigin || 0;   // al final → tornar a començar
                 }
-                log("▶▶ PLAY inici: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
-                // Anclar el <video> al punt de sortida abans de deixar-lo córrer a 1x:
-                // evita començar amb un drift gran que forci un seek durant la marxa.
-                try {
-                    var vPlay = document.getElementById('srtVideo');
-                    if (vPlay && vPlay.src && vPlay.readyState >= 2) {
-                        if (Math.abs(vPlay.currentTime - this._playheadSec) > 0.05) {
-                            vPlay.currentTime = this._playheadSec;
-                        }
-                        try { vPlay.playbackRate = 1; } catch (eR9) { }
-                    }
-                } catch (eP9) { }
-                callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().play();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
-                    log("📝 SRT: PLAY result: " + result);
-                });
+                this._mediaStop = this._computeMediaStop();
+                this._playheadLocal = true;
+                this._timelineRunning = true;
+                this._ctiSec = this._tlAtMedia(this._playheadSec);
+                this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
+                log("▶▶ PLAY LOCAL: media=" + this._playheadSec.toFixed(2) + "s → " + this._mediaStop.toFixed(2) + "s");
+                // Alinear el <video> al punt i arrencar-lo (rate 1× nativa).
+                this._syncVideo(this._playheadSec);
+                this._setVideoRunning(true);
                 if (btn) btn.innerHTML = '⏸ PAUSA';
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(function () { self._pollTick(); }, 250);
-                // (l'interpolació local del cabezal ja corre contínuament des de _startPolling)
+                this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
             } else {
-                if (this._playheadLocal) {
-                    this._timelineRunning = false;
-                    // Fixar la base al playhead actual perquè el _localPlayInterval no torni enrere.
-                    this._ctiSec = this._tlAtMedia(this._playheadSec);
-                    this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
-                    log("⏸⏸ PAUSA LOCAL: media=" + this._playheadSec.toFixed(2));
-                } else {
-                    callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
-                        log("📝 SRT: STOP result: " + result);
-                    });
-                }
+                // ── ⏸ PAUSA ────────────────────────────────────────────────────────
+                // Aturar el visor i alinear el cabezal de Premiere al punt on s'ha
+                // pausat (una sola crida): a partir d'aquí el panel torna a seguir el
+                // cabezal normalment (scrub).
+                this._timelineRunning = false;
+                this._playheadLocal = false;
+                this._setVideoRunning(false);
+                var tlP = this._pushCtiToPremiere();
+                // El cabezal de Premiere tarda un xic a arribar al punt: no reverteixis
+                // el playhead fins que hi sigui (mecanisme de seek pendent ja existent).
+                this._pendingSeek = (isFinite(tlP) && tlP > 0) ? tlP : null;
                 if (btn) btn.innerHTML = '▶ PLAY';
-                log("⏸⏸ PAUSA: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
+                log("⏸⏸ PAUSA: media=" + this._playheadSec.toFixed(2) + "s (tl " + (isFinite(tlP) ? tlP.toFixed(2) : "?") + "s)");
                 if (this._pollInterval) clearInterval(this._pollInterval);
                 this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
-                this._pollTick(); // re-sincronitzar el playhead amb el CTI real de seguida
             }
+        },
+
+        /**
+         * _computeMediaStop: Límit de parada del PLAY local: una mica després de
+         * l'últim subtítol (per veure'l sortir) i mai més enllà del final del clip.
+         */
+        _computeMediaStop: function () {
+            var v = document.getElementById('srtVideo');
+            var dur = (v && isFinite(v.duration) && v.duration > 0) ? v.duration : Infinity;
+            var last = 0;
+            if (this._entries && this._entries.length > 0) {
+                last = this._entries[this._entries.length - 1].endSec || 0;
+            }
+            var stop = (last > 0) ? (last + 1.0) : dur;
+            if (isFinite(dur)) stop = Math.min(stop, dur);
+            if (!isFinite(stop) || stop <= 0) stop = 1e9;
+            return stop;
+        },
+
+        /**
+         * _pushCtiToPremiere: Col·loca el cabezal de Premiere al punt de MEDIA actual
+         * del visor (una sola crida, només en pausar o en clicar al canvas).
+         */
+        _pushCtiToPremiere: function () {
+            var tl = this._tlAtMedia(this._playheadSec);
+            if (!isFinite(tl) || tl < 0 || this._playheadSec < (this._axisOrigin || 0)) tl = 0;
+            callJSX("Timeline.set(" + tl.toFixed(3) + ")").then(function (r) {
+                log("🎯 Timeline.set(" + tl.toFixed(3) + ") → " + r);
+            });
+            return tl;
         },
 
         // Layout únic compacte: regla a dalt + UNA zona de treball on la WF fa de
@@ -1586,6 +1732,15 @@
 
         setPlayhead: function (sec) {
             if (sec < 0) sec = 0;
+            // Si s'estava reproduint (PLAY local), aturar-ho: el clic reposiciona el
+            // visor i aquest torna al mode seguidor del cabezal de Premiere.
+            if (this._isPlaying) {
+                this._isPlaying = false;
+                this._playheadLocal = false;
+                this._setVideoRunning(false);
+                var btnP = document.getElementById('btnSrtPlay');
+                if (btnP) btnP.innerHTML = '▶ PLAY';
+            }
             // sec és temps de MEDIA (espai dels subtítols i la WF) → convertir a TL per Premiere
             this._playheadSec = sec;
             var tl = this._tlAtMedia(sec);
@@ -1856,6 +2011,7 @@
             this._markers = []; this._originalMarkers = []; this._dragIdx = -1;
             this._lastCtiSec = -1; this._lastLocalT = -1; this._lastLocalPx = -1;
             this._pendingSeek = null;
+            this._playheadLocal = false; this._mediaStop = 0;   // PLAY local desacoblat
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
             this._hideEditor();
         }
