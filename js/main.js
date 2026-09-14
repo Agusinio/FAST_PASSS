@@ -801,6 +801,23 @@ setInterval(function () {
     if (srA && (srA._isPlaying || srA._timelineRunning)) return;
     var ctA = window.FASTPASS_UI && window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
     if (!ctA || !ctA.checkContext) return;
+    // ── DATA DEL PROJECTE OBERT ─────────────────────────────────────────────
+    // Si el projecte obert és d'un altre dia (ex: correcció d'AHIR), no hi
+    // haurà cap fitxer nou d'aquell dia: no cal escanejar res (escaleta, media,
+    // wotts). Si no hi ha cap projecte ancorat obert, tornem a la data del
+    // sistema (HOY) perquè el botó principal pugui oferir CREAR el de avui.
+    var StA = window.FASTPASS_UI.State;
+    var regA = window.FASTPASS_UI.Registry;
+    if (StA && StA.projectDateDir) {
+        var activeA = regA ? regA.activeProjectName : null;
+        if (!activeA) {
+            StA.projectDateDir = null;
+            StA.lastOpenedProjectName = "";
+        } else if (StA.lastOpenedProjectName && activeA === StA.lastOpenedProjectName) {
+            var todayA = (FASTPASS_UI.Utils.getFormattedDate() || '').replace(/["\s]/g, '').trim();
+            if (todayA && StA.projectDateDir !== todayA) return;
+        }
+    }
     var stA = ctA._lastConclusion;
     var semA = (ctA._lastButtonData && ctA._lastButtonData.semaforo) || null;
     var pendA = !!(semA && (semA.mp4 === "pending" || semA.wot === "pending"));
@@ -817,13 +834,24 @@ setInterval(function () {
     var _visorRunning = !!(_sr && (_sr._isPlaying || _sr._timelineRunning));
     if (_visorRunning) return;
     sizeVideoToFit();
-    if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
-        FASTPASS_UI.Sync.updateSliderFromPremiere();
+    // SLIDER / MODE KF: NOMES amb el reencuadre actiu (recuadro azul).
+    // Fora d'aquest mode el slider esta desactivat i NO s'ha de fer cap crida JSX
+    // de slider (Anim.sliderApply / Anim.modeInfo). Si el panell no te el focus
+    // (l'usuari es a Premiere) el poll es pausa i el reencuadre s'apaga, per no
+    // quedar sondejant en segon pla (cas real: 17 min de poll a 2 Hz).
+    if (reframeActive) {
+        if (!document.hasFocus()) {
+            setReframeActive(false);
+        } else {
+            if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
+                FASTPASS_UI.Sync.updateSliderFromPremiere();
+            }
+            if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.syncKfMode) {
+                FASTPASS_UI.Sync.syncKfMode();
+            }
+        }
     }
-    // El mode slider/keyframe només és rellevant amb el reencuadre actiu.
-    if (reframeActive && FASTPASS_UI.Sync && FASTPASS_UI.Sync.syncKfMode) {
-        FASTPASS_UI.Sync.syncKfMode();
-    }
+    // Registry.poll es limita sol a 1 cicle cada 2 s (vegeu project_registry.js).
     if (FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
         FASTPASS_UI.Registry.poll();
     }

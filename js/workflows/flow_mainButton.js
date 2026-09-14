@@ -167,7 +167,7 @@
                     }
                 } catch (eG) { blockG = null; }
                 if (!jsonData || !blockG || !blockG.ok) {
-                    const detallG = blockG ? (blockG.emitted + "/" + blockG.total + " ítems emesos") : "sense escaleta carregable";
+                    const detallG = blockG ? (blockG.emitted + "/" + blockG.total + " ítems emesos (darrer pendent: " + ((blockG.pending && blockG.pending.num) || "?") + ")") : "sense escaleta carregable";
                     log("⛔ [NOU] No es crea el projecte: " + detallG + ". Fes FOTO quan el bloc acabi d'emetre.", "ERROR");
                     getUtils().status("No es crea el projecte: " + detallG, "error");
                     return;
@@ -752,6 +752,7 @@
                 // Registrar como último proyecto abierto
                 if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                     window.FASTPASS_UI.State.lastOpenedProjectName = fileName;
+                    window.FASTPASS_UI.State.projectDateDir = ctx.dateDir;
                 }
 
                 log("✅ Workflow NOU completat amb èxit.");
@@ -920,6 +921,7 @@
             // Registrar como último proyecto abierto
             if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                 window.FASTPASS_UI.State.lastOpenedProjectName = projName;
+                window.FASTPASS_UI.State.projectDateDir = ctx.dateDir;
             }
             
             log("✅ Projecte obert.");

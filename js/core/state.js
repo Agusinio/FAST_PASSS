@@ -9,6 +9,11 @@ FASTPASS_UI.State = {
     isKeyframeMode: false,
     activeSequenceName: "",
     lastOpenedProjectName: "",
+    // DATA DEL PROJECTE OBERT (YYYY_MM_DD): s'ancla en crear/obrir el projecte
+    // (_runNew / _runLoad). És la FONT ÚNICA de la data de treball: mentre el
+    // projecte estigui obert, el poll d'estat NO la pot canviar (evita que un
+    // projecte d'AHIR busqui escaleta/media/wotts de HOY).
+    projectDateDir: null,
     // MECÀNICA D'INICI (2026-09-04): data de treball explícita.
     //   'today' (defecte) | 'yesterday' (mode correcció amb Ctrl+clic a MAIN)
     workTarget: "today",
@@ -39,6 +44,7 @@ FASTPASS_UI.State = {
         this.srt = null;
         this.hierarchy = {};
         this.lastOpenedProjectName = "";
+        this.projectDateDir = null;
         this.workTarget = "today";
         this.dateDir = null;
         this._escaletaCache = null;

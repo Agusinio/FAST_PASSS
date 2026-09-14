@@ -34,8 +34,14 @@
          *                   si State.workTarget === 'yesterday'.
          */
         _targetDateDir: function () {
-            const useYesterday = !!(window.FASTPASS_UI && window.FASTPASS_UI.State &&
-                window.FASTPASS_UI.State.workTarget === 'yesterday');
+            const St = (window.FASTPASS_UI && window.FASTPASS_UI.State) ? window.FASTPASS_UI.State : null;
+            // 1) DATA DEL PROJECTE OBERT (font única): si treballem en un projecte
+            //    d'un altre dia (ex: correcció d'AHIR), TOTA la sessió (escaleta,
+            //    media MP4/SRT, wotts, portades) s'ha de datar amb la SEVA data.
+            //    El poll d'estat no la pot canviar mentre el projecte sigui obert.
+            if (St && St.projectDateDir) return St.projectDateDir;
+            // 2) Data de treball explícita: HOY per defecte, AHIR en mode correcció.
+            const useYesterday = !!(St && St.workTarget === 'yesterday');
             const d = new Date();
             if (useYesterday) d.setDate(d.getDate() - 1);
             const dd = ('0' + d.getDate()).slice(-2);
@@ -64,7 +70,7 @@
                             const sem = (this._lastButtonData && this._lastButtonData.semaforo) || null;
                             const cc = (sem && sem.esc && sem.esc.complete) ? sem.esc.complete : null;
                             if (mot === 'bloc_en_emissio') {
-                                u.status("ESPERANT: el bloc encara s'està emetent" + (cc && cc.total ? (" (" + cc.emitted + "/" + cc.total + " ítems)") : "") + ". Fes FOTO quan acabi l'emissió.", "warn");
+                                u.status("ESPERANT: el bloc encara s'està emetent" + (cc && cc.total ? (" (" + cc.emitted + "/" + cc.total + " ítems" + (cc.pending && cc.pending.num ? ", pendent " + cc.pending.num : "") + ")") : "") + ". Fes FOTO quan acabi l'emissió.", "warn");
                             } else {
                                 u.status('ESPERANT: la ingesta encara no ha arribat al TC final. Torna-hi més tard', "warn");
                             }
@@ -146,6 +152,7 @@
                     getUtils().log('🔄 [checkContext] Programa canviat (' + lastProg + ' → ' + progId + '). Resetejant dateDir.', 'DEBUG');
                     if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.dateDir = null;
+                        window.FASTPASS_UI.State.projectDateDir = null;
                         window.FASTPASS_UI.State.workTarget = 'today';
                     }
                 }
@@ -157,6 +164,7 @@
                     getUtils().log('🔄 [checkContext] Bloc canviat (' + lastBloc + ' → ' + elBloc.value + '). Resetejant dateDir.', 'DEBUG');
                     if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.dateDir = null;
+                        window.FASTPASS_UI.State.projectDateDir = null;
                         window.FASTPASS_UI.State.workTarget = 'today';
                     }
                 }
@@ -693,33 +701,92 @@
             }
         },
 
-        async syncConductorUI() {
+        // ── CACHÉ DE LA LLISTA DE CONDUCTORES ──────────────────────────────
+        // El directori de conductores és al NAS (22 .mov). El listat via JSX
+        // (IO.scanDirectory) obre CADA vídeo per xarxa per obtenir-ne la mida
+        // (File.length torna 0 en UNC → f.open/f.eof/f.close), i això triga
+        // desenes de segons. Aquí NOMÉS calen els noms dels fitxers.
+        _conductorsCache: null,
+        _conductorsCacheAt: 0,
+        _conductorUIRendered: null,
+        CONDUCTORS_TTL_MS: 10 * 60 * 1000,
+
+        /**
+         * _listConductorNames: Retorna NOMÉS els noms dels .mov de conductores.
+         * Via ràpida: window.cep.fs.readdir (sense stats ni obertura de fitxers).
+         * Fallback: Utils.readFolder (JSX) si CEP no pot llistar la carpeta.
+         * El resultat es cacheja 10 minuts (la carpeta gairebé no canvia).
+         * @param {string} dir - Ruta UNC de la biblioteca de conductores
+         * @returns {Promise<string[]>}
+         */
+        async _listConductorNames(dir) {
             const utils = FASTPASS_UI.Utils;
+            const t0 = Date.now();
+            const isConductorFile = (n) => n.includes('Conduct_') && n.includes('.mov');
+
+            if (this._conductorsCache && (t0 - this._conductorsCacheAt) < this.CONDUCTORS_TTL_MS) {
+                return this._conductorsCache;
+            }
+
+            let names = null;
+            try {
+                const res = window.cep.fs.readdir(dir);
+                if (res && res.err === 0 && res.data) {
+                    names = res.data.map(function (n) { return utils._decodeName(n); }).filter(isConductorFile);
+                } else {
+                    utils.log('⚠️ [COND] cep.fs.readdir err=' + (res ? res.err : 'null') + ' → fallback JSX', 'DEBUG');
+                }
+            } catch (eR) {
+                utils.log('⚠️ [COND] cep.fs.readdir excepcio: ' + eR.message + ' → fallback JSX', 'DEBUG');
+            }
+
+            if (!names) {
+                const nasFiles = await utils.readFolder(dir);
+                names = (nasFiles || [])
+                    .map(f => utils._decodeName((f.name || f).toString()))
+                    .filter(isConductorFile);
+            }
+
+            names.sort();
+            this._conductorsCache = names;
+            this._conductorsCacheAt = Date.now();
+            utils.log(`🎤 [COND] Llista conductores: ${names.length} fitxers en ${Date.now() - t0} ms`, 'INFO');
+            return names;
+        },
+
+        /**
+         * updateConductorSelector: Repintat forçat del selector COND.
+         * El crida main.js al canviar de programa.
+         */
+        updateConductorSelector(programKey) {
+            this._conductorUIRendered = null;
+            return this.syncConductorUI();
+        },
+        async syncConductorUI() {
             const config = FASTPASS_UI.Config.get();
             const select = document.getElementById('conductor');
             const programKey = document.getElementById('programa').value;
 
             if (!select || !programKey) return;
 
-            // 1. Obtenim titulars i substituts (Strings)
+            // Ja pintat per a aquest programa → no repetir. Els triggers es disparen
+            // a l'arrencada (main.js + Context.init) i a cada canvi de bloc.
+            if (this._conductorUIRendered === programKey && select.options.length > 0) return;
+
+            // 1. Titulars i substituts del programa (Profile.json)
             const progData = config.mapeoProgramas[programKey];
             let defaults = [];
             if (progData && progData.conductors) {
                 defaults = [].concat(progData.conductors.titular, progData.conductors.substituts).filter(Boolean);
             }
 
-            // 2. Llegim el NAS (Ara torna [{name: "...", mtime: ...}])
-            const nasFiles = await utils.readFolder(config.rutas.conductors);
-
-            // 📍 CANVI 1: Filtrem usant f.name
-            const validNasFiles = (nasFiles || []).filter(f => {
-                const n = (f.name || f).toString();
-                return n.includes("Conduct_") && n.includes(".mov");
-            });
+            // 2. Noms del NAS (via ràpida + caché: mai bloqueja el panel)
+            const nasNames = await this._listConductorNames(config.rutas.conductors);
+            this._conductorUIRendered = programKey;
 
             select.innerHTML = "";
 
-            // A. Afegim DEFAULTS
+            // A. DEFAULTS del programa
             if (defaults.length > 0) {
                 const groupDefault = document.createElement('optgroup');
                 groupDefault.label = "⭐ CONDUCTORS PROGRAMA";
@@ -733,17 +800,14 @@
                 select.appendChild(groupDefault);
             }
 
-            // B. Afegim la resta del NAS
-            // 📍 CANVI 2: Comparem contra f.name
-            const others = validNasFiles.filter(f => !defaults.includes(f.name || f));
+            // B. Resta del NAS
+            const others = nasNames.filter(n => !defaults.includes(n));
 
             if (others.length > 0) {
                 const groupOthers = document.createElement('optgroup');
                 groupOthers.label = "🌐 ALTRES (NAS)";
 
-                others.forEach(fileObj => {
-                    // 📍 CANVI 3: Extraiem el nom de l'objecte
-                    const fileName = fileObj.name || fileObj;
+                others.forEach(fileName => {
                     const opt = document.createElement('option');
                     opt.value = fileName;
                     opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
