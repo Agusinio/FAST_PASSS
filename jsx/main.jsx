@@ -14,6 +14,7 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         // Limpieza extra de la ruta recibida
         var root = extensionRootPath.toString().replace(/\\/g, "/");
         
+        var maxMod = 0;   // sello: max modified dels .jsx carregats
         var load = function (name) {
             $.writeln("📦 Intentando cargar: " + name);
             currentFile = name;
@@ -25,6 +26,7 @@ function jsx_BOOTSTRAP(extensionRootPath) {
             }
             if (!f.exists) throw new Error("No existe: " + name + " en la ruta " + root);
             $.evalFile(f);
+            try { if (f.modified) { var _mm = f.modified.getTime(); if (_mm > maxMod) maxMod = _mm; } } catch (eMM) { }
             $.writeln("✅ " + name + " cargado OK.");
         };
 
@@ -45,6 +47,9 @@ function jsx_BOOTSTRAP(extensionRootPath) {
         load("12_Diagnostic.jsx");
         load("14_FFmpeg.jsx");
 
+        FASTPASS._bootStamp = maxMod;
+        FASTPASS._bootRoot = root;
+        $.writeln("BOOT OK. stamp=" + maxMod);
         return "OK_BOOT";
     } catch (e) { 
         $.writeln("💥 CRASH en " + currentFile + ": " + e.message);
@@ -61,7 +66,42 @@ $.global.System = {
     ready: function() { return "READY"; },
     clear: function() { return (FASTPASS.System) ? FASTPASS.System.clear() : "OK"; },
     tool: function(name) { return (FASTPASS.System) ? FASTPASS.System.tool(name) : "ERR_NO_MODULE"; },
-    getExtPath: function() { return (FASTPASS.System) ? FASTPASS.System.getExtPath() : ""; }
+    getExtPath: function() { return (FASTPASS.System) ? FASTPASS.System.getExtPath() : ""; },
+    // Sello del motor cargado (max modified de los .jsx leidos en el bootstrap)
+    bootInfo: function() {
+        try { return JSON.stringify({ stamp: ($.global.FASTPASS && FASTPASS._bootStamp) || 0, root: ($.global.FASTPASS && FASTPASS._bootRoot) || "" }); } catch(e) { return "null"; }
+    },
+    // Sello del disco AHORA (max modified de los .jsx de la carpeta de la extensión)
+    jsxDiskStamp: function() {
+        try {
+            var root = ($.global.FASTPASS && FASTPASS._bootRoot) || (FASTPASS.System && FASTPASS.System.rootPath) || "";
+            if (!root) return "0";
+            var mx = 0;
+            var scan = function (folderPath) {
+                var fo = new Folder(folderPath);
+                if (!fo.exists) return;
+                var items = fo.getFiles();
+                for (var i = 0; i < items.length; i++) {
+                    var it = items[i];
+                    if (it instanceof Folder) continue;
+                    if (String(it.name).toLowerCase().indexOf(".jsx") === -1) continue;
+                    if (it.modified) { var m = it.modified.getTime(); if (m > mx) mx = m; }
+                }
+            };
+            scan(root + "/jsx");
+            scan(root + "/jsx/modules");
+            return String(mx);
+        } catch(e) { return "0"; }
+    },
+    // Recarrega tots els mòduls JSX sense reiniciar Premiere
+    reloadModules: function() {
+        try {
+            var root = ($.global.FASTPASS && FASTPASS._bootRoot) || (FASTPASS.System && FASTPASS.System.rootPath) || "";
+            if (!root) return "ERR:NO_ROOT";
+            jsx_BOOTSTRAP(root);
+            return "OK_RELOADED";
+        } catch(e) { return "ERR:" + e.message; }
+    }
 };
 
 $.global.Context = {

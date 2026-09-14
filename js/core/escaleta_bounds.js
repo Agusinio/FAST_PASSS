@@ -141,6 +141,49 @@
     };
 
     /**
+     * isBlockFullyEmitted: Comprova que TOTS els ítems del bloc han estat emesos
+     * (tenen hora d'entrada OnAir + durada o hora de sortida reals).
+     *
+     * És EL CRITERI que fa vàlida una escaleta per començar a muntar (la de FOTO
+     * inclosa): quan tots els elements del bloc ja s'han emès, tenim hora i durada
+     * de cadascun, i podem construir l''estructura del bloc al timeline quan el MP4
+     * estigui disponible.
+     *
+     * @param {Object} data - JSON d'escaleta (ja carregat)
+     * @param {string} blockId - "V1", "V2"...
+     * @returns {{ok:boolean, emitted:number, total:number, reason:string, pending:Object|null}}
+     */
+    ER.isBlockFullyEmitted = function (data, blockId) {
+        var lines = this.getLinesForBlock(data, blockId);
+        if (!lines || lines.length === 0) {
+            return { ok: false, emitted: 0, total: 0, reason: "sense_linies", pending: null };
+        }
+        var emitted = 0;
+        var firstPending = null;
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i];
+            var onAir = l.horaEntradaOnAir ? String(l.horaEntradaOnAir).trim() : "";
+            var hasOnAir = !!onAir && onAir.indexOf("00:00:00") !== 0;
+            var dur = 0;
+            try { dur = this.parseDurada(l.duradaOnAir || l.durada || "0:00"); } catch (eD) { dur = 0; }
+            var sortida = l.horaSortidaPrevista ? String(l.horaSortidaPrevista).trim() : "";
+            var hasEnd = (dur > 0) || (!!sortida && sortida.indexOf("00:00:00") !== 0);
+            if (hasOnAir && hasEnd) {
+                emitted++;
+            } else if (!firstPending) {
+                firstPending = { num: l.num || "?", titol: l.titol || "" };
+            }
+        }
+        var ok = (emitted === lines.length);
+        if (!ok) {
+            log("\u23F3 [ER:Bounds] Bloc " + blockId + ": " + emitted + "/" + lines.length + " ítems emesos (pendent: " + (firstPending ? firstPending.num : "?") + ")");
+        } else {
+            log("\u2705 [ER:Bounds] Bloc " + blockId + ": " + emitted + "/" + lines.length + " ítems emesos (bloc complet)");
+        }
+        return { ok: ok, emitted: emitted, total: lines.length, reason: ok ? "ok" : "en_emissio", pending: firstPending };
+    };
+
+    /**
      * getBlockItems: Retorna taula amb informació dels items d'un bloc.
      */
     ER.getBlockItems = function (data, blockId) {

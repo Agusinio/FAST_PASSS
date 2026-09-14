@@ -309,6 +309,16 @@ button.btn-debug {
 .light.pending { background: #ffc107; box-shadow: 0 0 5px #ffc107; }
 .light.error { background: #dc3545; box-shadow: 0 0 5px #dc3545; }
 .light.off { background: #333; box-shadow: none; }
+/* Verd INTERMITENT: element disponible/importable (MP4/rètols llestos) */
+.light.blink {
+    background: #28a745;
+    box-shadow: 0 0 6px #28a745;
+    animation: fpBlink 1s ease-in-out infinite;
+}
+@keyframes fpBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.22; }
+}
 
 .semaforo-strip {
     display: flex; gap: 8px; padding: 2px 6px;

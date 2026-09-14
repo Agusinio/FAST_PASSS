@@ -126,6 +126,25 @@ function applySliderLimits() {
         if (result && result.indexOf("OK") !== -1) {
             window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
             utils.log("✅ Motor JSX montado con éxito.");
+
+            // ── Detecció de motor JSX desactualitzat ─────────────────────────────
+            // Si la carpeta de l'extensió té .jsx més nous que els que el motor va
+            // carregar, es recarrega automàticament: així no cal reiniciar Premiere
+            // cada cop que s'actualitza l'extensió.
+            try {
+                const bootRaw = await utils.callJSX("System.bootInfo()");
+                const bootStamp = parseInt((JSON.parse(bootRaw || "{}")).stamp, 10) || 0;
+                const diskStamp = parseInt(await utils.callJSX("System.jsxDiskStamp()"), 10) || 0;
+                if (diskStamp > bootStamp + 1000) {
+                    utils.log("🔄 [JSX] Extensió més nova que el motor (disk=" + diskStamp + " boot=" + bootStamp + "). Recarregant mòduls...", "INFO");
+                    const rl = await utils.callJSX("System.reloadModules()");
+                    utils.status("Motor JSX recarregat (" + rl + ")", "exito");
+                } else {
+                    utils.log("✅ [JSX] Motor al dia (disk=" + diskStamp + " boot=" + bootStamp + ")", "DEBUG");
+                }
+            } catch (eJsx) {
+                utils.log("⚠️ [JSX] Comprovació de frescor fallida: " + eJsx.message, "DEBUG");
+            }
             //utils.isJsxReady = true;
             
             if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
@@ -772,6 +791,23 @@ function sizeVideoToFit() {
     } catch (e) { /* no crític */ }
 }
 window.addEventListener('resize', sizeVideoToFit);
+
+// AUTO-REFRESC DE L'ESTAT D'ARRENCADA (cada 15 s)
+// Mentre no tenim tot el necessari (escaleta llista, MP4/rètols pendents) el
+// semàfor es recalcula sol: així l'usuari veu quan pot CREAR o ACTUALITZAR
+// sense haver de tocar res. S'atura mentre el visor SRT reprodueix.
+setInterval(function () {
+    var srA = window.FASTPASS_UI && FASTPASS_UI.Editor && FASTPASS_UI.Editor.SrtEditor;
+    if (srA && (srA._isPlaying || srA._timelineRunning)) return;
+    var ctA = window.FASTPASS_UI && window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
+    if (!ctA || !ctA.checkContext) return;
+    var stA = ctA._lastConclusion;
+    var semA = (ctA._lastButtonData && ctA._lastButtonData.semaforo) || null;
+    var pendA = !!(semA && (semA.mp4 === "pending" || semA.wot === "pending"));
+    if (stA === "MASSA" || stA === "ESPERANT" || stA === null || pendA) {
+        try { ctA.checkContext(); } catch (eA) { }
+    }
+}, 15000);
 
 setInterval(function () {
     // Mentre el visor SRT està reproduint, NO es fa cap mesura de layout ni JSX

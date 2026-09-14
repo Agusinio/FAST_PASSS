@@ -540,12 +540,21 @@
             .filter(function (l) { return l.num && (l.teVideo || ['OFT', 'BVI'].indexOf(l.font) !== -1); })
             .map(function (l) { return l.num; });
 
-        // En el nou format (clips[] buit), block sempre es reconstrueix → ready=true
-        var isReady = !!(block && (block.ready || true));
+        // Criteri d'arrancada: la escaleta és vàlida quan TOTS els ítems del bloc
+        // ja s'han emès (hora OnAir + durada). Una escaleta del servidor amb el bloc
+        // encara en emissió NO es considera ready.
+        var complete = { ok: false, emitted: 0, total: 0, reason: 'n/d', pending: null };
+        try {
+            if (typeof this.isBlockFullyEmitted === 'function') {
+                complete = this.isBlockFullyEmitted(data, blockId);
+            }
+        } catch (eCE) { }
+        var isReady = !!complete.ok;
 
         return {
             found: true,
             ready: isReady,
+            complete: complete,
             filename: latest.filename,
             timestamp: latest.filename.split('_').slice(-2).join('_').replace('.json', ''),
             mediaStop: mediaScan.mediaStop || null,
@@ -618,16 +627,23 @@
                     .filter(function (l) { return l.num && (l.teVideo || ['OFT', 'BVI'].indexOf(l.font) !== -1); })
                     .map(function (l) { return l.num; });
 
-                // Igual que getStatus: en el nou format el bloc es reconstrueix → ready=true.
-                // La foto on_demand es genera un cop el bloc ja s'ha emès, per tant el pla
-                // és definitiu.
-                var isReady = !!(block && (block.ready || true));
+                // Criteri d'arrancada: la FOTO (o la còpia local) és vàlida si TOTS els
+                // ítems del bloc ja s'han emès. Si el bloc encara s'està emetent, l'estat
+                // queda en ESPERANT encara que la foto existeixi.
+                var complete = { ok: false, emitted: 0, total: 0, reason: 'n/d', pending: null };
+                try {
+                    if (typeof this.isBlockFullyEmitted === 'function') {
+                        complete = this.isBlockFullyEmitted(data, ctx.bloque);
+                    }
+                } catch (eCE) { }
+                var isReady = !!complete.ok;
                 var isOnDemand = String(cand.name).indexOf('escaleta_on_demand') === 0;
                 log('📷 [ER:IO] Escaleta local vàlida per al bloc ' + ctx.bloque + ': ' + cand.name);
                 return {
                     found: true,
                     ready: isReady,
                     local: true,
+                    complete: complete,
                     filename: cand.name,
                     timestamp: isOnDemand ? 'FOTO' : String(cand.name).split('_').slice(-2).join('_').replace('.json', ''),
                     mediaStop: mediaScan.mediaStop || null,

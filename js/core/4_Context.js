@@ -59,7 +59,16 @@
                     if (!action) {
                         const st = this._lastConclusion;
                         if (st === 'MASSA') u.status("MASSA D'HORA: avui encara no hi ha res publicat", "warn");
-                        else if (st === 'ESPERANT') u.status('ESPERANT: la ingesta encara no ha arribat al TC final. Torna-hi més tard', "warn");
+                        else if (st === 'ESPERANT') {
+                            const mot = (this._lastButtonData && this._lastButtonData.motiu) || '';
+                            const sem = (this._lastButtonData && this._lastButtonData.semaforo) || null;
+                            const cc = (sem && sem.esc && sem.esc.complete) ? sem.esc.complete : null;
+                            if (mot === 'bloc_en_emissio') {
+                                u.status("ESPERANT: el bloc encara s'està emetent" + (cc && cc.total ? (" (" + cc.emitted + "/" + cc.total + " ítems)") : "") + ". Fes FOTO quan acabi l'emissió.", "warn");
+                            } else {
+                                u.status('ESPERANT: la ingesta encara no ha arribat al TC final. Torna-hi més tard', "warn");
+                            }
+                        }
                         return;
                     }
                     // R6: la data de treball es fixa EN EL MOMENT DEL CLIC. Si l'estat
@@ -260,6 +269,10 @@
 
                 if (earlyState) {
                     const data = { ...ctx, name: earlyState };
+                    // Motiu llegible per als estats d'espera (bloc en emissió vs ingesta)
+                    data.motiu = (earlyState === 'ESPERANT' && semaforoData.esc && semaforoData.esc.complete && !semaforoData.esc.complete.ok)
+                        ? 'bloc_en_emissio'
+                        : (earlyState === 'ESPERANT' ? 'ingesta' : 'sense_dades');
                     data.semaforo = semaforoData;
                     this._lastConclusion = earlyState;
                     this._lastButtonData = data;
@@ -406,6 +419,29 @@
                     getUtils().log("⚠️ Error recollint dades del semàfor: " + e.message, "DEBUG");
                 }
 
+                // --- Semàfor per al cas SENSE projecte (escaleta de FOTO/local) ---
+                // Informa de què ja és al NAS perquè l'usuari sàpiga quan pot crear o
+                // actualitzar. MP4/Rètols en VERD INTERMITENT = ja importables.
+                if (!existingProjectName && semaforoData.esc && semaforoData.esc.found) {
+                    try {
+                        const scN = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
+                        if (scN && scN.mediaAssets) {
+                            const mediaN = await scN.mediaAssets(ctx);
+                            semaforoData.mp4 = (mediaN && mediaN.mp4) ? 'blink' : 'pending';
+                            semaforoData.srt = (mediaN && mediaN.srt) ? 'error' : 'off';
+                        }
+                        if (scN && scN.wotts) {
+                            const wN = await scN.wotts(ctx);
+                            const nW = (wN && wN.list) ? wN.list.length : 0;
+                            const expN = semaforoData.esc.totalExpected || 0;
+                            semaforoData.wot = (nW === 0) ? 'pending' : ((expN > 0 && nW < expN) ? 'pending' : 'blink');
+                            semaforoData.wotDetail = nW + '/' + expN;
+                        }
+                    } catch (eSN) {
+                        getUtils().log('⚠️ [checkContext] Error calculant semàfor NEW: ' + eSN.message, 'DEBUG');
+                    }
+                }
+
                 // 4. FEEDBACK UI
                 const finalName = existingProjectName || `Pruebas_${ctx.progData.archivo}_${ctx.bloque}_PENDENT.prproj`;
                 const data = { ...ctx, name: finalName };
@@ -445,7 +481,8 @@
                     if (state === 'ready') className = "light ready";
                     else if (state === 'pending') className = "light pending";
                     else if (state === 'error') className = "light error";
-                    else if (state === true || state === 'on') className = "light ready"; 
+                    else if (state === true || state === 'on') className = "light ready";
+                    else if (state === 'blink') className = "light blink"; 
                     
                     el.className = className;
                     if (title) el.parentElement.title = title;
@@ -462,13 +499,19 @@
             if (semaforoData) {
                 // ESC: Escaleta
                 if (!semaforoData.esc.found) set('sem-esc', 'error', "No s'ha trobat cap escaleta (servidor ni FOTO local)");
-                else if (!semaforoData.esc.ready) set('sem-esc', 'pending', `Escaleta ${semaforoData.esc.local ? 'local (FOTO)' : 'trobada'} però BLOC NO READY`);
+                else if (!semaforoData.esc.ready) {
+                    const cc = semaforoData.esc.complete;
+                    const nom = semaforoData.esc.local ? 'local (FOTO)' : 'trobada';
+                    set('sem-esc', 'pending', (cc && cc.total)
+                        ? ('Escaleta ' + nom + ': bloc en emissió (' + cc.emitted + '/' + cc.total + ' ítems)')
+                        : ('Escaleta ' + nom + ' però BLOC NO READY'));
+                }
                 else set('sem-esc', 'ready', semaforoData.esc.local
                     ? `Escaleta OK (FOTO local: ${semaforoData.esc.filename})`
                     : `Escaleta OK (${semaforoData.esc.timestamp})`);
 
                 // MP4: CleanFeed
-                const mp4Title = semaforoData.mp4 === 'pending' ? 'El stream no ha arribat al final del bloc' : (semaforoData.mp4 === 'error' ? 'Pista V1 buida' : 'CleanFeed OK');
+                const mp4Title = semaforoData.mp4 === 'pending' ? 'El stream encara no està disponible (ingesta en curs)' : (semaforoData.mp4 === 'error' ? 'Pista V1 buida' : (semaforoData.mp4 === 'blink' ? 'CleanFeed llest per importar' : 'CleanFeed OK'));
                 set('sem-mp4', semaforoData.mp4, mp4Title);
 
                 // WOT: Rètols

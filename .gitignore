@@ -39,6 +39,6 @@ graphify-out/
 # ffmpeg local (no es pusheja, es copia amb la instal·lacio)
 bin/ffmpeg/
 
-# Cline: datos locales (historial de conversaciones, ajustes y secretos) - NO versionar
-.cline/
 
+# Dades locals de l'agent (DB, secrets, sessions) - NO al repo
+.cline/

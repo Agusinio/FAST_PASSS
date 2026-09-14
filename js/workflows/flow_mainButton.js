@@ -154,6 +154,30 @@
                     sanitizedTheme = getUtils().sanitizeName(assets.wotts.tema).toUpperCase();
                     log('🏷️ [Theme] Tema extret dels chyrons (fallback): "' + sanitizedTheme + '"');
                 }
+                // --- GUARDA: MAI crear un projecte si el bloc no està emès complet ---
+                // Criteri de validesa: tots els ítems del bloc han d'haver estat emesos
+                // (hora OnAir + durada). Sense això no hi ha prou informació per muntar
+                // l'estructura i NO s'ha de crear cap projecte (evita els projectes
+                // genèrics tipus Pruebas_*_INTRO.prproj).
+                var readerG = window.EscaletaReader || (window.FASTPASS_UI && window.FASTPASS_UI.EscaletaReader);
+                var blockG = null;
+                try {
+                    if (readerG && readerG.isBlockFullyEmitted && jsonData) {
+                        blockG = readerG.isBlockFullyEmitted(jsonData, ctx.bloque);
+                    }
+                } catch (eG) { blockG = null; }
+                if (!jsonData || !blockG || !blockG.ok) {
+                    const detallG = blockG ? (blockG.emitted + "/" + blockG.total + " ítems emesos") : "sense escaleta carregable";
+                    log("⛔ [NOU] No es crea el projecte: " + detallG + ". Fes FOTO quan el bloc acabi d'emetre.", "ERROR");
+                    getUtils().status("No es crea el projecte: " + detallG, "error");
+                    return;
+                }
+                if (!sanitizedTheme || String(sanitizedTheme).trim().length < 3 || RESERVED_THEMES.indexOf(String(sanitizedTheme).toUpperCase().trim()) !== -1) {
+                    log("⛔ [NOU] No es crea el projecte: tema no vàlid (" + (sanitizedTheme || "") + ").", "ERROR");
+                    getUtils().status("No es crea el projecte: falta el tema del bloc", "error");
+                    return;
+                }
+
                 const shortProg = ctx.progData.wott || "TNV";
                 // Determinar hora d'inici del programa (per inserir el MP4 desde l'inici del informatiu)
                 const PROGRAM_START_HOURS = {
