@@ -14,6 +14,9 @@
  *   - getCleanFeed(data)
  *   - getBlock(data, blockId)
  *   - getLinesForBlock(data, blockId)
+ *   - _hasOnAirEntrada(l)
+ *   - _isEmitted(l)
+ *   - isBlockFullyEmitted(data, blockId)
  *   - getBlockItems(data, blockId)
  *   - getProgramName(data)
  *   - getOnAirVideoItems(data, blockId)
@@ -141,13 +144,37 @@
     };
 
     /**
-     * isBlockFullyEmitted: Comprova que TOTS els ítems del bloc han estat emesos
-     * (tenen hora d'entrada OnAir + durada o hora de sortida reals).
+     * _hasOnAirEntrada: Comprova si un ítem té hora d'entrada OnAir real (tally).
+     * @param {Object} l - Línia d'escaleta
+     * @returns {boolean}
+     */
+    ER._hasOnAirEntrada = function (l) {
+        if (!l) return false;
+        var h = l.horaEntradaOnAir ? String(l.horaEntradaOnAir).trim() : "";
+        return !!h && h !== "00:00:00";
+    };
+
+    /**
+     * _isEmitted: Comprova si un ítem ja s'ha emès.
+     * Senyal principal: la marca 'emesa' (o 'emitido') de l'escaleta. Si el
+     * playout ha donat tally, l'hora OnAir també ho confirma.
+     * @param {Object} l - Línia d'escaleta
+     * @returns {boolean}
+     */
+    ER._isEmitted = function (l) {
+        if (!l) return false;
+        return l.emesa === true || l.emitido === true || this._hasOnAirEntrada(l);
+    };
+
+    /**
+     * isBlockFullyEmitted: Comprova si el bloc ja s'ha emès del tot. ÉS EL
+     * CRITERI que fa vàlida una escaleta per començar a muntar (FOTO inclosa).
      *
-     * És EL CRITERI que fa vàlida una escaleta per començar a muntar (la de FOTO
-     * inclosa): quan tots els elements del bloc ja s'han emès, tenim hora i durada
-     * de cadascun, i podem construir l'estructura del bloc al timeline quan el MP4
-     * estigui disponible.
+     * CRITERI ÚNIC: l'ÚLTIM ítem del bloc (per 'sequencia') ja està emès
+     * ('emesa' == true o hora OnAir real). Com que l'emissió és seqüencial, si
+     * el darrer ítem ha entrat, tots els anteriors també s'han emès. Els ítems
+     * intermedis sense OnAir (llibres, notes, ítems sense tally) NO bloquegen:
+     * la seva posició es dedueix de l'anterior (_deduceOnAirEntrada).
      *
      * @param {Object} data - JSON d'escaleta (ja carregat)
      * @param {string} blockId - "V1", "V2"...
@@ -158,29 +185,37 @@
         if (!lines || lines.length === 0) {
             return { ok: false, emitted: 0, total: 0, reason: "sense_linies", pending: null };
         }
+
+        var last = null;
         var emitted = 0;
         var firstPending = null;
         for (var i = 0; i < lines.length; i++) {
             var l = lines[i];
-            var onAir = l.horaEntradaOnAir ? String(l.horaEntradaOnAir).trim() : "";
-            var hasOnAir = !!onAir && onAir.indexOf("00:00:00") !== 0;
-            var dur = 0;
-            try { dur = this.parseDurada(l.duradaOnAir || l.durada || "0:00"); } catch (eD) { dur = 0; }
-            var sortida = l.horaSortidaPrevista ? String(l.horaSortidaPrevista).trim() : "";
-            var hasEnd = (dur > 0) || (!!sortida && sortida.indexOf("00:00:00") !== 0);
-            if (hasOnAir && hasEnd) {
+            if (this._isEmitted(l)) {
                 emitted++;
             } else if (!firstPending) {
                 firstPending = { num: l.num || "?", titol: l.titol || "" };
             }
+            if (!last || (l.sequencia || 0) > (last.sequencia || 0)) last = l;
         }
-        var ok = (emitted === lines.length);
+
+        var ok = this._isEmitted(last);
+
         if (!ok) {
-            log("\u23F3 [ER:Bounds] Bloc " + blockId + ": " + emitted + "/" + lines.length + " ítems emesos (pendent: " + (firstPending ? firstPending.num : "?") + ")");
+            log("\u23F3 [ER:Bounds] Bloc " + blockId + ": " + emitted + "/" + lines.length +
+                " ítems emesos. Darrer ítem pendent: " + (last.num || "?") + " (\"" + (last.titol || "") + "\")");
         } else {
-            log("\u2705 [ER:Bounds] Bloc " + blockId + ": " + emitted + "/" + lines.length + " ítems emesos (bloc complet)");
+            log("\u2705 [ER:Bounds] Bloc " + blockId + ": bloc complet (" + emitted + "/" + lines.length +
+                " ítems emesos, darrer: " + (last.num || "?") + ")");
         }
-        return { ok: ok, emitted: emitted, total: lines.length, reason: ok ? "ok" : "en_emissio", pending: firstPending };
+
+        return {
+            ok: ok,
+            emitted: emitted,
+            total: lines.length,
+            reason: ok ? "ok" : "en_emissio",
+            pending: firstPending,
+        };
     };
 
     /**
