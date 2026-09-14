@@ -610,6 +610,10 @@ $.global.Anim = {
     sliderLimits: function() {
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.sliderLimits() : "{}";
     },
+    modeInfo: function() {
+        // Estat del clip OBJECTIU del slider {track,start,name,kf} (mode SLIDER/KEYFRAME)
+        return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.modeInfo() : "null";
+    },
     reframe: function(ti, ci) { 
         return ($.global.FASTPASS.Anim) ? FASTPASS.Anim.reframe(ti, ci) : "ERR"; 
     },

@@ -39,10 +39,25 @@
             return false;
         },
 
+        // ── OPTIMITZACIÓ DEL POLL ──────────────────────────────────────────
+        // El poll fa una crida JSX (Context.list()) per detectar canvis de projecte.
+        // main.js l'invoca cada 500 ms, però detectar un canvi de projecte no
+        // necessita aquesta freqüència: es limita a un cicle cada POLL_MIN_MS i
+        // s'evita el solapament (mai dues crides JSX vives alhora).
+        POLL_MIN_MS: 2000,
+        _lastPollAt: 0,
+        _pollInFlight: false,
+
         /**
          * Cicle de poll principal: cridat cada 500ms des del setInterval de main.js.
+         * Internament limitat a un cicle cada POLL_MIN_MS (2 s).
          */
         poll: async function () {
+            var now = Date.now();
+            if (this._pollInFlight) return;
+            if (now - this._lastPollAt < this.POLL_MIN_MS) return;
+            this._lastPollAt = now;
+            this._pollInFlight = true;
             try {
                 // Verificación de seguridad: si el motor JSX no está listo, saltamos este ciclo
                 if (!FASTPASS_UI.Utils || !FASTPASS_UI.Utils.isJsxReady) return;
@@ -79,6 +94,8 @@
 
             } catch (e) {
                 // Silent fail: el polling no ha d'interrompre l'usuari
+            } finally {
+                this._pollInFlight = false;
             }
         },
 

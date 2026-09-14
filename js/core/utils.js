@@ -74,6 +74,16 @@
                    ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + ']';
         },
 
+        // ── DEDUPLICACIÓ DE MISSATGES REPETITS ─────────────────────────────
+        // Un error dins d'un poll es repeteix molts cops per segon (cas real:
+        // 2.029 línies idèntiques → 1,1 MB de log en una sessió). Aquí, si el
+        // mateix missatge es repeteix dins de LOG_DEDUPE_MS, no s'escriu; només
+        // se n'imprimeix 1 de cada LOG_DEDUPE_EVERY repeticions (amb comptador).
+        LOG_DEDUPE_MS: 5000,
+        LOG_DEDUPE_EVERY: 100,
+        _logDedupe: {},
+        _logDedupeCount: 0,
+
         log: function(msg, level) { 
             // Filtre de logs per tema (estalvia tokens/ruido al chat).
             // Els missatges de nivell ERROR sempre es mostren.
@@ -87,6 +97,33 @@
                 }
                 if (!_match) return;
             }
+
+            // Deduplicació: només suprimeix repeticions EXACTES seguides.
+            // Un missatge únic s'escriu sempre; les repeticions ràpides s'agrupen.
+            var _key = String(msg);
+            var _now = Date.now();
+            var _d = this._logDedupe[_key];
+            if (_d && (_now - _d.last) < this.LOG_DEDUPE_MS) {
+                _d.n++;
+                _d.last = _now;
+                if ((_d.n % this.LOG_DEDUPE_EVERY) !== 0) return;
+                msg = _key + '  [repetit x' + _d.n + ']';
+            } else {
+                this._logDedupe[_key] = { last: _now, n: 1 };
+                // Poda periòdica: primer treure les entrades caducades; si tot i això
+                // n'hi ha massa (molts missatges únics seguits), reiniciar el mapa.
+                if (++this._logDedupeCount > 500) {
+                    var _cut = _now - this.LOG_DEDUPE_MS;
+                    var _live = 0;
+                    for (var _k in this._logDedupe) {
+                        if (this._logDedupe[_k].last < _cut) { delete this._logDedupe[_k]; }
+                        else { _live++; }
+                    }
+                    if (_live > 400) { this._logDedupe = {}; }
+                    this._logDedupeCount = 0;
+                }
+            }
+
             const colors = { "INFO": "🔵", "DEBUG": "🟢", "ERROR": "🔴", "WARN": "🟡" };
             var ts = this._timestamp();
             var formatted = ts + ' ' + (colors[level || "INFO"] || '🔵') + ' [FASTPASS]: ' + msg;
@@ -218,6 +255,21 @@
             return high; // Retorna l'índex immediatament anterior o coincident
         },
 
+        /**
+         * _decodeName: Desfà l'URL-encoding que ExtendScript pot aplicar a
+         * File.name en rutes UNC (ex: 'Pruebas_TNC_V1_CAP%20POLICIA.prproj').
+         * Sense això els noms no coincideixen amb els del projecte obert
+         * (Project.path() dóna el nom real) i el context conclou LOAD en
+         * comptes d'UPDATE → els semàfors no es calculen i queden apagats.
+         * @param {string} name
+         * @returns {string}
+         */
+        _decodeName: function(name) {
+            var n = String(name === null || name === undefined ? '' : name);
+            if (n.indexOf('%') === -1) return n;
+            try { return decodeURIComponent(n); } catch (e) { return n; }
+        },
+
         readFolder: async function(path) {
             // ── FILTRAT PER DATA DE CREACIÓ (2026-09-07) ───────────────────────
             // Els fitxers del NAS (wotts .mov, portades .png, SRT...) poden tenir el
@@ -244,7 +296,7 @@
                     var stat = window.cep.fs.stat(fullPath);
                     var created = (stat.err === 0) ? stat.data.creationTime : null;
                     filesWithStats.push({
-                        name: name,
+                        name: this._decodeName(name),
                         mtime: (stat.err === 0) ? stat.data.mtime : 0,
                         created: created
                     });
@@ -306,7 +358,7 @@
             for (var name in jsxMap) {
                 if (!jsxMap.hasOwnProperty(name)) continue;
                 var it = jsxMap[name];
-                out.push({ name: name, mtime: it.modified, created: it.created, size: it.size });
+                out.push({ name: this._decodeName(name), mtime: it.modified, created: it.created, size: it.size });
             }
             return out;
         },
