@@ -146,7 +146,7 @@
      *
      * És EL CRITERI que fa vàlida una escaleta per començar a muntar (la de FOTO
      * inclosa): quan tots els elements del bloc ja s'han emès, tenim hora i durada
-     * de cadascun, i podem construir l''estructura del bloc al timeline quan el MP4
+     * de cadascun, i podem construir l'estructura del bloc al timeline quan el MP4
      * estigui disponible.
      *
      * @param {Object} data - JSON d'escaleta (ja carregat)
