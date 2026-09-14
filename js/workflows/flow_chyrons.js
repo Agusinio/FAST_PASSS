@@ -334,8 +334,20 @@
             log(`   📍 [_freeze] Cabezal retornat a ${cutTime.toFixed(2)}s`);
 
             // 3. Eliminar el Wott temporal de V5
-            await callJSX(`Clips.remove(${T_THEME}, 0, 'video')`);
-            log(`   🗑️ [_freeze] Wott temporal eliminat de V5`);
+            // Esborrar NOMÉS el clip temporal (és a TEMP_TC). Amb diversos Tema‑Titol
+            // col·locats, l'índex 0 seria el primer clip legítim del bloc.
+            try {
+                const clipsT = await getClipsLogic().getTrackClips(T_THEME, 'video');
+                let idxTemp = -1;
+                for (let ci = 0; ci < clipsT.length; ci++) {
+                    if (Math.abs(clipsT[ci].start - TEMP_TC) < 0.5) { idxTemp = ci; break; }
+                }
+                if (idxTemp < 0) idxTemp = 0;
+                await callJSX(`Clips.remove(${T_THEME}, ${idxTemp}, 'video')`);
+                log(`   🗑️ [_freeze] Wott temporal eliminat de V5 (índex ${idxTemp})`);
+            } catch (eRT) {
+                log(`   ⚠️ [_freeze] No s'ha pogut eliminar el temporal: ${eRT.message}`, "WARN");
+            }
 
             if (!snapResult || snapResult.indexOf('OK') !== 0) {
                 log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
@@ -381,7 +393,7 @@
             try {
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
-                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]{0,3}\s*-\s*.+$/i;
                 const structuralMarkers = allMarkers.filter(m => {
                     const cmt = (m.comments || "").trim();
                     return STRUCTURAL_COMMENTS_RE.test(cmt);
@@ -436,113 +448,150 @@
             } catch (e) { getUtils().handleError(e, label); }
         },
 
+        /**
+         * TITOL (Tema‑Titol): Col·loca els Tema‑Títols GRANS del bloc, cadascun
+         * referenciat al seu ítem/marcador, amb freeze‑frame estès fins al següent
+         * Tema‑Titol o fins al final del bloc.
+         *
+         * Regles (2026-09-14):
+         *   1. Només clips amb durada > MIN_SEC (els "petits" ~1 s NO són pla B).
+         *   2. Posició: marcador de l'ítem + tc (offset del nom). Si l'ítem no té
+         *      marcador propi → es tracta com a únic i va a l'inici del bloc
+         *      (amb el marge CasA/CasB si hi ha conductor).
+         *   3. Cada Tema‑Titol s'estira amb freeze fins al següent o al final.
+         */
         placeChyronTitol: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const struct = FASTPASS_UI.State.structure;
             const T_THEME = cfg.tracks.video.tematitol;
+            const MIN_SEC = (typeof cfg.temaTitolMinSec === 'number') ? cfg.temaTitolMinSec : 4.0;
             if (!struct || struct.length === 0) {
                 log("⚠️ No hi ha estructura carregada. Executa un escaneig primer.", "WARN");
                 return;
             }
             try {
+                // ── 1. MARCADORS: id normalitzat → time ─────────────────────────
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
-                const STRUCTURAL_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const STRUCTURAL_RE = /^\d+[a-z]{0,3}\s*-\s*.+$/i;
                 const structuralMarkers = allMarkers.filter(m => STRUCTURAL_RE.test((m.comments || "").trim()));
-                if (structuralMarkers.length === 0) {
-                    log("⚠️ [Titol] No hi ha marcadors estructurals.", "WARN");
+                const markersById = {};
+                const markersByBase = {};
+                for (const m of structuralMarkers) {
+                    const raw = String(m.comments || "").split("-")[0].trim();
+                    const norm = FASTPASS_UI.Logic.Project.normItemId(raw);
+                    if (!norm) continue;
+                    if (markersById[norm] === undefined || m.time < markersById[norm]) markersById[norm] = m.time;
+                    const baseM = norm.match(/^\d+/);
+                    const base = baseM ? baseM[0] : norm;
+                    if (markersByBase[base] === undefined || m.time < markersByBase[base]) markersByBase[base] = m.time;
+                }
+                log(`🔗 [Titol] ${structuralMarkers.length} marcadors estructurals; ids: [${Object.keys(markersById).join(', ')}]`);
+
+                // ── 2. SELECCIÓ: només Tema‑Titol GRANS (> MIN_SEC) ─────────────
+                const durations = await FASTPASS_UI.Logic.Project.getWottDurations();
+                const ttList = FASTPASS_UI.Logic.Project.pickTemaTitols(struct, durations, MIN_SEC);
+                if (ttList.length === 0) {
+                    log(`⚠️ [Titol] Cap Tema‑Titol gran (>${MIN_SEC}s) al bin CHY. No es col·loca res.`, "WARN");
+                    getUtils().status(`Tema‑Titol: cap clip gran (>${MIN_SEC}s)`, "warn");
                     return;
                 }
-                structuralMarkers.sort((a, b) => a.time - b.time);
-                const structureById = {};
-                for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
+                log(`🎯 [Titol] ${ttList.length} Tema‑Titol(s) gran(s): ` +
+                    ttList.map(t => t.item + '@' + t.tc + ' (' + t.dur.toFixed(1) + 's, id=' + t.idNum + ')').join(' · '));
 
-                // El bloc sempre comença a 0.0s (clip V1 inicial)
+                // ── 3. REFERÈNCIA I FINAL DEL BLOC ──────────────────────────────
                 const clips = await getClipsLogic().getTrackClips(1, "video");
                 const clipStart = clips.length > 0 ? clips[0].start : 0;
-                const firstMarker = structuralMarkers[0];
-
-                // Detectar si hi ha conductor a V6 dins del primer clip V1
-                let hayConductor = false;
-                let conductPos = 0;
-                const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
-                try {
-                    const v6Count = parseInt(await callJSX(`Clips.count(${cfg.tracks.video.chyrons}, 'video')`) || '0');
-                    if (v6Count > 0) {
-                        const firstV6 = JSON.parse(await callJSX(`Clips.get(${cfg.tracks.video.chyrons}, 0, 'video')`));
-                        if (firstV6 && firstV6.name && firstV6.name.toUpperCase().includes("CONDUCT")) {
-                            hayConductor = true;
-                            conductPos = firstV6.start;
-                            log(`🔬 [Titol] Conductor detectat a V6 @ ${conductPos.toFixed(2)}s`);
-                        }
-                    }
-                } catch (e) {}
-
-                // Decidir posició: si hi ha conductor al principi, calcular marge
-                let placeTime = clipStart + 0.40; // per defecte 0:10
-                if (hayConductor && Math.abs(conductPos - clipStart) < 0.5) {
-                    let nextMarkerTime = clips[0] ? clips[0].end : clipStart + 30;
-                    for (const m of allMarkers) {
-                        if (m.time > clipStart + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
-                    }
-                    const margenDisponible = nextMarkerTime - clipStart;
-                    if (margenDisponible >= MIN_MARGEN_CASA) {
-                        placeTime = clipStart + 0.40; // Cas A
-                        log(`📌 [Titol·CasA] Tema‑Titol 1r @ ${placeTime.toFixed(2)}s`);
-                    } else {
-                        placeTime = clipStart + 0.40 + 4.40; // Cas B: 4:20
-                        log(`📌 [Titol·CasB] Tema‑Titol @ ${placeTime.toFixed(2)}s`);
-                    }
-                } else {
-                    log(`📌 [Titol] Al principi @ ${placeTime.toFixed(2)}s`);
-                }
-
-                // Buscar el Tema‑Titol al PRIMER ítem de l'escaleta/estructura del bloc
-                // que en tingui (no al primer marcador del timeline: l'ítem que porta el
-                // tema — p. ex. el 01dp de la primera notícia — pot no tenir marcador propi).
-                const SUFFIX_PRIORITY = ['dp', 'i', 'lead', 'f'];
-                let temaTitolChy = null;
-                const seenTt = {};
-                for (const entry of struct || []) {
-                    if (!entry || !entry.id || seenTt[entry.id]) continue;
-                    seenTt[entry.id] = true;
-                    if (!entry.chyrons || entry.chyrons.length === 0) continue;
-                    const tt = entry.chyrons.find(c =>
-                        (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol")
-                    );
-                    if (tt) { temaTitolChy = tt; break; }
-                }
-                if (!temaTitolChy) {
-                    log("⚠️ [Titol] Cap Tema‑Titol trobat a l'estructura. No es congela res (fes un ACTUALITZAR per portar els rètols).", "WARN");
-                    return;
-                }
-                log(`🎯 [Titol] Tema‑Titol escollit: ${String(temaTitolChy.name).substring(0, 70)}`);
-
-                // Estirar fins al final del bloc (Out Point, durada, o final del darrer clip V1)
                 let seqEnd = null;
                 try { seqEnd = parseFloat(await callJSX("Timeline.getOut()") || "0"); } catch (e) {}
                 if (!seqEnd || seqEnd <= 0) {
                     try { seqEnd = parseFloat(await callJSX("Timeline.duration()") || "0"); } catch (e) {}
                 }
                 if (!seqEnd || seqEnd <= 0) {
-                    // Fallback: final de l'últim clip V1
                     const lastClip = clips[clips.length - 1];
                     seqEnd = lastClip ? lastClip.end : null;
                 }
-                const stretchEnd = (seqEnd && seqEnd > 0) ? seqEnd : null;
-                log(`📌 [Titol] stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+                const startOfBlock = await this._blockStartTime(clipStart, allMarkers);
 
-                try {
-                    const freezeResult = await this._freezeTemaTitol(temaTitolChy.name, placeTime, stretchEnd, temaTitolChy.name);
-                    if (freezeResult && freezeResult.success) {
-                        log(`   🖼️ [Titol] Tema‑Titol col·locat: ${freezeResult.duration.toFixed(1)}s`);
-                        getUtils().status("Tema‑Titol col·locat", "exito");
+                const markerTimeFor = (itemId) => {
+                    const norm = FASTPASS_UI.Logic.Project.normItemId(itemId);
+                    const baseM = norm.match(/^\d+/);
+                    const base = baseM ? baseM[0] : norm;
+                    if (markersById[norm] !== undefined) return { time: markersById[norm], ref: 'marcador ' + norm };
+                    if (markersByBase[base] !== undefined) return { time: markersByBase[base], ref: 'marcador ' + base + ' (base)' };
+                    return { time: null, ref: 'inici del bloc' };
+                };
+
+                let placed = 0;
+                for (let i = 0; i < ttList.length; i++) {
+                    const tt = ttList[i];
+                    const tcSec = getUtils().timeToSeconds(tt.tc || "000000");
+                    const refInfo = markerTimeFor(tt.item);
+                    const placeTime = (refInfo.time !== null) ? (refInfo.time + tcSec) : startOfBlock;
+
+                    // Final del freeze: el següent Tema‑Titol gran, o el final del bloc
+                    let stretchEnd = null;
+                    if (i < ttList.length - 1) {
+                        const nextRef = markerTimeFor(ttList[i + 1].item);
+                        if (nextRef.time !== null) {
+                            stretchEnd = nextRef.time + getUtils().timeToSeconds(ttList[i + 1].tc || "000000");
+                        }
                     }
-                } catch (freezeErr) {
-                    log(`   ❌ [Titol] Freeze fallit: ${freezeErr.message}`, "ERROR");
+                    if (stretchEnd === null) stretchEnd = (seqEnd && seqEnd > 0) ? seqEnd : null;
+
+                    log(`📌 [Titol] ${i + 1}/${ttList.length} "${String(tt.name).substring(0, 60)}" → ${placeTime.toFixed(2)}s (${refInfo.ref}) · freeze fins ${stretchEnd !== null ? stretchEnd.toFixed(2) + 's' : 'final'}`);
+
+                    try {
+                        const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
+                        if (freezeResult && freezeResult.success) {
+                            placed++;
+                            log(`   🖼️ [Titol] Tema‑Titol col·locat: ${freezeResult.duration.toFixed(1)}s`);
+                        }
+                    } catch (freezeErr) {
+                        log(`   ❌ [Titol] Freeze fallit per ${tt.name}: ${freezeErr.message}`, "ERROR");
+                    }
+                    await getUtils().delay(200);
+                }
+
+                if (placed === 0) {
+                    log("⚠️ [Titol] Cap Tema‑Titol per col·locar.", "WARN");
+                } else {
+                    log(`🎬 [Titol] ${placed} Tema‑Titol(s) col·locat(s).`, "INFO");
+                    getUtils().status(`Titol: ${placed} col·locat(s)`, "exito");
                 }
             } catch (e) { getUtils().handleError(e, "Titol"); }
+        },
+        /**
+         * _blockStartTime: Posició d'inici del bloc per als Tema‑Titol sense
+         * marcador propi. Si hi ha conductor a la pista de chyrons dins del primer
+         * clip, s'aplica el marge CasA/CasB (no trepitjar el rètol del conductor).
+         * @param {number} clipStart
+         * @param {Array} allMarkers
+         * @returns {Promise<number>}
+         */
+        _blockStartTime: async function (clipStart, allMarkers) {
+            const cfg = FASTPASS_UI.Config.get();
+            const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
+            let placeTime = clipStart + 0.40;
+            try {
+                const v6Count = parseInt(await callJSX(`Clips.count(${cfg.tracks.video.chyrons}, 'video')`) || '0');
+                if (v6Count > 0) {
+                    const firstV6 = JSON.parse(await callJSX(`Clips.get(${cfg.tracks.video.chyrons}, 0, 'video')`));
+                    const isConductor = firstV6 && firstV6.name && firstV6.name.toUpperCase().includes("CONDUCT");
+                    if (isConductor && Math.abs(firstV6.start - clipStart) < 0.5) {
+                        const sortedM = (allMarkers || []).slice().sort((a, b) => a.time - b.time);
+                        let nextMarkerTime = clipStart + 30;
+                        for (const m of sortedM) {
+                            if (m.time > clipStart + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
+                        }
+                        const margen = nextMarkerTime - clipStart;
+                        placeTime = (margen >= MIN_MARGEN_CASA) ? (clipStart + 0.40) : (clipStart + 0.40 + 4.40);
+                        log(`📌 [Titol·Cas${margen >= MIN_MARGEN_CASA ? 'A' : 'B'}] inici del bloc @ ${placeTime.toFixed(2)}s`);
+                    }
+                }
+            } catch (e) { }
+            return placeTime;
         },
 
         _findClipAtTime: async function(timeSec) {
@@ -633,7 +682,7 @@
             try {
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
-                const STRUCTURAL_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const STRUCTURAL_RE = /^\d+[a-z]{0,3}\s*-\s*.+$/i;
                 const structuralMarkers = allMarkers.filter(m => STRUCTURAL_RE.test((m.comments || "").trim()));
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
@@ -810,7 +859,7 @@
             try {
                 const markersRaw = await callJSX('Markers.get()');
                 const allMarkers = markersRaw ? JSON.parse(markersRaw) : [];
-                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]?\s*-\s*.+$/i;
+                const STRUCTURAL_COMMENTS_RE = /^\d+[a-z]{0,3}\s*-\s*.+$/i;
                 const structuralMarkers = allMarkers.filter(m => {
                     const cmt = (m.comments || "").trim();
                     return STRUCTURAL_COMMENTS_RE.test(cmt);

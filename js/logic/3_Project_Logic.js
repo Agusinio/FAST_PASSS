@@ -629,6 +629,112 @@
             return isNaN(secs) ? 0 : secs;
         },
 
+        /**
+         * getWottDurations: Mapa nom→durada (segons) dels wotts importats al bin CHY.
+         * Font: FASTPASS.Project.items('CHY') (ja retorna la durada en segons).
+         * Cachejat per projecte: evita repetir la crida JSX a cada acció.
+         * @param {boolean} [forceReload]
+         * @returns {Promise<Object>}
+         */
+        getWottDurations: async function (forceReload) {
+            const st = window.FASTPASS_UI.State;
+            const key = (st && st.lastOpenedProjectName) || '';
+            if (!forceReload && this._wottDurCache && this._wottDurCache.key === key) {
+                return this._wottDurCache.map;
+            }
+            const map = {};
+            try {
+                const raw = await callJSX("FASTPASS.Project.items('CHY')");
+                const items = JSON.parse(raw || "[]");
+                for (const it of (items || [])) {
+                    const n = String(it.name || "").trim();
+                    if (n) map[n] = (typeof it.duration === 'number') ? it.duration : 0;
+                }
+                utils.log("⏱️ [Tema-Titol] Durades llegides del bin CHY: " + Object.keys(map).length + " fitxers", "DEBUG");
+            } catch (e) {
+                utils.log("⚠️ [Tema-Titol] No s'han pogut llegir les durades del bin CHY: " + e.message, "WARN");
+            }
+            this._wottDurCache = { key: key, map: map };
+            return map;
+        },
+
+        /**
+         * normItemId: Normalitza un id d'ítem per comparar wott ↔ marcador.
+         * Els noms dels wotts poden portar padding extra ('011i') i el marcador no
+         * ('11i - INTRO'); també canvien les majúscules ('01Lead' vs '01lead').
+         * @param {string} id
+         * @returns {string}
+         */
+        normItemId: function (id) {
+            return String(id === null || id === undefined ? '' : id)
+                .trim().toUpperCase().replace(/^0+(?=\d)/, '');
+        },
+
+        /**
+         * _wottIdNum: ID numèric intern del wott (part 6 del nom, ex: 589951).
+         * Serveix per quedar-se amb la versió MÉS RECENT quan hi ha duplicats.
+         * @param {string} wottName
+         * @returns {number}
+         */
+        _wottIdNum: function (wottName) {
+            const parts = String(wottName || '').split('_');
+            const n = parseInt(parts[6], 10);
+            return isNaN(n) ? 0 : n;
+        },
+
+        /**
+         * pickTemaTitols: Selecciona els Tema‑Titol VÀLIDS del bloc.
+         *   1. Només Tema‑Titol amb durada de clip > minSec: els "petits" (~1 s)
+         *      NO són un pla B (tenen altres usos).
+         *   2. Referència: un per (ítem + tc). Si n'hi ha diversos (versions
+         *      successives del mateix moment), es queda el d'ID més alt (recent).
+         *   3. Ordre: el de State.structure (ítem) i, dins de l'ítem, pel tc.
+         * @param {Array} structure - State.structure
+         * @param {Object} durations - mapa nom→segons
+         * @param {number} minSec
+         * @returns {Array<{item:string, name:string, tc:string, dur:number, idNum:number}>}
+         */
+        pickTemaTitols: function (structure, durations, minSec) {
+            const found = [];
+            const index = {};
+            const list = structure || [];
+            for (let ei = 0; ei < list.length; ei++) {
+                const entry = list[ei];
+                if (!entry || !entry.chyrons) continue;
+                for (let ci = 0; ci < entry.chyrons.length; ci++) {
+                    const c = entry.chyrons[ci];
+                    const rol = String(c.rol || '').toUpperCase();
+                    const isTT = (rol === 'TEMA-TITOL') || (String(c.name || '').toUpperCase().indexOf('TEMA-TITOL') !== -1);
+                    if (!isTT) continue;
+                    const dur = (durations && durations[c.name] !== undefined) ? durations[c.name] : 0;
+                    if (!(dur > minSec)) continue;
+                    const rec = {
+                        item: String(entry.id || ''),
+                        name: c.name,
+                        tc: String(c.tc || '000000'),
+                        dur: dur,
+                        idNum: this._wottIdNum(c.name),
+                        _ei: ei
+                    };
+                    const key = rec.item + '@' + rec.tc;
+                    if (index[key] !== undefined) {
+                        if (rec.idNum > found[index[key]].idNum) found[index[key]] = rec;
+                        continue;
+                    }
+                    index[key] = found.length;
+                    found.push(rec);
+                }
+            }
+            found.sort(function (a, b) {
+                if (a._ei !== b._ei) return a._ei - b._ei;
+                return String(a.tc).localeCompare(String(b.tc));
+            });
+            return found;
+        },
+
+        /**
+         * close: Tanca el projecte i elimina el lock.
+         */
         close: async function () {
             try {
                 utils.log("🔒 Tancant projecte i eliminant lock...", "INFO");
