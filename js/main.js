@@ -172,6 +172,9 @@ function applySliderLimits() {
             document.body.classList.remove('mode-work');
         }
         window.FASTPASS_UI.LayoutMode = mode;
+        // Persistir el mode: si no, en recarregar el panell torna a TEST i el botó
+        // OUT deixa de disparar el pipeline de marcadors (s'ha de passar a TREBALL).
+        try { localStorage.setItem('fastpass_v1_layout', mode); } catch (e) { }
         var btnMode = document.getElementById('btnMode');
         if (btnMode) btnMode.textContent = (mode === 'work') ? '👤' : '🧪';
         FASTPASS_UI.Utils.log('🔀 Layout mode: ' + mode.toUpperCase(), 'INFO');
@@ -485,13 +488,26 @@ function applySliderLimits() {
                     const folderDest = config.rutas.destinoBase + progData.directorio + '/' + stateDateDir;
 
                     utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}`, 'INFO');
-                    const result = await reader.fetchNewEscaleta(
-                        progData.escaletaId || null,
-                        stateDateDir,
-                        progData.archivo,
-                        blocId,
-                        folderDest
-                    );
+                    // Guarda de temps: si l'API d'escaletes o el motor JSX no responen
+                    // (xarxa/VPN), el botó no pot quedar-se penjat en "⏳ FOTO...".
+                    const FOTO_TIMEOUT_MS = 45000;
+                    const result = await Promise.race([
+                        reader.fetchNewEscaleta(
+                            progData.escaletaId || null,
+                            stateDateDir,
+                            progData.archivo,
+                            blocId,
+                            folderDest
+                        ),
+                        new Promise(function (resolve) {
+                            setTimeout(function () { resolve('__TIMEOUT__'); }, FOTO_TIMEOUT_MS);
+                        })
+                    ]);
+                    if (result === '__TIMEOUT__') {
+                        utils.log(`❌ [Fetch] Sense resposta de l'API d'escaletes (${FOTO_TIMEOUT_MS / 1000}s). Comprova la xarxa/VPN i torna-ho a provar.`, 'ERROR');
+                        utils.status("FOTO: l'API no respon", 'error');
+                        return;
+                    }
 
                     if (result) {
                         utils.log(`✅ [Fetch] Nova escaleta guardada: ${result.filename}`, 'INFO');
@@ -558,7 +574,11 @@ function applySliderLimits() {
                 applyLayoutMode(cur === 'test' ? 'work' : 'test');
             });
         }
-        applyLayoutMode(window.FASTPASS_UI.LayoutMode || 'test');
+        // El mode de layout es recorda entre sessions: TREBALL és el de producció
+        // (i el que fa que el botó OUT dispari el pipeline de marcadors).
+        var savedMode = 'test';
+        try { savedMode = localStorage.getItem('fastpass_v1_layout') || 'test'; } catch (e) { }
+        applyLayoutMode(window.FASTPASS_UI.LayoutMode || savedMode);
         if (typeof sizeVideoToFit === 'function') sizeVideoToFit();
     }
 
@@ -674,6 +694,11 @@ function applySliderLimits() {
         if (layoutMode === 'work') {
             await runFullPipelineOut();
         } else {
+            // Mode TEST: només el tancament clàssic. Avisem ben clar perquè el log
+            // no deixi cap dubte de per què no s'han col·locat els marcadors.
+            FASTPASS_UI.Utils.log('⚠️ [OUT] Mode TEST: només tancament (CUT OUT). El pipeline de marcadors ' +
+                '(TROSSEJA → OnAir → Deduc → Prev → Correl → Density) només s\'executa en mode TREBALL (👤).', 'WARN');
+            try { FASTPASS_UI.Utils.status('Mode TEST: només tancament — passa a 👤 TREBALL', 'warn'); } catch (eS) { }
             await callWorkflow('Cut', 'runCutOut');
         }
     }
@@ -771,21 +796,23 @@ function sizeVideoToFit() {
         var col = document.querySelector('.upper-left');
         if (!wrap || !zone || !col) return;
         var aw = zone.clientWidth;
+        if (aw <= 0) return;
+        /* 1) Mesurar la columna de controls SENSE el visor al flux (position:absolute),
+              però SENSE tocar-ne la mida: posar width/height a 0 i restaurar-los
+              reescala la textura del <video> i la deixa a mig pintar (franja negra
+              inferior) — bug real en moure el cabezal. La mesura és tota síncrona,
+              així que no es veu cap salt a la pantalla. */
+        var prevPos = wrap.style.position;
+        wrap.style.position = 'absolute';
         var ah = col.offsetHeight;
-        if (aw <= 0 || ah <= 0) return;
-        // Si les mesures no han canviat, NO tocar estils del visor de vídeo:
-        // reescriure width/height a cada poll (500ms) invalida el layout de la
-        // zona del <video> i pot provocar talls durant la reproducció.
-        if (wrap._fitAw === aw && wrap._fitAh === ah) return;
-        wrap._fitAw = aw;
-        wrap._fitAh = ah;
-        /* 1) Anul·lar la mida del visor perquè no infli l'alçada de la columna en mesurar
-              (si partís de 280px d'amplada, estiraria la fila i la mesura sortiria gran). */
-        wrap.style.width = '10px';
-        wrap.style.height = '0';
-        /* 2) Alçada real de tota la columna de controls: INICI + VÍDEO + GRF/SUB + CHY/REN. */
-        /* 3) Amplada 9:16; l'alçada la deriva l'aspect-ratio (i queda 1:1 amb la columna). */
+        wrap.style.position = prevPos;
+        if (ah <= 0) return;
+        /* 2) Amplada 9:16; l'alçada la deriva l'aspect-ratio (i queda 1:1 amb la columna). */
         var w = Math.min(aw, Math.floor(ah * 9 / 16));
+        // Si l'amplada calculada no ha canviat, NO tocar estils del visor:
+        // reescriure width/height invalida el layout de la zona del <video>.
+        if (wrap._fitW === w) return;
+        wrap._fitW = w;
         wrap.style.width = w + 'px';
         wrap.style.height = 'auto';
     } catch (e) { /* no crític */ }

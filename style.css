@@ -65,8 +65,8 @@ body {
     position: relative;
     align-self: flex-start;
     height: auto;
-    width: 10px;             /* amplada ajustada per JS (sizeVideoToFit); inicial ínfima */
-    height: 0;               /* perquè en el primer paint no infli la columna */
+    width: 10px;             /* mida inicial ínfima: el JS (main.js sizeVideoToFit) la fixa */
+    height: 0;
     max-width: 100%;
     aspect-ratio: 9 / 16;            /* canvas vertical com el projecte */
     background: #000; border-radius: 4px; overflow: hidden;
@@ -77,6 +77,18 @@ body {
     width: 100%; height: 100%;
     object-fit: cover;               /* omple el frame vertical (verticalització 9:16) */
     background: #000;
+}
+#srtVideoHud {
+    position: absolute; top: 4px; left: 4px; right: 4px;
+    font: 10px/1.3 monospace;
+    color: #9fe8ff;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 1px 4px; border-radius: 3px;
+    cursor: pointer;          /* clic → canvia l'origen del vídeo (auto/UNC/local/mem) */
+    user-select: none;
+    white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 3;
 }
 #srtVideoSubs {
     position: absolute; left: 0; right: 0; bottom: 12%;
@@ -166,7 +178,10 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* GRÀFICS + MARCADORS + CHYRONS + SUBTÍTOLS + RENDER (grups de botons quadrats, fileres) */
 .graphics-group { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; align-items: stretch; }
-.graphics-group > .section-container { flex: 0 1 auto; min-width: 0; margin-bottom: 0; }
+.graphics-group .section-container { flex: 0 1 auto; min-width: 0; margin-bottom: 0; }
+/* Columnes del layout TREBALL (.gfx-col). En TEST no fan de caixa (display: contents) i els
+   grups tornen al flux del .graphics-group, mantenint la graella per files amb .row-break. */
+.gfx-col { display: contents; }
 /* Etiquetes de secció: versió completa en TEST, abreujada (més baixa) en TREBALL */
 .section-label span.lbl-short { display: none; }
 .mode-work .section-label span.lbl-full { display: none; }
@@ -195,14 +210,13 @@ input[type="range"]::-webkit-slider-thumb {
 #secSubtitols  { order: 5; }
 .graphics-group > .row-break:not(.test-only) { order: 6; }
 #secRender     { order: 7; }
-/* En mode TREBALL: graella fixa 2×2 (sense wrap) → fila1 GRÀFICS+SUBTÍTOLS, fila2 CHYRONS+RENDER.
-   Gràfics i Subtítols NO poden baixar de fila: sempre queden junts a la fila superior. */
-.mode-work .graphics-group { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 4px; align-items: stretch; }
+/* En mode TREBALL el flux és PER COLUMNES: dues columnes independents que s'apilen de dalt a baix
+   → col1 CHYRONS (dalt) + GRÀFICS (baix) · col2 SUBTÍTOLS (dalt) + RENDER (baix).
+   Cada grup conserva la seva alçada natural (CHY/REN la meitat que GRÀFICS/SUBTÍTOLS) i, com que les
+   columnes no comparteixen files, el bloc manté la mateixa alçada que amb el layout anterior. */
+.mode-work .graphics-group { display: flex; gap: 4px; align-items: flex-start; }
+.mode-work .gfx-col { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 150px; }
 .mode-work .graphics-group > .row-break { display: none; }
-.mode-work #secGrafics { grid-column: 1; grid-row: 1; }
-.mode-work #secSubtitols { grid-column: 2; grid-row: 1; }
-.mode-work #secChyrons { grid-column: 1; grid-row: 2; }
-.mode-work #secRender { grid-column: 2; grid-row: 2; }
 /* CHYRONS en TREBALL: COLOCAR/REPART en una sola fila horitzontal */
 .mode-work .graphics-strip.chy-strip { grid-template-columns: repeat(2, 30px); }
 /* Separador de fila dins del .graphics-group */

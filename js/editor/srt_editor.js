@@ -61,6 +61,28 @@
         _lastPlyLogT: 0,      // throttle del log "⏱ PLY" (escriure al fitxer a cada poll tensa la UI)
         _lastVideoSeekT: 0,   // histèresi entre re-anclatges (seek) del <video> en PLAY
         _lastVideoDrift: 0,   // últim desfàs mesurat v.currentTime − playhead (diagnòstic)
+        _videoBlobUrl: null,  // objectURL del MP4 carregat a MEMÒRIA (s'ha d'alliberar sempre)
+        _videoSrcTag: '',     // origen real del vídeo carregat (MEMÒRIA/LOCAL/XARXA) — HUD
+        _videoFps: -1,        // fps reals que pinta el <video> (requestVideoFrameCallback) — HUD
+        _vfcId: null,         // id del requestVideoFrameCallback actiu
+        _vfcLastT: 0,         // base del comptador de fps
+        _vfcCount: 0,         // frames comptats des de la base
+        _vfcTimer: null,      // watchdog: si no arriben frames, el HUD baixa a 0 fps
+        _vfcWallT: 0,         // instant (wall clock) de l'últim frame vist
+        // ORIGEN DEL VÍDEO DEL VISOR. Clic al HUD → rota els modes (es guarda a
+        // localStorage). 'auto' = memòria → còpia local → UNC; 'unc' = només xarxa
+        // (per mesurar-la amb el HUD); 'local' = sense memòria; 'mem' = només memòria.
+        _videoSourceModes: ['auto', 'unc', 'local', 'mem'],
+        _videoSource: (function () {
+            try {
+                var v = localStorage.getItem('fastpass_video_source');
+                return (v === 'unc' || v === 'local' || v === 'mem' || v === 'auto') ? v : 'unc';
+            } catch (e) { return 'unc'; }
+        })(),
+        _videoMediaPath: '',  // clip carregat (per recarregar-lo al canviar de mode)
+        _hudBound: false,     // el clic del HUD ja enganxat
+        _lastCtiT: 0,         // timestamp del darrer poll (per calcular la VELOCITAT del CTI)
+        _pollBusy: false,     // un poll en curs (evita solapar Timeline.get si un poll va lent)
         _srtFingerprint: "",  // empremta del contingut del SRT carregat: els marcadors només
                               // es restauren si el SRT és el MATEIX (evita portar marques antigues
                               // d'una altra peça/sessió que comparteix el nom 'emergencia_EMERGENCIA')
@@ -420,9 +442,28 @@
                 const handles = (config.handles != null) ? config.handles : 20;
                 const srtAir = 20; // segons mínims garantits a cada banda del bloc
                 const marginSecs = Math.max(handles, srtAir);
-                const winStart = worldStart - marginSecs;
-                const winEnd = worldEnd + marginSecs;
-                log("🚨 SRT_EMERGENCIA: bloc world [" + worldStart.toFixed(1) + "s → " + worldEnd.toFixed(1) + "s], finestra ±" + marginSecs + "s (garantida)");
+                // Finestra ASIMÈTRICA (2026-09-15):
+                //  - per DAVANT: cap marge → no arrosseguem rètols de la peça anterior
+                //    (l'usuari veia "subtítols de molt abans", que no són del bloc).
+                //  - per DARRERE: s'allarga MÉS ENLLÀ del final del bloc, perquè la peça
+                //    sovint continua i no s'ha de perdre el final del text.
+                const tailSec = (config.srtEmergencyTailSec != null) ? Number(config.srtEmergencyTailSec) : 60;
+                const winStart = worldStart;
+                const winEnd = worldEnd + Math.max(marginSecs, tailSec);
+                log("🚨 SRT_EMERGENCIA: bloc world [" + worldStart.toFixed(1) + "s → " + worldEnd.toFixed(1) + "s], finestra [" + winStart.toFixed(1) + "s → " + winEnd.toFixed(1) + "s] (davant sense marge · darrere +" + Math.max(marginSecs, tailSec) + "s)");
+
+                // ⚠️ ORIGEN DE L'EIX: el clip extret comença al HANDLE (worldSecMediaStart),
+                // no a l'inici del bloc. Si re-temporitzem contra worldStart, TOTS els
+                // subtítols queden avançats tants segons com handles i els últims del clip
+                // es queden sense subtítols (sempre en faltaven uns quants al final).
+                const refStartSec = (manifest.ref && manifest.ref.worldSecMediaStart != null)
+                    ? manifest.ref.worldSecMediaStart
+                    : ((manifest.extractedClip && manifest.extractedClip.extractedWorldSecMediaStart != null)
+                        ? manifest.extractedClip.extractedWorldSecMediaStart
+                        : worldStart);
+                if (Math.abs(refStartSec - worldStart) > 0.01) {
+                    log("🚨 SRT_EMERGENCIA: origen de l'eix = inici del clip extret (" + refStartSec.toFixed(1) + "s) en lloc del bloc (" + worldStart.toFixed(1) + "s)");
+                }
 
                 // 3. Programa → carpeta dels blocs de 15 min
                 const progMap = { TNM: 'migdia', TNV: 'vespre', TNC: 'comarques' };
@@ -483,8 +524,8 @@
                         // el SRT no ha d'estirar-se a la peça veïna més enllà del handle.
                         const realEnd = Math.min(cand.startSec + ent.endSec, winEnd);
                         if (realEnd <= winStart || realStart >= winEnd) continue;
-                        const ns = realStart - worldStart;
-                        const ne = realEnd - worldStart;
+                        const ns = realStart - refStartSec;
+                        const ne = realEnd - refStartSec;
                         if (ne <= 0) continue;
                         all.push({ startSec: (ns < 0 ? 0 : ns), endSec: ne, texts: ent.texts.slice(), index: 0, timeStr: '' });
                     }
@@ -537,15 +578,6 @@
         _hideEditor: function () {
             var container = document.getElementById('srtEditorContainer');
             if (container) container.style.display = 'none';
-            // Estat de reproducció del visor a zero (PLAY local desacoblat)
-            this._isPlaying = false;
-            this._playheadLocal = false;
-            this._timelineRunning = false;
-            this._mediaStop = 0;
-            try {
-                var btnP = document.getElementById('btnSrtPlay');
-                if (btnP) btnP.innerHTML = '▶ PLAY';
-            } catch (eB) { }
             // Aturar i buidar el visor de vídeo (PLAN_VIDEO_PREVIEW)
             try {
                 var v = document.getElementById('srtVideo');
@@ -553,6 +585,8 @@
                 var subs = document.getElementById('srtVideoSubs');
                 if (subs) subs.innerHTML = '';
             } catch (e) { }
+            this._revokeVideoBlob();
+            this._stopVideoFrameMeter();
             this._pendingSeek = null;
             this.stop();
         },
@@ -563,41 +597,60 @@
          * directa (UNC, 4 barres). Si la seguretat CEP/CORS ho bloqueja → fallback:
          * copia local a C:\temp\fastpass_media.mp4 i file:///C:/temp/...
          */
+        /**
+         * _loadVideo: Obre el MP4 del clip al visor, en ordre de preferència:
+         *   1) A MEMÒRIA (XHR → Blob → objectURL): el fitxer sencer al buffer ⇒ la
+         *      reproducció no torna a tocar el disc/NAS (sense tirones ni negres).
+         *      Requereix `--allow-file-access-from-files` al CEF (vegeu .debug).
+         *   2) CÒPIA LOCAL a disc (C:\temp\fastpass_video): el <video> llegeix local.
+         *   3) file:////UNC directe (comportament antic) — darrer recurs.
+         * @param {string} mediaPath - Ruta UNC del MP4 del clip
+         * @returns {Promise<boolean>}
+         */
         _loadVideo: async function (mediaPath) {
             var v = document.getElementById('srtVideo');
             if (!v) return false;
+            this._videoMediaPath = mediaPath;
+            this._bindVideoHud();
+            var mode = this._videoSource || 'auto';
 
-            // ── 1. CÒPIA LOCAL REUTILITZABLE (caché de vídeo per peça) ──────────
-            // Reproduir sempre des d'una còpia local fa els seeks/scrub instantanis
-            // (sobre la UNC del NAS, cada seek re-llegeix de xarxa). Es reutilitza
-            // mentre l'origen no canviï (size + mtime al sidecar).
-            try {
-                var cached = await this._ensureLocalVideo(mediaPath);
-                if (cached) {
+            // 1) MEMÒRIA (en 'auto' i 'mem'; en 'unc'/'local' es salta per disseny)
+            if (mode === 'auto' || mode === 'mem') {
+                if (await this._loadVideoFromMemory(mediaPath)) {
+                    await this._seekVideoToPlayhead();
+                    return true;
+                }
+            }
+
+            // 2) CÒPIA LOCAL (en 'auto' i 'local'; no depèn del flag del CEF)
+            if (mode === 'auto' || mode === 'local') {
+                var local = await this._ensureLocalVideoCopy(mediaPath);
+                if (local) {
                     v.preload = "auto";
-                    v.src = "file:///" + cached;
+                    v.src = "file:///" + local;
                     v.load();
-                    var okC = await this._waitVideoReady(v, 10000);
-                    if (okC) {
-                        log("✅ SRT_EDIT: Vídeo carregat (còpia local: " + cached + ")");
+                    if (await this._waitVideoReady(v, 8000)) {
+                        log("✅ SRT_EDIT: Vídeo carregat des de la còpia local");
+                        this._setVideoSrcTag("💾 LOCAL (còpia a C:\\temp)");
+                        this._startVideoFrameMeter();
                         await this._seekVideoToPlayhead();
                         return true;
                     }
-                    log("⚠️ SRT_EDIT: la còpia local no carrega → provant file:// directa");
+                    log("⚠️ SRT_EDIT: la còpia local no reprodueix (còdec?)");
                 }
-            } catch (eCach) {
-                log("⚠️ SRT_EDIT: caché vídeo: " + eCach.message);
             }
 
-            // ── 2. Fallback: file:// directa (UNC) ──────────────────────────────
+            // 3) UNC directe (mode 'unc' → única via; resta → darrer recurs)
             var url = "file:////" + mediaPath.replace(/\\/g, "/");
-            log("📝 SRT_EDIT: Vídeo → " + url);
+            log("📝 SRT_EDIT: Vídeo → " + url + " (mode " + mode + ")");
             v.preload = "auto";
             v.src = url;
             v.load();
             var ok = await this._waitVideoReady(v, 8000);
             if (ok) {
                 log("✅ SRT_EDIT: Vídeo carregat (file:// directa)");
+                this._setVideoSrcTag("🌐 XARXA (UNC, sense còpia)");
+                this._startVideoFrameMeter();
                 await this._seekVideoToPlayhead();
                 return true;
             }
@@ -606,62 +659,216 @@
         },
 
         /**
-         * _ensureLocalVideo: Garanteix una còpia LOCAL reutilitzable del MP4 de la peça
-         * a C:/temp/fastpass_video_<tag>.mp4 i en retorna la ruta (o null si no es pot).
-         * No re-copia si l'origen no ha canviat (mida + data al sidecar .json).
-         * Caché de vídeo: els seeks sobre un fitxer local són instàntanis.
+         * ORIGEN DEL VÍDEO (HUD): clic al HUD rota auto → unc → local → mem i recarrega
+         * el clip actual. Serveix per mesurar amb el mateix HUD quina via va millor.
          */
-        _ensureLocalVideo: async function (mediaPath) {
+        _bindVideoHud: function () {
+            if (this._hudBound) return;
+            var h = document.getElementById('srtVideoHud');
+            if (!h) return;
+            var self = this;
+            h.addEventListener('click', function () { self._cycleVideoSource(); });
+            h.title = "Clic: canvia l'origen del vídeo (auto / UNC / local / memòria)";
+            this._hudBound = true;
+            this._renderVideoHud();
+        },
+
+        _cycleVideoSource: function () {
+            var modes = this._videoSourceModes || ['auto', 'unc', 'local', 'mem'];
+            var i = modes.indexOf(this._videoSource);
+            this._videoSource = modes[(i + 1) % modes.length];
+            try { localStorage.setItem('fastpass_video_source', this._videoSource); } catch (e) { }
+            log("🎞️ SRT_EDIT: Origen del visor → " + this._videoSource.toUpperCase() + " (clic al HUD per canviar)");
+            this._renderVideoHud();
+            if (this._videoMediaPath) {
+                var self = this;
+                this._loadVideo(this._videoMediaPath).then(function () { self._seekVideoToPlayhead(); }, function () { });
+            }
+        },
+
+        /**
+         * HUD DEL VISOR (diagnòstic): origen real del fitxer (MEMÒRIA/LOCAL/XARXA) i
+         * fps que està pintant el <video>. Serveix per saber d'un cop d'ull si el
+         * vídeo s'està refrescant de veritat.
+         */
+        _setVideoSrcTag: function (tag) {
+            this._videoSrcTag = tag || '';
+            this._renderVideoHud();
+        },
+
+        _renderVideoHud: function () {
+            var h = document.getElementById('srtVideoHud');
+            if (!h) return;
+            var fps = (this._videoFps < 0) ? '—' : this._videoFps;
+            var mode = String(this._videoSource || 'auto').toUpperCase();
+            h.textContent = '[' + mode + '] ' + (this._videoSrcTag || '—') + ' · ' + fps + ' fps';
+        },
+
+        /**
+         * _startVideoFrameMeter: Compta els frames REALS que el <video> entrega
+         * (requestVideoFrameCallback) i els mostra al HUD 1 cop per segon.
+         */
+        _startVideoFrameMeter: function () {
+            var v = document.getElementById('srtVideo');
+            this._stopVideoFrameMeter();
+            if (!v || typeof v.requestVideoFrameCallback !== 'function') {
+                this._videoFps = -1;   // CEF sense rVFC: no es pot mesurar
+                this._renderVideoHud();
+                return;
+            }
+            var self = this;
+            this._vfcLastT = 0;
+            this._vfcCount = 0;
+            this._vfcWallT = 0;
+            var cb = function (now) {
+                if (self._vfcId === null) return;
+                self._vfcCount++;
+                if (!self._vfcLastT) self._vfcLastT = now;
+                self._vfcWallT = (window.performance && performance.now) ? performance.now() : Date.now();
+                var dt = now - self._vfcLastT;
+                if (dt >= 1000) {
+                    self._videoFps = Math.round(self._vfcCount * 1000 / dt);
+                    self._vfcCount = 0;
+                    self._vfcLastT = now;
+                    self._renderVideoHud();
+                }
+                try { self._vfcId = v.requestVideoFrameCallback(cb); } catch (e) { self._vfcId = null; }
+            };
+            try { this._vfcId = v.requestVideoFrameCallback(cb); } catch (e) { this._vfcId = null; }
+            // Watchdog: si en 1,5 s no ha arribat cap frame (vídeo pausat o CEF que no
+            // repinta), el HUD ho mostra com a 0 fps → diagnòstic immediat.
+            this._vfcTimer = setInterval(function () {
+                var w = (window.performance && performance.now) ? performance.now() : Date.now();
+                if (self._vfcWallT && (w - self._vfcWallT) > 1500 && self._videoFps !== 0) {
+                    self._videoFps = 0;
+                    self._renderVideoHud();
+                }
+            }, 1000);
+        },
+
+        _stopVideoFrameMeter: function () {
+            if (this._vfcId !== null && this._vfcId !== undefined) {
+                try {
+                    var v = document.getElementById('srtVideo');
+                    if (v && typeof v.cancelVideoFrameCallback === 'function') v.cancelVideoFrameCallback(this._vfcId);
+                } catch (e) { }
+            }
+            this._vfcId = null;
+            if (this._vfcTimer) { clearInterval(this._vfcTimer); this._vfcTimer = null; }
+            this._videoFps = -1;
+        },
+
+        /**
+         * _ctiState: Classifica l'avanç del CTI entre polls. Els polls poden trigar
+         * 0,25-3 s si el panell està ocupat, per això es mira la VELOCITAT
+         * (Δ CTI / Δ temps real) i no el Δ absolut: un poll lent s'ha de llegir com
+         * a reproducció, no com a salt (que pausava el vídeo = "no es refresca").
+         * @param {number} deltaSec  - |CTI ara − CTI anterior|
+         * @param {number} dtRealSec - temps real transcorregut entre els dos polls
+         * @returns {string} 'stop' | 'play' | 'salt'
+         */
+        _ctiState: function (deltaSec, dtRealSec) {
+            var dt = (dtRealSec && dtRealSec > 0.05) ? dtRealSec : 0.05;
+            var vel = Math.abs(deltaSec) / dt;
+            if (deltaSec < 0.08 || vel < 0.35) return 'stop';
+            if (vel > 2.5) return 'salt';
+            return 'play';
+        },
+
+        /**
+         * _revokeVideoBlob: Allibera l'objectURL retingut (evita deixar 150-200 MB
+         * en memòria en carregar un altre clip o en tancar el visor).
+         */
+        _revokeVideoBlob: function () {
+            if (this._videoBlobUrl) {
+                try { URL.revokeObjectURL(this._videoBlobUrl); } catch (e) { }
+                this._videoBlobUrl = null;
+            }
+        },
+
+        /**
+         * _loadVideoFromMemory: Carrega el MP4 SENCER a memòria i el reprodueix des
+         * d'un objectURL. Amb el fitxer al buffer del navegador, la reproducció no
+         * depèn del NAS: desapareixen els tirones i els fotogrames negres.
+         * @param {string} mediaPath
+         * @returns {Promise<boolean>}
+         */
+        _loadVideoFromMemory: function (mediaPath) {
+            var self = this;
+            var v = document.getElementById('srtVideo');
+            if (!v) return Promise.resolve(false);
+            return new Promise(function (resolve) {
+                var t0 = Date.now();
+                var url = "file:////" + String(mediaPath).replace(/\\/g, "/");
+                var xhr;
+                try { xhr = new XMLHttpRequest(); } catch (eX) { return resolve(false); }
+                try {
+                    xhr.open('GET', url, true);
+                    xhr.responseType = 'blob';
+                    xhr.timeout = 25000;   // si el NAS va muy lent, es passa a la còpia local
+                } catch (eO) { return resolve(false); }
+                xhr.onload = function () {
+                    try {
+                        if (xhr.status !== 0 && (xhr.status < 200 || xhr.status >= 300)) return resolve(false);
+                        var blob = xhr.response;
+                        if (!blob || !blob.size) return resolve(false);
+                        self._revokeVideoBlob();
+                        self._videoBlobUrl = URL.createObjectURL(blob);
+                        v.preload = "auto";
+                        v.src = self._videoBlobUrl;
+                        v.load();
+                        self._waitVideoReady(v, 8000).then(function (ok) {
+                            if (!ok) { log("⚠️ SRT_EDIT: el blob a memòria no reprodueix (còdec?)"); return resolve(false); }
+                            log("🎞️ SRT_EDIT: Vídeo A MEMÒRIA: " + (blob.size / 1048576).toFixed(1) + " MB en " +
+                                ((Date.now() - t0) / 1000).toFixed(1) + "s · reproducció sense xarxa");
+                            self._setVideoSrcTag("🧠 MEMÒRIA " + (blob.size / 1048576).toFixed(0) + "MB");
+                            self._startVideoFrameMeter();
+                            resolve(true);
+                        });
+                    } catch (eL) { resolve(false); }
+                };
+                xhr.onerror = function () { resolve(false); };
+                xhr.ontimeout = function () {
+                    log("⚠️ SRT_EDIT: el vídeo triga massa a baixar del NAS (25s) → còpia local");
+                    resolve(false);
+                };
+                try { xhr.send(); } catch (eS) { resolve(false); }
+            });
+        },
+
+        /**
+         * _ensureLocalVideoCopy: Assegura una CÒPIA LOCAL del MP4 (C:\temp\fastpass_video)
+         * i en retorna la ruta. Si ja existeix amb la mateixa mida que l'original, la
+         * reutilitza (el mateix clip es reutilitza entre CARs). Amb el fitxer a disc
+         * local, el <video> no depèn del NAS: s'eliminen els tirones per xarxa.
+         * @param {string} mediaPath - Ruta UNC de l'original
+         * @returns {Promise<string|null>}
+         */
+        _ensureLocalVideoCopy: async function (mediaPath) {
             try {
-                var tag = String(this._waveformMediaTag || '').replace(/[^A-Za-z0-9_\-]/g, '_');
-                if (!tag) {
-                    tag = String(mediaPath || '').split(/[\\/]/).pop().replace(/\.mp4$/i, '').replace(/[^A-Za-z0-9_\-]/g, '_');
-                }
-                if (!tag) return null;
-                try { window.cep.fs.makedir("C:/temp"); } catch (e0) { }
-                var localPath = "C:/temp/fastpass_video_" + tag + ".mp4";
-                var sidecar = "C:/temp/fastpass_video_" + tag + ".json";
-
-                // Estat de l'origen (mida + mtime) via ExtendScript.
-                var safeSrc = String(mediaPath).replace(/\\/g, "/").replace(/'/g, "");
-                var statRaw = await callJSX("(function(){try{var f=new File('" + safeSrc + "');if(!f.exists)return'null';return JSON.stringify({size:f.length,mod:Number(f.modified)});}catch(e){return'null'}})()");
-                var st = null;
-                try { st = (statRaw && statRaw !== 'null') ? JSON.parse(statRaw) : null; } catch (eSt) { st = null; }
-                if (!st) {
-                    log("⚠️ SRT_EDIT: no es pot llegir l'estat del MP4 origen; file:// directa");
-                    return null;
-                }
-
-                var localExists = (await callJSX("IO.exists('" + localPath.replace(/'/g, "") + "')")) === "true";
-                var prev = null;
-                try {
-                    var pr = window.cep.fs.readFile(sidecar);
-                    if (pr && pr.err === 0 && pr.data) prev = JSON.parse(pr.data);
-                } catch (eP) { prev = null; }
-                var upToDate = localExists && prev
-                    && (Number(prev.size) === Number(st.size))
-                    && (Number(prev.mod) === Number(st.mod));
-                if (upToDate) return localPath;
-
-                log("📦 SRT_EDIT: creant còpia local de vídeo (" + tag + ", " + Math.round(st.size / 1048576) + " MB)...");
-                var cp = await callJSX(
-                    "(function(){try{try{new Folder('C:/temp').create()}catch(e0){}"
-                    + "var s=new File('" + safeSrc + "');var d=new File('" + localPath.replace(/'/g, "") + "');"
-                    + "if(d.exists)d.remove();var ok=s.copy(d);return ok?'OK':'ERR:copy=false'}catch(e){return'ERR:'+e.message}})()"
+                var name = String(mediaPath).split(/[\\/]/).pop();
+                if (!name) return null;
+                var dir = 'C:/temp/fastpass_video';
+                var dest = dir + '/' + name;
+                var src = String(mediaPath).replace(/\\/g, "/").replace(/'/g, "");
+                var res = await callJSX(
+                    "(function(){try{var d=new Folder('" + dir + "');if(!d.exists)d.create();" +
+                    "var s=new File('" + src + "');if(!s.exists)return 'ERR:no-src';" +
+                    "var t=new File('" + dest + "');" +
+                    "if(t.exists&&t.length===s.length)return 'CACHED;'+t.length;" +
+                    "if(t.exists)t.remove();" +
+                    "return s.copy(t)?('OK;'+t.length):'ERR:copy-false'}catch(e){return 'ERR:'+e.message}})()"
                 );
-                if (cp !== "OK") {
-                    log("⚠️ SRT_EDIT: còpia local de vídeo fallida → " + cp);
-                    return null;
+                var parts = String(res).split(';');
+                if (parts[0] === 'OK' || parts[0] === 'CACHED') {
+                    var mb = parts[1] ? (parseFloat(parts[1]) / 1048576).toFixed(1) + ' MB' : '? MB';
+                    log("🎞️ SRT_EDIT: còpia local del vídeo " + (parts[0] === 'CACHED' ? 'reutilitzada' : 'feta') + " (" + mb + ") → reproducció local");
+                    return dest;
                 }
-                try {
-                    window.cep.fs.writeFile(sidecar, JSON.stringify({
-                        src: mediaPath, size: st.size, mod: st.mod, at: new Date().toISOString()
-                    }));
-                } catch (eW) { }
-                log("✅ SRT_EDIT: còpia local de vídeo creada: " + localPath);
-                return localPath;
+                log("⚠️ SRT_EDIT: no s'ha pogut assegurar la còpia local del vídeo (" + res + ")");
+                return null;
             } catch (e) {
-                log("⚠️ SRT_EDIT: _ensureLocalVideo error: " + e.message);
+                log("⚠️ SRT_EDIT: error amb la còpia local del vídeo: " + e.message);
                 return null;
             }
         },
@@ -738,10 +945,12 @@
             var v = document.getElementById('srtVideo');
             if (!v || !v.src) return;
             if (v.readyState < 2) return;
-            // El <video> només es posa en marxa quan el CTI real confirma el PLAY
-            // (timelineRunning) o en el PLAY LOCAL; així no s'avança a Premiere
-            // durant l'arrencada (qe.play pot tardar uns 100-300ms).
-            var run = !!(this._isPlaying && (this._timelineRunning || this._playheadLocal));
+            // RUN: si l'usuari ha demanat PLAY (botó del panell) o el CTI confirma que
+            // el timeline corre (espai a Premiere), el <video> ha de córrer SEMPRE.
+            // Abans s'exigia `_timelineRunning` també amb el botó: si un poll arribava
+            // tard (0,6-3 s), el Δ del CTI es prenia per un salt i el vídeo es PAUSAVA
+            // → "no es refresca". Ara la pausa només la mana l'usuari.
+            var run = !!(this._isPlaying || this._timelineRunning);
             var d = v.currentTime - mediaSec;
             var ad = Math.abs(d);
             var nowT = (window.performance && performance.now) ? performance.now() : Date.now();
@@ -768,9 +977,7 @@
                 // (canvi de clip a una altra pista o deriva de rellotge), amb una
                 // histèresi per no encadenar seeks.
                 try { if (Math.abs(v.playbackRate - 1) > 0.005) v.playbackRate = 1; } catch (eR0) { }
-                // En PLAY LOCAL no es fan seeks correctius: el playhead s'ancora a
-                // v.currentTime, així que mai hi ha deriva (només l'alineació d'arrencada).
-                if (!this._playheadLocal && ad > 0.6 && (nowT - (this._lastVideoSeekT || 0)) > 250) {
+                if (ad > 0.6 && (nowT - (this._lastVideoSeekT || 0)) > 250) {
                     this._lastVideoSeekT = nowT;
                     try { v.currentTime = mediaSec; } catch (eS) { }
                     if (getUtils().forceLog) {
@@ -797,42 +1004,13 @@
         _startPolling: function () {
             if (this._pollInterval) clearInterval(this._pollInterval);
             var self = this;
-            this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
+            this._pollInterval = setInterval(function () { if (self._pollBusy) return; self._pollBusy = true; self._pollTick().then(function () { self._pollBusy = false; }, function () { self._pollBusy = false; }); }, 400);
             // Seguiment CONTINU del cabezal. Només s'extrapola a 1× quan el timeline està
             // en PLAY (_timelineRunning=true); parat o amb salt, el CTI es considera fix
             // fins al proper poll per evitar deriva. El suavitzat evita salts.
             if (this._localPlayInterval) clearInterval(this._localPlayInterval);
             this._localPlayInterval = setInterval(function () {
                 var now = (window.performance && performance.now) ? performance.now() : Date.now();
-
-                // ── PLAY LOCAL (desacoblat): el <video> és el rellotge mestre ──────
-                // Subtítols i canvas viuen en temps de MEDIA del mateix clip, així que
-                // n'hi ha prou de seguir v.currentTime. Sense seeks, sense CTI, sense
-                // cap interpolació: zero correccions → reproducció nativa fluida.
-                if (self._isPlaying && self._playheadLocal) {
-                    var vL = document.getElementById('srtVideo');
-                    if (vL && vL.src && vL.readyState >= 2) {
-                        if (vL.ended) {
-                            // El clip s'ha acabat abans del límit de subtítols → pausar.
-                            log("⏹ PLAY local: final del clip (" + vL.duration.toFixed(2) + "s)");
-                            self.togglePlay();
-                            return;
-                        }
-                        if (!vL.paused) {
-                            self._playheadSec = vL.currentTime;
-                            if (self._mediaStop && self._playheadSec >= self._mediaStop) {
-                                log("⏹ PLAY local: final del material (" + self._playheadSec.toFixed(2) + "s)");
-                                self.togglePlay();   // pausa: atura el vídeo i alinea el CTI
-                                return;
-                            }
-                            self.render();
-                            self._updatePreview(self._playheadSec);
-                        }
-                        // Pausat sense 'ended' (buffering) → no fer res.
-                    }
-                    return;
-                }
-
                 var estTl;
                 if (self._pendingSeek !== null && self._pendingSeek !== undefined) {
                     // Seek pendent (clic al canvas): usar el target per no derivar
@@ -885,12 +1063,6 @@
 
         _pollTick: async function () {
             try {
-                // PLAY LOCAL: el visor és autònom → no cal consultar el CTI de Premiere.
-                // Evitar aquest evalScript cada 400ms elimina qualsevol micro-stutter.
-                if (this._isPlaying && this._playheadLocal) {
-                    this._pollCount = (this._pollCount || 0) + 1;
-                    return;
-                }
                 var now0 = (window.performance && performance.now) ? performance.now() : Date.now();
                 var cti = await callJSX("Timeline.get()");
                 var now1 = (window.performance && performance.now) ? performance.now() : Date.now();
@@ -934,18 +1106,24 @@
                                 return;
                             }
                         }
-                        // Detecció d'estat del cabezal:
-                        //  - Δ < 0.1s  → parat (o jitter): posició exacta, sense extrapolar
-                        //  - Δ > 0.5s  → salt (clic/scrub): posicionar directe, no extrapolar
-                        //  - entremig  → avanç progressiu (PLAY): extrapolar a 1× entre polls
+                        // Detecció d'estat del cabezal PER VELOCITAT (Δ CTI / Δ temps real):
+                        //  - Δ < 0,08 s o vel < 0,35× → parat (o jitter): posició exacta
+                        //  - vel > 2,5×               → salt real (clic/scrub/seek)
+                        //  - resta                    → reproducció, encara que el poll hagi
+                        //    trigat 1-3 s. Abans es mirava el Δ absolut (>0,5 s = salt) i un
+                        //    poll lent pausava el vídeo → "no es refresca".
                         var ctiDelta = Math.abs(sec - this._lastCtiSec);
-                        if (ctiDelta < 0.1) {
+                        var _dtReal = (now1 - (this._lastCtiT || now0)) / 1000;
+                        this._lastCtiT = now1;
+                        var _vel = ctiDelta / Math.max(0.05, _dtReal);
+                        var _st = this._ctiState(ctiDelta, _dtReal);
+                        if (_st === 'stop') {
                             this._timelineRunning = false;
                             this._playheadSec = realPh;
-                        } else if (ctiDelta > 0.5) {
+                        } else if (_st === 'salt') {
                             this._timelineRunning = false;
                             this._playheadSec = realPh;
-                            log("🎯 PLY salt tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " (Δ=" + ctiDelta.toFixed(2) + ")");
+                            log("🎯 PLY salt tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " (Δ=" + ctiDelta.toFixed(2) + " vel=" + _vel.toFixed(2) + "x)");
                         } else {
                             // Transició parat → PLAY: alinear el playhead a l'instant real
                             // (el vídeo encara està pausat i arrencarà alineat al següent tick).
@@ -960,7 +1138,7 @@
                             var _nowLog = (window.performance && performance.now) ? performance.now() : Date.now();
                             if ((_nowLog - (this._lastPlyLogT || 0)) > 1000) {
                                 this._lastPlyLogT = _nowLog;
-                                log("⏱ PLY tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " show=" + this._playheadSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms driftV=" + (this._lastVideoDrift || 0).toFixed(2));
+                                log("⏱ PLY tl=" + sec.toFixed(2) + " real=" + realPh.toFixed(2) + " show=" + this._playheadSec.toFixed(2) + " rtt=" + Math.round(now1 - now0) + "ms vel=" + _vel.toFixed(2) + "x driftV=" + (this._lastVideoDrift || 0).toFixed(2));
                             }
                         }
                         this._lastCtiSec = sec;
@@ -1061,74 +1239,59 @@
             this._pendingSeek = null; // si hi ha un seek pendent, cancel·lar-lo
             var btn = document.getElementById('btnSrtPlay');
             var self = this;
+            // El <video> s'ha de posar en marxa ALINEAT quan el CTI confirmi el PLAY
+            // (ho fa _syncVideo al tick de 100ms); aquí només s'atura en PAUSA.
+            if (!this._isPlaying) this._setVideoRunning(false);
             if (this._isPlaying) {
-                // ── ▶ PLAY LOCAL (desacoblat del timeline de Premiere) ──────────────
-                // Els subtítols viuen en temps de MEDIA del MATEIX clip que reprodueix
-                // el <video>: el moviment natiu del vídeo a 1× ÉS la sincronia correcta.
-                // No es toca Premiere (ni qe.play ni Timeline.set): el visor és autònom
-                // i per tant no pateix els seeks ni els polls del cabezal.
-                if (this._mediaStop > 0 && this._playheadSec >= this._mediaStop - 0.02) {
-                    this._playheadSec = this._axisOrigin || 0;   // al final → tornar a començar
+                if (this._playheadLocal) {
+                    // PLAY LOCAL (més enllà de l'OUT): avançar el playhead a 1x en MEDIA
+                    // sense dependre del CTI de Premiere (que es queda al final físic).
+                    log("▶▶ PLAY LOCAL (més enllà de l'OUT): media=" + this._playheadSec.toFixed(2));
+                    this._timelineRunning = true;
+                    this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
+                    this._setVideoRunning(true);
+                    if (btn) btn.innerHTML = '⏸ PAUSA';
+                    if (this._pollInterval) clearInterval(this._pollInterval);
+                    this._pollInterval = setInterval(function () { if (self._pollBusy) return; self._pollBusy = true; self._pollTick().then(function () { self._pollBusy = false; }, function () { self._pollBusy = false; }); }, 400);
+                    return;
                 }
-                this._mediaStop = this._computeMediaStop();
-                this._playheadLocal = true;
-                this._timelineRunning = true;
-                this._ctiSec = this._tlAtMedia(this._playheadSec);
-                this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
-                log("▶▶ PLAY LOCAL: media=" + this._playheadSec.toFixed(2) + "s → " + this._mediaStop.toFixed(2) + "s");
-                // Alinear el <video> al punt i arrencar-lo (rate 1× nativa).
-                this._syncVideo(this._playheadSec);
-                this._setVideoRunning(true);
+                log("▶▶ PLAY inici: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
+                // Anclar el <video> al punt de sortida abans de deixar-lo córrer a 1x:
+                // evita començar amb un drift gran que forci un seek durant la marxa.
+                try {
+                    var vPlay = document.getElementById('srtVideo');
+                    if (vPlay && vPlay.src && vPlay.readyState >= 2) {
+                        if (Math.abs(vPlay.currentTime - this._playheadSec) > 0.05) {
+                            vPlay.currentTime = this._playheadSec;
+                        }
+                        try { vPlay.playbackRate = 1; } catch (eR9) { }
+                    }
+                } catch (eP9) { }
+                callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().play();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
+                    log("📝 SRT: PLAY result: " + result);
+                });
                 if (btn) btn.innerHTML = '⏸ PAUSA';
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
+                this._pollInterval = setInterval(function () { if (self._pollBusy) return; self._pollBusy = true; self._pollTick().then(function () { self._pollBusy = false; }, function () { self._pollBusy = false; }); }, 250);
+                // (l'interpolació local del cabezal ja corre contínuament des de _startPolling)
             } else {
-                // ── ⏸ PAUSA ────────────────────────────────────────────────────────
-                // Aturar el visor i alinear el cabezal de Premiere al punt on s'ha
-                // pausat (una sola crida): a partir d'aquí el panel torna a seguir el
-                // cabezal normalment (scrub).
-                this._timelineRunning = false;
-                this._playheadLocal = false;
-                this._setVideoRunning(false);
-                var tlP = this._pushCtiToPremiere();
-                // El cabezal de Premiere tarda un xic a arribar al punt: no reverteixis
-                // el playhead fins que hi sigui (mecanisme de seek pendent ja existent).
-                this._pendingSeek = (isFinite(tlP) && tlP > 0) ? tlP : null;
+                if (this._playheadLocal) {
+                    this._timelineRunning = false;
+                    // Fixar la base al playhead actual perquè el _localPlayInterval no torni enrere.
+                    this._ctiSec = this._tlAtMedia(this._playheadSec);
+                    this._ctiAt = (window.performance && performance.now) ? performance.now() : Date.now();
+                    log("⏸⏸ PAUSA LOCAL: media=" + this._playheadSec.toFixed(2));
+                } else {
+                    callJSX("(function(){try{app.enableQE();qe.project.getActiveSequence().stop();return'OK'}catch(e){return'ERR:'+e.message}})()").then(function(result){
+                        log("📝 SRT: STOP result: " + result);
+                    });
+                }
                 if (btn) btn.innerHTML = '▶ PLAY';
-                log("⏸⏸ PAUSA: media=" + this._playheadSec.toFixed(2) + "s (tl " + (isFinite(tlP) ? tlP.toFixed(2) : "?") + "s)");
+                log("⏸⏸ PAUSA: media=" + this._playheadSec.toFixed(2) + " tl=" + this._ctiSec.toFixed(2));
                 if (this._pollInterval) clearInterval(this._pollInterval);
-                this._pollInterval = setInterval(function () { self._pollTick(); }, 400);
+                this._pollInterval = setInterval(function () { if (self._pollBusy) return; self._pollBusy = true; self._pollTick().then(function () { self._pollBusy = false; }, function () { self._pollBusy = false; }); }, 400);
+                this._pollTick(); // re-sincronitzar el playhead amb el CTI real de seguida
             }
-        },
-
-        /**
-         * _computeMediaStop: Límit de parada del PLAY local: una mica després de
-         * l'últim subtítol (per veure'l sortir) i mai més enllà del final del clip.
-         */
-        _computeMediaStop: function () {
-            var v = document.getElementById('srtVideo');
-            var dur = (v && isFinite(v.duration) && v.duration > 0) ? v.duration : Infinity;
-            var last = 0;
-            if (this._entries && this._entries.length > 0) {
-                last = this._entries[this._entries.length - 1].endSec || 0;
-            }
-            var stop = (last > 0) ? (last + 1.0) : dur;
-            if (isFinite(dur)) stop = Math.min(stop, dur);
-            if (!isFinite(stop) || stop <= 0) stop = 1e9;
-            return stop;
-        },
-
-        /**
-         * _pushCtiToPremiere: Col·loca el cabezal de Premiere al punt de MEDIA actual
-         * del visor (una sola crida, només en pausar o en clicar al canvas).
-         */
-        _pushCtiToPremiere: function () {
-            var tl = this._tlAtMedia(this._playheadSec);
-            if (!isFinite(tl) || tl < 0 || this._playheadSec < (this._axisOrigin || 0)) tl = 0;
-            callJSX("Timeline.set(" + tl.toFixed(3) + ")").then(function (r) {
-                log("🎯 Timeline.set(" + tl.toFixed(3) + ") → " + r);
-            });
-            return tl;
         },
 
         // Layout únic compacte: regla a dalt + UNA zona de treball on la WF fa de
@@ -1732,15 +1895,6 @@
 
         setPlayhead: function (sec) {
             if (sec < 0) sec = 0;
-            // Si s'estava reproduint (PLAY local), aturar-ho: el clic reposiciona el
-            // visor i aquest torna al mode seguidor del cabezal de Premiere.
-            if (this._isPlaying) {
-                this._isPlaying = false;
-                this._playheadLocal = false;
-                this._setVideoRunning(false);
-                var btnP = document.getElementById('btnSrtPlay');
-                if (btnP) btnP.innerHTML = '▶ PLAY';
-            }
             // sec és temps de MEDIA (espai dels subtítols i la WF) → convertir a TL per Premiere
             this._playheadSec = sec;
             var tl = this._tlAtMedia(sec);
@@ -2011,7 +2165,6 @@
             this._markers = []; this._originalMarkers = []; this._dragIdx = -1;
             this._lastCtiSec = -1; this._lastLocalT = -1; this._lastLocalPx = -1;
             this._pendingSeek = null;
-            this._playheadLocal = false; this._mediaStop = 0;   // PLAY local desacoblat
             if (this._ctx) this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
             this._hideEditor();
         }

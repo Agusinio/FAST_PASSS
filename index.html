@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=44">
+    <link rel="stylesheet" href="./style.css?v=47">
 </head>
 <body>
     <div id="main-content">
@@ -94,40 +94,11 @@
             </div>
         </div>
         
-        <!-- FILA TEST1: GRÀFICS + MARCADORS · FILA TREBALL1: GRÀFICS + CHYRONS (vertical) -->
+        <!-- TEST: graella per files (MAR+CHY · GRÀFICS+SUBTÍTOLS · RENDER) · TREBALL: 2 columnes (col1 CHYRONS+GRÀFICS · col2 SUBTÍTOLS+RENDER) -->
         <div class="graphics-group">
-        <!-- SECTION: GRÀFICS (sempre visible) -->
-        <div class="section-container sq-group" id="secGrafics">
-            <div class="section-label" title="Gràfics"><span class="lbl-full">GRÀFICS</span><span class="lbl-short">GRF</span></div>
-            <div class="section-content">
-                 <div class="graphics-strip cols-3">
-                    <button id="btnMarksF6" class="secondary" title="Gràfica — col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">GRAF</button>
-                    <button id="btnGrafIpd" class="secondary" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD (marcador IPD → següent estructural)">IPD</button>
-                    <button id="btnGrafDoblePantalla" class="secondary" title="Doble Pantalla V2/V3">DP</button>
-                    <button id="btnGrafMapa" class="secondary" title="Mapa zoom">MAPA</button>
-                    <button id="btnGrafTotem" class="secondary" title="Tòtem">TOTEM</button>
-                 </div>
-            </div>
-        </div>
-
-        <!-- SECTION: MARCADORS (TEST ONLY) - fila 1 en TEST -->
-        <div class="section-container sq-group test-only" id="secMarcadors">
-            <div class="section-label" title="Marcadors"><span class="lbl-full">MARCADORS</span><span class="lbl-short">MAR</span></div>
-            <div class="section-content">
-                 <div class="graphics-strip cols-3">
-                    <button id="btnMarksF1" class="secondary" title="F1 · Marcadors OnAir (TC real d'emissió)">OnAir</button>
-                    <button id="btnMarksF2" class="secondary" title="F2 · Marcadors OnAir deduïts">Dedu</button>
-                    <button id="btnMarksF3" class="secondary" title="F3 · Marcadors previstos (coincidències)">Prev</button>
-                    <button id="btnMarksF35" class="secondary" title="F3.5 · CorrelationSnap a corts de vídeo">Correl</button>
-                    <button id="btnMarksF4" class="secondary" title="F4 · DensitySnap / faros">Dens</button>
-                    <button id="btnMarksF5" class="secondary" title="F5 · OrphanSnap (marcadors orfes a corts propers)">Orphan</button>
-                 </div>
-            </div>
-        </div>
-
-        <div class="row-break test-only"></div>
-
-        <!-- SECTION: CHYRONS - en TREBALL botons en vertical (COLOCAR/REPART); en TEST graella 4 columnes -->
+        <!-- TREBALL col1: flux de dalt a baix (CHYRONS a dalt, GRÀFICS a baix) -->
+        <div class="gfx-col">
+        <!-- SECTION: CHYRONS (sempre visible) - TREBALL: col1 a dalt (COLOCAR/REPART); TEST: graella 4 columnes -->
         <div class="section-container sq-group" id="secChyrons">
             <div class="section-label" title="Chyrons"><span class="lbl-full">CHYRONS</span><span class="lbl-short">CHY</span></div>
             <div class="section-content">
@@ -144,7 +115,24 @@
             </div>
         </div>
 
-        <!-- SECTION: SUBTÍTOLS (sempre visible) - mateixa fila amb RENDER en TREBALL -->
+        <!-- SECTION: GRÀFICS (sempre visible) - TREBALL: col1, sota CHYRONS -->
+        <div class="section-container sq-group" id="secGrafics">
+            <div class="section-label" title="Gràfics"><span class="lbl-full">GRÀFICS</span><span class="lbl-short">GRF</span></div>
+            <div class="section-content">
+                 <div class="graphics-strip cols-3">
+                    <button id="btnMarksF6" class="secondary" title="Gràfica — col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">GRAF</button>
+                    <button id="btnGrafIpd" class="secondary" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD (marcador IPD → següent estructural)">IPD</button>
+                    <button id="btnGrafDoblePantalla" class="secondary" title="Doble Pantalla V2/V3">DP</button>
+                    <button id="btnGrafMapa" class="secondary" title="Mapa zoom">MAPA</button>
+                    <button id="btnGrafTotem" class="secondary" title="Tòtem">TOTEM</button>
+                 </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- TREBALL col2: flux de dalt a baix (SUBTÍTOLS a dalt, RENDER a baix) -->
+        <div class="gfx-col">
+        <!-- SECTION: SUBTÍTOLS (sempre visible) - TREBALL: col2 a dalt (RENDER queda a sota) -->
         <div class="section-container" id="secSubtitols">
             <div class="section-label" title="Subtítols"><span class="lbl-full">SUBTÍTOLS</span><span class="lbl-short">SUB</span></div>
             <div class="section-content">
@@ -158,9 +146,7 @@
             </div>
         </div>
 
-        <div class="row-break test-only"></div>
-
-        <!-- SECTION: RENDER (sempre visible) - mateixa fila amb SUBTÍTOLS en TREBALL -->
+        <!-- SECTION: RENDER (sempre visible) - TREBALL: col2 a baix, sota SUBTÍTOLS -->
         <div class="section-container" id="secRender">
             <div class="section-label" title="Render"><span class="lbl-full">RENDER</span><span class="lbl-short">REN</span></div>
             <div class="section-content">
@@ -172,11 +158,33 @@
             </div>
         </div>
         </div>
+
+        <!-- NOMÉS TEST (amagats en TREBALL): marcadors i salts de fila de la graella TEST -->
+        <!-- SECTION: MARCADORS (TEST ONLY) - fila 1 en TEST -->
+        <div class="section-container sq-group test-only" id="secMarcadors">
+            <div class="section-label" title="Marcadors"><span class="lbl-full">MARCADORS</span><span class="lbl-short">MAR</span></div>
+            <div class="section-content">
+                 <div class="graphics-strip cols-3">
+                    <button id="btnMarksF1" class="secondary" title="F1 · Marcadors OnAir (TC real d'emissió)">OnAir</button>
+                    <button id="btnMarksF2" class="secondary" title="F2 · Marcadors OnAir deduïts">Dedu</button>
+                    <button id="btnMarksF3" class="secondary" title="F3 · Marcadors previstos (coincidències)">Prev</button>
+                    <button id="btnMarksF35" class="secondary" title="F3.5 · CorrelationSnap a corts de vídeo">Correl</button>
+                    <button id="btnMarksF4" class="secondary" title="F4 · DensitySnap / faros">Dens</button>
+                    <button id="btnMarksF5" class="secondary" title="F5 · OrphanSnap (marcadors orfes a corts propers)">Orphan</button>
+                 </div>
+            </div>
+        </div>
+
+        <div class="row-break test-only"></div>
+        <div class="row-break test-only"></div>
+
+        </div>
         <div id="splitter" title="Arrossega per redimensionar"></div>
         </div>
         <div class="right-zone">
             <div id="srtVideoWrap">
                 <video id="srtVideo" playsinline muted></video>
+                <div id="srtVideoHud">— · — fps</div>
                 <div id="srtVideoSubs"></div>
             </div>
         </div>
@@ -221,21 +229,21 @@
     <script src="js/logic/Scanner.js?v=5"></script>
     <script src="js/inspectors/2_App.js?v=5"></script>
     <script src="js/inspectors/3_Session.js?v=5"></script>
-    <script src="js/core/4_Context.js?v=5"></script>
-    <script src="js/logic/3_Project_Logic.js?v=9"></script>
+    <script src="js/core/4_Context.js?v=6"></script>
+    <script src="js/logic/3_Project_Logic.js?v=10"></script>
     <script src="js/logic/5_Tracks_Logic.js?v=5"></script>
     <script src="js/logic/6_Clips_Logic.js?v=5"></script>
     <script src="js/logic/7_KF_Logic.js?v=5"></script>
     <script src="js/logic/9_Render_Logic.js?v=5"></script>
-    <script src="js/logic/10_Srt_Logic.js?v=9"></script>
+    <script src="js/logic/10_Srt_Logic.js?v=11"></script>
     <script src="js/logic/13_Parse.js?v=5"></script>
     <script src="js/logic/14_Assembly_Logic.js?v=6"></script>
     <script src="js/logic/15_FFmpeg_Logic.js?v=5"></script>
     <script src="js/logic/16_Analysis_Logic.js?v=5"></script>
     <script src="js/core/assembly_context.js?v=5"></script>
     <script src="js/workflows/flow_mp4.js?v=5"></script>
-    <script src="js/workflows/flow_markers.js?v=9"></script>
-    <script src="js/workflows/flow_chyrons.js?v=10"></script>
+    <script src="js/workflows/flow_markers.js?v=10"></script>
+    <script src="js/workflows/flow_chyrons.js?v=13"></script>
     <script src="js/workflows/flow_graphics.js?v=5"></script>
     <script src="js/workflows/flow_mainButton.js?v=7"></script>
     <script src="js/workflows/flow_cut.js?v=11"></script>
@@ -244,9 +252,9 @@
     <script src="js/workflows/flow_render.js?v=6"></script>
     <script src="js/workflows/flow_KF.js?v=10"></script>
     <script src="js/workflows/flow_config.js?v=5"></script>
-    <script src="js/workflows/flow_assembly.js?v=5"></script>
+    <script src="js/workflows/flow_assembly.js?v=6"></script>
     <script src="js/core/project_registry.js?v=5"></script>
-    <script src="js/editor/srt_editor.js?v=63"></script>
-    <script src="js/main.js?v=31"></script>
+    <script src="js/editor/srt_editor.js?v=68"></script>
+    <script src="js/main.js?v=34"></script>
 </body>
 </html>

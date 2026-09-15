@@ -1,25 +1,3 @@
-## Actualització (2026-09-09): PLAY LOCAL desacoblat + caché de vídeo
-
-**Decisió**: el botó **▶ del editor SRT reprodueix el clip a 1× de forma autònoma**, sense
-tocar Premiere (ni `qe.play()` ni `Timeline.set()` durant la reproducció).
-
-Motiu: els subtítols viuen en **temps de MEDIA del mateix clip** que mostra el `<video>`,
-per tant el moviment natiu del vídeo **ja és** la sincronia correcta. Anclar el visor al
-CTI de Premiere obligava a seeks i interpolacions a cada poll → micro-tirons constants.
-
-- Al ▶: `_playheadLocal = true`; el tick de 100 ms fa `_playheadSec = v.currentTime` i
-  pinta canvas + overlay. **Zero seeks, zero polls del CTI** (`_pollTick` fa return).
-- Límit de parada: una mica després de l'últim subtítol i mai més enllà de `v.duration`.
-- Al ⏸ (o en clicar al canvas): s'atura el vídeo i es fa **una sola** `Timeline.set()` per
-  alinear el cabezal de Premiere; a partir d'aquí torna el mode seguidor (scrub).
-- El mode seguidor (pausa/scrub) es manté: seeks al media que correspon al CTI.
-
-**Caché de vídeo**: `_ensureLocalVideo` manté una còpia local reutilitzable per peça a
-`C:/temp/fastpass_video_<tag>.mp4` (+ sidecar `.json` amb `size`/`mtime` de l'origen).
-Es re-copia només si l'origen canvia. Reproduir en local fa els seeks/scrub instantanis
-(sobre la UNC, cada seek re-llegeix de xarxa).
-
-
 # PLAN: Visor de vídeo + subtítols a l'editor SRT (opció A, sense ffmpeg)
 
 ## Objectiu
@@ -116,3 +94,49 @@ cabezal actual, i segueix el cabezal en play/pausa/scrubbing.
 - En play (espai o botó), el vídeo avança sincronitzat amb el cabezal i el so de Premiere.
 - En pausa es queda quiet; en scrubbing segueix.
 - Sense ffmpeg implicat.
+
+---
+
+## ACTUALITZACIÓ — Qualitat de reproducció (opció C: vídeo a MEMÒRIA)
+
+**Problema**: el MP4 es reproduïa via `file:////DSMEDIA07/...` (SMB). Cada demux/seek
+tocava la xarxa ⇒ **micro-tirons** i **fotogrames negres** en fer play/scrub.
+
+**Solució implementada** (`js/editor/srt_editor.js` → `_loadVideo`, ordre de preferència):
+
+| # | Mètode | Què fa | Requisit |
+|---|---|---|---|
+| 1 | `_loadVideoFromMemory()` | XHR `responseType='blob'` del MP4 sencer → `URL.createObjectURL(blob)` → el `<video>` llegeix del **buffer de memòria** (zero accés a xarxa durant la reproducció = zero tirones/negres) | `--allow-file-access-from-files` al CEF (`.debug`, ja afegit) |
+| 2 | `_ensureLocalVideoCopy()` | Còpia pròpia a `C:\temp\fastpass_video\<clip>.mp4` via JSX (`File.copy`), **cachejada per mida** (`t.length===s.length` → `CACHED`). El `<video>` llegeix de disc local | cap (funciona sempre) |
+| 3 | `file:////` UNC directe | Comportament antic (darrer recurs) | — |
+| 4 | `_loadVideoFallback()` | Còpia a `C:\temp\fastpass_media.mp4` (fallback històric) | — |
+
+- `_revokeVideoBlob()` allibera l'objectURL anterior en carregar un altre clip i a
+  `_hideEditor()` (evita retenir 150-200 MB per clip obert).
+- **NO** s'implementa cap anti-negre (canvas fantasma) ni proxy ffmpeg: amb el fitxer a
+  memòria o a disc local el problema deixa de tenir sentit (decisió d'usuari).
+- Nota: el pas 1 necessita **reiniciar Premiere** un cop perquè CEF llegeixi el
+  `CEFCommandLineParameters` del `.debug`.
+- Verificat amb `C:\temp\fp_test_video_mem.html` (34 checks: ordre dels intents,
+  revoke, cachejada per mida, fallback a UNC, presència del flag al `.debug`).
+
+### MODES D'ORIGEN (`_videoSource`, clic al HUD)
+
+Mesurat al log real: la còpia de 201,7 MB triga **3 s** (≈66 MB/s) i el clip només
+necessita **~1 MB/s** per reproduir-se; el defecte mai va ser la xarxa sinó el servo de
+sincronia. Per això l'origen és configurable i es pot **mesurar amb el mateix HUD**:
+
+| Mode | Camí | Per a què |
+|---|---|---|
+| `unc` | només `file:////` UNC | **per defecte**: mesurar si la xarxa aguanta el scrub |
+| `local` | còpia a `C:\temp\fastpass_video` (sense memòria) | si la xarxa no aguanta |
+| `mem` | XHR → Blob → objectURL (sense còpia) | provar la memòria (cal el flag del `.debug`) |
+| `auto` | memòria → còpia local → UNC | comoditat (màxima probabilitat d'èxit) |
+
+- **Clic al HUD** (`#srtVideoHud`) rota `auto → unc → local → mem`, ho desa a
+  `localStorage['fastpass_video_source']`, ho registra al `FASTPASS.log` i recarrega el
+  clip actual. El HUD mostra el mode entre claudàtors: `[UNC] 🌐 XARXA · 25 fps`.
+- Validat: `fp_test_video_mem.html` → **58 PASS / 0 FAIL**; `fp_test_video_sync.html` →
+  **31 PASS / 0 FAIL**; syntax check del panell → **21 OK / 0 FAIL**.
+
+
