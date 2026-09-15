@@ -271,7 +271,17 @@
                         const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
                         earlyState = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
                     } else if (!semaforoData.esc.ready || ingestaEnCurs) {
-                        earlyState = 'ESPERANT';
+                        // FOTO local (on_demand): l'escaleta ja està capturada, així que es
+                        // deixa CREAR encara que el bloc s'estigui acabant d'emetre o que la
+                        // ingesta (MP4/SRT) encara no hagi arribat: l'usuari farà ACTUALITZAR
+                        // després. Sense FOTO local es manté l'espera (evita fer feina a cegues).
+                        const esFotoLocal = !!(semaforoData.esc && semaforoData.esc.local);
+                        if (esFotoLocal) {
+                            getUtils().log('📷 [checkContext] FOTO local' + (ingestaEnCurs ? ' amb ingesta en curs' : ' amb bloc en emissió') +
+                                ' → es permet CREAR el projecte (després ACTUALITZAR per a la media).', 'INFO');
+                        } else {
+                            earlyState = 'ESPERANT';
+                        }
                     }
                 }
 

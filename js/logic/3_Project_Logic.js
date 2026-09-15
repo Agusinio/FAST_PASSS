@@ -394,6 +394,9 @@
                     // 2. Importem la llista al Root
                     const safeWotts = newWotts.map(f => f.path.replace(/\\/g, "/"));
                     await utils.importList(safeWotts, "root");
+                    // L'índex de durades del bin CHY ha canviat: invalidem la caché
+                    // perquè el proper Tema‑Titol llegeixi els nous wotts.
+                    this._wottIdxCache = null;
                     
                     // 3. Parem un segon per donar temps a Premiere a indexar (Opcional però segur)
                     await utils.delay(200);
@@ -630,32 +633,161 @@
         },
 
         /**
-         * getWottDurations: Mapa nom→durada (segons) dels wotts importats al bin CHY.
-         * Font: FASTPASS.Project.items('CHY') (ja retorna la durada en segons).
-         * Cachejat per projecte: evita repetir la crida JSX a cada acció.
+         * _normWottName: Clau de comparació ROBUSTA per a noms de wott.
+         * Treu URL-encoding, extensió, sufix de duplicat (" 1") i col·lapsa
+         * espais/guions baixos, en minúscules. Així el nom del chyron
+         * (Parse.files: nom de fitxer) casa amb el nom de l'ítem del bin CHY
+         * encara que Premiere hagi afegit sufix o canviï l'extensió.
+         * @param {string} n
+         * @returns {string}
+         */
+        _normWottName: function (n) {
+            var s = String(n === null || n === undefined ? '' : n);
+            try { s = decodeURIComponent(s); } catch (e) { }
+            return s.replace(/\s+\d+$/i, '')   // sufix de duplicat de Premiere ("clip.mov 1")
+                .replace(/\.(mov|mp4|png|srt|jpg|jpeg)$/i, '')
+                .replace(/\.\d{6,}$/, '')       // sufix de fitxer del sistema de ròtols (.00590810)
+                .replace(/[_\s]+/g, ' ')
+                .replace(/^\s+|\s+$/g, '')
+                .toLowerCase();
+        },
+
+        /**
+         * _idsDeWott: TOTS els IDs numèrics llargs (6+ dígits) del nom.
+         * El nom del wott en porta dos (id d'escaleta 590746 i id de fitxer
+         * 00590810); indexar-los tots fa que el casat chyron ↔ bin surti per
+         * qualsevol dels dos encara que un dels noms porti sufix.
+         * @param {string} n
+         * @returns {Array<string>}
+         */
+        _idsDeWott: function (n) {
+            var m = String(n === null || n === undefined ? '' : n).match(/\d{6,}/g);
+            return m || [];
+        },
+
+        /**
+         * getWottIndex: Índex complet dels wotts del bin CHY.
+         *   { byName, byNorm, byId, items, bytesPerSec }
+         * - byName:  nom exacte → segons (font del DOM)
+         * - byNorm:  nom normalitzat → segons
+         * - byId:    cada ID llarg → segons
+         * - items:   [{name, dur, size, id, mediaPath}]
+         * - bytesPerSec: bitrate calibrat (mediana size/dur) per estimar durades
+         *   quan el DOM no les dóna (projectItem.duration pot ser un TickTime).
+         * @param {boolean} [forceReload]
+         * @returns {Promise<Object>}
+         */
+        getWottIndex: async function (forceReload) {
+            const st = window.FASTPASS_UI.State;
+            const key = (st && st.lastOpenedProjectName) || '';
+            if (!forceReload && this._wottIdxCache && this._wottIdxCache.key === key) {
+                return this._wottIdxCache.index;
+            }
+            const byName = {}, byNorm = {}, byId = {}, items = [];
+            let bytesPerSec = 0;
+            try {
+                const raw = await callJSX("FASTPASS.Project.items('CHY')");
+                const list = JSON.parse(raw || "[]") || [];
+                const ratios = [];
+                for (const it of (list || [])) {
+                    const name = String(it.name || "").trim();
+                    if (!name) continue;
+                    const dur = (typeof it.duration === 'number' && isFinite(it.duration) && it.duration > 0) ? it.duration : 0;
+                    const size = (typeof it.size === 'number' && isFinite(it.size)) ? it.size : 0;
+                    const norm = this._normWottName(name);
+                    const ids = this._idsDeWott(name);
+                    const rec = { name: name, dur: dur, size: size, id: (ids.length ? ids[0] : ''), mediaPath: it.mediaPath || '' };
+                    items.push(rec);
+                    if (byName[name] === undefined) byName[name] = dur;
+                    if (norm && byNorm[norm] === undefined) byNorm[norm] = dur;
+                    for (const id of ids) { if (byId[id] === undefined) byId[id] = dur; }
+                    if (dur > 0.1 && size > 0) ratios.push(size / dur);
+                }
+                if (ratios.length > 0) {
+                    ratios.sort((a, b) => a - b);
+                    bytesPerSec = ratios[Math.floor(ratios.length / 2)];   // mediana
+                }
+                const ambDur = items.filter(i => i.dur > 0).length;
+                utils.log(`⏱️ [Tema-Titol] Bin CHY: ${items.length} fitxers, ${ambDur} amb durada del DOM` +
+                    (bytesPerSec > 0 ? ` · bitrate calibrat ~${(bytesPerSec / 1048576).toFixed(1)} MB/s` : ' (sense bitrate)'), 'DEBUG');
+                if (items.length > 0 && ambDur === 0) {
+                    utils.log("⚠️ [Tema-Titol] El DOM no ha donat cap durada (projectItem.duration no és numèric): s'estimarà per mida de fitxer.", 'WARN');
+                }
+            } catch (e) {
+                utils.log("⚠️ [Tema-Titol] No s'han pogut llegir les durades del bin CHY: " + e.message, 'WARN');
+            }
+            const index = { key: key, byName: byName, byNorm: byNorm, byId: byId, items: items, bytesPerSec: bytesPerSec };
+            this._wottIdxCache = { key: key, index: index };
+            return index;
+        },
+
+        /**
+         * getWottDurations: Mapa nom→durada (segons) dels wotts del bin CHY.
+         * Es manté per compatibilitat; internament usa getWottIndex().
          * @param {boolean} [forceReload]
          * @returns {Promise<Object>}
          */
         getWottDurations: async function (forceReload) {
-            const st = window.FASTPASS_UI.State;
-            const key = (st && st.lastOpenedProjectName) || '';
-            if (!forceReload && this._wottDurCache && this._wottDurCache.key === key) {
-                return this._wottDurCache.map;
+            const idx = await this.getWottIndex(forceReload);
+            return idx.byName;
+        },
+
+        /**
+         * _wottEntryFor: Troba l'entrada del bin que correspon a un chyron,
+         * per nom exacte → nom normalitzat → qualsevol dels seus IDs.
+         * @param {Object} index
+         * @param {string} name
+         * @returns {Object|null}
+         */
+        _wottEntryFor: function (index, name) {
+            if (!index || !index.items) return null;
+            const norm = this._normWottName(name);
+            const ids = this._idsDeWott(name);
+            for (const it of index.items) { if (it.name === name) return it; }
+            for (const it of index.items) { if (norm && this._normWottName(it.name) === norm) return it; }
+            for (const it of index.items) {
+                for (const id of ids) { if (this._idsDeWott(it.name).indexOf(id) !== -1) return it; }
             }
-            const map = {};
-            try {
-                const raw = await callJSX("FASTPASS.Project.items('CHY')");
-                const items = JSON.parse(raw || "[]");
-                for (const it of (items || [])) {
-                    const n = String(it.name || "").trim();
-                    if (n) map[n] = (typeof it.duration === 'number') ? it.duration : 0;
+            return null;
+        },
+
+        /**
+         * _resolveWottDur: Durada fiable (segons) d'un chyron.
+         * Ordre: durada del DOM (nom → norm → ID) → estimació per mida amb el
+         * bitrate calibrat del propi bin → default ProRes (~43,5 MB/s) marcat
+         * com a estimació.
+         * @param {Object} index - getWottIndex()
+         * @param {Object} chyron - {name, tc, rol, path}
+         * @returns {{dur:number, src:string, size:number}}
+         */
+        _resolveWottDur: function (index, chyron) {
+            const name = String((chyron && chyron.name) || '');
+            if (index) {
+                // 1) Mapes directes (inclou la compatibilitat amb el mapa pla nom → segons)
+                if (index.byName && typeof index.byName[name] === 'number' && index.byName[name] > 0) {
+                    return { dur: index.byName[name], src: 'bin', size: 0 };
                 }
-                utils.log("⏱️ [Tema-Titol] Durades llegides del bin CHY: " + Object.keys(map).length + " fitxers", "DEBUG");
-            } catch (e) {
-                utils.log("⚠️ [Tema-Titol] No s'han pogut llegir les durades del bin CHY: " + e.message, "WARN");
+                const norm = this._normWottName(name);
+                if (index.byNorm && norm && typeof index.byNorm[norm] === 'number' && index.byNorm[norm] > 0) {
+                    return { dur: index.byNorm[norm], src: 'bin~norm', size: 0 };
+                }
+                for (const id of this._idsDeWott(name)) {
+                    if (index.byId && typeof index.byId[id] === 'number' && index.byId[id] > 0) {
+                        return { dur: index.byId[id], src: 'bin~id', size: 0 };
+                    }
+                }
             }
-            this._wottDurCache = { key: key, map: map };
-            return map;
+            // 2) Entrada del bin (per estimar la durada amb la mida del fitxer)
+            const entry = this._wottEntryFor(index, name);
+            if (entry && entry.dur > 0) return { dur: entry.dur, src: 'bin', size: entry.size };
+            const size = entry ? (entry.size || 0) : 0;
+            if (size > 0) {
+                let bps = (index && index.bytesPerSec) ? index.bytesPerSec : 0;
+                let src = 'mida';
+                if (!(bps > 0)) { bps = 43500000; src = 'mida~est'; }   // ~43,5 MB/s (ProRes 422 HQ 1080x1920)
+                return { dur: size / bps, src: src, size: size };
+            }
+            return { dur: 0, src: 'cap', size: 0 };
         },
 
         /**
@@ -678,7 +810,11 @@
          */
         _wottIdNum: function (wottName) {
             const parts = String(wottName || '').split('_');
-            const n = parseInt(parts[6], 10);
+            let n = parseInt(parts[6], 10);
+            if (isNaN(n) || n <= 0) {
+                const ids = this._idsDeWott(wottName);   // primer ID llarg = id d'escaleta
+                n = ids.length ? parseInt(ids[0], 10) : 0;
+            }
             return isNaN(n) ? 0 : n;
         },
 
@@ -698,6 +834,10 @@
             const found = [];
             const index = {};
             const list = structure || [];
+            // Compatibilitat: també accepta un mapa pla (nom → segons).
+            const idx = (durations && durations.byName)
+                ? durations
+                : { byName: durations || {}, byNorm: {}, byId: {}, items: [], bytesPerSec: 0 };
             for (let ei = 0; ei < list.length; ei++) {
                 const entry = list[ei];
                 if (!entry || !entry.chyrons) continue;
@@ -706,13 +846,16 @@
                     const rol = String(c.rol || '').toUpperCase();
                     const isTT = (rol === 'TEMA-TITOL') || (String(c.name || '').toUpperCase().indexOf('TEMA-TITOL') !== -1);
                     if (!isTT) continue;
-                    const dur = (durations && durations[c.name] !== undefined) ? durations[c.name] : 0;
-                    if (!(dur > minSec)) continue;
+                    const res = this._resolveWottDur(idx, c);
+                    if (!(res.dur > minSec)) continue;
                     const rec = {
                         item: String(entry.id || ''),
                         name: c.name,
+                        path: c.path || '',
                         tc: String(c.tc || '000000'),
-                        dur: dur,
+                        dur: res.dur,
+                        durSrc: res.src,
+                        size: res.size,
                         idNum: this._wottIdNum(c.name),
                         _ei: ei
                     };

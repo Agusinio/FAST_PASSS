@@ -382,7 +382,224 @@
             return { success: true, duration };
         },
 
-        _placeChyronsByType: async function (filterFn, trackResolver, label, onPlaced) {
+        /**
+         * _isConexioWott: El rètol pertany a una CONNEXIÓ (directe/enviada/presencial)?
+         * Aquests wotts porten el lineID del Donapas però s'han d'ancorar al punt
+         * de connexió (marcador 01dir - CONNEXIÓ DIRECTE), no a l'inici del bloc.
+         * @param {Object} chy - {name, rol}
+         * @returns {boolean}
+         */
+        _isConexioWott: function (chy) {
+            const n = String((chy && chy.name) || '').toUpperCase();
+            const r = String((chy && chy.rol) || '').toUpperCase();
+            const hay = (s) => (n.indexOf(s) !== -1 || r.indexOf(s) !== -1);
+            return hay('DIRECTE') || hay('ENVIAT') || hay('PRESENCIAL') ||
+                hay('CONNEXIO') || hay('CONEXIO');
+        },
+
+        /**
+         * _isConexioMarker: El marcador és el punt de connexió del directe?
+         * Criteris: el comentari conté CONNEXIÓ/CONNEXIO/CONEXIO o el seu id
+         * acaba en "dir" (ex: "01dir - CONNEXIÓ DIRECTE ILLA").
+         * @param {Object} m - {comments, name, time}
+         * @returns {boolean}
+         */
+        _isConexioMarker: function (m) {
+            const lbl = String((m && (m.comments || m.name)) || '').toUpperCase();
+            if (lbl.indexOf('CONNEXIÓ') !== -1 || lbl.indexOf('CONNEXIO') !== -1 || lbl.indexOf('CONEXIO') !== -1) return true;
+            const id = (lbl.split('-')[0] || '').trim();
+            return /DIR$/.test(id);
+        },
+
+        /**
+         * _connexioMarkerTime: Instant del marcador de connexió més proper DESPRÉS
+         * de fromTime (o l'últim si no n'hi ha cap després).
+         * @param {Array} allMarkers
+         * @param {number} fromTime
+         * @returns {number|null}
+         */
+        _connexioMarkerTime: function (allMarkers, fromTime) {
+            const cands = (allMarkers || []).filter(m => this._isConexioMarker(m))
+                .slice().sort((a, b) => a.time - b.time);
+            if (cands.length === 0) return null;
+            const after = cands.filter(m => m.time >= fromTime - 0.001);
+            if (after.length > 0) return after[0].time;
+            return cands[cands.length - 1].time;
+        },
+
+        /**
+         * _baseTimeForChyron: Temps base d'un rètol (abans de sumar-hi el tc).
+         * Per defecte el marcador del seu ítem; si el rètol és de connexió
+         * (Directe/Enviat/Presencial) s'ancora al punt de connexió.
+         * @param {Object} chy
+         * @param {Object} mk - {fullId, time}
+         * @param {Array} allMarkers
+         * @returns {number}
+         */
+        _baseTimeForChyron: function (chy, mk, allMarkers) {
+            const fallback = (mk && isFinite(mk.time)) ? mk.time : 0;
+            if (!this._isConexioWott(chy)) return fallback;
+            const tConex = this._connexioMarkerTime(allMarkers, fallback);
+            if (tConex === null) return fallback;
+            if (Math.abs(tConex - fallback) > 0.01) {
+                log(`   🔌 [Conexió] "${String(chy.name).substring(0, 55)}..." → punt de connexió @ ${tConex.toFixed(2)}s (no a ${fallback.toFixed(2)}s)`);
+            }
+            return tConex;
+        },
+
+        /**
+         * _isTitolet: És un rètol TITOLET (grafisme de l'INSERT)?
+         * OJO: el filtre antic de la fase Resto feia servir name.includes("TITOL")
+         * i els TITOLET hi quedaven exclosos (no anaven ni a Titol ni a Resto).
+         * @param {Object} chy
+         * @returns {boolean}
+         */
+        _isTitolet: function (chy) {
+            const n = String((chy && chy.name) || '').toUpperCase();
+            const r = String((chy && chy.rol) || '').toUpperCase();
+            return n.indexOf('TITOLET') !== -1 || r.indexOf('TITOLET') !== -1;
+        },
+
+        /**
+         * _titoletKey: Clau d'agrupació d'un TITOLET: el text del rètol, sense el
+         * sufix de posició/versió (BAIX/MIG/ALT/B...), l'extensió ni el sufix de
+         * fitxer numèric del sistema de ròtols.
+         * @param {string} name
+         * @returns {string}
+         */
+        _titoletKey: function (name) {
+            const parts = String(name || '').split('_');
+            let key = (parts.length > 8) ? parts.slice(8).join('_') : (parts[parts.length - 1] || name);
+            key = key.replace(/\.(mov|mp4|png)$/i, '')
+                .replace(/\.\d{6,}$/, '')
+                .replace(/_(BAIX|MIG|ALT|B|M|A)$/i, '')
+                .replace(/[_\s]+/g, ' ')
+                .trim().toLowerCase();
+            // Els noms del sistema venen truncats a ~40 caràcters, així que el mateix
+            // rètol pot arribar com "…món en plena" i "…món en pla": ens quedem amb
+            // el prefix per agrupar-los.
+            return key.slice(0, 30).replace(/[\s_]+$/, '');
+        },
+
+        /**
+         * _dedupeTitolet: Deixa NOMÉS un TITOLET per text (la versió més recent,
+         * id més alt). El sistema genera variants de posició (BAIX/MIG) i versions
+         * successives del mateix rètol: n'hi ha prou amb una.
+         * @param {Array} list
+         * @returns {Array}
+         */
+        _dedupeTitolet: function (list) {
+            const byKey = {};
+            for (const c of (list || [])) {
+                const key = this._titoletKey(c.name);
+                const id = FASTPASS_UI.Logic.Project._wottIdNum(c.name);
+                if (byKey[key] === undefined || id > byKey[key].id) byKey[key] = { c: c, id: id };
+            }
+            return Object.keys(byKey).map(k => byKey[k].c);
+        },
+
+        /**
+         * _trackBusyRanges: Rangs (start,end) ocupats d'una pista de vídeo, amb la
+         * caché de la crida i els rètols ja col·locats en aquesta mateixa passada.
+         * @param {number} track
+         * @param {Object} ctx - {busy:{}, placed:{}}
+         * @returns {Promise<Array>}
+         */
+        _trackBusyRanges: async function (track, ctx) {
+            const c = ctx || {};
+            c.busy = c.busy || {};
+            c.placed = c.placed || {};
+            c.placed[track] = c.placed[track] || [];
+            if (c.busy[track]) return c.busy[track].concat(c.placed[track]);
+            let ranges = [];
+            try {
+                const clips = await getClipsLogic().getTrackClips(track, 'video');
+                ranges = (clips || []).map(cl => ({ start: cl.start, end: cl.end }))
+                    .filter(r => isFinite(r.start) && isFinite(r.end));
+            } catch (e) { }
+            c.busy[track] = ranges;
+            return ranges.concat(c.placed[track]);
+        },
+
+        /**
+         * _addPlaced: Anota un rètol col·locat (perquè la resta de la passada el
+         * tingui en compte) i invalida la caché de la seva pista.
+         */
+        _addPlaced: function (ctx, track, start, end) {
+            if (!ctx) return;
+            ctx.placed = ctx.placed || {};
+            ctx.placed[track] = ctx.placed[track] || [];
+            ctx.placed[track].push({ start: start, end: end });
+            if (ctx.busy) delete ctx.busy[track];
+        },
+
+        /**
+         * _firstFreeStart: Primer instant ≥ start amb 'dur' segons lliures.
+         * @param {Array} ranges
+         * @param {number} start
+         * @param {number} dur
+         * @returns {number}
+         */
+        _firstFreeStart: function (ranges, start, dur) {
+            let t = start;
+            const sorted = (ranges || []).slice().sort((a, b) => a.start - b.start);
+            for (let i = 0; i < sorted.length; i++) {
+                const r = sorted[i];
+                if (r.end <= t + 0.001) continue;         // ja ha passat
+                if (r.start >= t + dur - 0.001) break;    // hi cap abans d'aquest clip
+                t = r.end;                                 // xoca: saltem al seu final
+            }
+            return t;
+        },
+
+        /**
+         * _chooseSlot: Tria pista i instant per no trepitjar cap rètol.
+         * candidates: número o array de números (ordre de preferència, ex: [V6,V7]).
+         * Si la primera candidata està lliure s'hi queda; si no, guanya la que
+         * tingui el primer forat (desplaçant l'inici si cal).
+         * @returns {Promise<{track:number, start:number, moved:boolean}>}
+         */
+        _chooseSlot: async function (candidates, startSec, durSec, ctx) {
+            const list = (Array.isArray(candidates) ? candidates : [candidates]).filter(t => t);
+            if (list.length === 0) return { track: null, start: startSec, moved: false };
+            const dur = Math.max(durSec || 0, 0.5);
+            let best = null;
+            for (const tr of list) {
+                const ranges = await this._trackBusyRanges(tr, ctx);
+                const free = this._firstFreeStart(ranges, startSec, dur);
+                if (free <= startSec + 0.01) return { track: tr, start: startSec, moved: false };
+                if (!best || free < best.start) best = { track: tr, start: free, moved: true };
+            }
+            return best || { track: list[0], start: startSec, moved: false };
+        },
+
+        /**
+         * _itemEndTime: Final de l'ítem d'un marcador estructural: el següent
+         * marcador (amb un petit marge), o el final del clip de V1 que el conté,
+         * o el final de la seqüència.
+         * Serveix per repartir els TITOLET dins del seu ítem quan no tenen un
+         * timecode fiable.
+         * @param {Object} mk - {fullId, time}
+         * @param {Array} markersFull - marcadors estructurals ordenats
+         * @returns {Promise<number|null>}
+         */
+        _itemEndTime: async function (mk, markersFull) {
+            const after = (markersFull || []).filter(m => m.time > mk.time + 0.01)
+                .sort((a, b) => a.time - b.time);
+            if (after.length > 0) return after[0].time - 0.5;      // marge abans del següent ítem
+            try {
+                const clips = await getClipsLogic().getTrackClips(1, 'video');
+                const cl = (clips || []).filter(c => c.start <= mk.time && c.end > mk.time)[0];
+                if (cl && cl.end > mk.time) return cl.end;
+            } catch (e) { }
+            try {
+                const end = parseFloat(await callJSX("Timeline.getOut()") || "0");
+                if (end > mk.time) return end;
+            } catch (e2) { }
+            return null;
+        },
+
+        _placeChyronsByType: async function (filterFn, trackResolver, label, onPlaced, opts) {
             if (!(await getUtils().validateActiveSequence())) return;
             const cfg = FASTPASS_UI.Config.get();
             const struct = FASTPASS_UI.State.structure;
@@ -419,24 +636,60 @@
                 const structureById = {};
                 for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
 
+                const wottIdx = await FASTPASS_UI.Logic.Project.getWottIndex();
+                const ctx = { busy: {}, placed: {} };
                 let placedCount = 0;
                 for (const mk of markersFull) {
                     const entry = structureById[mk.fullId];
                     if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
-                    const matching = entry.chyrons.filter(c => filterFn(c));
+                    let matching = entry.chyrons.filter(c => filterFn(c));
                     if (matching.length === 0) continue;
+                    // TITOLET: el sistema genera variants de posició i versions del
+                    // mateix rètol; es deixa només la més recent de cada text.
+                    if (opts && opts.dedupeTitolet) {
+                        const titolets = matching.filter(c => this._isTitolet(c));
+                        if (titolets.length > 1) {
+                            const kept = this._dedupeTitolet(titolets);
+                            log(`   🧩 [${label}] TITOLET al marcador ${mk.fullId}: ${titolets.length} fitxers → ${kept.length} rètol(s) únic(s)`);
+                            matching = matching.filter(c => !this._isTitolet(c)).concat(kept);
+                        }
+                    }
                     matching.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
                     log(`📌 [${label}] Marcador ${mk.fullId}: ${matching.length} chyron(s)`);
+                    // TITOLET: el tc del nom no és fiable (sempre 00.00/00.01) → es
+                    // reparteixen dins del seu ítem, tots a la mateixa pista i sense pisar-se.
+                    const titolGroup = matching.filter(c => this._isTitolet(c));
+                    const itemEnd = (titolGroup.length > 0) ? await this._itemEndTime(mk, markersFull) : null;
                     for (const chy of matching) {
-                        const tcSeconds = getUtils().timeToSeconds(chy.tc || "000000");
-                        const idealTime = mk.time + tcSeconds;
-                        const placeTime = await this._snapToNearestCut(idealTime);
-                        const track = trackResolver(chy, cfg);
+                        const isTit = this._isTitolet(chy);
+                        let idealTime, doSnap = true;
+                        if (isTit && itemEnd && itemEnd > mk.time) {
+                            const n = titolGroup.length;
+                            const i = titolGroup.indexOf(chy);
+                            const slot = (itemEnd - mk.time) / n;
+                            idealTime = mk.time + (i * slot);
+                            doSnap = false;
+                            log(`   🧩 [${label}] TITOLET ${i + 1}/${n} sense tc fiable → repartit dins l'ítem ${mk.fullId} ` +
+                                `(${mk.time.toFixed(2)}s → ${itemEnd.toFixed(2)}s, pas ${slot.toFixed(1)}s)`);
+                        } else {
+                            const baseTime = this._baseTimeForChyron(chy, mk, allMarkers);
+                            idealTime = baseTime + getUtils().timeToSeconds(chy.tc || "000000");
+                        }
+                        const snapped = doSnap ? await this._snapToNearestCut(idealTime) : idealTime;
+                        const durInfo = FASTPASS_UI.Logic.Project._resolveWottDur(wottIdx, chy);
+                        const slot = await this._chooseSlot(trackResolver(chy, cfg), snapped, durInfo.dur, ctx);
+                        if (!slot.track) {
+                            log(`   ⚠️ [${label}] Sense pista disponible per a ${chy.name}`, "WARN");
+                            continue;
+                        }
                         const escapedName = getUtils().escape(chy.name);
-                        await callJSX(`Clips.insert('${escapedName}', ${track}, ${placeTime}, null, 'video')`);
-                        log(`   ✅ [${label}] ${chy.name} → V${track} @ ${placeTime.toFixed(2)}s`);
+                        await callJSX(`Clips.insert('${escapedName}', ${slot.track}, ${slot.start}, null, 'video')`);
+                        this._addPlaced(ctx, slot.track, slot.start, slot.start + Math.max(durInfo.dur, 0.5));
+                        log(`   ✅ [${label}] ${chy.name} → V${slot.track} @ ${slot.start.toFixed(2)}s (dur ${durInfo.dur.toFixed(1)}s)` +
+                            (slot.moved ? ` ⟵ desplaçat per no trepitjar (ideal ${snapped.toFixed(2)}s)` : '') +
+                            (this._isTitolet(chy) ? ' [INSERT]' : ''));
                         placedCount++;
-                        if (onPlaced) { await onPlaced(chy, placeTime); }
+                        if (onPlaced) { await onPlaced(chy, slot.start); }
                     }
                 }
                 if (placedCount === 0) {
@@ -490,15 +743,16 @@
                 log(`🔗 [Titol] ${structuralMarkers.length} marcadors estructurals; ids: [${Object.keys(markersById).join(', ')}]`);
 
                 // ── 2. SELECCIÓ: només Tema‑Titol GRANS (> MIN_SEC) ─────────────
-                const durations = await FASTPASS_UI.Logic.Project.getWottDurations();
-                const ttList = FASTPASS_UI.Logic.Project.pickTemaTitols(struct, durations, MIN_SEC);
+                const wottIdx = await FASTPASS_UI.Logic.Project.getWottIndex();
+                const ttList = FASTPASS_UI.Logic.Project.pickTemaTitols(struct, wottIdx, MIN_SEC);
                 if (ttList.length === 0) {
+                    this._logTitolDiagnostic(struct, wottIdx, MIN_SEC);
                     log(`⚠️ [Titol] Cap Tema‑Titol gran (>${MIN_SEC}s) al bin CHY. No es col·loca res.`, "WARN");
                     getUtils().status(`Tema‑Titol: cap clip gran (>${MIN_SEC}s)`, "warn");
                     return;
                 }
                 log(`🎯 [Titol] ${ttList.length} Tema‑Titol(s) gran(s): ` +
-                    ttList.map(t => t.item + '@' + t.tc + ' (' + t.dur.toFixed(1) + 's, id=' + t.idNum + ')').join(' · '));
+                    ttList.map(t => t.item + '@' + t.tc + ' (' + t.dur.toFixed(1) + 's ' + t.durSrc + ', id=' + t.idNum + ')').join(' · '));
 
                 // ── 3. REFERÈNCIA I FINAL DEL BLOC ──────────────────────────────
                 const clips = await getClipsLogic().getTrackClips(1, "video");
@@ -562,6 +816,43 @@
                 }
             } catch (e) { getUtils().handleError(e, "Titol"); }
         },
+        /**
+         * _logTitolDiagnostic: Log de diagnòstic quan no hi ha cap Tema‑Titol gran.
+         * Mostra quants n'hi ha a l'estructura, la durada resolta i la seva font,
+         * i avisa del motiu més habitual (cap rol/nom Tema‑Titol o cap durada).
+         * @param {Array} struct - State.structure
+         * @param {Object} idx - getWottIndex()
+         * @param {number} minSec
+         */
+        _logTitolDiagnostic: function (struct, idx, minSec) {
+            try {
+                const found = [];
+                let totalChy = 0;
+                for (const e of (struct || [])) {
+                    for (const c of (e.chyrons || [])) {
+                        totalChy++;
+                        const rol = String(c.rol || '').toUpperCase();
+                        if (rol === 'TEMA-TITOL' || String(c.name || '').toUpperCase().indexOf('TEMA-TITOL') !== -1) {
+                            const res = FASTPASS_UI.Logic.Project._resolveWottDur(idx, c);
+                            found.push(`${e.id}@${c.tc}→${res.dur.toFixed(2)}s(${res.src})`);
+                        }
+                    }
+                }
+                log(`🔬 [Titol·DIAG] Estructura: ${(struct || []).length} blocs, ${totalChy} chyrons; Tema‑Titol: ${found.length}` +
+                    (found.length ? ' → ' + found.join(' | ') : ''), "INFO");
+                const nBin = (idx && idx.items) ? idx.items.length : 0;
+                if (found.length === 0) {
+                    log(`🔬 [Titol·DIAG] Cap chyron amb rol/nom Tema‑Titol (bin CHY: ${nBin} fitxers). Revisa que l'escaneig hagi carregat l'estructura del bloc.`, "WARN");
+                } else if (found.every(f => f.indexOf('(cap)') !== -1)) {
+                    log(`🔬 [Titol·DIAG] Tema‑Titol trobats però sense durada ni mida al bin CHY (${nBin} fitxers).`, "WARN");
+                } else {
+                    log(`🔬 [Titol·DIAG] Tots els Tema‑Titol fan ≤ ${minSec}s: no es col·loca res (regla: només clips grans).`, "INFO");
+                }
+            } catch (e) {
+                log(`🔬 [Titol·DIAG] Error al diagnòstic: ${e.message}`, "WARN");
+            }
+        },
+
         /**
          * _blockStartTime: Posició d'inici del bloc per als Tema‑Titol sense
          * marcador propi. Si hi ha conductor a la pista de chyrons dins del primer
@@ -822,7 +1113,7 @@
         placeChyronLloc: async function () {
             await this._placeChyronsByType(
                 c => c.name.includes("Lloc") || c.name.includes("Data") || (c.rol || '').toUpperCase() === "LLOCDATA",
-                (c, cfg) => cfg.tracks.video.llocdata,
+                (c, cfg) => [cfg.tracks.video.llocdata, cfg.tracks.video.lloc, cfg.tracks.video.chyrons],
                 "Lloc"
             );
         },
@@ -830,7 +1121,7 @@
         placeChyronNom: async function () {
             await this._placeChyronsByType(
                 c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec"),
-                (c, cfg) => cfg.tracks.video.chyrons,
+                (c, cfg) => [cfg.tracks.video.chyrons, cfg.tracks.video.lloc || cfg.tracks.video.llocdata],
                 "Nom"
                 // ── Reencuadre automàtic DESACTIVAT de moment: el botó NOM només col·loca
                 //    els chyrons. L'efecte Auto Reframe s'aplica manualment amb el botó REFRAME.
@@ -953,7 +1244,9 @@
         },
 
         placeChyronResto: async function () {
-            const isTitol = c => c.name.includes("Tema-Titol") || c.name.includes("TITOL");
+            // OJO: "TITOLET" conté "TITOL": si es filtra per includes("TITOL") els
+            // TITOLET queden exclosos del Resto i no es col·loquen enlloc.
+            const isTitol = c => (c.rol || '').toUpperCase() === "TEMA-TITOL" || c.name.includes("Tema-Titol");
             const isConductor = c => (c.rol || '').toUpperCase() === "CONDUCTOR";
             const isLloc = c => c.name.includes("Lloc") || c.name.includes("Data") || (c.rol || '').toUpperCase() === "LLOCDATA";
             const isNom = c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec");
@@ -963,17 +1256,26 @@
                 (c, cfg) => {
                     const rName = (c.name || '').toUpperCase();
                     const rRol = (c.rol || '').toUpperCase();
-                    // Rètols de LOCALITZACIÓ d'un directe (ex: "Directe PRESENCIAL Moscou")
-                    // i rètols de PROGRAMES (menció d'un altre programa): van a la pista de
-                    // Lloc (V7) per no trepitjar a V6 els chyrons de nom consecutius
-                    // (00.00 Directe + 00.01 Enviat No) del mateix directe.
+                    const V6 = cfg.tracks.video.chyrons;
+                    const V7 = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
+                    // TITOLET (grafismes de l'INSERT): tots a V7, repartits dins del seu
+                    // ítem (el tc del nom no és fiable i no s'han de repartir de pista).
+                    if (this._isTitolet(c)) return [V7];
+                    // Rètols de connexió (Directe/Enviat/Presencial): V6 preferent i V7 de
+                    // reserva, perquè no es trepitgin (abans tots dos anaven a V7 i se
+                    // solapaven a 00.00 i 00.01 del mateix directe).
+                    if (this._isConexioWott(c)) return [V6, V7];
+                    // Rètols de LOCALITZACIÓ (ex: "Directe PRESENCIAL Barcelona") i de
+                    // PROGRAMES: V7 preferent (deixen V6 lliure per als noms), V6 de reserva.
                     if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE' ||
                         rName.indexOf('PROGRAMES') !== -1 || rRol.indexOf('PROGRAMES') !== -1) {
-                        return cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
+                        return [V7, V6];
                     }
-                    return cfg.tracks.video.chyrons;
+                    return [V6, V7];
                 },
-                "Resto"
+                "Resto",
+                undefined,
+                { dedupeTitolet: true }
             );
         },
 

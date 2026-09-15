@@ -37,12 +37,7 @@ FASTPASS.IO = (function () {
                         }
                     }
                     result.push({
-                        // ⚠️ File.name d'ExtendScript pot venir URL-encoded en algunes rutes
-                        // UNC (ex: 'Conductor_Enric%20Pinyol%20Leal.mov'). El desfem aquí perquè
-                        // tots els consumidors del JS rebin el nom real (espais i accents).
-                        name: (function (nm) {
-                            try { return decodeURIComponent(String(nm)); } catch (e) { return String(nm); }
-                        })(f.name),
+                        name: f.name,
                         path: f.fsName,
                         modified: f.modified.getTime(),
                         // Data de CREACIÓ real. Mai fer servir modified com a created:
@@ -232,11 +227,16 @@ FASTPASS.IO = (function () {
          */
         curl: function (url, authHeader) {
             try {
-                var outFile = Folder.temp + "/fp_curl_" + new Date().getTime() + ".json";
-                var cmd = 'curl -s -X POST "' + url + '" -H "accept: application/json" -H "' + authHeader + '" > "' + outFile + '"';
+                var stamp = new Date().getTime();
+                var outFile = Folder.temp + "/fp_curl_" + stamp + ".json";
+                var errFile = Folder.temp + "/fp_curl_" + stamp + ".err";
+                // --connect-timeout/--max-time: si l'API de digition no respon (xarxa
+                // interna, VPN, certificat) curl ha de tallar SOL. Sense límit, el motor
+                // JSX queda bloquejat i el botó FOTO es queda en "⏳ FOTO..." per sempre.
+                var cmd = 'curl -s --connect-timeout 6 --max-time 20 -X POST "' + url + '" -H "accept: application/json" -H "' + authHeader + '" > "' + outFile + '" 2> "' + errFile + '"';
 
                 // Crear .bat temporal
-                var tempFile = new File(Folder.temp + "/fp_curl_" + new Date().getTime() + ".bat");
+                var tempFile = new File(Folder.temp + "/fp_curl_" + stamp + ".bat");
                 tempFile.open('w');
                 tempFile.writeln("@echo off");
                 tempFile.writeln(cmd);
@@ -246,16 +246,27 @@ FASTPASS.IO = (function () {
                 var success = tempFile.execute();
                 if (!success) return "ERR:CURL_EXECUTE_FAILED";
 
-                // Esperar que el fitxer de sortida es crei (max 30 segons)
-                var maxWait = 30000;
+                // Esperar que el fitxer de sortida tingui contingut (max 25 segons)
+                var maxWait = 25000;
                 var waited = 0;
                 var outFileObj = new File(outFile);
-                while (!outFileObj.exists && waited < maxWait) {
+                while ((!outFileObj.exists || outFileObj.length === 0) && waited < maxWait) {
                     $.sleep(500);
                     waited += 500;
                 }
 
-                if (!outFileObj.exists) return "ERR:CURL_OUTPUT_NOT_FOUND";
+                if (!outFileObj.exists || outFileObj.length === 0) {
+                    // Sense resposta: retornem també el stderr de curl per poder diagnosticar
+                    var errTxt = "";
+                    try {
+                        var errFileObj = new File(errFile);
+                        if (errFileObj.exists) { errFileObj.open('r'); errTxt = errFileObj.read(); errFileObj.close(); }
+                    } catch (eErr) { }
+                    try { tempFile.remove(); } catch (e1) { }
+                    try { outFileObj.remove(); } catch (e2) { }
+                    try { new File(errFile).remove(); } catch (e3) { }
+                    return "ERR:CURL_EMPTY" + (errTxt ? (": " + String(errTxt).replace(/[\r\n]+/g, " ").substring(0, 200)) : "");
+                }
 
                 // Llegir el resultat
                 var result = "";
@@ -264,8 +275,9 @@ FASTPASS.IO = (function () {
                 outFileObj.close();
 
                 // Netejar fitxers temporals
-                try { tempFile.remove(); } catch(e) {}
-                try { outFileObj.remove(); } catch(e) {}
+                try { tempFile.remove(); } catch (e4) {}
+                try { outFileObj.remove(); } catch (e5) {}
+                try { new File(errFile).remove(); } catch (e6) {}
 
                 return result;
             } catch (e) {

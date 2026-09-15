@@ -794,6 +794,98 @@
         },
 
         // ═══════════════════════════════════════════════════════════════
+        // 🟠 F4: snapFaroMarkers — Snap dels marcadors al TALL REAL més
+        // proper (o a la ruptura de densitat DP+DIR), finestra ±0,6 s
+        // ═══════════════════════════════════════════════════════════════
+        snapFaroMarkers: async function () {
+            log('🟠 [F4·Faro] Iniciant snap dels marcadors al tall real més proper...');
+
+            const clips = await getClipsLogic().getTrackClips(1, 'video');
+            if (!clips || clips.length === 0) {
+                log('⚠️ [F4·Faro] No hi ha clips a V1.');
+                return;
+            }
+
+            // Ruptures de densitat (multi-senyal); les de parell DP+DIR són prioritàries
+            const densityData = this._calcDensityFootprint(clips);
+            const breaks = (densityData && densityData.breaks) ? densityData.breaks : [];
+            log('   🟠 [F4·Faro] Ruptures de densitat: ' + breaks.length +
+                (breaks.length ? ' → ' + breaks.map(function (b) { return b.time.toFixed(2) + 's' + (b.dpDirPair ? '[DP+DIR]' : ''); }).join(', ') : ''));
+
+            var markersRaw = await callJSX('Markers.get()');
+            var existingMarkers = [];
+            if (markersRaw && markersRaw !== '[]') {
+                try { existingMarkers = JSON.parse(markersRaw); } catch (e) { }
+            }
+            log('   🟠 [F4·Faro] Marcadors existents: ' + existingMarkers.length);
+
+            var SEARCH_WINDOW = 0.6;
+            var MIN_MOVE = 0.02;
+
+            var _extractPrefix = function (comment) {
+                if (!comment) return '';
+                var spaceDashIdx = comment.indexOf(' -');
+                if (spaceDashIdx <= 0) return '';
+                return comment.substring(0, spaceDashIdx).replace(/^\s+|\s+$/g, '');
+            };
+
+            var placements = [];
+            var alreadyOk = 0;
+
+            for (var mi = 0; mi < existingMarkers.length; mi++) {
+                var mk = existingMarkers[mi];
+                var markerTime = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
+                if (isNaN(markerTime)) continue;
+                if (markerTime < 0.01) continue;   // el marcador d'inici no es toca
+
+                var comment = mk.comments || '';
+                var prefix = _extractPrefix(comment);
+                if (!prefix) continue;
+
+                // 1) Ruptura de densitat dins la finestra (prioritària: marca el punt
+                //    on canvia el patró, p.ex. el pas del Donapas al directe)
+                var bestBreak = null;
+                for (var bi = 0; bi < breaks.length; bi++) {
+                    var dB = Math.abs(breaks[bi].time - markerTime);
+                    if (dB <= SEARCH_WINDOW && (bestBreak === null || dB < Math.abs(bestBreak - markerTime))) {
+                        bestBreak = breaks[bi].time;
+                    }
+                }
+
+                // 2) Tall real més proper de V1
+                var nearestDist = SEARCH_WINDOW + 999;
+                var nearestCut = null;
+                for (var ci = 0; ci < clips.length; ci++) {
+                    var dStart = clips[ci].start - markerTime;
+                    var dEnd = clips[ci].end - markerTime;
+                    if (Math.abs(dStart) < Math.abs(nearestDist)) { nearestDist = dStart; nearestCut = clips[ci].start; }
+                    if (Math.abs(dEnd) < Math.abs(nearestDist)) { nearestDist = dEnd; nearestCut = clips[ci].end; }
+                }
+
+                var target = null, why = '';
+                if (bestBreak !== null && (nearestCut === null || Math.abs(bestBreak - markerTime) <= Math.abs(nearestDist))) {
+                    target = bestBreak; why = 'ruptura de densitat';
+                } else if (nearestCut !== null && Math.abs(nearestDist) <= SEARCH_WINDOW) {
+                    target = nearestCut; why = 'tall real';
+                }
+
+                if (target === null || Math.abs(target - markerTime) < MIN_MOVE) { alreadyOk++; continue; }
+
+                var mkColor = (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : 6;
+                placements.push({ prefix: prefix, timeSec: target, comment: comment, colorIdx: mkColor });
+                log('   🟠 [F4·Faro] ' + prefix + ': ' + markerTime.toFixed(2) + 's → ' + target.toFixed(2) + 's (' + why + ', Δ=' + (target - markerTime).toFixed(3) + 's)');
+            }
+
+            if (placements.length === 0) {
+                log('🟠 [F4·Faro] Cap marcador per ajustar (' + alreadyOk + ' ja correctes). ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F4·Faro');
+            log('🟠 [F4·Faro] Moguts: ' + (result.moved || 0) + ' | Ja correctes: ' + alreadyOk + '. ✓ FINALITZAT.');
+        },
+
+        // ═══════════════════════════════════════════════════════════════
         // 🟢 F5: snapOrphanMarkers — Snap d'huérfans als talls més propers
         // ═══════════════════════════════════════════════════════════════
         snapOrphanMarkers: async function () {

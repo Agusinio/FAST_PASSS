@@ -46,6 +46,9 @@
         placeScheduledMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.placeScheduledMarkers();
         },
+        snapFaroMarkers: async function () {
+            return FASTPASS_UI.Workflows.Markers.snapFaroMarkers();
+        },
         snapOrphanMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.snapOrphanMarkers();
         },

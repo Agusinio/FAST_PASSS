@@ -50,6 +50,78 @@ FASTPASS.Project = (function() {
         return null;
     }
 
+    /**
+     * _ticksToSeconds: Converteix ticks del DOM a segons usant la classe Time de
+     * Premiere (així no depenem del factor fix 254016000000, que és fràgil).
+     * @param {number} ticks
+     * @returns {number} segons, 0 si no es pot convertir
+     */
+    function _ticksToSeconds(ticks) {
+        try {
+            var t = new Time();
+            t.ticks = ticks;
+            var s = t.seconds;
+            if (typeof s === 'number' && !isNaN(s) && s > 0) return s;
+        } catch (e) {}
+        return 0;
+    }
+
+    /**
+     * _timeToSeconds: Normalitza la durada d'un ítem del projecte a SEGONS.
+     * Al DOM de Premiere, projectItem.duration NO sempre és un número:
+     *   - numero (segons)               → es retorna tal qual
+     *   - objecte Time amb .seconds     → es llegeix .seconds
+     *   - objecte TickTime amb .ticks   → es converteix amb _ticksToSeconds
+     * Els tests simulaven un número i a producció (2026-09-15) totes les
+     * durades arribaven a 0 → cap Tema‑Titol gran detectat al bin CHY.
+     * @param {*} v
+     * @returns {number} segons (0 si no es pot determinar)
+     */
+    function _timeToSeconds(v) {
+        if (v === null || v === undefined) return 0;
+        if (typeof v === 'number') {
+            if (isNaN(v) || v <= 0) return 0;
+            return (v > 100000) ? _ticksToSeconds(v) : v;
+        }
+        if (typeof v === 'string') {
+            var n = parseFloat(v);
+            if (isNaN(n) || n <= 0) return 0;
+            return (n > 100000) ? _ticksToSeconds(n) : n;
+        }
+        try {
+            var s = v.seconds;
+            if (typeof s === 'function') s = v.seconds();
+            if (typeof s === 'number' && !isNaN(s) && s > 0) return s;
+        } catch (e1) {}
+        try {
+            var k = v.ticks;
+            if (typeof k === 'function') k = v.ticks();
+            if (typeof k === 'number' && !isNaN(k) && k > 0) return _ticksToSeconds(k);
+        } catch (e2) {}
+        return 0;
+    }
+
+    /**
+     * _safeStr: Conversió a string tolerant (mai llança) per a diagnòstics.
+     */
+    function _safeStr(v) {
+        try { return String(v); } catch (e) { return '?'; }
+    }
+
+    /**
+     * _fileSize: Mida en bytes del media d'un ítem (0 si no és accessible).
+     * Serveix de xarxa de seguretat per estimar la durada quan el DOM no la dóna.
+     * @param {object} it - projectItem de tipus footage
+     * @returns {number}
+     */
+    function _fileSize(it) {
+        try {
+            var f = new File(it.getMediaPath());
+            if (f.exists) return f.length;
+        } catch (e) {}
+        return 0;
+    }
+
     return {
         
         // --- 1. GESTIÓ DE PROJECTE ---
@@ -221,20 +293,14 @@ FASTPASS.Project = (function() {
                 var results = [];
                 for (var i = 0; i < container.children.numItems; i++) {
                     var it = container.children[i];
-                    var dur = 0;
-                    if (it.type === 1) { // Footage
-                        if (it.duration && it.duration.seconds) {
-                            dur = it.duration.seconds;
-                        } else if (it.duration) {
-                            // Ticks a segundos: 254016000000 ticks = 1 hora a 30fps
-                            dur = it.duration / 254016000000.0 * 3600.0;
-                        }
-                    }
+                    var isFootage = (it.type === 1);
                     results.push({
                         name: it.name,
                         type: it.type,
-                        mediaPath: (it.type === 1) ? it.getMediaPath() : "",
-                        duration: dur
+                        mediaPath: isFootage ? it.getMediaPath() : "",
+                        duration: isFootage ? _timeToSeconds(it.duration) : 0,
+                        size: isFootage ? _fileSize(it) : 0,
+                        durationRaw: isFootage ? _safeStr(it.duration) : ""
                     });
                 }
                 return JSON.stringify(results);
@@ -260,16 +326,9 @@ FASTPASS.Project = (function() {
                     }
                 }
                 if (!item) return 0;
-                // projectItem.duration està en ticks (254016000000 ticks = 1 hora a 30fps)
-                // Fórmula: segons = ticks / 254016000000 * 3600
-                if (item.duration && item.duration.seconds) {
-                    return item.duration.seconds;
-                }
-                // Fallback: convertir des de ticks si seconds no està disponible
-                if (item.duration) {
-                    return item.duration / 254016000000.0 * 3600.0;
-                }
-                return 0;
+                // El DOM pot retornar un número, un Time (.seconds) o un TickTime
+                // (.ticks): ho resol _timeToSeconds (fix 2026-09-15).
+                return _timeToSeconds(item.duration);
             } catch(e) {
                 $.writeln("[3_Project.itemDuration] Error: " + e.message);
                 return 0;

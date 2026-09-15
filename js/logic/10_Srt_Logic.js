@@ -41,9 +41,12 @@
                 lines.push(String(i + 1));
                 lines.push(this.secToSrtTime(e.startSec) + ' --> ' + this.secToSrtTime(e.endSec));
                 for (var t = 0; t < e.texts.length; t++) lines.push(e.texts[t]);
-                if (i < entries.length - 1) lines.push('');
+                // Separador DESPRÉS de cada bloc, també del darrer: sense la línia
+                // buida final, Premiere (i altres parsers) descarten l'últim subtítol.
+                lines.push('');
             }
-            return lines.join('\n');
+            // Doble salt final (bloc + línia buida), com el SRT de referència.
+            return lines.join('\n') + '\n';
         },
 
         srtTimeToSec: function (timeStr) {
