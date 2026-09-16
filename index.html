@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=47">
+    <link rel="stylesheet" href="./style.css?v=55">
 </head>
 <body>
     <div id="main-content">
@@ -78,9 +78,8 @@
                 <div class="video-tactical-layout">
                     <div class="video-row-top">
                         <button id="btnIn" class="secondary btn-sq-std">IN</button>
-                        <button id="btnScene" class="secondary btn-wide-flex">TROSSEJA</button>
-                        <button id="btnOut" class="secondary btn-sq-std">OUT</button>
-                        <button id="btnCenter" class="secondary btn-sq-double-high" title="Toggle Auto Reframe">REFRAME</button>
+                        <button id="btnOut" class="secondary btn-wide-flex" title="OUT &amp; GO: tanca el bloc, trosseja els talls, col·loca els marcadors i els chyrons (tot el pipeline)">OUT &amp; GO</button>
+                        <button id="btnKey" class="secondary btn-sq-double-high">KEYFRAME</button>
                     </div>
                     <div class="video-row-bottom">
                         <button id="btnPrevClip" class="secondary btn-sq-std">◀</button>
@@ -88,7 +87,6 @@
                             <input type="range" id="slider-move" min="-1000" max="1000" value="0" disabled>
                         </div>
                         <button id="btnNextClip" class="secondary btn-sq-std">▶</button>
-                        <button id="btnKey" class="secondary btn-sq-double-high">KEYFRAME</button>
                     </div>
                 </div>
             </div>
@@ -103,8 +101,8 @@
             <div class="section-label" title="Chyrons"><span class="lbl-full">CHYRONS</span><span class="lbl-short">CHY</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-4 chy-strip">
-                    <button id="btnChyronColocar" class="secondary" title="Col·loca TOTS els chyrons: Conductor, Titol, Lloc, Nom, Resto i Traducció (verifica primer els marcadors)">COLOCAR</button>
-                    <button id="btnChyronRepartir" class="secondary" title="Reparteix les traduccions seleccionades">REPART</button>
+                    <button id="btnChyronColocar" class="secondary icon-only" title="Col·loca TOTS els chyrons: Conductor, Titol, Lloc, Nom, Resto i Traducció (verifica primer els marcadors)">🎯</button>
+                    <button id="btnChyronRepartir" class="secondary icon-only" title="Reparteix les traduccions seleccionades">↔️</button>
                     <button id="btnChyronConductor" class="secondary test-only" title="Col·loca el Conductor (TEST)">COND</button>
                     <button id="btnChyronTitol" class="secondary test-only" title="Col·loca el Tema-Titol (TEST)">TITOL</button>
                     <button id="btnChyronLloc" class="secondary test-only" title="Col·loca Lloc/Data (TEST)">LLOC</button>
@@ -120,11 +118,11 @@
             <div class="section-label" title="Gràfics"><span class="lbl-full">GRÀFICS</span><span class="lbl-short">GRF</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
-                    <button id="btnMarksF6" class="secondary" title="Gràfica — col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">GRAF</button>
+                    <button id="btnMarksF6" class="secondary icon-only" title="Gràfica — col·loca els marcadors/gràfics GF de l'escaleta al seu ancla">🎨</button>
                     <button id="btnGrafIpd" class="secondary" title="Toggle IPD sobre el clip seleccionat · Ctrl+clic = revisa els clips IPD (marcador IPD → següent estructural)">IPD</button>
-                    <button id="btnGrafDoblePantalla" class="secondary" title="Doble Pantalla V2/V3">DP</button>
-                    <button id="btnGrafMapa" class="secondary" title="Mapa zoom">MAPA</button>
-                    <button id="btnGrafTotem" class="secondary" title="Tòtem">TOTEM</button>
+                    <button id="btnGrafDoblePantalla" class="secondary icon-only doble" title="Doble Pantalla V2/V3">🪟🪟</button>
+                    <button id="btnGrafMapa" class="secondary icon-only" title="Mapa zoom">🗺️</button>
+                    <button id="btnGrafTotem" class="secondary icon-only" title="Tòtem">🗿</button>
                  </div>
             </div>
         </div>
@@ -137,9 +135,9 @@
             <div class="section-label" title="Subtítols"><span class="lbl-full">SUBTÍTOLS</span><span class="lbl-short">SUB</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
-                    <button id="btnSrtLoad" class="secondary" title="Carrega el SRT del dia (per blocs)">CAR</button>
-                    <button id="btnSrtExport" class="secondary" title="Exporta el SRT">EXP</button>
-                    <button id="btnSrtReset" class="secondary" style="background:#5a2a2a; color:#f99;" title="RESET / neteja subtítols">RES</button>
+                    <button id="btnSrtLoad" class="secondary icon-only" title="Carrega el SRT del dia (per blocs)">⬇️</button>
+                    <button id="btnSrtExport" class="secondary icon-only" title="Exporta el SRT">💾</button>
+                    <button id="btnSrtReset" class="secondary icon-only" style="background:#5a2a2a; color:#f99;" title="RESET / neteja subtítols">♻️</button>
                     <button id="btnSrtIn" class="secondary" title="IN del subtítol seleccionat">IN</button>
                     <button id="btnSrtOut" class="secondary" title="OUT del subtítol seleccionat">OUT</button>
                  </div>
@@ -151,9 +149,9 @@
             <div class="section-label" title="Render"><span class="lbl-full">RENDER</span><span class="lbl-short">REN</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
-                    <button id="btnRenderVideo" class="secondary" title="Render / exporta el vídeo">VID</button>
-                    <button id="btnRenderPortada" class="secondary" title="Render / exporta la portada">PORT</button>
-                    <button id="btnRenderClose" class="secondary" title="Tanca la peça">TANC</button>
+                    <button id="btnRenderVideo" class="secondary icon-only" title="Render / exporta el vídeo">📹</button>
+                    <button id="btnRenderPortada" class="secondary icon-only" title="Render / exporta la portada">🖼️</button>
+                    <button id="btnRenderClose" class="secondary icon-only" title="Tanca la peça">✅</button>
                  </div>
             </div>
         </div>
@@ -184,9 +182,9 @@
         <div class="right-zone">
             <div id="srtVideoWrap">
                 <video id="srtVideo" playsinline muted></video>
-                <div id="srtVideoHud">— · — fps</div>
                 <div id="srtVideoSubs"></div>
             </div>
+            <div id="srtVideoHud">— · — fps</div>
         </div>
         </div>
 
@@ -213,24 +211,24 @@
 
     <!-- SCRIPTS with version cachebuster -->
     <script src="js/lib/CSInterface.js"></script>
-    <script src="js/core/utils.js?v=5"></script>
-    <script src="js/core/11_Configuracio.js?v=5"></script>
+    <script src="js/core/utils.js?v=10"></script>
+    <script src="js/core/11_Configuracio.js?v=9"></script>
     <script src="js/core/escaleta_timecode.js?v=5"></script>
-    <script src="js/core/escaleta_config.js?v=5"></script>
-    <script src="js/core/escaleta_io.js?v=5"></script>
+    <script src="js/core/escaleta_config.js?v=6"></script>
+    <script src="js/core/escaleta_io.js?v=8"></script>
     <script src="js/core/escaleta_items.js?v=5"></script>
-    <script src="js/core/escaleta_bounds.js?v=5"></script>
+    <script src="js/core/escaleta_bounds.js?v=6"></script>
     <script src="js/core/escaleta_fallback.js?v=5"></script>
-    <script src="js/core/escaleta_fetch.js?v=5"></script>
+    <script src="js/core/escaleta_fetch.js?v=7"></script>
     <script src="js/core/escaleta_reader.js?v=5"></script>
     <script src="js/core/session_manifest.js?v=6"></script>
     <script src="js/core/state.js?v=5"></script>
     <script src="js/inspectors/1_SourceAssets.js?v=5"></script>
-    <script src="js/logic/Scanner.js?v=5"></script>
+    <script src="js/logic/Scanner.js?v=6"></script>
     <script src="js/inspectors/2_App.js?v=5"></script>
     <script src="js/inspectors/3_Session.js?v=5"></script>
-    <script src="js/core/4_Context.js?v=6"></script>
-    <script src="js/logic/3_Project_Logic.js?v=10"></script>
+    <script src="js/core/4_Context.js?v=11"></script>
+    <script src="js/logic/3_Project_Logic.js?v=11"></script>
     <script src="js/logic/5_Tracks_Logic.js?v=5"></script>
     <script src="js/logic/6_Clips_Logic.js?v=5"></script>
     <script src="js/logic/7_KF_Logic.js?v=5"></script>
@@ -242,10 +240,10 @@
     <script src="js/logic/16_Analysis_Logic.js?v=5"></script>
     <script src="js/core/assembly_context.js?v=5"></script>
     <script src="js/workflows/flow_mp4.js?v=5"></script>
-    <script src="js/workflows/flow_markers.js?v=10"></script>
-    <script src="js/workflows/flow_chyrons.js?v=13"></script>
+    <script src="js/workflows/flow_markers.js?v=13"></script>
+    <script src="js/workflows/flow_chyrons.js?v=16"></script>
     <script src="js/workflows/flow_graphics.js?v=5"></script>
-    <script src="js/workflows/flow_mainButton.js?v=7"></script>
+    <script src="js/workflows/flow_mainButton.js?v=10"></script>
     <script src="js/workflows/flow_cut.js?v=11"></script>
     <script src="js/workflows/flow_retols.js?v=5"></script>
     <script src="js/workflows/flow_srt.js?v=5"></script>
@@ -254,7 +252,7 @@
     <script src="js/workflows/flow_config.js?v=5"></script>
     <script src="js/workflows/flow_assembly.js?v=6"></script>
     <script src="js/core/project_registry.js?v=5"></script>
-    <script src="js/editor/srt_editor.js?v=68"></script>
-    <script src="js/main.js?v=34"></script>
+    <script src="js/editor/srt_editor.js?v=71"></script>
+    <script src="js/main.js?v=45"></script>
 </body>
 </html>

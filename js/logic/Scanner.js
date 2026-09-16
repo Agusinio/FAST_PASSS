@@ -208,7 +208,22 @@
         wotts: async function (ctx) {
             try {
                 const pathNAS = ctx.config.rutas.chyrons;
-                const allFiles = await utils.readFolder(pathNAS);
+                // CACHÉ (2026-09-16): llegir aquesta carpeta pel NAS és CAR (75+ .mov de
+                // presentadors) i es feia a CADA checkContext (auto-refresh cada 15 s +
+                // polls), cosa que bloquejava la UI del panell i endarreria la llista de
+                // presentadors. Amb 30 s de TTL n'hi ha prou: la ingesta no canvia en
+                // mig minut i el botó CREAR/ACTUALITZAR treballa amb el mateix marge.
+                var _now = Date.now();
+                if (!this._readCache) this._readCache = {};
+                var _key = 'wotts:' + pathNAS;
+                var _c = this._readCache[_key];
+                var allFiles;
+                if (_c && (_now - _c.at) < 30000) {
+                    allFiles = _c.list;
+                } else {
+                    allFiles = await utils.readFolder(pathNAS);
+                    this._readCache[_key] = { at: _now, list: allFiles };
+                }
                 if (!allFiles || allFiles.length === 0) return { tema: "PENDENT", list: [] };
     
                 var fProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott.toUpperCase() : 'TNV';

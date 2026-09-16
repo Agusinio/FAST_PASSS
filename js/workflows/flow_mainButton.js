@@ -168,9 +168,33 @@
                 } catch (eG) { blockG = null; }
                 if (!jsonData || !blockG || !blockG.ok) {
                     const detallG = blockG ? (blockG.emitted + "/" + blockG.total + " ítems emesos (darrer pendent: " + ((blockG.pending && blockG.pending.num) || "?") + ")") : "sense escaleta carregable";
-                    log("⛔ [NOU] No es crea el projecte: " + detallG + ". Fes FOTO quan el bloc acabi d'emetre.", "ERROR");
-                    getUtils().status("No es crea el projecte: " + detallG, "error");
-                    return;
+                    // FIX (2026-09-16): si l'usuari ha fet FOTO (escaleta_on_demand_*.json),
+                    // es permet crear el projecte encara que el bloc segueixi en emissió:
+                    // es munta amb el que ja hi ha i es completa amb ACTUALITZAR. Sense
+                    // FOTO es manté el bloqueig (evita projectes genèrics tipus *_INTRO).
+                    var fotoOk = false, fotoFilename = '';
+                    try {
+                        if (readerG && typeof readerG.lookupLocalStatus === 'function') {
+                            const locF = await readerG.lookupLocalStatus(ctx);
+                            if (locF && locF.found && /^escaleta_on_demand/i.test(String(locF.filename || ''))) {
+                                fotoOk = true;
+                                fotoFilename = locF.filename;
+                            }
+                        }
+                    } catch (eFoto) { fotoOk = false; }
+                    // FIX (2026-09-16): també es permet crear amb l'ESCALETA DEL SISTEMA
+                    // (jsonData carregat del dia) encara que el bloc no estigui emès del
+                    // tot; abans calia FOTO local i, si el motor publicava el bloc amb
+                    // error o endarrerit, no hi havia manera de començar.
+                    const escSistemaOk = !!(jsonData && jsonData.cleanFeed && jsonData.escaleta);
+                    if ((!fotoOk && !escSistemaOk) || !jsonData) {
+                        log("⛔ [NOU] No es crea el projecte: " + detallG + ". Fes FOTO quan el bloc acabi d'emetre.", "ERROR");
+                        getUtils().status("No es crea el projecte: " + detallG, "error");
+                        return;
+                    }
+                    log((fotoOk ? "📷 [NOU] FOTO local (" + fotoFilename + ")" : "📡 [NOU] Escaleta del sistema") +
+                        " amb el bloc en emissió (" + detallG + "): es crea el projecte PROVISIONAL. Completa'l amb ACTUALITZAR.", "WARN");
+                    getUtils().status("Creant projecte provisional (bloc en emissió)…", "warn");
                 }
                 if (!sanitizedTheme || String(sanitizedTheme).trim().length < 3 || RESERVED_THEMES.indexOf(String(sanitizedTheme).toUpperCase().trim()) !== -1) {
                     log("⛔ [NOU] No es crea el projecte: tema no vàlid (" + (sanitizedTheme || "") + ").", "ERROR");
@@ -178,13 +202,34 @@
                     return;
                 }
 
+                // ── FIX (2026-09-16): no importar un cleanFeed encara en ingesta ──────
+                // Si el MP4 del bloc ja és al NAS però la ingesta encara no ha arribat al
+                // TC de sortida (mediaStop < out del bloc), importar-lo el deixaria
+                // TRUNCAT a V1 i, com que la capa de vídeo ja seria present, ACTUALITZAR
+                // no el reimportaria mai. Es crea el projecte sense vídeo i es completa
+                // amb ACTUALITZAR quan l'ingesta acabi.
+                let skipVideoIngesta = false;
+                try {
+                    if (assets && assets.media && assets.media.mp4 && jsonData && jsonData.cleanFeed && readerG) {
+                        const blkIng = (typeof readerG.getBlock === 'function') ? readerG.getBlock(jsonData, ctx.bloque) : null;
+                        const stopIng = (typeof readerG.tcToSeconds === 'function') ? readerG.tcToSeconds(jsonData.cleanFeed.mediaStop) : null;
+                        const outIng = (blkIng && typeof readerG.tcToSeconds === 'function') ? readerG.tcToSeconds(blkIng.out) : null;
+                        if (isFinite(stopIng) && isFinite(outIng) && stopIng < outIng) {
+                            skipVideoIngesta = true;
+                            log("⏳ [NOU] CleanFeed en ingesta (" + jsonData.cleanFeed.mediaStop + " < " + (blkIng && blkIng.out) + "): el projecte es crearà SENSE VÍDEO (ni MP4 ni extracció de clip). Fes ACTUALITZAR quan acabi.", "WARN");
+                            getUtils().status("MP4 en ingesta: projecte sense vídeo (ACTUALITZAR després)", "warn");
+                            assets.media = { mp4: null, srt: (assets.media.srt || null) };
+                        }
+                    }
+                } catch (eIngMp4) {
+                    log("⚠️ [NOU] No s'ha pogut comprovar la ingesta del cleanFeed: " + eIngMp4.message, "DEBUG");
+                }
+
                 const shortProg = ctx.progData.wott || "TNV";
                 // Determinar hora d'inici del programa (per inserir el MP4 desde l'inici del informatiu)
-                const PROGRAM_START_HOURS = {
-                    TNV: 21.0,   // TN Vespre → 21:00
-                    TNM: 14.5,   // TN Migdia → 14:30
-                    TNC: 13.8333 // TN Comarques → 13:50
-                };
+                // Font única: Config.get().programStartHours (11_Configuracio.js).
+                const PROGRAM_START_HOURS = ctx.config.programStartHours
+                    || { TNV: 21.0, TNM: 14.5, TNC: 13.8333 };
                 const worldProgramStartHour = PROGRAM_START_HOURS[shortProg] || 0;
                 const projSlug = `${shortProg}_${ctx.bloque}_${sanitizedTheme}`;
                 
@@ -415,7 +460,7 @@
                                     // ─── FASE 0: Extracció de clip via ffmpeg (si possible) ──
                                     try {
                                         const ffmpeg = window.FASTPASS_UI.Logic.FFmpeg;
-                                        if (ffmpeg && ffmpeg.extractClip) {
+                                        if (!skipVideoIngesta && ffmpeg && ffmpeg.extractClip) {
                                             const clipName = `${ctx.progData.wott || "TNV"}_${ctx.bloque}_CLIP.mp4`;
                                             // Destí: DIRECTORI DEL PROJECTE (folderPath = on neix el .prproj a _runNew).
                                             // El clip del bloc, l'AUDIO_REF.bin i el .prproj queden sempre junts
@@ -699,7 +744,11 @@
                 log(`🏗️ Generant projecte: ${fileName}`);
 
                 // 1. CREACIÓ FÍSICA (Crea seqüencia i inserta MP4 amb els bounds calculats)
-                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg, cleanFeedData);
+                await FASTPASS_UI.Logic.Project.create(ctx, assets.wotts, assets.media, paths, assets.portada, shortProg,
+                    // FIX (2026-09-16): amb el cleanFeed en ingesta es crea el projecte SENSE
+                    // vídeo (ni clip extret ni MP4) perquè quedi truncat a V1. ACTUALITZAR el
+                    // col·locarà quan l'ingesta hagi acabat.
+                    skipVideoIngesta ? null : cleanFeedData);
 
                 // 2. FINALITZAR ref (Obtenir tlClipStartSec real post-inserció)
                 if (cleanFeedData) {

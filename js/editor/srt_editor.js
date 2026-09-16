@@ -456,14 +456,31 @@
                 // no a l'inici del bloc. Si re-temporitzem contra worldStart, TOTS els
                 // subtítols queden avançats tants segons com handles i els últims del clip
                 // es queden sense subtítols (sempre en faltaven uns quants al final).
-                const refStartSec = (manifest.ref && manifest.ref.worldSecMediaStart != null)
-                    ? manifest.ref.worldSecMediaStart
+                // ⚠️ ORIGEN DE L'EIX (2026-09-16): el MP4 del projecte NO és el cleanFeed
+                // sencer, sinó un EXTRACTE que comença a `mp4ExpandedInPoint` (p.ex. 124 s)
+                // dins del cleanFeed. La base de temps dels subtítols ha de ser, doncs,
+                //   worldSecMediaStart + mp4ExpandedInPoint   (inici del clip extret),
+                // no worldSecMediaStart (inici del cleanFeed).
+                // Amb l'antiga base, les entrades quedaven en l'eix del cleanFeed: a
+                // l'editor sortien ~115 s tard (buit enorme al davant) i l'EXPORTAR a
+                // Premiere les deixava desplaçades exactament el mateix.
+                const theExIn = (manifest.ref && manifest.ref.mp4ExpandedInPoint != null)
+                    ? Number(manifest.ref.mp4ExpandedInPoint)
+                    : ((manifest.blockBounds && manifest.blockBounds.mp4ExpandedInPoint != null)
+                        ? Number(manifest.blockBounds.mp4ExpandedInPoint) : 0);
+                const baseMediaStart = (manifest.ref && manifest.ref.worldSecMediaStart != null)
+                    ? Number(manifest.ref.worldSecMediaStart)
                     : ((manifest.extractedClip && manifest.extractedClip.extractedWorldSecMediaStart != null)
-                        ? manifest.extractedClip.extractedWorldSecMediaStart
+                        ? Number(manifest.extractedClip.extractedWorldSecMediaStart)
                         : worldStart);
-                if (Math.abs(refStartSec - worldStart) > 0.01) {
-                    log("🚨 SRT_EMERGENCIA: origen de l'eix = inici del clip extret (" + refStartSec.toFixed(1) + "s) en lloc del bloc (" + worldStart.toFixed(1) + "s)");
+                const refStartSec = baseMediaStart + ((isFinite(theExIn) && theExIn > 0) ? theExIn : 0);
+                log("🚨 SRT_EMERGENCIA: base de temps = cleanFeed " + baseMediaStart.toFixed(1) + "s + inPoint " +
+                    ((isFinite(theExIn) && theExIn > 0) ? theExIn : 0) + "s = " + refStartSec.toFixed(1) + "s" +
+                    " → bloc a " + (worldStart - refStartSec).toFixed(2) + "s dins del MP4 del clip");
+                if (Math.abs(refStartSec - worldStart) < 0.001) {
+                    log("⚠️ SRT_EMERGENCIA: base = inici del bloc (sense handle). Revisa el manifest.");
                 }
+                // (l'antic avís d'origen d'eix ja no cal: la base és ara l'inici del clip extret)
 
                 // 3. Programa → carpeta dels blocs de 15 min
                 const progMap = { TNM: 'migdia', TNV: 'vespre', TNC: 'comarques' };
@@ -1170,7 +1187,16 @@
                     + "for(var i=0;i<clips.numItems;i++){var c=clips[i];var nm='';try{nm=c.projectItem?c.projectItem.name:''}catch(e2){}"
                     + "var o={v:v,s:c.start.seconds,e:c.end.seconds,m:c.inPoint.seconds,m2:c.outPoint.seconds,n:nm};all.push(o);"
                     + "if('" + tag + "'===''||nm.toUpperCase().indexOf('" + tag + "')>=0)segs.push(o)}}"
-                    + "if(segs.length===0)segs=all;return JSON.stringify({seqName:String(seq.name),segs:segs})}catch(e){return'ERR:'+e.message}})()";
+                    // FALLBACK: si el tag no coincideix amb cap clip, NO agafem TOTES les
+                    // pistes (V1..V8). Els clips de grafismes/rètols/fons tenen inPoints
+                    // propers a 0 i feien que l'eix (media IN mínim → _axisOrigin) baixés a
+                    // 0: el clip del MP4 (media ≈20s = handle) es dibuixava 20s endavant i
+                    // quedava un buit gran al principi del timeline del editor.
+                    // Prioritat al fallback: la pista del MP4 (v=0 → V1); si no, tot.
+                    + "var mode='tag';"
+                    + "if(segs.length===0){mode='v1';for(var k=0;k<all.length;k++){if(all[k].v===0)segs.push(all[k]);}}"
+                    + "if(segs.length===0){mode='all';segs=all}"
+                    + "return JSON.stringify({seqName:String(seq.name),segs:segs,mode:mode})}catch(e){return'ERR:'+e.message}})()";
                 var raw = await callJSX(jsx);
                 if (!raw || raw.indexOf('ERR') === 0) return;
                 var parsed = JSON.parse(raw);
@@ -1205,6 +1231,17 @@
                 this._wfMediaStart = isFinite(wfStart) ? wfStart : 0;
                 this._wfMediaEnd = isFinite(wfEnd) ? wfEnd : 0;
                 this._axisOrigin = this._wfMediaStart;   // eix del timeline: x=0 = IN del primer clip
+                // DIAGNÒSTIC de l'origen del mapa: 'tag' = clips del MP4 triats pel nom;
+                // 'v1' = fallback a la pista V1 (el tag no ha coincidit amb cap clip);
+                // 'all' = totes les pistes (pitjor cas: l'eix pot baixar a 0 i el clip
+                // del MP4 sortir desplaçat amb un buit gran al davant).
+                log("📝 SRT_EDIT: Mapa de clips mode=" + (parsed.mode || "?") + " tag=\"" + tag +
+                    "\" → _axisOrigin=" + this._axisOrigin.toFixed(2) + "s (" + segs.length + " segs)");
+                if (parsed.mode && parsed.mode !== 'tag') {
+                    log("⚠️ SRT_EDIT: cap clip del projecte conté el tag \"" + tag + "\" → mapa per " +
+                        (parsed.mode === 'v1' ? "la pista V1" : "TOTES les pistes") +
+                        ". Si el timeline de l'editor surt desplaçat, revisa el nom del MP4 al projecte.");
+                }
                 // Log diagnòstic quan canvia el mapa (o primer cop): resum de medias + primers segments
                 if (this._lastSegLog !== segs.length) {
                     this._lastSegLog = segs.length;
@@ -1443,12 +1480,18 @@
             var wfStart = this._wfMediaStart || 0;
             var wfEnd = this._wfMediaEnd || 0;
             var hasRange = (wfEnd > wfStart);
+            // Els peaks del .bin comencen a l'INICIAL del clip amb què es va generar
+            // (= el seu inPoint de MEDIA, p.ex. 27.92s amb handle de 20s), NO a media 0.
+            // Cal descomptar aquest origen abans d'indexar: sense això la waveform
+            // sortia desplaçada exactament aquest offset i quedava un buit gran al
+            // principi del timeline de l'editor (era petit quan el handle era petit).
+            var binStart = (this._wfMediaStart || 0);
             for (var px = 0; px < W; px++) {
                 var sec = this._xToSec(px);
                 var secEnd = this._xToSec(px + 1);
                 if (hasRange && (sec < wfStart || sec >= wfEnd)) { this._wfPixelHeights[px] = 0; continue; }
-                var idxStart = Math.floor(sec * pps);
-                var idxEnd = Math.max(idxStart + 1, Math.floor(secEnd * pps));
+                var idxStart = Math.floor((sec - binStart) * pps);
+                var idxEnd = Math.max(idxStart + 1, Math.floor((secEnd - binStart) * pps));
                 if (idxStart < 0 || idxStart >= nPeaks) { this._wfPixelHeights[px] = 0; continue; }
                 if (idxEnd > nPeaks) idxEnd = nPeaks;
                 var maxV = 0;

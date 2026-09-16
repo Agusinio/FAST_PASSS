@@ -53,6 +53,24 @@
         return (cfg && cfg.handles != null) ? cfg.handles : 3;
     };
 
+    /**
+     * _getOutMarginSec: Marge de SORTIDA del clip (segons) que ha de quedar DESPRÉS
+     * de l'inici del següent item amb OnAir, per poder estirar el clip a la timeline
+     * si cal (l'OUT calculat pot quedar-se abans de l'IPD següent).
+     * Font única: 11_Configuracio.js._activeConfig.general.clipOutMarginSec (30 s).
+     * Cas real 2026-09-16: el clip importat no cobria l'inici de l'IPD següent.
+     */
+    ER._getOutMarginSec = function () {
+        try {
+            var cfg = window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get();
+            if (cfg && cfg.clipOutMarginSec != null) {
+                var v = Number(cfg.clipOutMarginSec);
+                return isFinite(v) && v >= 0 ? v : 30;
+            }
+        } catch (e) { }
+        return 30;
+    };
+
     // ----------------------------------------------------------------
     // 2. MAPA DE CORRECCIÓ DE DURADES
     // ----------------------------------------------------------------

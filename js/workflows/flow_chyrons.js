@@ -574,6 +574,24 @@
         },
 
         /**
+         * _clipAtInstant: Clip de V1 que CONTÉ l'instant donat (o el següent si cau
+         * just sobre el tall). És el "clip de referència" d'un rètol.
+         * @param {Array} clips - clips de V1 (getTrackClips)
+         * @param {number} instant
+         * @returns {{start:number,end:number}|null}
+         */
+        _clipAtInstant: function (clips, instant) {
+            const list = clips || [];
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].start <= instant && list[i].end > instant) return { start: list[i].start, end: list[i].end };
+            }
+            for (let j = 0; j < list.length; j++) {
+                if (list[j].start >= instant - 0.05) return { start: list[j].start, end: list[j].end };
+            }
+            return null;
+        },
+
+        /**
          * _itemEndTime: Final de l'ítem d'un marcador estructural: el següent
          * marcador (amb un petit marge), o el final del clip de V1 que el conté,
          * o el final de la seqüència.
@@ -638,6 +656,15 @@
 
                 const wottIdx = await FASTPASS_UI.Logic.Project.getWottIndex();
                 const ctx = { busy: {}, placed: {} };
+                // ── REGLA DELS RÈTOLS (2026-09-16) ──────────────────────────────
+                // Un rètol (NomCarrec, Lloc, Resto…) va a 10 FRAMES (0,40s) de l'inici
+                // del SEU CLIP de referència — el clip de V1 que conté l'instant ideal —
+                // i ACABA quan acaba aquest clip. No depèn de la durada del clip ni de
+                // la durada del wott. (TITOLET i Traducció tenen regles pròpies.)
+                const CHYRON_OFFSET_SEC = 0.40;   // 10 frames a 25 fps
+                const CHYRON_OFFSET_FRAMES = 10;
+                let allClipsV1 = [];
+                try { allClipsV1 = await getClipsLogic().getTrackClips(1, 'video'); } catch (eCL) { log(`⚠️ [${label}] Sense clips de V1: ${eCL.message}`); }
                 let placedCount = 0;
                 for (const mk of markersFull) {
                     const entry = structureById[mk.fullId];
@@ -677,15 +704,40 @@
                         }
                         const snapped = doSnap ? await this._snapToNearestCut(idealTime) : idealTime;
                         const durInfo = FASTPASS_UI.Logic.Project._resolveWottDur(wottIdx, chy);
-                        const slot = await this._chooseSlot(trackResolver(chy, cfg), snapped, durInfo.dur, ctx);
+
+                        // Clip de referència = el clip de V1 que conté l'instant ideal.
+                        // El rètol hi entra 10 frames després del seu inici i S'ACURTA
+                        // si el clip s'acaba abans que el wott. MAI s'allarga: si el
+                        // wott és més curt que el clip, conserva la seva durada pròpia
+                        // (regla de l'usuari, 16/09).
+                        let placeStart = snapped, placeEnd = null;
+                        if (doSnap && allClipsV1.length > 0) {
+                            const ci = this._clipAtInstant(allClipsV1, snapped);
+                            if (ci) {
+                                const durOwn = (durInfo.dur > 0) ? durInfo.dur : null;   // si no es resol, mana el media
+                                placeStart = ci.start + CHYRON_OFFSET_SEC;
+                                placeEnd = (durOwn === null) ? null : Math.min(ci.end, placeStart + durOwn);
+                                const trimmed = (durOwn !== null && placeStart + durOwn > ci.end + 0.001);
+                                log(`   📐 [${label}] ${String(chy.name).substring(0, 34)}… → clip [${ci.start.toFixed(2)}-${ci.end.toFixed(2)}] → entra a ${placeStart.toFixed(2)}s (+${CHYRON_OFFSET_FRAMES}f), surt a ${(placeEnd === null ? placeStart + Math.max(durInfo.dur, 0.5) : placeEnd).toFixed(2)}s` +
+                                    (trimmed ? ' (acurtat: el clip s\'acaba abans)' : ' (durada pròpia del wott)'));
+                            }
+                        }
+                        const chyronDur = (placeEnd !== null) ? Math.max(0.5, placeEnd - placeStart) : durInfo.dur;
+                        const slot = await this._chooseSlot(trackResolver(chy, cfg), placeStart, chyronDur, ctx);
                         if (!slot.track) {
                             log(`   ⚠️ [${label}] Sense pista disponible per a ${chy.name}`, "WARN");
                             continue;
                         }
+                        if (placeEnd !== null && slot.moved) {
+                            const ci2 = this._clipAtInstant(allClipsV1, slot.start);
+                            if (ci2) placeEnd = (durInfo.dur > 0) ? Math.min(ci2.end, slot.start + durInfo.dur) : null;
+                        }
                         const escapedName = getUtils().escape(chy.name);
-                        await callJSX(`Clips.insert('${escapedName}', ${slot.track}, ${slot.start}, null, 'video')`);
-                        this._addPlaced(ctx, slot.track, slot.start, slot.start + Math.max(durInfo.dur, 0.5));
-                        log(`   ✅ [${label}] ${chy.name} → V${slot.track} @ ${slot.start.toFixed(2)}s (dur ${durInfo.dur.toFixed(1)}s)` +
+                        const endParam = (placeEnd !== null) ? placeEnd.toFixed(4) : 'null';
+                        await callJSX(`Clips.insert('${escapedName}', ${slot.track}, ${slot.start.toFixed(4)}, ${endParam}, 'video')`);
+                        this._addPlaced(ctx, slot.track, slot.start, (placeEnd !== null) ? placeEnd : slot.start + Math.max(durInfo.dur, 0.5));
+                        log(`   ✅ [${label}] ${chy.name} → V${slot.track} @ ${slot.start.toFixed(2)}s` +
+                            ((placeEnd !== null) ? ` → ${placeEnd.toFixed(2)}s (dur ${(placeEnd - slot.start).toFixed(1)}s)` : ` (dur ${durInfo.dur.toFixed(1)}s)`) +
                             (slot.moved ? ` ⟵ desplaçat per no trepitjar (ideal ${snapped.toFixed(2)}s)` : '') +
                             (this._isTitolet(chy) ? ' [INSERT]' : ''));
                         placedCount++;
@@ -1067,6 +1119,31 @@
                 // Calcular posició del conductor
                 let conductTime;
 
+                // ── Posició REAL del Tema-Titol de plató (2026-09-16) ───────────
+                // placeChyronTitol col·loca el Tema-Titol amb la regla
+                //     marcador de l'ítem + tc del nom     (01i: 0.00 + 1.00 = 1.00s)
+                // i el conductor ha d'anar JUST DESPRÉS d'ell. Abans es calculava amb
+                // marges fixos (clipStart + 0:10 + 6:06 = 6.64s) i, com que el TT real
+                // anava a 1.00s, el conductor entrava 0.60s abans d'hora (havia de ser
+                // 7:06 = 7.24s). Com que els chyrons "màgics" es col·loquen a partir
+                // d'aquest instant, l'error s'arrossegava a tota la resta.
+                let ttPlaceTime = null;
+                try {
+                    const idxTT = await FASTPASS_UI.Logic.Project.getWottIndex();
+                    const minTT = (typeof cfg.temaTitolMinSec === 'number') ? cfg.temaTitolMinSec : 4.0;
+                    const ttList = FASTPASS_UI.Logic.Project.pickTemaTitols(struct, idxTT, minTT);
+                    const normTarget = FASTPASS_UI.Logic.Project.normItemId(targetId);
+                    for (let tti = 0; tti < ttList.length; tti++) {
+                        if (FASTPASS_UI.Logic.Project.normItemId(ttList[tti].item) !== normTarget) continue;
+                        const tcSecTT = getUtils().timeToSeconds(ttList[tti].tc || "000000");
+                        ttPlaceTime = targetTime + tcSecTT;
+                        log(`🎯 [Conductor] Tema‑Titol de plató "${String(ttList[tti].name).substring(0, 40)}" @ ${ttPlaceTime.toFixed(2)}s (marcador ${targetTime.toFixed(2)} + tc ${tcSecTT.toFixed(2)})`);
+                        break;
+                    }
+                } catch (eTT) {
+                    log(`⚠️ [Conductor] Sense Tema‑Titol de plató llegible: ${eTT.message}`);
+                }
+
                 if (isFirstItem) {
                     // Primer item: localitzar el segment del clip del bloc actiu a la
                     // pista MP4 (v_mp4=1, on hi ha el clip del bloc, ex: TNV_V2_CLIP.mp4)
@@ -1088,17 +1165,25 @@
                     const margenDisponible = clipEnd - clipStart;
                     const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + 4.40; // ~11.04s
 
-                    if (margenDisponible >= MIN_MARGEN) {
+                    if (ttPlaceTime !== null && (clipEnd - (ttPlaceTime + DUR_TEMA_TITOL)) >= 0.5) {
+                        // Cas A: just després del Tema‑Titol REAL
+                        conductTime = ttPlaceTime + DUR_TEMA_TITOL;
+                        log(`📌 [Conductor·CasA] Després del Tema‑Titol real: ${ttPlaceTime.toFixed(2)} + ${DUR_TEMA_TITOL.toFixed(2)} → @ ${conductTime.toFixed(2)}s`);
+                    } else if (margenDisponible >= MIN_MARGEN) {
                         conductTime = clipStart + MARGEN_INICIO + DUR_TEMA_TITOL;
-                        log(`📌 [Conductor·CasA] Marge suficient (${margenDisponible.toFixed(2)}s ≥ ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
+                        log(`📌 [Conductor·CasA·clàssic] Marge suficient (${margenDisponible.toFixed(2)}s ≥ ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
                     } else {
                         conductTime = clipStart + MARGEN_INICIO;
                         log(`📌 [Conductor·CasB] Marge insuficient (${margenDisponible.toFixed(2)}s < ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
                     }
+                } else if (ttPlaceTime !== null) {
+                    conductTime = ttPlaceTime + DUR_TEMA_TITOL;
+                    log(`📌 [Conductor] Després del Tema‑Titol real (no primer ítem): @ ${conductTime.toFixed(2)}s`);
                 } else {
                     conductTime = targetTime + MARGEN_INICIO;
                     log(`📌 [Conductor] No és el primer: Conductor @ marcador+0:10 = ${conductTime.toFixed(2)}s`);
                 }
+                log(`📐 [Conductor] instant base per als chyrons següents: ${conductTime.toFixed(2)}s`);
 
                 // Col·locar conductor
                 const escapedName = getUtils().escape(conductorFile);

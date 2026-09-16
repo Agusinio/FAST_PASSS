@@ -793,6 +793,110 @@
             log('🟢 [F3·Coinc] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
         },
 
+        /**
+         * _buildOnAirMap: Mapa num → true si ALGUNA línia d'escaleta amb aquell num té
+         * OnAir real. Ha de ser un OR: a l'escaleta hi ha nums repetits (01, 02…) en
+         * agrupacions diferents i, si ens quedéssim amb l'última línia llegida, un faro
+         * bo (p.ex. "01 - INVERSIONS", amb OnAir) es classificaria com a deduït i F4 el
+         * mouriria fins a 2,5 s, trencant-lo.
+         */
+        _buildOnAirMap: function (lines) {
+            var m = {};
+            var arr = lines || [];
+            for (var i = 0; i < arr.length; i++) {
+                var num = arr[i].num;
+                if (!num) continue;
+                var oa = arr[i].horaEntradaOnAir;
+                var has = !!(oa && oa !== '00:00:00' && String(oa).trim() !== '');
+                var key = String(num);
+                m[key] = !!m[key] || has;
+            }
+            return m;
+        },
+
+        /**
+         * _snapWindowFaro: Finestra de snap per a marcadors FARO (ítems amb OnAir real).
+         * Ha de ser prou àmplia per absorbir l'error del delta de correlació de F3
+         * (el Δ consensuat pot passar-se ~0,7 s: cas real 2026-09-16 → 01 quedava a
+         * 0,72 s del seu tall i amb ±0,6 s F4 no el corregia), però prou curta per no
+         * saltar a talls irrellevants.
+         * Configurable a Profile.json → general.snapWindowFaroSec (per defecte 1,0 s).
+         */
+        _snapWindowFaro: function () {
+            var w = null;
+            try {
+                var c = FASTPASS_UI.Config.get();
+                if (c && c.snapWindowFaroSec != null) w = Number(c.snapWindowFaroSec);
+            } catch (e) { }
+            return (isFinite(w) && w > 0) ? w : 1.0;
+        },
+
+        /**
+         * _snapWindowDeduced: Finestra de snap per a marcadors DEDUÏTS (ítems sense
+         * OnAir, col·locats per F2). Arrosseguen l'error de les durades d'escaleta
+         * (típicament 1-3 s), així que necessiten més marge que els faros.
+         * Configurable a Profile.json → general.snapWindowDeducedSec (per defecte 2,5 s).
+         */
+        _snapWindowDeduced: function () {
+            var w = null;
+            try {
+                var c = FASTPASS_UI.Config.get();
+                if (c && c.snapWindowDeducedSec != null) w = Number(c.snapWindowDeducedSec);
+            } catch (e) { }
+            return (isFinite(w) && w > 0) ? w : 2.5;
+        },
+
+        /**
+         * _chooseSnapTarget: Tria a quin punt s'ha d'ancorar un marcador.
+         *  - FARO (ítem amb OnAir real): ruptura de densitat (prioritària) o tall real
+         *    més proper, dins de la finestra curta (±0,6 s).
+         *  - DEDUÏT (ítem sense OnAir → F2): s'ancora al TALL QUE OBRE el seu ítem
+         *    (el que es veu com "entrada per tall"), i si no n'hi ha, a la ruptura de
+         *    densitat o al tall més proper, dins de la finestra ampla (±2,5 s).
+         * @param {number} markerTime - posició actual del marcador (s de timeline)
+         * @param {number} win - finestra de cerca en segons
+         * @param {boolean} isDeduced
+         * @param {Array} breaks - ruptures de densitat [{time}]
+         * @param {Array} clips - clips de V1 [{start,end}]
+         * @returns {{target:number|null, why:string}}
+         */
+        _chooseSnapTarget: function (markerTime, win, isDeduced, breaks, clips) {
+            var bl = breaks || [], cl = clips || [];
+            var bestBreak = null;
+            for (var bi = 0; bi < bl.length; bi++) {
+                if (!isFinite(bl[bi].time)) continue;
+                var dB = Math.abs(bl[bi].time - markerTime);
+                if (dB <= win && (bestBreak === null || dB < Math.abs(bestBreak - markerTime))) bestBreak = bl[bi].time;
+            }
+            var nearest = null, nearestDist = null;      // tall real més proper (start o end)
+            var openCut = null, openDist = null;         // tall que OBRIRIA l'ítem (start >= marcador)
+            for (var ci = 0; ci < cl.length; ci++) {
+                var cs = cl[ci].start, ce = cl[ci].end;
+                if (isFinite(cs)) {
+                    var ds = Math.abs(cs - markerTime);
+                    if (ds <= win && (nearest === null || ds < nearestDist)) { nearest = cs; nearestDist = ds; }
+                    if (cs >= markerTime - 0.05 && ds <= win && (openCut === null || ds < openDist)) { openCut = cs; openDist = ds; }
+                }
+                if (isFinite(ce)) {
+                    var de = Math.abs(ce - markerTime);
+                    if (de <= win && (nearest === null || de < nearestDist)) { nearest = ce; nearestDist = de; }
+                }
+            }
+            if (isDeduced) {
+                if (openCut !== null) return { target: openCut, why: "tall d'obertura" };
+                if (bestBreak !== null && (nearest === null || Math.abs(bestBreak - markerTime) <= nearestDist)) {
+                    return { target: bestBreak, why: 'ruptura de densitat' };
+                }
+                if (nearest !== null) return { target: nearest, why: 'tall real' };
+                return { target: null, why: '' };
+            }
+            if (bestBreak !== null && (nearest === null || Math.abs(bestBreak - markerTime) <= nearestDist)) {
+                return { target: bestBreak, why: 'ruptura de densitat' };
+            }
+            if (nearest !== null) return { target: nearest, why: 'tall real' };
+            return { target: null, why: '' };
+        },
+
         // ═══════════════════════════════════════════════════════════════
         // 🟠 F4: snapFaroMarkers — Snap dels marcadors al TALL REAL més
         // proper (o a la ruptura de densitat DP+DIR), finestra ±0,6 s
@@ -819,8 +923,28 @@
             }
             log('   🟠 [F4·Faro] Marcadors existents: ' + existingMarkers.length);
 
-            var SEARCH_WINDOW = 0.6;
+            // Finestra per a faros: configurable (per defecte 1,0 s) per absorbir
+            // l'error del Δ de correlació de F3 (cas real: 01 a 0,72 s del seu tall).
+            var SEARCH_WINDOW = this._snapWindowFaro();
             var MIN_MOVE = 0.02;
+
+            // ── Tipus de marcador: FARO (ítem amb OnAir real) o DEDUÏT (sense OnAir) ──
+            // Els deduïts (F2) arrosseguen l'error de les durades d'escaleta (1-3 s) i
+            // necessiten una finestra de snap més ampla. Els faros es queden amb la
+            // curta per no moure'ls de la seva hora real d'emissió.
+            // Només es considera "deduït" si consta a l'escaleta que l'ítem NO té OnAir
+            // (si el mapa no es pot llegir, tots es tracten com a faro → conservador).
+            var hasOnAirByNum = {};
+            try {
+                var ctxF4 = await getAssemblyContext().loadAssemblyContext();
+                var linesF4 = (ctxF4 && ctxF4.lines) ? ctxF4.lines : [];
+                hasOnAirByNum = this._buildOnAirMap(linesF4);
+                var nFaro = 0, nDed = 0;
+                for (var kx in hasOnAirByNum) { if (hasOnAirByNum[kx]) nFaro++; else nDed++; }
+                log('   🟠 [F4·Faro] Finestra deduïts = ±' + this._snapWindowDeduced().toFixed(1) + 's · nums amb OnAir: ' + nFaro + ' · sense OnAir (deduïts): ' + nDed);
+            } catch (eT) {
+                log('⚠️ [F4·Faro] Sense mapa OnAir (' + eT.message + ') → tots els marcadors com a faro');
+            }
 
             var _extractPrefix = function (comment) {
                 if (!comment) return '';
@@ -842,38 +966,19 @@
                 var prefix = _extractPrefix(comment);
                 if (!prefix) continue;
 
-                // 1) Ruptura de densitat dins la finestra (prioritària: marca el punt
-                //    on canvia el patró, p.ex. el pas del Donapas al directe)
-                var bestBreak = null;
-                for (var bi = 0; bi < breaks.length; bi++) {
-                    var dB = Math.abs(breaks[bi].time - markerTime);
-                    if (dB <= SEARCH_WINDOW && (bestBreak === null || dB < Math.abs(bestBreak - markerTime))) {
-                        bestBreak = breaks[bi].time;
-                    }
-                }
+                // DEDUÏT només si consta que l'ítem no té OnAir (si no, faro).
+                var isDeduced = (hasOnAirByNum[prefix] === false);
+                var win = isDeduced ? this._snapWindowDeduced() : SEARCH_WINDOW;
 
-                // 2) Tall real més proper de V1
-                var nearestDist = SEARCH_WINDOW + 999;
-                var nearestCut = null;
-                for (var ci = 0; ci < clips.length; ci++) {
-                    var dStart = clips[ci].start - markerTime;
-                    var dEnd = clips[ci].end - markerTime;
-                    if (Math.abs(dStart) < Math.abs(nearestDist)) { nearestDist = dStart; nearestCut = clips[ci].start; }
-                    if (Math.abs(dEnd) < Math.abs(nearestDist)) { nearestDist = dEnd; nearestCut = clips[ci].end; }
-                }
-
-                var target = null, why = '';
-                if (bestBreak !== null && (nearestCut === null || Math.abs(bestBreak - markerTime) <= Math.abs(nearestDist))) {
-                    target = bestBreak; why = 'ruptura de densitat';
-                } else if (nearestCut !== null && Math.abs(nearestDist) <= SEARCH_WINDOW) {
-                    target = nearestCut; why = 'tall real';
-                }
+                var pick = this._chooseSnapTarget(markerTime, win, isDeduced, breaks, clips);
+                var target = pick.target, why = pick.why;
 
                 if (target === null || Math.abs(target - markerTime) < MIN_MOVE) { alreadyOk++; continue; }
 
                 var mkColor = (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : 6;
                 placements.push({ prefix: prefix, timeSec: target, comment: comment, colorIdx: mkColor });
-                log('   🟠 [F4·Faro] ' + prefix + ': ' + markerTime.toFixed(2) + 's → ' + target.toFixed(2) + 's (' + why + ', Δ=' + (target - markerTime).toFixed(3) + 's)');
+                log('   🟠 [F4·Faro] ' + prefix + (isDeduced ? ' (deduït, win ±' + win.toFixed(1) + 's)' : ' (faro)') + ': ' +
+                    markerTime.toFixed(2) + 's → ' + target.toFixed(2) + 's (' + why + ', Δ=' + (target - markerTime).toFixed(3) + 's)');
             }
 
             if (placements.length === 0) {
@@ -1161,6 +1266,72 @@
         // ═══════════════════════════════════════════════════════════════
         // ANÀLISI DE MARCADORS (migrats des de flow_graphics.js)
         // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * dumpMarkersSnapshot: Desa un SNAPSHOT dels marcadors que hi ha ARA a la
+         * seqüència (posició, comentari, color) a la carpeta del projecte:
+         *   MARCADORS_<yyyy-mm-dd_hhmm>.txt   (llegible, per revisar a mà)
+         *   MARCADORS_<yyyy-mm-dd_hhmm>.json  (cru, per comparar/diff)
+         * Serveix per tenir constància de COM s'han col·locat abans de moure'ls a mà.
+         * @returns {Promise<number>} nombre de marcadors desats, -1 si ha fallat
+         */
+        dumpMarkersSnapshot: async function () {
+            try {
+                var raw = await callJSX('Markers.get()');
+                var list = [];
+                if (raw && raw !== '[]') { try { list = JSON.parse(raw); } catch (e) { } }
+
+                var folder = await callJSX('Context.folder()');
+                if (!folder || String(folder).indexOf('ERR') === 0) {
+                    log('⚠️ [SNAP] Sense carpeta de projecte: ' + folder);
+                    return -1;
+                }
+
+                var d = new Date();
+                var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+                var stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) +
+                    '_' + p2(d.getHours()) + p2(d.getMinutes());
+                var base = String(folder).replace(/\\/g, '/') + '/MARCADORS_' + stamp;
+
+                var tc = function (sec) {
+                    var s = Math.max(0, sec || 0);
+                    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+                    var ss = Math.floor(s % 60), ms = Math.round((s - Math.floor(s)) * 1000);
+                    var pad = function (n, w) { var t = String(n); while (t.length < w) t = '0' + t; return t; };
+                    return pad(h, 2) + ':' + pad(m, 2) + ':' + pad(ss, 2) + '.' + pad(ms, 3);
+                };
+
+                var txt = 'SNAPSHOT MARCADORS · ' + d.toISOString() + '\n' +
+                    'Marcadors a la seqüència: ' + list.length + '\n' +
+                    '------------------------------------------------------------\n' +
+                    '#    segons      TC                color  comentari\n';
+                for (var i = 0; i < list.length; i++) {
+                    var m = list[i];
+                    var t = (typeof m.time === 'number') ? m.time : parseFloat(m.time);
+                    if (isNaN(t)) t = 0;
+                    var col = (m.color !== undefined && m.color !== null) ? m.color : '-';
+                    var cmt = (m.comments || m.comment || '').replace(/\r?\n/g, ' ');
+                    txt += (i + 1) + '.\t' + t.toFixed(3) + '\t' + tc(t) + '\t' + col + '\t' + cmt + '\n';
+                }
+
+                var r1 = await callJSX("IO.writeTxt('" + base.replace(/'/g, "") + ".txt', '" + txt.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, "\\n") + "')");
+                var json = JSON.stringify({ capturedAt: d.toISOString(), count: list.length, markers: list }, null, 2);
+                // Els salts de línia i les cometes simples han d'anar escapats: la crida
+                // JSX és una línia de codi ExtendScript amb el contingut entre cometes.
+                var jsonEsc = json.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, "\\n");
+                var r2 = await callJSX("IO.writeTxt('" + base.replace(/'/g, "") + ".json', '" + jsonEsc + "')");
+
+                if (r1 === 'OK' || r2 === 'OK') {
+                    log('💾 [SNAP] Snapshot desat: ' + list.length + ' marcadors → ' + base + '.txt/.json');
+                    return list.length;
+                }
+                log('⚠️ [SNAP] No s\'ha pogut escriure el snapshot (' + r1 + ' / ' + r2 + ')');
+                return -1;
+            } catch (e) {
+                log('⚠️ [SNAP] Error desant el snapshot: ' + e.message);
+                return -1;
+            }
+        },
 
         placeCookedMarkers: async function() {
             if (!(await getUtils().validateActiveSequence())) return;

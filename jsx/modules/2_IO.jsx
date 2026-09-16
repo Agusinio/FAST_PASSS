@@ -200,7 +200,11 @@ FASTPASS.IO = (function () {
         executeShell: function (command) {
             try {
                 // 1. Crear el fitxer .bat a la carpeta temporal del sistema
-                var tempFile = new File(Folder.temp + "/fp_exec_" + new Date().getTime() + ".bat");
+                // ⚠️ BUGFIX (2026-09-16): cal `Folder.temp.fsName` (ruta nativa
+                // C:\Users\...\Temp). `Folder.temp` com a string dóna la forma URI
+                // ("~/AppData/Local/Temp"), que cmd.exe NO expande → qualsevol fitxer
+                // creat o redirigit des del .bat acabava en una ruta inexistent.
+                var tempFile = new File(Folder.temp.fsName + "\\fp_exec_" + new Date().getTime() + ".bat");
                 
                 tempFile.open('w');
                 tempFile.writeln("@echo off");
@@ -228,26 +232,82 @@ FASTPASS.IO = (function () {
         curl: function (url, authHeader) {
             try {
                 var stamp = new Date().getTime();
-                var outFile = Folder.temp + "/fp_curl_" + stamp + ".json";
-                var errFile = Folder.temp + "/fp_curl_" + stamp + ".err";
+                // ⚠️ BUGFIX (2026-09-16): `Folder.temp.fsName` (ruta nativa). Amb
+                // `Folder.temp` com a string s'obtenia "~/AppData/Local/Temp", i cmd.exe
+                // NO expandeix el '~' → el curl no podia escriure el fitxer de sortida i
+                // el botó FOTO fallava SEMPRE amb ERR:CURL_EMPTY (verificat als .bat
+                // del Temp del sistema: "> \"~/AppData/Local/Temp/fp_curl_....json\"").
+                var tempDir = Folder.temp.fsName;
+                var outFile = tempDir + "\\fp_curl_" + stamp + ".json";
+                var errFile = tempDir + "\\fp_curl_" + stamp + ".err";
+
+                // ── VIA 1 (preferida): system.callSystem ─────────────────────────
+                // Executa curl directament (sense .bat, sense redireccions i ESPERANT
+                // el procés). Evita tots els paranys de cmd.exe: finestra de CMD, '~'
+                // no expandit, '%' expandit, i el bucle d'espera que bloquejava el motor
+                // mono-fil. La URL ha d'anar SENSE '%' (escaleta_fetch no escapa els ':').
+                var sysObj = null;
+                try { if (typeof system !== "undefined" && system) sysObj = system; } catch (eS1) { sysObj = null; }
+                if (!sysObj) { try { if ($.system) sysObj = $.system; } catch (eS2) { sysObj = null; } }
+                try {
+                    if (sysObj && sysObj.callSystem) {
+                        var curlExeAbs = (new File("C:\\Windows\\System32\\curl.exe")).exists
+                            ? "C:\\Windows\\System32\\curl.exe" : "curl";
+                        var sysCmd = curlExeAbs + ' -s --connect-timeout 8 --max-time 20 -X POST "' + url +
+                            '" -H "accept: application/json" -H "' + authHeader + '"';
+                        var t0Sys = new Date().getTime();
+                        var outText = sysObj.callSystem(sysCmd);
+                        var msSys = new Date().getTime() - t0Sys;
+                        if (outText && String(outText).length > 2) {
+                            $.writeln("[FASTPASS.IO.curl] OK via callSystem (" + msSys + " ms, " + String(outText).length + " chars)");
+                            return String(outText);
+                        }
+                        $.writeln("[FASTPASS.IO.curl] callSystem sense sortida (" + msSys + " ms) -> es prova el .bat");
+                    } else {
+                        $.writeln("[FASTPASS.IO.curl] system.callSystem NO disponible -> es prova el .bat");
+                    }
+                } catch (eSys) {
+                    $.writeln("[FASTPASS.IO.curl] callSystem ha fallat (" + eSys.message + ") -> es prova el .bat");
+                }
+
+                // ⚠️ BUGFIX (2026-09-16): el .bat s'executa amb cmd.exe, que EXPANDEIX els
+                // '%' (p. ex. '%3A' es llegeix com l'argument 3 → buit): la URL
+                // 'hora=14%3A00%3A00' arribava a l'API com a '14A00A00' → resposta
+                // "Format d'hora incorrecte" → el botó FOTO fallava SEMPRE.
+                // Al batch, un '%' literal s'ha d'escriure '%%'.
+                var batUrl = String(url).replace(/%/g, '%%');
+                var batAuth = String(authHeader).replace(/%/g, '%%');
                 // --connect-timeout/--max-time: si l'API de digition no respon (xarxa
                 // interna, VPN, certificat) curl ha de tallar SOL. Sense límit, el motor
                 // JSX queda bloquejat i el botó FOTO es queda en "⏳ FOTO..." per sempre.
-                var cmd = 'curl -s --connect-timeout 6 --max-time 20 -X POST "' + url + '" -H "accept: application/json" -H "' + authHeader + '" > "' + outFile + '" 2> "' + errFile + '"';
+                // Valors continguts: el motor ExtendScript és MONO-FIL i una crida massa
+                // llarga bloqueja la resta del panell (p. ex. la llista de conductors).
+                // (> Vegeu les línies del .bat més avall, on s'executa curl.)
 
                 // Crear .bat temporal
-                var tempFile = new File(Folder.temp + "/fp_curl_" + stamp + ".bat");
+                var tempFile = new File(tempDir + "\\fp_curl_" + stamp + ".bat");
                 tempFile.open('w');
                 tempFile.writeln("@echo off");
-                tempFile.writeln(cmd);
+                // Diagnòstic: si el .bat s'executa, això queda a l'errFile.
+                tempFile.writeln('echo START %DATE% %TIME%> "' + errFile + '"');
+                // Ruta ABSOLUTA de curl: el PATH del procés de Premiere pot no resoldre'l
+                // (símptoma real 2026-09-16: ERR:CURL_EMPTY amb err buit = cmd no trobava
+                // l'executable). Si no hi és, es prova el curl del PATH com a fallback.
+                tempFile.writeln('set "CURLEXE=C:\\Windows\\System32\\curl.exe"');
+                tempFile.writeln('if not exist "%CURLEXE%" set "CURLEXE=curl"');
+                tempFile.writeln('"%CURLEXE%" -sv --connect-timeout 8 --max-time 20 -X POST "' + batUrl + '" -H "accept: application/json" -H "' + batAuth + '" > "' + outFile + '" 2>> "' + errFile + '"');
+                tempFile.writeln('echo EXIT=%ERRORLEVEL%>> "' + errFile + '"');
                 tempFile.writeln("exit");
                 tempFile.close();
 
                 var success = tempFile.execute();
                 if (!success) return "ERR:CURL_EXECUTE_FAILED";
 
-                // Esperar que el fitxer de sortida tingui contingut (max 25 segons)
-                var maxWait = 25000;
+                // Esperar que el fitxer de sortida tingui contingut (max 24 segons,
+                // alineat amb el --max-time 20 de curl + marge d'arrencada del .bat).
+                // Límit baix a propòsit: el motor ExtendScript és mono-fil i un bloqueig
+                // llarg afecta tota la resta del panell.
+                var maxWait = 24000;
                 var waited = 0;
                 var outFileObj = new File(outFile);
                 while ((!outFileObj.exists || outFileObj.length === 0) && waited < maxWait) {
@@ -256,16 +316,16 @@ FASTPASS.IO = (function () {
                 }
 
                 if (!outFileObj.exists || outFileObj.length === 0) {
-                    // Sense resposta: retornem també el stderr de curl per poder diagnosticar
+                    // Sense resposta: retornem el stderr de curl per poder diagnosticar.
+                    // NOTA (2026-09-16): NO s'esborren .bat/.err — queden a la carpeta
+                    // temporal (fp_curl_<stamp>.*) per poder investigar què ha passat.
                     var errTxt = "";
                     try {
                         var errFileObj = new File(errFile);
                         if (errFileObj.exists) { errFileObj.open('r'); errTxt = errFileObj.read(); errFileObj.close(); }
                     } catch (eErr) { }
-                    try { tempFile.remove(); } catch (e1) { }
-                    try { outFileObj.remove(); } catch (e2) { }
-                    try { new File(errFile).remove(); } catch (e3) { }
-                    return "ERR:CURL_EMPTY" + (errTxt ? (": " + String(errTxt).replace(/[\r\n]+/g, " ").substring(0, 200)) : "");
+                    return "ERR:CURL_EMPTY" + (errTxt ? (": " + String(errTxt).replace(/[\r\n]+/g, " ").substring(0, 200)) : "") +
+                        " (fitxers: " + tempDir + "\\fp_curl_" + stamp + ".*)";
                 }
 
                 // Llegir el resultat

@@ -30,13 +30,19 @@ body {
        perquè el timeline inferior s'estrenyi amb la finestra. */
 }
 
-#main-content { flex-grow: 1; overflow-y: auto; overflow-x: auto; padding: 10px; }
+/* (2026-09-16) Sense barres de desplaçament visibles: el panell ja és compacte i
+   les barreres laterals/inferiors només feien nosa. El desplaçament amb roda/trackpad
+   segueix funcionant si algun dia el contingut no hi cap. */
+#main-content { flex-grow: 1; overflow-y: auto; overflow-x: auto; padding: 10px; scrollbar-width: none; }
+#main-content::-webkit-scrollbar { width: 0; height: 0; }
 
 /* NOVA ZONA VERTICAL DRETA */
 /* L'ample mínim només s'aplica a la franja de controls (no al body) perquè el
    timeline de subtítols, que està per sota, s'estrenyi amb la finestra de l'extensió. */
-.main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; min-width: 640px; }
-.upper-left { flex: 0 1 340px; min-width: 0; }
+/* (2026-09-16) Panell més estret: tret de TROSSEJA i REFRAME (fila IN/OUT&GO/KEYFRAME)
+   i aprofitant l'espai que sobrava a la dreta dels grups. 640 → 520px. */
+.main-upper { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; min-width: 520px; }
+.upper-left { flex: 0 1 280px; min-width: 0; }
 .right-zone {
     flex: 1 1 auto;
     min-width: 0;
@@ -69,17 +75,27 @@ body {
     height: 0;
     max-width: 100%;
     aspect-ratio: 9 / 16;            /* canvas vertical com el projecte */
-    background: #000; border-radius: 4px; overflow: hidden;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+    background: #000; border-radius: 4px;
+    /* Sense box-shadow, overflow:hidden ni capes a sobre del vídeo: en CEF qualsevol
+       d'aquestes coses força composició i deixa franges a mig pintar. */
 }
 #srtVideo {
     display: block;
     width: 100%; height: 100%;
     object-fit: cover;               /* omple el frame vertical (verticalització 9:16) */
     background: #000;
+    /* Capa de composició pròpia del vídeo: fa que cada fotograma nou es compongui
+       sencer (sense això, en pausa/scrub CEF deixa la part de baix a mig pintar). */
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 #srtVideoHud {
-    position: absolute; top: 4px; left: 4px; right: 4px;
+    /* (2026-09-16) Marca de fps/origen OCULTA per petició d'usuari: el codi del visor
+       (srt_editor.js) queda intacte i segueix tolerant que aquest element no es vegi.
+       Per recuperar-la, treu aquesta línia. */
+    display: none;
+    align-self: flex-start;
+    margin-top: 4px;
     font: 10px/1.3 monospace;
     color: #9fe8ff;
     background: rgba(0, 0, 0, 0.55);
@@ -88,7 +104,7 @@ body {
     user-select: none;
     white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis;
-    z-index: 3;
+    max-width: 100%;
 }
 #srtVideoSubs {
     position: absolute; left: 0; right: 0; bottom: 12%;
@@ -100,6 +116,12 @@ body {
     pointer-events: none;
     overflow: hidden;
     text-wrap: balance;
+    /* Capa de composició PRÒPIA: si els subtítols comparteixen capa amb el vídeo,
+       cada canvi de text obliga a repintar la imatge i en deixa trossos a mig fer.
+       Amb capa pròpia, el vídeo no es toca quan canvia el text. */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    will-change: transform;
 }
 /* CONTAINERS */
 .section-container {
@@ -121,15 +143,15 @@ body {
 
 /* BASE BUTTONS */
 button {
-    padding: 0 4px; font-size: 10px; font-weight: 700; border: none; border-radius: 4px;
+    padding: 0 4px; font-size: 11px; font-weight: 700; border: none; border-radius: 4px;
     cursor: pointer; background-color: var(--color-accent); color: white;
     display: flex; align-items: center; justify-content: center; transition: all 0.1s;
 }
 button:hover { filter: brightness(1.2); }
 button.secondary { background-color: var(--color-secondary); }
 button.btn-sq-std { width: var(--boto-std-sq); height: var(--boto-std-sq); min-height: var(--boto-std-sq); }
-button.btn-big-sq { width: var(--boto-gran-vip); height: var(--boto-gran-vip); font-size: 10px; }
-button.btn-big-sq-full { width: 150%; height: var(--boto-gran-vip); font-size: 10px; }
+button.btn-big-sq { width: var(--boto-gran-vip); height: var(--boto-gran-vip); font-size: 11px; }
+button.btn-big-sq-full { width: 150%; height: var(--boto-gran-vip); font-size: 11px; }
 
 /* SETUP */
 .setup-grid { display: grid; grid-template-columns: 1fr var(--boto-gran-vip); gap: 10px; align-items: start; }
@@ -137,21 +159,33 @@ button.btn-big-sq-full { width: 150%; height: var(--boto-gran-vip); font-size: 1
     display: grid; grid-template-columns: 1fr auto; gap: 10px;
     align-items: center; margin-bottom: 8px;
 }
-.setup-inputs { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.setup-inputs { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 180px; }
 .setup-actions { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .setup-actions-mini { display: flex; gap: 4px; justify-content: center; }
 .inline-input-group { display: grid; grid-template-columns: 35px minmax(0, 1fr); align-items: center; gap: 4px; }
 select { background: #000; color: #fff; border: 1px solid #444; height: 20px; font-size: 10px; border-radius: 3px; width: 100%; min-width: 0; }
-button.btn-foto { height: var(--boto-std-sq); white-space: nowrap; padding: 0 8px; font-size: 9px; }
+button.btn-foto { height: var(--boto-std-sq); white-space: nowrap; padding: 0 8px; font-size: 10px; }
 
-/* VÍDEO TACTICAL 2.9.5 */
+/* VÍDEO TACTICAL 2.9.5 — (2026-09-16) IN · OUT & GO · KEYFRAME junts a l'esquerra;
+   ◀ · slider · ▶ a la de baix (TROSSEJA passa al pipeline d'OUT & GO i REFRAME s'elimina). */
 .video-tactical-layout { display: flex; flex-direction: column; gap: var(--gap); }
-.video-row-top, .video-row-bottom { 
-    display: grid; grid-template-columns: var(--boto-std-sq) 1fr var(--boto-std-sq) calc(var(--boto-std-sq) * 2); 
+.video-row-top {
+    /* Flex (no grid): IN i OUT & GO a l'esquerra i KEYFRAME enganxat a la DRETA
+       (margin-left:auto), alineat amb el ▶ de la fila de baix. */
+    display: flex; align-items: center; gap: var(--gap);
+}
+.video-row-top #btnOut,
+.video-row-top #btnKey {
+    flex: 0 0 64px; width: 64px; box-sizing: border-box;
+    height: var(--boto-std-sq); font-size: 10px !important;
+}
+.video-row-top #btnKey { margin-left: auto; }
+.video-row-bottom {
+    display: grid; grid-template-columns: var(--boto-std-sq) 1fr var(--boto-std-sq);
     gap: var(--gap); align-items: center;
 }
-.btn-wide-flex { flex-grow: 1; height: var(--boto-std-sq); }
-.btn-sq-double-high { width: auto; height: var(--boto-std-sq); font-size: 8px !important; }
+.btn-wide-flex { height: var(--boto-std-sq); }
+.btn-sq-double-high { width: auto; height: var(--boto-std-sq); font-size: 10px !important; }
 
 /* SLIDER / ZONA DE REENCUADRE MANUAL (toggle amb recuadre) */
 .slider-zone {
@@ -197,11 +231,16 @@ input[type="range"]::-webkit-slider-thumb {
     white-space: normal;         /* textos llargs (COLOCAR/REPART) es parteixen en 2 línies */
     overflow-wrap: anywhere;
     text-align: center;
-    font-size: 8px;              /* discreta, com els botons IN/OUT de la zona VÍDEO */
+    font-size: 10px;              /* llegible; els botons d'icona (icon-only) van a part */
     font-weight: 700;
     line-height: 1.1;
     border-radius: 5px;
 }
+/* (2026-09-16) Botons d'ICONA (sense text): només emoji + tooltip. Mida ajustada perquè
+   omplin bé els 30x30 px sense retallar-se (emojis de Windows ≈1,17x l'amplada del
+   font-size ⇒ 22px deixa marge). El cas "doble" duu dues icones (Doble Pantalla 🪟🪟). */
+button.icon-only { font-size: 22px !important; line-height: 1; padding: 0; }
+button.icon-only.doble { font-size: 11px !important; letter-spacing: -0.5px; }
 /* Ordre en TEST: fila1 MARCADORS+CHYRONS · fila2 GRÀFICS+SUBTÍTOLS · fila3 RENDER */
 #secMarcadors { order: 1; }
 #secChyrons    { order: 2; }
@@ -215,10 +254,12 @@ input[type="range"]::-webkit-slider-thumb {
    Cada grup conserva la seva alçada natural (CHY/REN la meitat que GRÀFICS/SUBTÍTOLS) i, com que les
    columnes no comparteixen files, el bloc manté la mateixa alçada que amb el layout anterior. */
 .mode-work .graphics-group { display: flex; gap: 4px; align-items: flex-start; }
-.mode-work .gfx-col { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 150px; }
+.mode-work .gfx-col { display: flex; flex-direction: column; gap: 4px; flex: 1 1 0; min-width: 128px; }
 .mode-work .graphics-group > .row-break { display: none; }
-/* CHYRONS en TREBALL: COLOCAR/REPART en una sola fila horitzontal */
-.mode-work .graphics-strip.chy-strip { grid-template-columns: repeat(2, 30px); }
+/* CHYRONS en TREBALL: COLOCAR/REPART en una sola fila i ocupant tot l'ample
+   (abans 2×30px fixos → sobrava un botó d'espai a la dreta). */
+.mode-work .graphics-strip.chy-strip { grid-template-columns: repeat(2, 1fr); }
+.mode-work .graphics-strip.chy-strip button { width: 100%; }
 /* Separador de fila dins del .graphics-group */
 .row-break { flex-basis: 100%; width: 0; height: 0; margin: 0; padding: 0; }
 
@@ -236,7 +277,7 @@ input[type="range"]::-webkit-slider-thumb {
     cursor: help;
     vertical-align: middle;
 }
-.reset-text { color: #ff6b6b; border: 1px solid #482222; font-size: 8px !important; }
+.reset-text { color: #ff6b6b; border: 1px solid #482222; font-size: 10px !important; }
 
 /* SUBTÍTOLS */
 .srt-tactical-layout { display: grid; grid-template-columns: var(--boto-gran-vip) 1fr var(--boto-gran-vip); gap: 10px; }
@@ -311,7 +352,7 @@ input[type="range"]::-webkit-slider-thumb {
 button.btn-debug {
     width: 100%;
     height: 30px;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     padding: 0 4px;
     white-space: nowrap;

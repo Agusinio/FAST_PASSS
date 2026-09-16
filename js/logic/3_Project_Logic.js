@@ -433,9 +433,10 @@
             // (TO DO UPDATE #1) NO reimportar el MP4 si ja existeix un clip al projecte.
             // A més, en actualitzar, si la CAPA de vídeo ja és present a V1 no es
             // reimporta cap MP4 equivalent encara que el nom no coincideixi.
-            if (media?.mp4?.path && !mp4Exists && !(skipMedia && capaVideoPresent)) {
-                mediaList.push(media.mp4.path.replace(/\\/g, "/"));
-            }
+            // BUG (2026-09-16): aquí hi havia un `if (... !mp4Exists ...)` ABANS de la
+            // declaració de `mp4Exists` (let, més avall) → "Cannot access 'mp4Exists'
+            // before initialization" i el flotge de CREAR/ACTUALITZAR s'aturava sense
+            // importar el MP4. La comprovació viu ara una sola vegada, després de calcular-lo.
             let mp4Exists = false;
             if (media?.mp4?.path) {
                 const mp4Enc = encodeURIComponent(media.mp4.name);
@@ -449,7 +450,7 @@
                     }
                 }
             }
-            if (media?.mp4?.path && !mp4Exists) {
+            if (media?.mp4?.path && !mp4Exists && !(skipMedia && capaVideoPresent)) {
                 mediaList.push(media.mp4.path.replace(/\\/g, "/"));
             }
 

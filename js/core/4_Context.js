@@ -233,30 +233,46 @@
                     let ingestaEnCurs = false;
 
                     // ── ESCALETA LOCAL (FOTO on_demand) ────────────────────────────
-                    // Si el servidor encara no té el JSON del dia (el bloc acaba d'emetre
-                    // i la publicació triga), la "foto" generada amb el botó FOTO ja viu al
-                    // directori del dia (escaleta_on_demand_*.json o còpia del NAS). Si
-                    // existeix i conté el bloc, es considera la escaleta vàlida → l'estat
-                    // passa de "MASSA D'HORA" a "CREAR".
-                    if ((!semaforoData.esc || !semaforoData.esc.found)
-                        && readerE && typeof readerE.lookupLocalStatus === 'function') {
-                        try {
-                            const localEsc = await readerE.lookupLocalStatus(ctx);
-                            if (localEsc && localEsc.found) {
-                                semaforoData.esc = localEsc;
-                                getUtils().log('📷 [checkContext] Escaleta local detectada (FOTO/on_demand): ' + localEsc.filename, 'INFO');
-                            }
-                        } catch (eLoc) {
+                    // La "foto" generada amb el botó FOTO viu al directori del dia
+                    // (escaleta_on_demand_*.json).
+                    // FIX (2026-09-16): es consulta SEMPRE, no només quan el NAS no té cap
+                    // escaleta. Abans, si el NAS ja tenia el JSON del dia però el bloc
+                    // encara s'estava emetent (found=true, ready=false), haver fet FOTO no
+                    // canviava res: l'estat quedava a ESPERANT i el semàfor mai es posava
+                    // verd. Ara la FOTO local passa a ser font vàlida i permet arrancar.
+                    let escLocal = null;
+                    if (readerE && typeof readerE.lookupLocalStatus === 'function') {
+                        try { escLocal = await readerE.lookupLocalStatus(ctx); } catch (eLoc) {
                             getUtils().log('⚠️ [checkContext] Error buscant escaleta local: ' + eLoc.message, 'DEBUG');
                         }
                     }
 
-                    if (semaforoData.esc && semaforoData.esc.mediaStop && semaforoData.esc.blockOut && readerE) {
+                    // La ingesta es mesura sobre l'escaleta més fiable disponible.
+                    const escPerIngesta = (semaforoData.esc && semaforoData.esc.found) ? semaforoData.esc : escLocal;
+                    if (escPerIngesta && escPerIngesta.mediaStop && escPerIngesta.blockOut && readerE) {
                         try {
-                            const stopSecs = readerE.tcToSeconds(semaforoData.esc.mediaStop);
-                            const outSecs = readerE.tcToSeconds(semaforoData.esc.blockOut);
+                            const stopSecs = readerE.tcToSeconds(escPerIngesta.mediaStop);
+                            const outSecs = readerE.tcToSeconds(escPerIngesta.blockOut);
                             ingestaEnCurs = (stopSecs < outSecs);
                         } catch (eIng) { /* TC no comparable */ }
+                    }
+
+                    // ── PRIORITAT DE LA FOTO (2026-09-16) ──────────────────────────
+                    // Si l'usuari ha fet FOTO, aquesta és la font i mana SEMPRE sobre la
+                    // del sistema (encara que el NAS tingui una escaleta més nova): la FOTO
+                    // és una acció deliberada i el JSON del servidor pot estar
+                    // desactualitzat o ser un fitxer d'error del motor.
+                    if (escLocal && escLocal.found) {
+                        const nasEsc = semaforoData.esc;
+                        semaforoData.esc = escLocal;
+                        // Si el NAS ja té el bloc complet se'n conserva la informació
+                        // (la foto pot ser més antiga que el JSON del servidor).
+                        if (nasEsc && nasEsc.found && nasEsc.ready && !escLocal.ready) {
+                            semaforoData.esc.ready = true;
+                            semaforoData.esc.complete = nasEsc.complete;
+                        }
+                        getUtils().log('📷 [checkContext] FOTO local amb PREFERÈNCIA (' + escLocal.filename + ')' +
+                            (semaforoData.esc.ready ? ' [bloc complet]' : ' [bloc en emissió → es permet CREAR i fer ACTUALITZAR després]'), 'INFO');
                     }
 
                     if (!semaforoData.esc || !semaforoData.esc.found) {
@@ -271,17 +287,22 @@
                         const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
                         earlyState = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
                     } else if (!semaforoData.esc.ready || ingestaEnCurs) {
-                        // FOTO local (on_demand): l'escaleta ja està capturada, així que es
-                        // deixa CREAR encara que el bloc s'estigui acabant d'emetre o que la
-                        // ingesta (MP4/SRT) encara no hagi arribat: l'usuari farà ACTUALITZAR
-                        // després. Sense FOTO local es manté l'espera (evita fer feina a cegues).
+                        // Es permet CREAR sempre que hi hagi una ESCALETA localitzada:
+                        //   · FOTO local (on_demand) capturada per l'usuari,
+                        //   · escaleta del SISTEMA amb el bloc encara en emissió,
+                        //   · ingesta del cleanFeed en curs.
+                        // L'usuari completa la feina amb ACTUALITZAR quan acabi l'emissió.
+                        // Només s'espera (ESPERANT) si NO hi ha cap escaleta, que és quan
+                        // realment es treballaria a cegues.
+                        // FIX (2026-09-16): abans això només passava amb FOTO local; si el
+                        // motor publicava el bloc amb error o endarrerit, el botó quedava
+                        // atrapat a ESPERANT sense manera de començar.
                         const esFotoLocal = !!(semaforoData.esc && semaforoData.esc.local);
-                        if (esFotoLocal) {
-                            getUtils().log('📷 [checkContext] FOTO local' + (ingestaEnCurs ? ' amb ingesta en curs' : ' amb bloc en emissió') +
-                                ' → es permet CREAR el projecte (després ACTUALITZAR per a la media).', 'INFO');
-                        } else {
-                            earlyState = 'ESPERANT';
-                        }
+                        const ccEsc = semaforoData.esc ? semaforoData.esc.complete : null;
+                        getUtils().log((esFotoLocal ? '📷 [checkContext] FOTO local' : '📡 [checkContext] Escaleta del sistema') +
+                            (ingestaEnCurs ? ' amb ingesta en curs' : ' amb bloc en emissió') +
+                            (ccEsc && ccEsc.total ? ' (' + ccEsc.emitted + '/' + ccEsc.total + ' ítems emesos)' : '') +
+                            ' → es permet CREAR el projecte (després ACTUALITZAR per a la media).', 'INFO');
                     }
                 }
 
@@ -517,16 +538,25 @@
             if (semaforoData) {
                 // ESC: Escaleta
                 if (!semaforoData.esc.found) set('sem-esc', 'error', "No s'ha trobat cap escaleta (servidor ni FOTO local)");
+                else if (semaforoData.esc.local) {
+                    // FIX (2026-09-16): amb FOTO local es pot COMENÇAR a treballar encara
+                    // que el bloc segueixi en emissió → semàfor en VERD. Si la foto és
+                    // provisional s'indica al tooltip (N/M ítems emesos) i es recorda fer
+                    // ACTUALITZAR després.
+                    const cc = semaforoData.esc.complete;
+                    set('sem-esc', 'ready', semaforoData.esc.ready
+                        ? ('Escaleta OK (FOTO local: ' + semaforoData.esc.filename + ')')
+                        : ('FOTO local (bloc en emissió' + (cc && cc.total ? ': ' + cc.emitted + '/' + cc.total + ' ítems' : '') + ') — pots CREAR i fer ACTUALITZAR després'));
+                }
                 else if (!semaforoData.esc.ready) {
                     const cc = semaforoData.esc.complete;
-                    const nom = semaforoData.esc.local ? 'local (FOTO)' : 'trobada';
-                    set('sem-esc', 'pending', (cc && cc.total)
-                        ? ('Escaleta ' + nom + ': bloc en emissió (' + cc.emitted + '/' + cc.total + ' ítems)')
-                        : ('Escaleta ' + nom + ' però BLOC NO READY'));
+                    const w = semaforoData.esc.waitSec;
+                    set('sem-esc', 'pending', ((cc && cc.total)
+                        ? ('Escaleta trobada: bloc en emissió (' + cc.emitted + '/' + cc.total + ' ítems)')
+                        : ('Escaleta trobada però BLOC NO READY')) +
+                        (w ? ' — espera ~' + Math.ceil(w / 60) + ' min' : ''));
                 }
-                else set('sem-esc', 'ready', semaforoData.esc.local
-                    ? `Escaleta OK (FOTO local: ${semaforoData.esc.filename})`
-                    : `Escaleta OK (${semaforoData.esc.timestamp})`);
+                else set('sem-esc', 'ready', `Escaleta OK (${semaforoData.esc.timestamp})`);
 
                 // MP4: CleanFeed
                 const mp4Title = semaforoData.mp4 === 'pending' ? 'El stream encara no està disponible (ingesta en curs)' : (semaforoData.mp4 === 'error' ? 'Pista V1 buida' : (semaforoData.mp4 === 'blink' ? 'CleanFeed llest per importar' : 'CleanFeed OK'));
@@ -729,7 +759,7 @@
          * @param {string} dir - Ruta UNC de la biblioteca de conductores
          * @returns {Promise<string[]>}
          */
-        async _listConductorNames(dir) {
+        async _listConductorNames(dir, allowJsxFallback) {
             const utils = FASTPASS_UI.Utils;
             const t0 = Date.now();
             const isConductorFile = (n) => n.includes('Conduct_') && n.includes('.mov');
@@ -744,17 +774,27 @@
                 if (res && res.err === 0 && res.data) {
                     names = res.data.map(function (n) { return utils._decodeName(n); }).filter(isConductorFile);
                 } else {
-                    utils.log('⚠️ [COND] cep.fs.readdir err=' + (res ? res.err : 'null') + ' → fallback JSX', 'DEBUG');
+                    utils.log('⚠️ [COND] cep.fs.readdir err=' + (res ? res.err : 'null'), 'WARN');
                 }
             } catch (eR) {
-                utils.log('⚠️ [COND] cep.fs.readdir excepcio: ' + eR.message + ' → fallback JSX', 'DEBUG');
+                utils.log('⚠️ [COND] cep.fs.readdir excepcio: ' + eR.message, 'WARN');
             }
 
-            if (!names) {
+            // FIX (2026-09-16): el fallback JSX (readFolder → obre CADA .mov per xarxa)
+            // triga decenes de segons i, com que el motor ExtendScript és MONO-FIL,
+            // bloquejava TOTA la resta del panell (FOTO inclosa). Només es fa quan no
+            // hi ha cap conductor del programa, que és l'únic cas en què cal.
+            if (!names && allowJsxFallback) {
+                utils.log('🔁 [COND] Fallback JSX per a la llista del NAS...', 'DEBUG');
                 const nasFiles = await utils.readFolder(dir);
                 names = (nasFiles || [])
                     .map(f => utils._decodeName((f.name || f).toString()))
                     .filter(isConductorFile);
+            }
+
+            if (!names) {
+                names = [];
+                utils.log('⚠️ [COND] Sense llista del NAS (no es fa el fallback JSX per no bloquejar el motor)', 'WARN');
             }
 
             names.sort();
@@ -772,6 +812,26 @@
             this._conductorUIRendered = null;
             return this.syncConductorUI();
         },
+        /** _withTimeout: limita l'espera d'una promesa (evita bloquejar el panell). */
+        _withTimeout(promise, ms, label) {
+            return Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => {
+                    reject(new Error('timeout ' + (ms / 1000) + 's' + (label ? ' (' + label + ')' : '')));
+                }, ms))
+            ]);
+        },
+
+        /**
+         * syncConductorUI: Omple el selector COND.
+         * FIX (2026-09-16): abans es pintava NOMÉS després d'esperar el listat del NAS
+         * (cep.fs.readdir sobre UNC + fallback JSX, que obre cada .mov per xarxa): si el
+         * NAS trigava o el motor JSX estava ocupat (p. ex. una crida de FOTO), el
+         * selector quedava BUIT. Ara:
+         *   1. es pinten ELS CONDUCTORS DEL PROGRAMA a l'instant (Profile.json),
+         *   2. el grup "ALTRES (NAS)" s'afegeix quan el llistat arriba, amb un límit de
+         *      8 s perquè mai no bloquegi el panell.
+         */
         async syncConductorUI() {
             const config = FASTPASS_UI.Config.get();
             const select = document.getElementById('conductor');
@@ -790,43 +850,58 @@
                 defaults = [].concat(progData.conductors.titular, progData.conductors.substituts).filter(Boolean);
             }
 
-            // 2. Noms del NAS (via ràpida + caché: mai bloqueja el panel)
-            const nasNames = await this._listConductorNames(config.rutas.conductors);
-            this._conductorUIRendered = programKey;
+            const mountOptions = (parent, list) => {
+                list.forEach(fileName => {
+                    const opt = document.createElement('option');
+                    opt.value = fileName;
+                    opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
+                    parent.appendChild(opt);
+                });
+            };
 
-            select.innerHTML = "";
+            const buildList = (nasList) => {
+                select.innerHTML = "";
+                if (defaults.length > 0) {
+                    const groupDefault = document.createElement('optgroup');
+                    groupDefault.label = "⭐ CONDUCTORS PROGRAMA";
+                    mountOptions(groupDefault, defaults);
+                    select.appendChild(groupDefault);
+                }
+                const others = (nasList || []).filter(n => !defaults.includes(n));
+                if (others.length > 0) {
+                    const groupOthers = document.createElement('optgroup');
+                    groupOthers.label = "🌐 ALTRES (NAS)";
+                    mountOptions(groupOthers, others);
+                    select.appendChild(groupOthers);
+                }
+                if (select.options.length > 0) select.selectedIndex = 0;
+            };
 
-            // A. DEFAULTS del programa
+            // 2. Pintat IMMEDIAT amb els defaults del programa (mai selector buit)
             if (defaults.length > 0) {
-                const groupDefault = document.createElement('optgroup');
-                groupDefault.label = "⭐ CONDUCTORS PROGRAMA";
-
-                defaults.forEach(fileName => {
-                    const opt = document.createElement('option');
-                    opt.value = fileName;
-                    opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
-                    groupDefault.appendChild(opt);
-                });
-                select.appendChild(groupDefault);
+                buildList(null);
+                this._conductorUIRendered = programKey;
             }
 
-            // B. Resta del NAS
-            const others = nasNames.filter(n => !defaults.includes(n));
-
-            if (others.length > 0) {
-                const groupOthers = document.createElement('optgroup');
-                groupOthers.label = "🌐 ALTRES (NAS)";
-
-                others.forEach(fileName => {
-                    const opt = document.createElement('option');
-                    opt.value = fileName;
-                    opt.textContent = fileName.replace('Conduct_', '').replace('.mov', '');
-                    groupOthers.appendChild(opt);
-                });
-                select.appendChild(groupOthers);
+            // 3. Noms del NAS amb límit de temps (via ràpida cep.fs.readdir + caché 10 min)
+            let nasNames = [];
+            try {
+                nasNames = await this._withTimeout(
+                    this._listConductorNames(config.rutas.conductors, defaults.length === 0), 8000, 'conductors');
+            } catch (eCond) {
+                FASTPASS_UI.Utils.log('⚠️ [COND] Llistat del NAS no disponible (' + eCond.message + '): es mantenen els del programa', 'WARN');
+                this._conductorUIRendered = programKey;
+                return;
             }
 
-            if (select.options.length > 0) select.selectedIndex = 0;
+            this._conductorUIRendered = programKey;
+            if (!nasNames || nasNames.length === 0) {
+                if (defaults.length === 0) {
+                    FASTPASS_UI.Utils.log('⚠️ [COND] Sense conductors (ni del programa ni del NAS)', 'WARN');
+                }
+                return;
+            }
+            buildList(nasNames);
         },
 
         _extractThemeFromFiles(fileList) {

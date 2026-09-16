@@ -347,7 +347,10 @@
         var worldSecBlockOut    = this.tcToSeconds(worldTCBlockOut);
 
         var mp4ExpandedInPoint  = Math.max(0, (worldSecBlockIn  - worldSecMediaStart) - handles);
-        var mp4ExpandedOutPoint = (worldSecBlockOut - worldSecMediaStart) + handles;
+        // Marge de sortida (2026-09-16): a més dels handles, s'hi afegeix
+        // clipOutMarginSec perquè el clip tingui material per estirar a la timeline.
+        var outMarginSec = (typeof this._getOutMarginSec === 'function') ? this._getOutMarginSec() : 30;
+        var mp4ExpandedOutPoint = (worldSecBlockOut - worldSecMediaStart) + handles + outMarginSec;
 
         if (worldTCMediaStop) {
             var worldSecMediaStop = this.tcToSeconds(worldTCMediaStop);
@@ -417,10 +420,18 @@
         var mp4ExpandedInPoint  = Math.max(0, (blockOnAirStart - worldSecMediaStart) - handles);
         var mp4ExpandedOutPoint = (blockOnAirEnd - worldSecMediaStart) + handles;
 
+        // FIX (2026-09-16): el tall de sortida deixava NOMÉS 0,04 s després de l'inici
+        // del següent ítem (IPD) → el clip no el cobria i no es podia estirar. Ara es
+        // conserva `clipOutMarginSec` (30 s per defecte) dins del següent ítem.
+        var outMarginSec = (typeof this._getOutMarginSec === 'function') ? this._getOutMarginSec() : 30;
         var hardIn  = prevEnd   != null ? (prevEnd   - worldSecMediaStart) - 0.04 : null;
-        var hardOut = nextStart != null ? (nextStart - worldSecMediaStart) + 0.04 : null;
+        var hardOut = nextStart != null ? (nextStart - worldSecMediaStart) + outMarginSec : null;
         if (hardIn  != null && mp4ExpandedInPoint  < hardIn)  mp4ExpandedInPoint  = hardIn;
-        if (hardOut != null && mp4ExpandedOutPoint > hardOut) mp4ExpandedOutPoint = hardOut;
+        if (hardOut != null && mp4ExpandedOutPoint > hardOut) {
+            log('\u2702\uFE0F [ER:Bounds] Bloc ' + blockId + ': sortida limitada a l\'inici del següent ítem + ' +
+                outMarginSec.toFixed(1) + 's (' + hardOut.toFixed(2) + 's)');
+            mp4ExpandedOutPoint = hardOut;
+        }
 
         if (worldTCMediaStop) {
             var worldSecMediaStop  = this.tcToSeconds(worldTCMediaStop);
@@ -824,6 +835,36 @@
         // ================================================================
         var mp4ExpandedInPoint  = Math.max(0, (worldBlockStartSec - worldSecMediaStart) - inHandlesSec);
         var mp4ExpandedOutPoint = (worldBlockEndSec - worldSecMediaStart) + outHandlesSec;
+
+        // ── MARGEN DE SALIDA (2026-09-16) ─────────────────────────────────────
+        // L'OUT calculat pot quedar-se ABANS de l'ítem següent (p. ex. Tier 1 = fi de
+        // l'últim ítem emès), i llavors el clip no cobria l'IPD i no es podia estirar.
+        // El clip ha d'arribar com a mínim `clipOutMarginSec` MÉS ENLLÀ de l'inici del
+        // següent ítem amb OnAir (configurable; per defecte 30 s).
+        var outMarginSec = (typeof this._getOutMarginSec === 'function') ? this._getOutMarginSec() : 30;
+        try {
+            var nxt = this.getNeighbourOnAirTimes(data, blockId);
+            var nextOnAirSec = (nxt && nxt.nextStart != null) ? nxt.nextStart : null;
+            if (nextOnAirSec != null && outMarginSec > 0) {
+                var minOut = (nextOnAirSec - worldSecMediaStart) + outMarginSec;
+                if (mp4ExpandedOutPoint < minOut) {
+                    log('   \u2702\uFE0F [OUT-MARGIN] Clip ampliat fins al següent ítem + ' + outMarginSec.toFixed(1) + 's: ' +
+                        mp4ExpandedOutPoint.toFixed(2) + 's \u2192 ' + minOut.toFixed(2) + 's (següent OnAir=' + this.secondsToTC(nextOnAirSec) + ')');
+                    mp4ExpandedOutPoint = minOut;
+                }
+            }
+        } catch (eMar) {
+            log('   \u26A0\uFE0F [OUT-MARGIN] No s\'ha pogut aplicar el marge de sortida: ' + eMar.message, 'WARN');
+        }
+
+        // No passar mai del final del MP4 cleanFeed
+        if (worldSecMediaStop) {
+            var maxOutSec = worldSecMediaStop - worldSecMediaStart;
+            if (mp4ExpandedOutPoint > maxOutSec) {
+                log('   \u2702\uFE0F [OUT-MARGIN] Limitat pel final del cleanFeed: ' + mp4ExpandedOutPoint.toFixed(2) + 's \u2192 ' + maxOutSec.toFixed(2) + 's');
+                mp4ExpandedOutPoint = maxOutSec;
+            }
+        }
 
         // Límit per block.out
         var blockLim = this.getBlock(data, blockId);

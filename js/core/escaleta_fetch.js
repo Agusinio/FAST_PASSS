@@ -45,9 +45,11 @@
      * @returns {string} URL completa
      */
     ER._buildFetchUrl = function (escaletaId, data, hora) {
-        var horaEscaped = hora.replace(/:/g, '%3A');
+        // ⚠️ BUGFIX (2026-09-16): NO s'escapa ':' com a '%3A'. L'URL s'executa dins d'un
+        // .bat / cmd.exe, que EXPANDEIX els '%' ('%3A' → 'A' → l'API responia
+        // "Format d'hora incorrecte"). Els ':' són vàlids en una query string (RFC 3986).
         return API_BASE + escaletaId + '/_clips?data=' + data +
-            '&hora=' + horaEscaped +
+            '&hora=' + hora +
             '&genera=false&force=false' +
             '&ajustaHoresSegonsEmissionsPlayout=true' +
             '&mostraEscaleta=true';
@@ -81,8 +83,9 @@
 
         var dataStr = dateDir.replace(/_/g, '-'); // "2026_07_30" -> "2026-07-30"
 
-        // Hora: usar mediaStart del cleanFeed del JSON mes recent, o default
-        var horaStr = "14:00:00";
+        // Hora: (1) mediaStart del cleanFeed del JSON més recent del dia,
+        // (2) hora d'inici del programa, (3) hora actual. MAI una hora fixa.
+        var horaStr = null;
         try {
             var reader = window.FASTPASS_UI.EscaletaReader;
             if (reader && reader.findLatest && reader.load) {
@@ -103,55 +106,127 @@
             log('\u26A0\uFE0F [ER:Fetch] Error determinant hora: ' + e.message);
         }
 
-        var url = this._buildFetchUrl(escaletaId, dataStr, horaStr);
-        log('\uD83D\uDCE1 [ER:Fetch] Cridant API: ' + url);
-
-        try {
-            // La crida es fa via JSX (curl no esta disponible des del navegador)
-            // Utilitzem un helper custom a JSX per executar la request HTTP
-            var timestamp = Date.now();
-            var rawResult = await window.FASTPASS_UI.Utils.callJSX(
-                "FASTPASS.IO.curl('" + url.replace(/'/g, "\\'") + "', '" + API_AUTH.replace(/'/g, "\\'") + "')"
-            );
-
-            if (!rawResult || rawResult === '' || rawResult.indexOf('ERR') === 0) {
-                log('\u274C [ER:Fetch] Error a la crida API: ' + rawResult);
-                return null;
+        // ── Hora de la petició (2026-09-16) ─────────────────────────────────────
+        // Si no hi ha JSON local del dia, s'usa l'hora d'inici del PROGRAMA
+        // (Config.programStartHours: TNC 13:50, TNM 14:30, TNV 21:00) i, si no es pot
+        // resoldre, l'hora actual. Abans s'enviava "14:00:00" fix, que només servia
+        // per a TN COMARQUES i feia fallar la FOTO per a la resta de programes.
+        if (!horaStr) {
+            var cfgH = null;
+            try { cfgH = window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get(); } catch (eCfgH) { cfgH = null; }
+            var wottH = null;
+            try {
+                if (cfgH && cfgH.mapeoProgramas) {
+                    for (var kH in cfgH.mapeoProgramas) {
+                        if (cfgH.mapeoProgramas[kH].archivo === programArchivo) { wottH = cfgH.mapeoProgramas[kH].wott; break; }
+                    }
+                }
+            } catch (eWott) { wottH = null; }
+            var startH = (cfgH && cfgH.programStartHours && wottH && cfgH.programStartHours[wottH] != null)
+                ? Number(cfgH.programStartHours[wottH]) : null;
+            if (isFinite(startH)) {
+                var hhH = Math.floor(startH);
+                var mmH = Math.round((startH - hhH) * 60);
+                horaStr = (hhH < 10 ? '0' : '') + hhH + ':' + (mmH < 10 ? '0' : '') + mmH + ':00';
+                log('\u23F0 [ER:Fetch] Hora de la petició: ' + horaStr + ' (inici de programa ' + wottH + ')');
+            } else {
+                var nowH = new Date();
+                horaStr = (nowH.getHours() < 10 ? '0' : '') + nowH.getHours() + ':' +
+                    (nowH.getMinutes() < 10 ? '0' : '') + nowH.getMinutes() + ':00';
+                log('\u23F0 [ER:Fetch] Hora de la petició: ' + horaStr + ' (hora actual)');
             }
-
-            // ── Validació de resposta (2026-09-07) ─────────────────────────────
-            // Si l'API no té emissió per a la data/hora demanada retorna [] (o un
-            // JSON d'error { missatge }). En aquests casos NO es guarda cap
-            // escaleta_on_demand buida que pugui contaminar el directori del projecte.
-            var trimmedRaw = String(rawResult || '').trim();
-            var respuestaValida = false;
-            if (trimmedRaw && trimmedRaw !== '[]' && trimmedRaw !== '{}') {
-                try {
-                    var parsedRaw = JSON.parse(trimmedRaw);
-                    respuestaValida = !!(parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)
-                        && !parsedRaw.missatge && parsedRaw.escaleta && parsedRaw.cleanFeed);
-                } catch (ePars) { respuestaValida = false; }
-            }
-            if (!respuestaValida) {
-                log('\u274C [ER:Fetch] Resposta buida o no valida per a ' + dataStr + ' (hora ' + horaStr + '). No es guarda cap on_demand.', 'ERROR');
-                return null;
-            }
-
-            // Guardar el resultat JSON al directori del projecte
-            var filename = 'escaleta_on_demand_' + timestamp + '.json';
-            var safeFolderPath = (folderPath + '/' + filename).replace(/\\/g, '/').replace(/'/g, "\\'");
-
-            await window.FASTPASS_UI.Utils.callJSX(
-                "IO.writeTxt('" + safeFolderPath + "', '" + rawResult.replace(/'/g, "\\'") + "')"
-            );
-
-            log('\u2705 [ER:Fetch] JSON guardat: ' + safeFolderPath);
-            return { path: safeFolderPath, filename: filename };
-
-        } catch (e) {
-            log('\u274C [ER:Fetch] Error: ' + e.message);
-            return null;
         }
+
+        var url = this._buildFetchUrl(escaletaId, dataStr, horaStr);
+
+        // ── REINTENTS + MOTIU REAL DE L'API (2026-09-16) ────────────────────
+        // L'API de digition triga uns minuts a "localitzar" el cleanFeed del dia:
+        // mentre no el té, retorna {"missatge":"Error","debugInfo":"No s'ha
+        // localitzat cap clean feed..."}. Abans es feia UN sol intent i, si la API
+        // encara no tenia el cleanFeed, la foto fallava en silenci amb un genèric
+        // "Resposta buida o no valida": no se sabia per què ni es reintentava.
+        // Ara: fins a API_RETRIES intents separats API_RETRY_MS i el missatge REAL
+        // de l'API al log i a la UI.
+        // Un sol intent: cada intent pot bloquejar el motor JSX fins a ~24 s (el motor
+        // és mono-fil) i encadenar-ne dos deixava el panell penjat més d'un minut.
+        // Si falla, el motiu queda al log i l'usuari pot tornar a prémer FOTO.
+        var API_RETRIES = 1;
+        var API_RETRY_MS = 6000;
+        var lastReason = 'sense resposta de l\'API';
+
+        for (var att = 1; att <= API_RETRIES; att++) {
+            var timestamp = Date.now();
+            log('\uD83D\uDCE1 [ER:Fetch] Cridant API (intent ' + att + '/' + API_RETRIES + '): ' + url);
+
+            var rawResult = null;
+            try {
+                // La crida es fa via JSX (curl no esta disponible des del navegador)
+                // Utilitzem un helper custom a JSX per executar la request HTTP
+                rawResult = await window.FASTPASS_UI.Utils.callJSX(
+                    "FASTPASS.IO.curl('" + url.replace(/'/g, "\\'") + "', '" + API_AUTH.replace(/'/g, "\\'") + "')",
+                    { rawError: true }
+                );
+            } catch (eCurl) {
+                rawResult = null;
+                lastReason = 'curl: ' + eCurl.message;
+            }
+
+            if (!rawResult || rawResult === '' || String(rawResult).indexOf('ERR') === 0) {
+                if (!lastReason || lastReason.indexOf('curl:') !== 0) {
+                    lastReason = String(rawResult || 'sense resposta de curl');
+                }
+                log('\u274C [ER:Fetch] Error a la crida API: ' + lastReason, 'ERROR');
+            } else {
+                // ── Validació de resposta (2026-09-07) ─────────────────────────
+                // Si l'API no té emissió per a la data/hora demanada retorna [] o un
+                // JSON d'error { missatge }. En aquests casos NO es guarda cap
+                // escaleta_on_demand buida que pugui contaminar el directori.
+                var trimmedRaw = String(rawResult || '').trim();
+                var parsedRaw = null;
+                var respuestaValida = false;
+                if (trimmedRaw && trimmedRaw !== '[]' && trimmedRaw !== '{}') {
+                    try {
+                        parsedRaw = JSON.parse(trimmedRaw);
+                        respuestaValida = !!(parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)
+                            && !parsedRaw.missatge && parsedRaw.escaleta && parsedRaw.cleanFeed);
+                    } catch (ePars) { respuestaValida = false; }
+                }
+
+                if (respuestaValida) {
+                    // Guardar el resultat JSON al directori del projecte
+                    var filename = 'escaleta_on_demand_' + timestamp + '.json';
+                    var safeFolderPath = (folderPath + '/' + filename).replace(/\\/g, '/').replace(/'/g, "\\'");
+
+                    await window.FASTPASS_UI.Utils.callJSX(
+                        "IO.writeTxt('" + safeFolderPath + "', '" + rawResult.replace(/'/g, "\\'") + "')"
+                    );
+
+                    log('\u2705 [ER:Fetch] JSON guardat: ' + safeFolderPath);
+                    return { path: safeFolderPath, filename: filename };
+                }
+
+                // Motiu REAL de l'API (abans aquesta informació es perdia)
+                if (parsedRaw) {
+                    lastReason = 'API: ' + (parsedRaw.missatge || 'resposta sense escaleta/cleanFeed') +
+                        (parsedRaw.debugInfo ? ' — ' + String(parsedRaw.debugInfo).substring(0, 140) : '');
+                } else {
+                    lastReason = 'resposta no JSON: ' + trimmedRaw.substring(0, 140);
+                }
+                log('\u274C [ER:Fetch] Resposta no valida (' + dataStr + ' ' + horaStr + ') intent ' + att + ': ' + lastReason, 'ERROR');
+            }
+
+            if (att < API_RETRIES) {
+                log('\u23F3 [ER:Fetch] Reintentant en ' + (API_RETRY_MS / 1000) + 's (l\'API tarda uns minuts a localitzar el cleanFeed)...');
+                await new Promise(function (r) { setTimeout(r, API_RETRY_MS); });
+            }
+        }
+
+        // Tots els intents fallits: motiu per a la UI (el log té el detall complet)
+        try {
+            window.FASTPASS_UI.Utils.status('FOTO: l\'API no té dades del dia (mira el log)', 'error');
+        } catch (eSt) { }
+        log('\u274C [ER:Fetch] FOTO fallida després de ' + API_RETRIES + ' intents. Motiu: ' + lastReason, 'ERROR');
+        return null;
     };
 
     // ----------------------------------------------------------------

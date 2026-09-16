@@ -18,6 +18,93 @@ var lastKfClipId = "";
 // seqW (amplada del frame) es guarda per convertir px <-> normalitzat.
 var sliderSeqW = 608;
 
+// ── 📊 PERF (FASE 0 · TEMPORAL 2026-09-16) ───────────────────────────────────
+// Instrumentació del slider de reencuadre: quantes ordres s'envien, quant triga
+// cada round-trip a ExtendScript, quantes queden en vola alhora i quant temps
+// d'I/O de log es consumeix. NO altera el comportament (només mesura).
+var _perf = {
+    on: true,
+    barridos: 0,
+    nInput: 0, nSent: 0, nDescarts: 0, inFlight: 0, inFlightMax: 0,
+    rtSum: 0, rtMin: 0, rtMax: 0, rtN: 0,
+    tFirst: 0, tLastInput: 0, tRelease: 0, drainMs: -1,
+    ticks: 0, ticksKf: 0, pollSkip: 0,
+    timer: 0, id: 0
+};
+FASTPASS_UI.Sync._perf = _perf;
+
+function _perfNow() {
+    return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
+
+function _perfBeginBarrido() {
+    if (!_perf.on) return;
+    if (_perf.timer) { clearTimeout(_perf.timer); _perf.timer = 0; }
+    _perf.id++;
+    _perf.barridos++;
+    _perf.nInput = 0; _perf.nSent = 0; _perf.nDescarts = 0; _perf.inFlight = 0; _perf.inFlightMax = 0;
+    _perf.rtSum = 0; _perf.rtMin = 0; _perf.rtMax = 0; _perf.rtN = 0;
+    _perf.tLastInput = 0; _perf.tRelease = 0; _perf.drainMs = -1;
+    _perf.ticks = 0; _perf.ticksKf = 0; _perf.pollSkip = 0;
+    _perf.tFirst = _perfNow();
+    if (window.FASTPASS_UI.Utils && window.FASTPASS_UI.Utils._perfReset) {
+        window.FASTPASS_UI.Utils._perfReset();
+    }
+}
+
+function _perfSendStart() {
+    if (!_perf.on) return 0;
+    _perf.nSent++;
+    _perf.inFlight++;
+    if (_perf.inFlight > _perf.inFlightMax) _perf.inFlightMax = _perf.inFlight;
+    return _perfNow();
+}
+
+function _perfRecv(t0) {
+    if (!_perf.on) return 0;
+    var d = _perfNow() - t0;
+    if (_perf.inFlight > 0) _perf.inFlight--;
+    _perf.rtSum += d; _perf.rtN++;
+    if (_perf.rtMin === 0 || d < _perf.rtMin) _perf.rtMin = d;
+    if (d > _perf.rtMax) _perf.rtMax = d;
+    return d;
+}
+
+function _perfReport() {
+    if (!_perf.on) return;
+    var U = window.FASTPASS_UI.Utils;
+    var io = (U && U._ioStats) ? U._ioStats : { n: 0, ms: 0, maxMs: 0, bytes: 0, logN: 0, auditN: 0 };
+    var js = (U && U._jsxStats) ? U._jsxStats : { n: 0, byPrefix: {}, other: 0 };
+    var rtAvg = _perf.rtN ? (_perf.rtSum / _perf.rtN) : 0;
+    // Vía d'escriptura detectada (cep_node / require / cep.fs síncron) — diagnòstic Fase 2.
+    var fsKind = 'n/a';
+    try { if (U && U._nodeFs) { U._nodeFs(); fsKind = U._fsKind || 'n/a'; } } catch(eFsk) {}
+    var tEnd = _perf.tRelease || _perf.tLastInput || _perf.tFirst;
+    var barrido = (_perf.tFirst && tEnd) ? ((tEnd - _perf.tFirst) / 1000) : 0;
+    var top = [];
+    for (var k in js.byPrefix) { top.push([k, js.byPrefix[k]]); }
+    top.sort(function (a, b) { return b[1] - a[1]; });
+    var jsxTxt = [];
+    for (var i = 0; i < top.length && i < 6; i++) { jsxTxt.push(top[i][0] + '=' + top[i][1]); }
+    if (js.other) jsxTxt.push('altres=' + js.other);
+    U.forceLog('📊 [PERF·SLIDER #' + _perf.barridos + '] barrido=' + barrido.toFixed(2) + 's' +
+        ' · inputs=' + _perf.nInput + ' · enviats=' + _perf.nSent + ' · descartats=' + _perf.nDescarts +
+        ' · max_en_vola=' + _perf.inFlightMax +
+        ' · rt_avg=' + rtAvg.toFixed(1) + 'ms (min ' + _perf.rtMin.toFixed(0) + ' / max ' + _perf.rtMax.toFixed(0) + ')' +
+        ' · espera_total=' + (_perf.rtSum / 1000).toFixed(2) + 's' +
+        ' · drenatge_final=' + (_perf.drainMs >= 0 ? _perf.drainMs.toFixed(0) + 'ms' : 'n/a') +
+        ' · IO=' + io.n + ' escr ' + io.ms.toFixed(0) + 'ms (max ' + io.maxMs.toFixed(0) + ', BLOC ' + (io.blockMs || 0).toFixed(0) + 'ms, sync ' + (io.syncN || 0) + ' / async ' + (io.asyncN || 0) + ') ' + (io.bytes / 1048576).toFixed(2) + 'MB · FS=' + fsKind +
+        ' · JSX=' + js.n + ' [' + jsxTxt.join(' · ') + ']' +
+        ' · ticks500=' + _perf.ticks + ' (syncKfMode=' + _perf.ticksKf + ', poll_saltat=' + _perf.pollSkip + ')');
+}
+
+// 📊 FASE 0: accessos ràpids per a la consola del panell (F12 / clic dret → Inspect):
+//   FASTPASS_UI.Sync._perf.report()   → torna a escriure l'informe de l'últim barrido
+//   FASTPASS_UI.Sync._perf.reset()    → reinicia els comptadors
+//   FASTPASS_UI.Sync._perf.on = false → atura la instrumentació
+_perf.report = _perfReport;
+_perf.reset = _perfBeginBarrido;
+
 function setReframeActive(on) {
     reframeActive = on;
     var zone = document.getElementById('sliderZone');
@@ -223,23 +310,18 @@ function applySliderLimits() {
         console.log('🔍 btnIn:', btnIn);
         if (!btnIn) alert('❌ btnIn no encontrado en el DOM');
         const btnOut = document.getElementById('btnOut');
-        const btnScene = document.getElementById('btnScene');
+        // (2026-09-16) TROSSEJA i REFRAME: botons eliminats del panell d'usuari.
+        //  - TROSSEJA es fa dins del pipeline d'OUT & GO (Cut.runScene).
+        //  - REFRAME (KF.runAutoReframe) no permet col·locar l'efecte de reencuadre.
         const btnPrevClip = document.getElementById('btnPrevClip');
         const btnNextClip = document.getElementById('btnNextClip');
-        const btnCenter = document.getElementById('btnCenter');
         const btnKey = document.getElementById('btnKey');
 
         if (btnIn) btnIn.addEventListener('click', function () { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
         if (btnOut) btnOut.addEventListener("click", function () { runOutHandler(); });
-        if (btnScene) btnScene.addEventListener('click', function () { callWorkflow('Cut', 'runScene'); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
         if (btnNextClip) btnNextClip.addEventListener('click', function () { callWorkflow('Cut', 'runNextClip'); });
 
-        if (btnCenter) {
-            btnCenter.addEventListener('click', function () {
-                if (FASTPASS_UI.Workflows.KF) FASTPASS_UI.Workflows.KF.runAutoReframe();
-            });
-        }
         if (btnKey) {
             btnKey.addEventListener('click', async function (ev) {
                 // DIAGNÒSTIC: Ctrl+clic a KEY = probeRange (límit real de la Position)
@@ -278,26 +360,77 @@ function applySliderLimits() {
             // El slider actua sobre el clip SELECCIONAT (Anim.sliderApply ho decideix:
             // V1 sense recorte → x(); V2 sense recorte → posició normal;
             // clip amb recorte (V3 de la doble finestra) → PAN amb compensació).
+            // ── 🚀 FASE 1 (2026-09-16): enviament coalescent (últim-gana) ────────
+            // Mesura Fase 0: 105 inputs → 106 evalScript, fins a 25 en vola, rt_avg
+            // 592 ms i 62,8 s d'espera acumulada per a un barrido de 4,5 s. Ara:
+            //  · com a màxim 1 crida en vola (la resta espera),
+            //  · els valors intermedis obsolets es DESCARTEN (només compta l'últim),
+            //  · el COMMIT (isFinal) s'envia SEMPRE com a última operació del barrido.
+            var slPending = null, slInFlight = false, slRaf = 0;
+
+            var slSend = function (job) {
+                slInFlight = true;
+                var _t = _perfSendStart();                                 // 📊 FASE 0
+                var script = job.final
+                    ? `Anim.sliderApply(${job.norm}, true, ${kfMode()})`
+                    : `Anim.sliderApply(${job.norm}, false)`;
+                return FASTPASS_UI.Utils.callJSX(script).then(function (res) {
+                    _perfRecv(_t);                                         // 📊 FASE 0
+                    slInFlight = false;
+                    var px = Math.round(job.norm * sliderSeqW);
+                    if (job.final) {
+                        _perf.drainMs = _perfNow() - (_perf.tRelease || _perfNow());   // 📊 FASE 0
+                        // forceLog: salta el filtre de tema perquè el resultat (dx/crops del
+                        // panRecorte) sempre aparegui al log de diagnòstic.
+                        FASTPASS_UI.Utils.forceLog(`🎚️ Slider FINAL ${px}px → ${res}`);
+                        // 📊 FASE 0: informe del barrido (2,5 s d'espera perquè dreni la cua).
+                        if (_perf.on) {
+                            var _myId = _perf.id;
+                            if (_perf.timer) clearTimeout(_perf.timer);
+                            _perf.timer = setTimeout(function () {
+                                _perf.timer = 0;
+                                if (_perf.id === _myId) _perfReport();
+                            }, 2500);
+                        }
+                    } else {
+                        FASTPASS_UI.Utils.log(`🎚️ Slider ${px}px → ${res}`, "DEBUG");
+                    }
+                    // Si ha arribat un valor nou mentre volava → s'envia ARA (només l'últim).
+                    if (slPending) { slFlush(); }
+                });
+            };
+
+            var slFlush = function () {
+                slRaf = 0;
+                if (slInFlight || !slPending) return;
+                // Si el reencuadre s'ha desactivat pel camí, descarta els valors
+                // intermedis (el COMMIT final sí que s'envia sempre).
+                if (!reframeActive && !slPending.final) { slPending = null; return; }
+                var job = slPending;
+                slPending = null;
+                slSend(job);
+            };
+
             slider.oninput = function () {
                 if (!reframeActive) return;
+                if (!isUserDraggingSlider) _perfBeginBarrido();            // 📊 FASE 0
                 isUserDraggingSlider = true;
+                _perf.nInput++; _perf.tLastInput = _perfNow();             // 📊 FASE 0
                 // El valor del slider ja és la X en PÍXELS → normalitzar (0..1)
-                var norm = parseInt(slider.value, 10) / sliderSeqW;
-                FASTPASS_UI.Utils.callJSX(`Anim.sliderApply(${norm}, false)`).then(res => {
-                    FASTPASS_UI.Utils.log(`🎚️ Slider ${Math.round(slider.value)}px → ${res}`, "DEBUG");
-                });
+                if (slPending) _perf.nDescarts++;                          // 📊 FASE 0: intermedi obsolet
+                slPending = { norm: parseInt(slider.value, 10) / sliderSeqW, final: false };
+                if (!slRaf) slRaf = requestAnimationFrame(slFlush);        // 🚀 FASE 1
             };
 
             slider.onchange = function () {
                 if (!reframeActive) return;
                 isUserDraggingSlider = false;
-                var norm = parseInt(slider.value, 10) / sliderSeqW;
+                _perf.tRelease = _perfNow();                               // 📊 FASE 0
                 // En soltar: isFinal=true per fer el COMMIT (refresc) a Premiere.
-                FASTPASS_UI.Utils.callJSX(`Anim.sliderApply(${norm}, true, ${kfMode()})`).then(res => {
-                    // forceLog: salta el filtre de tema perquè el resultat (dx/crops del
-                    // panRecorte) sempre aparegui al log de diagnòstic.
-                    FASTPASS_UI.Utils.forceLog(`🎚️ Slider FINAL ${Math.round(slider.value)}px → ${res}`);
-                });
+                if (slPending) _perf.nDescarts++;                          // 📊 FASE 0
+                slPending = { norm: parseInt(slider.value, 10) / sliderSeqW, final: true };
+                if (slRaf) { cancelAnimationFrame(slRaf); slRaf = 0; }
+                slFlush();                                                 // 🚀 FASE 1: COMMIT garantit
             };
         }
 
@@ -490,6 +623,7 @@ function applySliderLimits() {
                     utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}`, 'INFO');
                     // Guarda de temps: si l'API d'escaletes o el motor JSX no responen
                     // (xarxa/VPN), el botó no pot quedar-se penjat en "⏳ FOTO...".
+                    // 45 s: el fetch fa un intent (curl --max-time 20 + marge).
                     const FOTO_TIMEOUT_MS = 45000;
                     const result = await Promise.race([
                         reader.fetchNewEscaleta(
@@ -535,8 +669,10 @@ function applySliderLimits() {
                             await window.FASTPASS_UI.Core.Context.checkContext({ force: true });
                         }
                     } else {
-                        utils.log('❌ [Fetch] No s\'ha pogut obtenir la foto de l\'escaleta', 'ERROR');
-                        utils.status('Error obtenint foto escaleta', 'error');
+                        // El motiu REAL ja l'ha registrat EscaletaReader.fetchNewEscaleta al log
+                        // (missatge/debugInfo de l'API de digition).
+                        utils.log('❌ [Fetch] No s\'ha pogut obtenir la foto de l\'escaleta (mira el motiu de l\'API més amunt al log)', 'ERROR');
+                        utils.status("FOTO: l'API no ha donat escaleta (mira el log)", 'error');
                     }
                 } catch (e) {
                     utils.log(`❌ [Fetch] Error: ${e.message}`, 'ERROR');
@@ -628,6 +764,20 @@ function applySliderLimits() {
             utils.log('✅ [PIPE] ' + ph[0] + ' finalitzada (' + ((Date.now() - t0) / 1000).toFixed(1) + 's)', 'INFO');
         }
         utils.log('🏁 [PIPE] Marcadors col·locats. Verifica la seqüència i prem COLOCAR per posar els chyrons.', 'INFO');
+        // SNAPSHOT: deixar constància de COM han quedat els marcadors (posició,
+        // comentari, color) abans que l'usuari els mogui a mà. Es desa a la carpeta
+        // del projecte com a MARCADORS_<data>_<hora>.txt i .json.
+        try {
+            const MK = FASTPASS_UI.Workflows && FASTPASS_UI.Workflows.Markers;
+            if (MK && MK.dumpMarkersSnapshot) {
+                const nSnap = await MK.dumpMarkersSnapshot();
+                if (typeof nSnap === 'number' && nSnap >= 0) {
+                    utils.log('💾 [PIPE] Snapshot de marcadors desat (' + nSnap + ' marcadors) a la carpeta del projecte.', 'INFO');
+                }
+            }
+        } catch (eSnap) {
+            utils.log('⚠️ [PIPE] Snapshot de marcadors: ' + eSnap.message, 'WARN');
+        }
         utils.status('Marcadors col·locats — prem COLOCAR', 'exito');
     }
 
@@ -728,7 +878,7 @@ function applySliderLimits() {
 // 4. SINCRONIZACIÓN (POLLING DEL SLIDER)
 FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
     if (!reframeActive) return;          // polling només amb el reencuadre actiu
-    if (isUserDraggingSlider) return;
+    if (isUserDraggingSlider) { _perf.pollSkip++; return; }   // 📊 FASE 0
     // Llegeix la X del clip objectiu (el SELECCIONAT, o V1 sota CTI): Anim.sliderApply().
     FASTPASS_UI.Utils.callJSX('Anim.sliderApply()').then(val => {
         const slider = document.getElementById('slider-move');
@@ -742,6 +892,10 @@ FASTPASS_UI.Sync.updateSliderFromPremiere = function () {
 // 5. SINCRONITZACIÓ DEL MODE (SLIDER / KEYFRAME) AMB EL CLIP SELECCIONAT
 FASTPASS_UI.Sync.syncKfMode = function () {
     if (!window.FASTPASS_UI.Utils || !window.FASTPASS_UI.Utils.isJsxReady) return;
+    // 🚀 FASE 3 (2026-09-16): mentre s'arrossega el slider no es fa cap crida de
+    // sincronització (competia a la mateixa cua d'ExtendScript: 15 Anim.modeInfo
+    // per barrido). Es reprendrà al tick següent de deixar anar el slider.
+    if (isUserDraggingSlider) { _perf.ticksKf++; return; }   // 📊 FASE 0
     // El clip objectiu (Anim.modeInfo) és el SELECCIONAT (o V1 sota CTI com a
     // fallback), el mateix sobre el qual actuen el slider i el botó KEYFRAME.
     FASTPASS_UI.Utils.callJSX('Anim.modeInfo()').then(function (raw) {
@@ -789,7 +943,7 @@ document.addEventListener('click', function (e) {
  * columna de botons i es redueixi quan la vista es compacta.
  * Amplada = min(ample disponible, 9/16 de l'altura de la columna).
  */
-function sizeVideoToFit() {
+function sizeVideoToFit(force) {
     try {
         var wrap = document.getElementById('srtVideoWrap');
         var zone = document.querySelector('.right-zone');
@@ -797,35 +951,56 @@ function sizeVideoToFit() {
         if (!wrap || !zone || !col) return;
         var aw = zone.clientWidth;
         if (aw <= 0) return;
-        /* 1) Mesurar la columna de controls SENSE el visor al flux (position:absolute),
-              però SENSE tocar-ne la mida: posar width/height a 0 i restaurar-los
-              reescala la textura del <video> i la deixa a mig pintar (franja negra
-              inferior) — bug real en moure el cabezal. La mesura és tota síncrona,
-              així que no es veu cap salt a la pantalla. */
-        var prevPos = wrap.style.position;
-        wrap.style.position = 'absolute';
-        var ah = col.offsetHeight;
-        wrap.style.position = prevPos;
-        if (ah <= 0) return;
-        /* 2) Amplada 9:16; l'alçada la deriva l'aspect-ratio (i queda 1:1 amb la columna). */
+        /* 1) Alçada de la columna de controls. Només es mesura quan cal:
+              - la primera vegada (normalment encara no hi ha vídeo), o
+              - en redimensionar el panell (force).
+              Mesurar obliga a treure el visor del flux i, amb un <video> carregat,
+              qualsevol canvi de layout el deixa a mig pintar: és el parpadeig negre
+              de la part inferior (passava cada 500 ms, també en pausa). */
+        if (!wrap._fitAh) {
+            var pW = wrap.style.width, pH = wrap.style.height;
+            wrap.style.width = '10px';
+            wrap.style.height = '0';
+            wrap._fitAh = col.offsetHeight;
+            wrap.style.width = pW;      // restaurar (no inventar 'auto'): el CSS mana
+            wrap.style.height = pH;
+        } else if (force) {
+            var prevW = wrap.style.width, prevH = wrap.style.height;
+            wrap.style.width = '10px';
+            wrap.style.height = '0';
+            wrap._fitAh = col.offsetHeight;
+            wrap.style.width = prevW;
+            wrap.style.height = prevH;
+        }
+        var ah = wrap._fitAh;
+        if (!ah || ah <= 0) return;
+        /* 2) Mida EXACTA en px enters (9:16). Amb aspect-ratio la alçada surt amb
+              decimals i el compositor rasteritza el <video> a mig píxel: d'aquí
+              surten les franges "mig negres". */
         var w = Math.min(aw, Math.floor(ah * 9 / 16));
-        // Si l'amplada calculada no ha canviat, NO tocar estils del visor:
+        var h = Math.round(w * 16 / 9);
+        // Si la mida calculada no ha canviat, NO tocar estils del visor:
         // reescriure width/height invalida el layout de la zona del <video>.
         if (wrap._fitW === w) return;
         wrap._fitW = w;
         wrap.style.width = w + 'px';
-        wrap.style.height = 'auto';
+        wrap.style.height = h + 'px';
     } catch (e) { /* no crític */ }
 }
-window.addEventListener('resize', sizeVideoToFit);
+window.addEventListener('resize', function () { sizeVideoToFit(true); });
 
-// AUTO-REFRESC DE L'ESTAT D'ARRENCADA (cada 15 s)
+// AUTO-REFRESC DE L'ESTAT D'ARRENCADA (cada 60 s)
 // Mentre no tenim tot el necessari (escaleta llista, MP4/rètols pendents) el
 // semàfor es recalcula sol: així l'usuari veu quan pot CREAR o ACTUALITZAR
 // sense haver de tocar res. S'atura mentre el visor SRT reprodueix.
-setInterval(function () {
+// NOTA: cada checkContext fa un escaneig COMPLET del NAS (escaleta + media +
+// wotts + chyrons) amb crides JSX síncirones que BLOQUEGEN la UI del panell.
+// Per això: (a) no se solapen (guard _ctxRefreshBusy) i (b) s'espacien a 60 s.
+var _ctxRefreshBusy = false;
+setInterval(async function () {
     var srA = window.FASTPASS_UI && FASTPASS_UI.Editor && FASTPASS_UI.Editor.SrtEditor;
     if (srA && (srA._isPlaying || srA._timelineRunning)) return;
+    if (_ctxRefreshBusy) return;   // un escaneig en curs: no n'arrenquem un altre
     var ctA = window.FASTPASS_UI && window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
     if (!ctA || !ctA.checkContext) return;
     // ── DATA DEL PROJECTE OBERT ─────────────────────────────────────────────
@@ -849,11 +1024,13 @@ setInterval(function () {
     var semA = (ctA._lastButtonData && ctA._lastButtonData.semaforo) || null;
     var pendA = !!(semA && (semA.mp4 === "pending" || semA.wot === "pending"));
     if (stA === "MASSA" || stA === "ESPERANT" || stA === null || pendA) {
-        try { ctA.checkContext(); } catch (eA) { }
+        _ctxRefreshBusy = true;
+        try { await ctA.checkContext(); } catch (eA) { } finally { _ctxRefreshBusy = false; }
     }
-}, 15000);
+}, 60000);
 
 setInterval(function () {
+    if (isUserDraggingSlider) _perf.ticks++;   // 📊 FASE 0: ticks de 500 ms amb el slider arrossegant
     // Mentre el visor SRT està reproduint, NO es fa cap mesura de layout ni JSX
     // extern (Registry/slider/reframe): competirien amb el polling del cabezal
     // (250ms) i causarien talls al <video>. Fora de la reproducció es manté tot.
@@ -879,7 +1056,9 @@ setInterval(function () {
         }
     }
     // Registry.poll es limita sol a 1 cicle cada 2 s (vegeu project_registry.js).
-    if (FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
+    // 🚀 FASE 3 (2026-09-16): tampoc no ha de competir amb la cua del slider mentre
+    // s'arrossega (la mesura Fase 0 hi comptava Timeline.get / Context.list).
+    if (!isUserDraggingSlider && FASTPASS_UI.Registry && FASTPASS_UI.Registry.poll) {
         FASTPASS_UI.Registry.poll();
     }
 }, 500);

@@ -15,7 +15,10 @@
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     // Tracks alineats amb Profile.json (v_mp4:1, v_fondos:2, v_graf:3, v_tema:5, v_chyrons:6, v_lloc:7)
     let _activeConfig = {
-        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10 },
+        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 60, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 1.0, clipOutMarginSec: 30 },
+        // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
+        // guardes de temps, peticions a l'API d'escaletes i OFFSET del MP4).
+        programStartHours: { TNV: 21.0, TNM: 14.5, TNC: 13.8333 },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
@@ -140,6 +143,13 @@
                 },
                 debug:    cfg.general.debug,
                 handles:  cfg.general.handles  || 0,
+                // clipOutMarginSec: marge de SORTIDA del clip (segons) que ha de quedar
+                // DESPRÉS de l'inici del següent item amb OnAir (i per sobre dels
+                // handles), per poder estirar el clip a la timeline si cal.
+                // Cas real 2026-09-16: el clip acabava massa aviat i no cobria l'IPD.
+                clipOutMarginSec: (cfg.general.clipOutMarginSec != null) ? cfg.general.clipOutMarginSec : 30,
+                // Hores d'inici d'emissió per programa (TNC 13:50, TNM 14:30, TNV 21:00).
+                programStartHours: cfg.general.programStartHours || { TNV: 21.0, TNM: 14.5, TNC: 13.8333 },
                 tcOffset: cfg.general.tcOffset || 0,
                 // 🎛️ [IN-OFFSET 2026-09-04] Ajustos del flujo NOU/Main (create):
                 // - clipInOffset: segons a RESTAR a l'IN (media origen) del clip inserit
@@ -148,7 +158,15 @@
                 //   perquè quedi més a prop de l'inici real del bloc.
                 // Només s'apliquen a create() MODE NORMAL (3_Project_Logic.js).
                 clipInOffset: cfg.general.clipInOffset || 0,
-                zonaInOffset: cfg.general.zonaInOffset || 0
+                zonaInOffset: cfg.general.zonaInOffset || 0,
+                // 🌊 Ajustos de l'editor SRT / marcadors (Profile.json → general):
+                // - srtEmergencyTailSec: segons de cua més enllà del final del bloc al
+                //   SRT d'emergència (per defecte 60).
+                // - snapWindowDeducedSec: finestra de snap (F4) per als marcadors DEDUÏTS
+                //   (ítems sense OnAir, tipus "02i - Intro") — per defecte 2,5 s.
+                srtEmergencyTailSec: (cfg.general.srtEmergencyTailSec != null) ? cfg.general.srtEmergencyTailSec : 60,
+                snapWindowDeducedSec: (cfg.general.snapWindowDeducedSec != null) ? cfg.general.snapWindowDeducedSec : 2.5,
+                snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 1.0
             };
         },
 

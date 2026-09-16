@@ -198,9 +198,26 @@
 
             // ── NOU COMPORTAMENT (2026-06-29): Sempre agafar el JSON MÉS RECENT
             // del programa, ignorant el blockId al nom del fitxer.
-            var best = allProgFiles[0];
-            log('\u2705 [ER:IO] JSON m\u00E9s recent (global): ' + best.name);
-            return { path: best.path, filename: best.name };
+            // FIX (2026-09-16) — ESCULL LA ESCALETA VALIDA:
+            // Sempre el JSON MES RECENT del programa (s'ignora el blockId del nom), pero
+            // SALTANT els fitxers d'ERROR que publica el motor
+            // ({"missatge":"Error","debugInfo":...}, 200 bytes). Abans s'agafava el
+            // primer per data i, si era un error (cas real: TNC V3 del 16/09), l'extensio
+            // es quedava sense escaleta tot i tenir el V2 valid al mateix directori.
+            var maxTry = Math.min(allProgFiles.length, 5);
+            for (var fi = 0; fi < maxTry; fi++) {
+                var cand = allProgFiles[fi];
+                var candData = null;
+                try { candData = await this.load(cand.path); } catch (eL) { candData = null; }
+                if (candData && candData.cleanFeed && candData.escaleta) {
+                    if (fi > 0) log('\u2139\uFE0F [ER:IO] El JSON mes recent no era una escaleta valida; s\'usa: ' + cand.name);
+                    log('\u2705 [ER:IO] JSON mes recent valid (global): ' + cand.name);
+                    return { path: cand.path, filename: cand.name };
+                }
+                log('\u26A0\uFE0F [ER:IO] JSON descartat (no es escaleta): ' + cand.name);
+            }
+            log('\u274C [ER:IO] Cap JSON valid del programa per a la data demanada');
+            return null;
 
         } catch (e) {
             log('\u274C [ER:IO] Error en findLatest: ' + e.message);
@@ -242,11 +259,34 @@
             });
             if (candidates.length === 0) return null;
 
+            // ── PRIORITAT (2026-09-16): la FOTO (escaleta_on_demand_*) mana SEMPRE sobre
+            // les còpies del NAS: si l'usuari ha fet FOTO, aquesta és la font. Dins de
+            // cada grup, la més recent. I es descarten els JSON invàlids (fitxers
+            // d'error del motor: {"missatge":"Error",...}) així com els que no es poden
+            // llegir.
             candidates.sort(function (a, b) { return (b.modified || 0) - (a.modified || 0); });
-            var best = candidates[0];
-            var path = folderPath.replace(/[\\/]+$/, '') + '\\' + best.name;
-            log('\uD83D\uDCC1 [ER:IO] Escaleta local trobada: ' + best.name);
-            return { path: path, filename: best.name };
+            var fotos = [], nasCopies = [];
+            for (var ci2 = 0; ci2 < candidates.length; ci2++) {
+                var nm2 = String(candidates[ci2].name || '');
+                if (nm2.indexOf('escaleta_on_demand') === 0) fotos.push(candidates[ci2]);
+                else nasCopies.push(candidates[ci2]);
+            }
+            var ordered = fotos.concat(nasCopies);
+            var maxTryF = Math.min(ordered.length, 4);
+            for (var fi2 = 0; fi2 < maxTryF; fi2++) {
+                var best = ordered[fi2];
+                var path = folderPath.replace(/[\\/]+$/, '') + '\\' + best.name;
+                var localData = null;
+                try { localData = await this.load(path, true); } catch (eLF) { localData = null; }
+                if (!localData) {
+                    log('\u26A0\uFE0F [ER:IO] Escaleta local descartada (no vàlida): ' + best.name);
+                    continue;
+                }
+                log('\uD83D\uDCC1 [ER:IO] Escaleta local trobada: ' + best.name + (fi2 < fotos.length ? ' [FOTO]' : ''));
+                return { path: path, filename: best.name };
+            }
+            log('\u274C [ER:IO] Cap escaleta local vàlida al directori del projecte');
+            return null;
         } catch (e) {
             log('\u26A0\uFE0F [ER:IO] Error en findInFolder: ' + e.message);
             return null;
@@ -526,11 +566,29 @@
      * @returns {Promise<{ found: boolean, ready: boolean, timestamp: string }>}
      */
     ER.getStatus = async function (programArchivo, blockId, datePrefix) {
-        var latest = await this.findLatest(programArchivo, blockId, datePrefix);
-        if (!latest) return { found: false, ready: false };
+        // FIX (2026-09-16): s'usa findLatestValid (validació "JSON >= fi del bloc" +
+        // fallback al JSON anterior + espera estimada) per saber si l'escaleta és prou
+        // RECENT per al bloc. Abans només s'usava findLatest (el més recent per data),
+        // i una escaleta massa antiga o un fitxer d'error deixaven el semàfor en vermell
+        // sense cap explicació ni estimació d'espera.
+        var validRes = null;
+        try {
+            if (typeof this.findLatestValid === 'function') {
+                validRes = await this.findLatestValid(programArchivo, blockId, datePrefix);
+            }
+        } catch (eVal) { validRes = null; }
+        var waitSec = (validRes && validRes.estimatedWaitSec != null) ? validRes.estimatedWaitSec : null;
+
+        var latest = null;
+        if (validRes && validRes.valid && validRes.path) {
+            latest = { path: validRes.path, filename: validRes.filename };
+        } else {
+            latest = await this.findLatest(programArchivo, blockId, datePrefix);
+        }
+        if (!latest) return { found: false, ready: false, waitSec: waitSec };
 
         var data = await this.load(latest.path);
-        if (!data) return { found: true, ready: false, filename: latest.filename };
+        if (!data) return { found: true, ready: false, filename: latest.filename, waitSec: waitSec };
 
         var block = this.getBlock(data, blockId);
         var mediaScan = data && data.cleanFeed ? data.cleanFeed : {};
@@ -549,12 +607,14 @@
                 complete = this.isBlockFullyEmitted(data, blockId);
             }
         } catch (eCE) { }
-        var isReady = !!complete.ok;
+        var isReady = !!complete.ok || !!(validRes && validRes.valid);
 
         return {
             found: true,
             ready: isReady,
             complete: complete,
+            escaletaValid: !!(validRes && validRes.valid),
+            waitSec: waitSec,
             filename: latest.filename,
             timestamp: latest.filename.split('_').slice(-2).join('_').replace('.json', ''),
             mediaStop: mediaScan.mediaStop || null,
@@ -609,7 +669,16 @@
             });
             if (candidates.length === 0) return { found: false, ready: false };
 
+            // ── PRIORITAT (2026-09-16): la FOTO (escaleta_on_demand_*) va PRIMER: si
+            // l'usuari ha fet FOTO, aquesta és la font, encara que hi hagi una còpia del
+            // NAS més recent. Dins de cada grup, la més recent.
             candidates.sort(function (a, b) { return (b.modified || 0) - (a.modified || 0); });
+            var fotosL = [], nasL = [];
+            for (var ciL = 0; ciL < candidates.length; ciL++) {
+                if (String(candidates[ciL].name || '').indexOf('escaleta_on_demand') === 0) fotosL.push(candidates[ciL]);
+                else nasL.push(candidates[ciL]);
+            }
+            candidates = fotosL.concat(nasL);
 
             // Iterar de més recent a més antic: el primer que contingui el bloc és la
             // foto/escaleta vàlida (igual que getStatus sobre el repositori central).
@@ -636,13 +705,17 @@
                         complete = this.isBlockFullyEmitted(data, ctx.bloque);
                     }
                 } catch (eCE) { }
-                var isReady = !!complete.ok;
                 var isOnDemand = String(cand.name).indexOf('escaleta_on_demand') === 0;
-                log('📷 [ER:IO] Escaleta local vàlida per al bloc ' + ctx.bloque + ': ' + cand.name);
+                // FIX (2026-09-16): una FOTO sempre és utilitzable (l'usuari l'ha
+                // demanada expressament), encara que el bloc no consti com a emès del tot.
+                var isReady = isOnDemand || !!complete.ok;
+                log('📷 [ER:IO] Escaleta local trobada per al bloc ' + ctx.bloque + ': ' + cand.name +
+                    (isOnDemand ? ' [FOTO → té preferència]' : ' [còpia NAS]'));
                 return {
                     found: true,
                     ready: isReady,
                     local: true,
+                    isFoto: isOnDemand,
                     complete: complete,
                     filename: cand.name,
                     timestamp: isOnDemand ? 'FOTO' : String(cand.name).split('_').slice(-2).join('_').replace('.json', ''),
@@ -692,7 +765,7 @@
             // Ex: JSON V3 de TNC 06/07: {"missatge":"Error","debugInfo":"No s'ha localitzat..."}
             if (data.missatge || !data.cleanFeed || !data.escaleta) {
                 log('\u26A0\uFE0F [ER:IO] JSON descartat (error del servidor o estructura invàlida): ' + jsonPath);
-                if (data.missatge) log('\u26A0\uFE0F [ER:IO]   Motiu: ' + data.missatge);
+                if (data.missatge) log('\u26A0\uFE0F [ER:IO]   Motiu: ' + data.missatge + (data.debugInfo ? ' [' + String(data.debugInfo).substring(0, 160) + ']' : ''));
                 return null;
             }
             var clipCount = data && data.cleanFeed && data.cleanFeed.clips ? data.cleanFeed.clips.length : 0;

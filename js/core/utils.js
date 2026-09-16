@@ -17,6 +17,24 @@
         // comparar les accions REALS amb les que el codi pretén executar.
         _auditBuffer: [],
         _auditPath: null,
+        // ── 📊 PERF (FASE 0 · TEMPORAL 2026-09-16) ─────────────────────────
+        // Instrumentació per mesurar el coll d'ampolla del slider de reencuadre.
+        // NO altera cap comportament: només compta temps, bytes i crides.
+        // Retirar (o posar _perfOn = false) quan ja no calgui.
+        _perfOn: true,
+        _ioStats: { n: 0, ms: 0, maxMs: 0, bytes: 0, logN: 0, auditN: 0, syncN: 0, asyncN: 0, blockMs: 0 },
+        _jsxStats: { n: 0, byPrefix: {}, other: 0 },
+        // ── 🚀 FASE 2 (2026-09-16): I/O fora del camí calent ───────────────
+        // Mesura Fase 0: 206 escriptures / 2411 ms / 35 MB reescrits en un barrido
+        // de 4,5 s (54% del temps) — writeFile de CEP és SÍNCRON i va a un share
+        // de xarxa. Ara s'acumulen línies i s'escriuen amb Node fs.appendFile
+        // ASÍNCRON com a molt 1 cop cada _ioFlushMs; ERROR/forceLog forcen flush.
+        _ioFlushMs: 400,
+        _logPending: [],
+        _auditPending: [],
+        _ioTimer: 0,
+        _fsMod: undefined,
+        _fsKind: '',
         // Filtre de logs per tema: string amb keywords separades per coma o null (desactivat).
         // Quan està actiu, log() NOMÉS escriu els missatges que continguin alguna keyword.
         // ⚠️ TEMPORAL (2026-09-04): DESACTIVAT per poder veure els logs del botó Main
@@ -44,6 +62,8 @@
          * @param {string} projectName - Nom del fitxer .prproj (ex: Pruebas_TNV_V1_TEMA.prproj)
          */
         _setLogPath: function(folderPath, projectName) {
+            // 🚀 FASE 2: abans de canviar de fitxer, buida el que quedi pendent.
+            this._ioFlushNow();
             var normalized = folderPath.replace(/\\/g, '\\').replace(/\/$/, '');
             // Log comú a la carpeta PROVES (per seguir qualsevol projecte des d'un únic fitxer obert a l'editor)
             var provIdx = normalized.toUpperCase().indexOf('\\PROVES\\');
@@ -52,12 +72,14 @@
             }
             this._debugLogPath = normalized + '\\FASTPASS.log';
             this._logBuffer = [];
+            this._logPending = [];          // 🚀 FASE 2
             try {
                 window.cep.fs.writeFile(this._debugLogPath, '');
             } catch(e) {}
             // Fitxer d'auditoria de crides JSX (sense filtre de tema)
             this._auditPath = normalized + '\\FASTPASS_audit.log';
             this._auditBuffer = [];
+            this._auditPending = [];        // 🚀 FASE 2
             try {
                 window.cep.fs.writeFile(this._auditPath, '');
             } catch(e) {}
@@ -72,6 +94,167 @@
             var pad = function(n) { return (n < 10 ? '0' : '') + n; };
             return '[' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
                    ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + ']';
+        },
+
+        // ── 📊 PERF (FASE 0 · TEMPORAL 2026-09-16) ─────────────────────────
+        /** Reinicia els comptadors de mesura (I/O i crides JSX). */
+        _perfReset: function() {
+            this._ioStats = { n: 0, ms: 0, maxMs: 0, bytes: 0, logN: 0, auditN: 0, syncN: 0, asyncN: 0, blockMs: 0 };
+            this._jsxStats = { n: 0, byPrefix: {}, other: 0 };
+        },
+
+        /**
+         * _timedWrite: window.cep.fs.writeFile mesurant quant triga i quants bytes
+         * reescriu. El writeFile de CEP és SÍNCRON i les rutes de log viuen en un
+         * share de xarxa (UNC) → aquesta mesura és la que ha de dir si l'I/O és el
+         * coll d'ampolla del slider.
+         * @param {string} path
+         * @param {string} data
+         * @param {string} kind - 'log' | 'audit' (per al desglossament)
+         */
+        _timedWrite: function(path, data, kind) {
+            var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            var res = null;
+            try { res = window.cep.fs.writeFile(path, data); } catch(eIO) { res = null; }
+            if (this._perfOn) {
+                var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                var s = this._ioStats;
+                var d = t1 - t0;
+                s.n++; s.ms += d; if (d > s.maxMs) s.maxMs = d;
+                s.syncN++; s.blockMs += d;      // escriptura SÍNCRONA: temps bloquejant la UI
+                s.bytes += (data ? data.length : 0);
+                if (kind === 'audit') { s.auditN++; } else { s.logN++; }
+            }
+            return res;
+        },
+
+        // ── 🚀 FASE 2: escriptura diferida i asíncrona ─────────────────────
+        /**
+         * _nodeFs: objecte `fs` de Node si està disponible.
+         * Ordre de detecció (cascada, per cobrir totes les configuracions de CEP):
+         *  1. window.cep_node.require  → API oficial CEP 10+ (NO cal --mixed-context)
+         *  2. require (global)         → context mixt / CEP 9
+         *  3. window.cep.node.require  → variants antigues
+         * Es guarda també _fsKind per poder diagnosticar-ho des del informe PERF.
+         */
+        _nodeFs: function() {
+            if (this._fsMod !== undefined) return this._fsMod;
+            var fs = null, kind = 'cep.fs(sync)';
+            try { if (window.cep_node && window.cep_node.require) { fs = window.cep_node.require('fs'); if (fs) kind = 'cep_node'; } } catch(e1) { fs = null; }
+            if (!fs) { try { if (typeof require === 'function') { fs = require('fs'); if (fs) kind = 'require'; } } catch(e2) { fs = null; } }
+            if (!fs) { try { if (window.cep && window.cep.node && window.cep.node.require) { fs = window.cep.node.require('fs'); if (fs) kind = 'cep.node'; } } catch(e3) { fs = null; } }
+            if (!fs) { fs = null; }
+            this._fsMod = fs;
+            this._fsKind = kind;
+            return fs;
+        },
+
+        /**
+         * _writeNow: escriu les línies acumulades a disc.
+         * - Amb Node fs  → appendFile ASÍNCRON (no bloqueja el fil de la UI).
+         * - Sense Node   → writeFile de CEP (síncron), però només 1 cop per flush.
+         * @param {string} path
+         * @param {string[]} pending - línies noves (es buiden aquí)
+         * @param {string} kind - 'log' | 'audit'
+         */
+        _writeNow: function(path, pending, kind) {
+            if (!path || !pending || pending.length === 0) return;
+            var lines = pending.splice(0, pending.length);
+            var data = lines.join('\n') + '\n';
+            var fs = this._nodeFs();
+            if (fs && fs.appendFile) {
+                var self = this;
+                var t0 = this._perfOn ? ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) : 0;
+                var bytes = data.length;
+                try {
+                    fs.appendFile(path, data, function (err) {
+                        if (!self._perfOn) return;
+                        var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                        var s = self._ioStats;
+                        s.n++; s.asyncN++; s.ms += (t1 - t0); s.bytes += bytes;
+                        if (kind === 'audit') { s.auditN++; } else { s.logN++; }
+                    });
+                    return;
+                } catch(eAp) { /* cau al fallback síncron */ }
+            }
+            // Sense Node fs: reescriure el buffer SENCER (comportament clàssic de CEP),
+            // però ara només 1 cop per flush en comptes de 1 cop per missatge.
+            var full = (kind === 'audit') ? this._auditBuffer : this._logBuffer;
+            this._timedWrite(path, full.join('\n') + '\n', kind);
+        },
+
+        /**
+         * _ensureExtLogPath: Ruta del fitxer de log local de l'extensió. S'usa com a
+         * fallback quan encara no hi ha projecte (fase prèvia a CREAR: FOTO,
+         * checkContext, semàfors) o quan forceLog no té fitxer de projecte.
+         * La primera vegada el fitxer es deixa NET (log de sessió, sense barrejar
+         * amb execucions anteriors).
+         */
+        _ensureExtLogPath: function() {
+            if (this._extLogPath) return this._extLogPath;
+            try {
+                var href = window.location.href;
+                var qi = href.indexOf('/index.html');
+                if (qi > 0) {
+                    var p = decodeURIComponent(href.substring(0, qi));
+                    if (p.indexOf('file:///') === 0) p = p.substring(8);
+                    var full = p.replace(/\//g, '\\') + '\\_keyframe_trace.log';
+                    try { window.cep.fs.writeFile(full, ''); } catch (eTrunc) { }
+                    this._logBuffer = [];
+                    this._extLogPath = full;
+                }
+            } catch (e) { }
+            return this._extLogPath;
+        },
+
+        /** Buida immediatament els pendents de log i auditoria. */
+        _ioFlushNow: function() {
+            if (this._ioTimer) { clearTimeout(this._ioTimer); this._ioTimer = 0; }
+            // FIX (2026-09-16): sense projecte assignat, el log va al fitxer local de l'extensió.
+            var logPath = this._debugLogPath || this._ensureExtLogPath();
+            if (logPath && this._logPending.length) { this._writeNow(logPath, this._logPending, 'log'); }
+            if (this._auditPath && this._auditPending.length) { this._writeNow(this._auditPath, this._auditPending, 'audit'); }
+        },
+
+        /** Agenda un flush diferit (com a molt 1 cada _ioFlushMs). */
+        _ioSchedule: function() {
+            if (this._ioTimer) return;
+            var self = this;
+            // Sense Node el writeFile de CEP és SÍNCRON i reescriu el fitxer SENCER:
+            // el cost per escriptura creix amb la mida del log → s'allarga l'interval
+            // perquè el temps bloquejant per segon es mantingui petit i constant.
+            var ms = this._ioFlushMs;
+            if (!this._nodeFs()) {
+                ms = 400 + Math.min(3000, this._logBuffer.length * 2);
+            }
+            this._ioTimer = setTimeout(function () {
+                self._ioTimer = 0;
+                self._ioFlushNow();
+            }, ms);
+        },
+
+        /**
+         * _jsxLabel: etiqueta curta d'un script JSX per al desglossament del
+         * comptador (ex: "Anim.sliderApply", "Registry.poll").
+         */
+        _jsxLabel: function(script) {
+            try {
+                var m = /([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(script);
+                return m ? m[1] : 'altres';
+            } catch(e) { return 'altres'; }
+        },
+
+        /** Compta una crida JSX realment enviada a Premiere (desglossada per etiqueta). */
+        _jsxCount: function(script) {
+            if (!this._perfOn) return;
+            var s = this._jsxStats;
+            s.n++;
+            var k = this._jsxLabel(script);
+            if (s.byPrefix[k] === undefined) {
+                if (Object.keys(s.byPrefix).length >= 30) { s.other++; return; }
+                s.byPrefix[k] = 0;
+            }
+            s.byPrefix[k]++;
         },
 
         // ── DEDUPLICACIÓ DE MISSATGES REPETITS ─────────────────────────────
@@ -128,17 +311,26 @@
             var ts = this._timestamp();
             var formatted = ts + ' ' + (colors[level || "INFO"] || '🔵') + ' [FASTPASS]: ' + msg;
             console.log(formatted);
-            // Escriure al fitxer de debug del projecte perquè el Cline pugui llegir-lo
-            if (this._debugLogPath) {
+            // Escriure al fitxer de debug del projecte perquè el Cline pugui llegir-lo.
+            // FIX (2026-09-16): en la fase PRÈVIA al projecte (FOTO, checkContext,
+            // semàfors, ESCALETA...) no hi ha cap fitxer assignat i aquests missatges
+            // només anaven a la consola del panell → impossibles de diagnosticar.
+            // Ara, si no hi ha fitxer de projecte, s'escriuen al fitxer local de
+            // l'extensió (_ensureExtLogPath), amb el mateix flush diferit.
+            var _logPath = this._debugLogPath || this._ensureExtLogPath();
+            if (_logPath) {
                 this._logBuffer.push(formatted);
-                try {
-                    window.cep.fs.writeFile(this._debugLogPath, this._logBuffer.join('\n') + '\n');
-                } catch(e) {}
+                this._logPending.push(formatted);     // 🚀 FASE 2: acumula
+                // Els ERRORs s'escriuen sempre de seguida (no es poden perdre).
+                if (level === "ERROR") { this._ioFlushNow(); } else { this._ioSchedule(); }
             }
         },
 
         clearLogFile: function() {
             this._logBuffer = [];
+            this._logPending = [];          // 🚀 FASE 2
+            this._auditPending = [];        // 🚀 FASE 2
+            if (this._ioTimer) { clearTimeout(this._ioTimer); this._ioTimer = 0; }
             if (this._debugLogPath) {
                 try {
                     window.cep.fs.writeFile(this._debugLogPath, '');
@@ -156,39 +348,32 @@
                 var ts = this._timestamp();
                 var formatted = ts + ' 🟢 [FASTPASS]: ' + msg;
                 console.log(formatted);
-                if (this._debugLogPath) {
-                    this._logBuffer.push(formatted);
-                    window.cep.fs.writeFile(this._debugLogPath, this._logBuffer.join('\n') + '\n');
-                } else {
-                    // Fallback: arrel de la mateixa extensió (sempre accessible)
-                    if (!this._extLogPath) {
-                        var href = window.location.href;
-                        var qi = href.indexOf('/index.html');
-                        if (qi > 0) {
-                            var p = decodeURIComponent(href.substring(0, qi));
-                            if (p.indexOf('file:///') === 0) p = p.substring(8);
-                            this._extLogPath = p.replace(/\//g, '\\') + '\\_keyframe_trace.log';
-                        }
-                    }
-                    if (this._extLogPath) {
-                        var prev = '';
-                        try { prev = window.cep.fs.readFile(this._extLogPath) || ''; } catch(e) {}
-                        window.cep.fs.writeFile(this._extLogPath, prev + formatted + '\n');
-                    }
-                }
+                // Mateix camí per als dos casos (FIX 2026-09-16): amb projecte escriu al
+                // log del projecte; sense projecte, _ioFlushNow resol el fitxer local de
+                // l'extensió (_ensureExtLogPath) → els missatges de diagnòstic previs a
+                // CREAR ja no es perden a la consola.
+                this._logBuffer.push(formatted);
+                this._logPending.push(formatted);   // 🚀 FASE 2
+                this._ioFlushNow();                 // diagnòstic: escriptura immediata
             } catch(e) {}
         },
 
         /**
          * Pont asíncron cap al motor ExtendScript (JSX).
          */
-        callJSX: function(script) {
+        callJSX: function(script, opts) {
+            // opts.rawError: si true, un ERR de JSX es retorna TAL QUAL (per poder
+            // distingir "error de transport" de "resposta buida"). Per defecte es
+            // manté el comportament clàssic (ERR → "[]") per no alterar els llamants.
+            var rawError = !!(opts && opts.rawError);
             // Auditoria: registra cada script enviat a Premiere (per poder comparar
             // les accions reals amb el que el codi pretén executar)
             if (this._auditPath) {
                 try {
-                    this._auditBuffer.push(this._timestamp() + " JSX> " + script);
-                    window.cep.fs.writeFile(this._auditPath, this._auditBuffer.join('\n') + '\n');
+                    var _auditLine = this._timestamp() + " JSX> " + script;
+                    this._auditBuffer.push(_auditLine);
+                    this._auditPending.push(_auditLine);   // 🚀 FASE 2: acumula
+                    this._ioSchedule();                    // 🚀 FASE 2: flush diferit
                 } catch(e) {}
             }
             // Si estem en mode batching i NO és una crida de consulta crítica (com Anim.x), encolar
@@ -196,6 +381,8 @@
                 this.Batch._queue.push(script);
                 return Promise.resolve("QUEUED");
             }
+
+            this._jsxCount(script);   // 📊 FASE 0: compta la crida real a Premiere
 
             return new Promise(function(resolve) {
                 var isAnimX = script.indexOf("Anim.x") !== -1;
@@ -205,7 +392,7 @@
                         resolve("");
                     } else if (res.indexOf("ERR:") === 0) {
                         window.FASTPASS_UI.Utils.log("💥 [JSX ERROR]: " + res, "ERROR");
-                        resolve("[]");
+                        resolve(rawError ? res : "[]");
                     } else {
                         resolve(res);
                     }
