@@ -69,7 +69,12 @@
                             const mot = (this._lastButtonData && this._lastButtonData.motiu) || '';
                             const sem = (this._lastButtonData && this._lastButtonData.semaforo) || null;
                             const cc = (sem && sem.esc && sem.esc.complete) ? sem.esc.complete : null;
-                            if (mot === 'bloc_en_emissio') {
+                            // (2026-09-17) Si no hi ha escaleta per un error del motor,
+                            // digues-ho clarament en comptes del generic "ESPERANT".
+                            const escMot2 = (sem && sem.esc && sem.esc.reason) ? String(sem.esc.reason) : '';
+                            if (escMot2) {
+                                u.status("ESPERANT: no hi ha cap escaleta valida del dia. Motiu: " + escMot2, "warn");
+                            } else if (mot === 'bloc_en_emissio') {
                                 u.status("ESPERANT: el bloc encara s'està emetent" + (cc && cc.total ? (" (" + cc.emitted + "/" + cc.total + " ítems" + (cc.pending && cc.pending.num ? ", pendent " + cc.pending.num : "") + ")") : "") + ". Fes FOTO quan acabi l'emissió.", "warn");
                             } else {
                                 u.status('ESPERANT: la ingesta encara no ha arribat al TC final. Torna-hi més tard', "warn");
@@ -465,8 +470,24 @@
                     try {
                         const scN = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
                         if (scN && scN.mediaAssets) {
-                            const mediaN = await scN.mediaAssets(ctx);
-                            semaforoData.mp4 = (mediaN && mediaN.mp4) ? 'blink' : 'pending';
+                            // (2026-09-17) El MP4 del cleanFeed viu a la ruta que diu el JSON
+                            // (mediaPath, p.ex. \\DSMEDIA10\...), NO a config.rutas.verticalitzacio:
+                            // el SCAN mediaAssets no el trobava mai i el semafor quedava en
+                            // AMARILLO per sempre tot i haver-se emes el bloc.
+                            // Criteri correcte (el mateix que amb projecte obert): la ingesta
+                            // ha arribat al final del bloc → mediaStop >= blockOut.
+                            var _escN = semaforoData.esc;
+                            var _mStop = _escN.mediaStop, _bOut = _escN.blockOut;
+                            if (_mStop && _bOut) {
+                                var _rdN = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                                var _stopS = _rdN.tcToSeconds(_mStop);
+                                var _outS = _rdN.tcToSeconds(_bOut);
+                                semaforoData.mp4 = (_stopS < _outS) ? 'pending' : 'blink';
+                                getUtils().log('🎬 [sem-mp4] cleanFeed mediaStop=' + _mStop + ' (' + _stopS + 's) vs blockOut=' + _bOut + ' (' + _outS + 's) → ' + semaforoData.mp4, 'DEBUG');
+                            } else {
+                                const mediaN = await scN.mediaAssets(ctx);
+                                semaforoData.mp4 = (mediaN && mediaN.mp4) ? 'blink' : 'pending';
+                            }
                             semaforoData.srt = (mediaN && mediaN.srt) ? 'error' : 'off';
                         }
                         if (scN && scN.wotts) {
@@ -536,8 +557,11 @@
 
             // 🚦 Luces nuevas (Semáforo)
             if (semaforoData) {
+                // (2026-09-17) Motiu real quan no hi ha escaleta valida: el fixa
+                // escaleta_io (ER._lastReject) llegint el JSON d'error del motor.
+                const escMotiu = (semaforoData.esc && semaforoData.esc.reason) ? (' | Motiu: ' + semaforoData.esc.reason) : '';
                 // ESC: Escaleta
-                if (!semaforoData.esc.found) set('sem-esc', 'error', "No s'ha trobat cap escaleta (servidor ni FOTO local)");
+                if (!semaforoData.esc.found) set('sem-esc', 'error', "No s'ha trobat cap escaleta (servidor ni FOTO local)" + escMotiu);
                 else if (semaforoData.esc.local) {
                     // FIX (2026-09-16): amb FOTO local es pot COMENÇAR a treballar encara
                     // que el bloc segueixi en emissió → semàfor en VERD. Si la foto és
@@ -554,7 +578,7 @@
                     set('sem-esc', 'pending', ((cc && cc.total)
                         ? ('Escaleta trobada: bloc en emissió (' + cc.emitted + '/' + cc.total + ' ítems)')
                         : ('Escaleta trobada però BLOC NO READY')) +
-                        (w ? ' — espera ~' + Math.ceil(w / 60) + ' min' : ''));
+                        (w ? ' — espera ~' + Math.ceil(w / 60) + ' min' : '') + escMotiu);
                 }
                 else set('sem-esc', 'ready', `Escaleta OK (${semaforoData.esc.timestamp})`);
 

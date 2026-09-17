@@ -150,12 +150,17 @@
             const clips = await getClipsLogic().getTrackClips(1, "video");
 
             // Detectar primer ítem no agrupat (agrupacio:null) dins del rang del bloc
-            var firstUngroupedItem = this._detectFirstUngroupedItem(manifest, reader, lines, targetBlock);
+            var ungroupedItems = this._detectUngroupedItems(manifest, reader, lines, targetBlock);
+            var firstUngroupedItem = (ungroupedItems && ungroupedItems.length) ? ungroupedItems[0] : null;
+            if (ungroupedItems && ungroupedItems.length) {
+                log('[Ungrouped] ' + ungroupedItems.length + ' item(s) no agrupat(s) dins del bloc: ' +
+                    ungroupedItems.map(function (x) { return x.num || '?'; }).join(', ') + ' (es marcaran en VERMELL)');
+            }
             if (firstUngroupedItem) {
                 log(`🔴 [Ungrouped] Detectat primer ítem no agrupat: ${firstUngroupedItem.num || '?'} - ${(firstUngroupedItem.titol || '').substring(0, 60)}`);
             }
 
-            return { ctx, manifest, reader, targetBlock, lines, lineIndexByNum, clips, refFromManifest, refInPoint, firstUngroupedItem };
+            return { ctx, manifest, reader, targetBlock, lines, lineIndexByNum, clips, refFromManifest, refInPoint, firstUngroupedItem, ungroupedItems };
         },
 
         /**
@@ -173,6 +178,69 @@
          * @param {string} targetBlock - ID del bloc (ex: "v2")
          * @returns {Object|null} - Primer ítem no agrupat o null
          */
+        /**
+         * _detectUngroupedItems(manifest, reader, lines, targetBlock)
+         * Com _detectFirstUngroupedItem, però retorna TOTS els ítems no agrupats
+         * (agrupacio:null) dins del rang del bloc. Cas d'ús 2026-09-17: blocs en
+         * calent amb ítems que NO són del projecte (sense V1) — cal veure'ls tots
+         * per delimitar el bloc (es marquen en VERMELL, color 1).
+         * @returns {Array<Object>} ítems no agrupats (pot ser buit)
+         */
+        _detectUngroupedItems: function (manifest, reader, lines, targetBlock) {
+            var out = [];
+            try {
+                if (!lines || lines.length === 0) return out;
+                if (!manifest || !manifest.escaletaItems || manifest.escaletaItems.length === 0) return out;
+
+                var blockStartSec = (manifest.ref && manifest.ref.worldBlockStartSec != null)
+                    ? manifest.ref.worldBlockStartSec : null;
+                var blockEndSec = (manifest.ref && manifest.ref.worldBlockEndSec != null)
+                    ? manifest.ref.worldBlockEndSec : null;
+                if (blockStartSec === null || blockEndSec === null) {
+                    var bS = lines[0].horaEntradaOnAir || lines[0].horaEntradaPrevista;
+                    var bE = lines[lines.length - 1].horaEntradaOnAir || lines[lines.length - 1].horaEntradaPrevista;
+                    if (!bS || !bE) return out;
+                    blockStartSec = reader.tcToSeconds(bS);
+                    blockEndSec = reader.tcToSeconds(bE);
+                    if (blockStartSec === null || blockEndSec === null) return out;
+                }
+
+                var allItems = manifest.escaletaItems;
+                var cands = [];
+                for (var i = 0; i < allItems.length; i++) {
+                    var item = allItems[i];
+                    if (!item || item.flotant === true) continue;
+                    var ag = item.agrupacio;
+                    // (2026-09-17) NOMÉS els ítems SENSE agrupació (agrupacio:null) compten
+                    // com a "no del projecte" i es marquen en VERMELL. Els ítems d'ALTRES
+                    // blocs (agrupacio=v2, v3...) NO es marquen: ens centrem en el bloc
+                    // actual (correcció de criteri demanada per l'usuari).
+                    if (ag !== null && ag !== undefined) continue;
+                    var tStr = item.horaEntradaOnAir || item.horaEntradaPrevista;
+                    if (!tStr) continue;
+                    var tSec = reader.tcToSeconds(tStr);
+                    if (tSec === null) continue;
+                    if (tSec >= blockStartSec && tSec <= blockEndSec) cands.push({ item: item, timeSec: tSec });
+                }
+                if (cands.length === 0) return out;
+                cands.sort(function (a, b) { return a.timeSec - b.timeSec; });
+
+                // Excloure l'últim si NO té OnAir (és el final trimeat per l'usuari)
+                var last = cands[cands.length - 1].item;
+                var lastOnAir = last && last.horaEntradaOnAir && last.horaEntradaOnAir !== '00:00:00' && String(last.horaEntradaOnAir).trim() !== '';
+                for (var c = 0; c < cands.length; c++) {
+                    var it = cands[c].item;
+                    if (it === last && !lastOnAir) continue;
+                    if (window.FASTPASS_UI && window.FASTPASS_UI.Workflows && window.FASTPASS_UI.Workflows.Markers &&
+                        window.FASTPASS_UI.Workflows.Markers._isGraphicByNum && window.FASTPASS_UI.Workflows.Markers._isGraphicByNum(it.num)) continue;
+                    out.push(it);
+                }
+            } catch (e) {
+                try { window.FASTPASS_UI.Utils.log('⚠️ [Ungrouped] Error detectant ítems no agrupats: ' + e.message, 'DEBUG'); } catch (e2) { }
+            }
+            return out;
+        },
+
         _detectFirstUngroupedItem: function (manifest, reader, lines, targetBlock) {
             if (!lines || lines.length === 0) return null;
             if (!manifest || !manifest.escaletaItems || manifest.escaletaItems.length === 0) return null;

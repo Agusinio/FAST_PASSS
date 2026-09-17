@@ -556,7 +556,14 @@
                                                 // Actualitzar també les referències del manifest (en memòria)
                                                 if (manifest && manifest.ref) {
                                                     manifest.ref.worldSecMediaStart = fbWorldSecMediaStart;
-                                                    log(`📐 [EXTRACT] manifest.ref.worldSecMediaStart actualitzat a ${fbWorldSecMediaStart.toFixed(2)}s`);
+                                                    // ⚠️ FIX (2026-09-17): el bloc, dins del CLIP EXTRET, comença a
+                                                    // clipExpandedInPoint (handles), NO al valor del cleanFeed.
+                                                    // Sense això offsetSec = -168 en lloc de -20 (148 s de desfasament).
+                                                    manifest.ref.tlBlockInPointSec = clipExpandedInPoint;
+                                                    manifest.ref.mp4ExpandedInPoint = clipExpandedInPoint;
+                                                    manifest.ref.mp4ExpandedOutPoint = clipExpandedOutPoint;
+                                                    manifest.ref.mp4Duration = clipDuration;
+                                                    log(`📐 [EXTRACT] manifest.ref actualitzat: worldSecMediaStart=${fbWorldSecMediaStart.toFixed(2)}s, tlBlockInPointSec=${clipExpandedInPoint.toFixed(2)}s, dur=${clipDuration.toFixed(1)}s`);
                                                 }
 
                                                 log(`✅ [EXTRACT] cleanFeedData actualitzat: mediaPath=${cleanFeedData.mediaPath}, mp4ExpandedInPoint=${clipExpandedInPoint.toFixed(1)}s, mp4ExpandedOutPoint=${clipExpandedOutPoint.toFixed(1)}s, dur=${clipDuration.toFixed(1)}s`);
@@ -575,7 +582,14 @@
                                                             worldSecMediaStart: fbWorldSecMediaStart,
                                                             mp4ExpandedInPoint: clipExpandedInPoint,
                                                             mp4ExpandedOutPoint: clipExpandedOutPoint,
-                                                            mp4Duration: clipDuration
+                                                            mp4Duration: clipDuration,
+                                                            // ⚠️ FIX (2026-09-17): SENSE això el manifest conservava el
+                                                            // tlBlockInPointSec del CLEANFEED (168 s) mentre el clip
+                                                            // extret té el bloc a clipExpandedInPoint (20 s) -> offsetSec
+                                                            // quedava a -168 en lloc de -20 = 148 s de desfasament a TOT
+                                                            // el timeline (marcadors, chyrons i SRT).
+                                                            tlBlockInPointSec: clipExpandedInPoint,
+                                                            mp4SweetInPointRaw: clipExpandedInPoint
                                                         }
                                                     });
                                                     log(`✅ [EXTRACT] Manifest actualitzat amb ref del clip extret: worldSecMediaStart=${fbWorldSecMediaStart.toFixed(2)}s, mp4ExpandedInPoint=${clipExpandedInPoint.toFixed(2)}s`);

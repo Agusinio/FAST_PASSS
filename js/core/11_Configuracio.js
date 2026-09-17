@@ -15,10 +15,10 @@
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     // Tracks alineats amb Profile.json (v_mp4:1, v_fondos:2, v_graf:3, v_tema:5, v_chyrons:6, v_lloc:7)
     let _activeConfig = {
-        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 1.5, clipOutMarginSec: 30, clipExtraTailSec: 60 },
+        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 1.5, clipOutMarginSec: 0, clipExtraTailSec: 60 },
         // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
         // guardes de temps, peticions a l'API d'escaletes i OFFSET del MP4).
-        programStartHours: { TNV: 21.0, TNM: 14.5, TNC: 13.8333 },
+        programStartHours: { TNV: 21.0, TNM: 14.5, TNC: 13.8333, MAT: 7.9167 },
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\CHYRONS CONDUCTORS 3CATINFO WOTT\\",
@@ -56,7 +56,12 @@
                     s_s1: 1, s_s2: 2
                 },
                 programas: [
-                    { id: "MATINS", archivo: "MATINS", wott: "MAT", dir: "01_MATINS_PROJECTES", conductor: "Conduct_Ariadna Oltra.mov" }
+                    { id: "MATINS", archivo: "MATINS", wott: "MAT", dir: "01_MATINS_PROJECTES", conductor: "Conduct_Ariadna Oltra.mov",
+                      // digition crea un rundown per dia feiner: l'ID puja +1/dia
+                      // (lun PRO1374 · mar PRO1376 · mie PRO1377). Darrer conegut:
+                      // jue 2026-09-17 -> PRO1378. Si l'API diu "no existeix", la
+                      // FOTO prova l'estimat i els veins (+1/-1/+2...) automaticament.
+                      escaletaId: "PRO1378" }
                 ]
             },
             "Fotomató": {
@@ -147,13 +152,13 @@
                 // DESPRÉS de l'inici del següent item amb OnAir (i per sobre dels
                 // handles), per poder estirar el clip a la timeline si cal.
                 // Cas real 2026-09-16: el clip acabava massa aviat i no cobria l'IPD.
-                clipOutMarginSec: (cfg.general.clipOutMarginSec != null) ? cfg.general.clipOutMarginSec : 30,
+                clipOutMarginSec: (cfg.general.clipOutMarginSec != null) ? cfg.general.clipOutMarginSec : 0,
                 // clipExtraTailSec: COLA EXTRA (segons) del clip extret amb ffmpeg. El
                 // clip del timeline es munta igual, però el fitxer té aquest material de
                 // més al final per poder estirar-lo (connexions/directes que s'allarguen).
                 clipExtraTailSec: (cfg.general.clipExtraTailSec != null) ? cfg.general.clipExtraTailSec : 60,
                 // Hores d'inici d'emissió per programa (TNC 13:50, TNM 14:30, TNV 21:00).
-                programStartHours: cfg.general.programStartHours || { TNV: 21.0, TNM: 14.5, TNC: 13.8333 },
+                programStartHours: cfg.general.programStartHours || { TNV: 21.0, TNM: 14.5, TNC: 13.8333, MAT: 7.9167 },
                 tcOffset: cfg.general.tcOffset || 0,
                 // 🎛️ [IN-OFFSET 2026-09-04] Ajustos del flujo NOU/Main (create):
                 // - clipInOffset: segons a RESTAR a l'IN (media origen) del clip inserit

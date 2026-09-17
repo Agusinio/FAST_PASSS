@@ -253,14 +253,26 @@ FASTPASS.IO = (function () {
                     if (sysObj && sysObj.callSystem) {
                         var curlExeAbs = (new File("C:\\Windows\\System32\\curl.exe")).exists
                             ? "C:\\Windows\\System32\\curl.exe" : "curl";
-                        var sysCmd = curlExeAbs + ' -s --connect-timeout 8 --max-time 20 -X POST "' + url +
-                            '" -H "accept: application/json" -H "' + authHeader + '"';
+                        // ⚠️ BUGFIX (2026-09-17): en aquest equip `system.callSystem` tornava
+                        // SEMPRE buit (outText == "") i es queia al .bat, que obre una finestra
+                        // de CMD a cada intent. A mes, el handshake TLS amb digition triga ~26 s
+                        // i el --max-time 20 feia que curl s'hi quedés curt (ERR:CURL_EMPTY amb
+                        // el JSON diana DESCARGAT al Temp uns segons despres). Ara: sortida
+                        // REDIRIGIDA a fitxer (no stdout), timeouts mes llargs (15/60) i es
+                        // llegeix el fitxer. Mateixa funcio, mateix contracte.
+                        var sysCmd = curlExeAbs + ' -s --connect-timeout 15 --max-time 60 -X POST "' + url +
+                            '" -H "accept: application/json" -H "' + authHeader + '" > "' + outFile + '" 2> "' + errFile + '"';
                         var t0Sys = new Date().getTime();
-                        var outText = sysObj.callSystem(sysCmd);
+                        try { sysObj.callSystem(sysCmd); } catch (eSysRun) { }
                         var msSys = new Date().getTime() - t0Sys;
-                        if (outText && String(outText).length > 2) {
-                            $.writeln("[FASTPASS.IO.curl] OK via callSystem (" + msSys + " ms, " + String(outText).length + " chars)");
-                            return String(outText);
+                        var outObjSys = new File(outFile);
+                        if (outObjSys.exists && outObjSys.length > 2) {
+                            var outTxtSys = "";
+                            try { outObjSys.open('r'); outTxtSys = outObjSys.read(); outObjSys.close(); } catch (eRdSys) { outTxtSys = ""; }
+                            if (outTxtSys && String(outTxtSys).length > 2) {
+                                $.writeln("[FASTPASS.IO.curl] OK via callSystem+fitxer (" + msSys + " ms, " + String(outTxtSys).length + " chars)");
+                                return String(outTxtSys);
+                            }
                         }
                         $.writeln("[FASTPASS.IO.curl] callSystem sense sortida (" + msSys + " ms) -> es prova el .bat");
                     } else {
@@ -295,7 +307,7 @@ FASTPASS.IO = (function () {
                 // l'executable). Si no hi és, es prova el curl del PATH com a fallback.
                 tempFile.writeln('set "CURLEXE=C:\\Windows\\System32\\curl.exe"');
                 tempFile.writeln('if not exist "%CURLEXE%" set "CURLEXE=curl"');
-                tempFile.writeln('"%CURLEXE%" -sv --connect-timeout 8 --max-time 20 -X POST "' + batUrl + '" -H "accept: application/json" -H "' + batAuth + '" > "' + outFile + '" 2>> "' + errFile + '"');
+                tempFile.writeln('"%CURLEXE%" -sv --connect-timeout 15 --max-time 60 -X POST "' + batUrl + '" -H "accept: application/json" -H "' + batAuth + '" > "' + outFile + '" 2>> "' + errFile + '"');
                 tempFile.writeln('echo EXIT=%ERRORLEVEL%>> "' + errFile + '"');
                 tempFile.writeln("exit");
                 tempFile.close();
@@ -307,15 +319,35 @@ FASTPASS.IO = (function () {
                 // alineat amb el --max-time 20 de curl + marge d'arrencada del .bat).
                 // Límit baix a propòsit: el motor ExtendScript és mono-fil i un bloqueig
                 // llarg afecta tota la resta del panell.
-                var maxWait = 24000;
+                // Esperar que el fitxer de sortida tingui contingut (max 70 segons,
+                // alineat amb el --max-time 60 de curl). El handshake TLS amb digition
+                // pot trigar ~26 s en aquesta xarxa (2026-09-17).
+                var maxWait = 70000;
                 var waited = 0;
                 var outFileObj = new File(outFile);
-                while ((!outFileObj.exists || outFileObj.length === 0) && waited < maxWait) {
+                var outLen = (outFileObj.exists) ? outFileObj.length : 0;
+                while (waited < maxWait && outLen <= 2) {
+                    // ⚠️ BUGFIX (2026-09-17): amb un unic objecte File el bucle no veia el
+                    // fitxer: el JSON de 206 KB hi era 3 s despres d'arrencar el .bat i
+                    // s'esperaven els 70 s igualment (ERR:CURL_EMPTY amb la diana al disc).
+                    // Ara: objecte File NOU a cada volta i, si el .bat ja ha escrit el seu
+                    // EXIT= a l'.err, s'atura la espera (el proces ja ha acabat).
+                    var probeOut = new File(outFile);
+                    outLen = (probeOut.exists) ? probeOut.length : 0;
+                    if (outLen > 2) break;
+                    var probeErr = new File(errFile);
+                    if (probeErr.exists && probeErr.length > 0) {
+                        var errTxtProbe = "";
+                        try { probeErr.open('r'); errTxtProbe = probeErr.read(); probeErr.close(); } catch (eProbe) { errTxtProbe = ""; }
+                        if (errTxtProbe && String(errTxtProbe).indexOf('EXIT=') !== -1) break;
+                    }
                     $.sleep(500);
                     waited += 500;
+                    outFileObj = new File(outFile);
+                    outLen = (outFileObj.exists) ? outFileObj.length : 0;
                 }
 
-                if (!outFileObj.exists || outFileObj.length === 0) {
+                if (outLen <= 2) {
                     // Sense resposta: retornem el stderr de curl per poder diagnosticar.
                     // NOTA (2026-09-16): NO s'esborren .bat/.err — queden a la carpeta
                     // temporal (fp_curl_<stamp>.*) per poder investigar què ha passat.
@@ -330,6 +362,7 @@ FASTPASS.IO = (function () {
 
                 // Llegir el resultat
                 var result = "";
+                outFileObj = new File(outFile);   // nou objecte: el del bucle pot estar obsolet
                 outFileObj.open('r');
                 result = outFileObj.read();
                 outFileObj.close();

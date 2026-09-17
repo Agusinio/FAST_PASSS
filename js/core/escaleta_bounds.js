@@ -375,6 +375,39 @@
         var worldSecMediaStart = this.tcToSeconds(worldTCMediaStart);
         var handles = this._getHandleSecs();
 
+        // ── (2026-09-17) DESCARTAR OnAir "MENTIDERS" ────────────────────────────
+        // El realitzador llança ítems de prova i el seu timecode queda com OnAir,
+        // sovint ABANS de l'inici del programa. Cas TNC 17/09: els "08 P2-1/P2-2"
+        // tenien OnAir 13:48:08/13:48:42 quan el programa comença a les 13:50 →
+        // el bloc s'inflava 8 min de buit (clip de 13 min en lloc de 3).
+        // Criteri: OnAir anterior a (inici de programa − 90 s) = sospitós → no
+        // compta per al càlcul del bloc. Mai no es descarten tots (salvaguarda).
+        try {
+            var progKey = (typeof this._detectProgramKey === 'function') ? this._detectProgramKey(data) : null;
+            var cfgAll = window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get();
+            var startH = (cfgAll && cfgAll.programStartHours && progKey) ? Number(cfgAll.programStartHours[progKey]) : null;
+            if (progKey && startH != null && isFinite(startH)) {
+                var minOnAirSec = Math.round(startH * 3600) - 90;
+                var filtered = [];
+                for (var fi = 0; fi < videoItems.length; fi++) {
+                    var oaSec = this.tcToSeconds(videoItems[fi].horaEntradaOnAir);
+                    if (oaSec != null && oaSec < minOnAirSec) {
+                        log('🕵️ [ER:Bounds] OnAir SOSPITÓS (anterior a l\'inici de programa ' + this.secondsToTC(minOnAirSec) +
+                            '): "' + (videoItems[fi].num || '?') + '" @ ' + videoItems[fi].horaEntradaOnAir + ' → fora del càlcul del bloc');
+                        continue;
+                    }
+                    filtered.push(videoItems[fi]);
+                }
+                if (filtered.length > 0 && filtered.length < videoItems.length) {
+                    log('🕵️ [ER:Bounds] Bloc ' + blockId + ': ' + (videoItems.length - filtered.length) +
+                        ' ítem(s) amb OnAir no plausible(s) descartats (' + filtered.length + ' queden)');
+                    videoItems = filtered;
+                }
+            }
+        } catch (eSus) {
+            log('⚠️ [ER:Bounds] No s\'han pogut filtrar OnAir sospitosos: ' + eSus.message, 'WARN');
+        }
+
         if (videoItems.length === 0) {
             log('\u26A0\uFE0F [ER:Bounds] No hi ha items amb horaEntradaOnAir al bloc ' + blockId + '. Usant fallback calcClipBounds.');
             var block = this.getBlock(data, blockId);
@@ -521,6 +554,197 @@
     };
 
     // ----------------------------------------------------------------
+    // 5.b SANEJAT D'OnAir "MENTIDERS" (2026-09-17)
+    // ----------------------------------------------------------------
+
+    /**
+     * _sanitizeOnAirLies: Neutralitza els OnAir "mentiders": el realitzador llança
+     * ítems per provar i el seu timecode queda com OnAir, sovint ABANS del programa.
+     * Cas TNC 17/09: "08 P2-1/P2-2" amb OnAir 13:48:08/13:48:42 quan el programa
+     * comença a 13:50 → el bloc s'inflava 8 min (clip de 13 min en lloc de 3).
+     *
+     * Regles:
+     *  1) Coherència temporal: en ordre d'escaleta, si l'hora RETROCEDEIX > 60 s
+     *     respecte a l'última hora fiable → l'OnAir és mentider.
+     *  2) Hora de programa: OnAir anterior a (inici de programa − 90 s) → mentider.
+     *  3) Encadenat: OnAir anterior al "high water" de l'última hora fiable → mentider.
+     * L'OnAir original es conserva a `_onAirRaw` (diagnòstic); l'efectiu s'anul·la, de
+     * manera que la resta del sistema (tiers, deduccions, marcadors) el tracta com un
+     * ítem sense OnAir.
+     * @returns {number} quants ítems s'han neutralitzat
+     */
+    ER._sanitizeOnAirLies = function (data, config) {
+        var n = 0;
+        try {
+            var all = (data && data.escaleta && data.escaleta.liniesEscaleta) ? data.escaleta.liniesEscaleta : null;
+            if (!all || all.length === 0) return 0;
+            if (data._onAirSanitized) return 0;         // idempotent
+            data._onAirSanitized = true;
+
+            var progKey = (typeof this._detectProgramKey === 'function') ? this._detectProgramKey(data) : null;
+            var startH = null;
+            try {
+                var cfg = window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get();
+                if (cfg && cfg.programStartHours && progKey) startH = Number(cfg.programStartHours[progKey]);
+            } catch (eC) { startH = null; }
+            var programStartSec = (progKey && startH != null && isFinite(startH)) ? Math.round(startH * 3600) : null;
+            var minOnAirSec = (programStartSec != null) ? programStartSec - 90 : null;
+            if (minOnAirSec != null) {
+                log('🕵️ [ER:Bounds] Sanejant OnAir: inici de programa ' + progKey + '=' + this.secondsToTC(programStartSec) +
+                    ' · llindar ' + this.secondsToTC(minOnAirSec));
+            }
+
+            var prevFiableSec = null;
+            var highWater = null;
+            for (var i = 0; i < all.length; i++) {
+                var it = all[i];
+                if (!it || it.flotant === true) continue;
+                var oaStr = it.horaEntradaOnAir;
+                var hasOnAir = !!(oaStr && oaStr !== '00:00:00' && String(oaStr).trim() !== '');
+                var sec = this.tcToSeconds(hasOnAir ? oaStr : it.horaEntradaPrevista);
+                if (sec == null) continue;
+
+                var mentider = false, motiu = '';
+                if (hasOnAir) {
+                    if (minOnAirSec != null && sec < minOnAirSec) {
+                        mentider = true; motiu = 'anterior a l\'inici de programa';
+                    } else if (prevFiableSec != null && sec < prevFiableSec - 60) {
+                        mentider = true; motiu = 'retrocés de ' + Math.round(prevFiableSec - sec) + 's';
+                    } else if (highWater != null && sec < highWater) {
+                        mentider = true; motiu = 'encadenat a un OnAir mentider';
+                    }
+                }
+
+                if (mentider) {
+                    it._onAirRaw = oaStr;
+                    it.horaEntradaOnAir = null;
+                    n++;
+                    log('🕵️ [ER:Bounds] OnAir MENTIDER neutralitzat: "' + (it.num || '?') + '" @ ' + oaStr +
+                        ' (' + motiu + ', seq ' + (it.sequencia != null ? it.sequencia : i) + ')');
+                } else if (hasOnAir) {
+                    prevFiableSec = sec;
+                    highWater = (highWater === null || sec > highWater) ? sec : highWater;
+                }
+
+                // (2026-09-17d) La PREVISTA és mentidera SEMPRE que l'OnAir ho era: el
+                // realitzador llança l'ítem de prova i l'escaleta fixa la mateixa hora
+                // a les dues (cas TNC "08 P2-1": OnAir i Prevista = 13:48:08). El
+                // BUG #21 de _deduceOnAirEntrada fa servir la Prevista quan és anterior
+                // al resultat deduït → per això cal anul·lar-la també.
+                var pvStr = it.horaEntradaPrevista;
+                var pvSec = (pvStr && pvStr !== '00:00:00' && String(pvStr).trim() !== '')
+                    ? this.tcToSeconds(pvStr) : null;
+                if (pvSec != null) {
+                    var pvMentider = false, pvMotiu = '';
+                    if (minOnAirSec != null && pvSec < minOnAirSec) {
+                        pvMentider = true; pvMotiu = 'anterior a l\'inici de programa';
+                    } else if (prevFiableSec != null && pvSec < prevFiableSec - 60) {
+                        pvMentider = true; pvMotiu = 'retrocés de ' + Math.round(prevFiableSec - pvSec) + 's';
+                    } else if (highWater != null && pvSec < highWater) {
+                        pvMentider = true; pvMotiu = 'encadenat a una hora mentidera';
+                    }
+                    if (pvMentider) {
+                        it._prevRaw = it.horaEntradaPrevista;
+                        it.horaEntradaPrevista = null;
+                        n++;
+                        log('🕵️ [ER:Bounds] PREVISTA MENTIDERA neutralitzada: "' + (it.num || '?') + '" @ ' +
+                            it._prevRaw + ' (' + pvMotiu + ', seq ' + (it.sequencia != null ? it.sequencia : i) + ')');
+                    } else if (!hasOnAir || mentider) {
+                        // Les previsions fiables també són referència (si no, en un
+                        // programa amb els primers OnAir tardans no es detectaria res).
+                        prevFiableSec = pvSec;
+                        highWater = (highWater === null || pvSec > highWater) ? pvSec : highWater;
+                    }
+                }
+            }
+            if (n > 0) log('🕵️ [ER:Bounds] ' + n + ' OnAir mentider(s) neutralitzat(s) → es deduiran com a sense OnAir');
+        } catch (e) {
+            log('⚠️ [ER:Bounds] Error sanejat OnAir: ' + e.message, 'WARN');
+        }
+        return n;
+    };
+
+    /**
+     * _applyBaseColumnFloor: PISO de l'inici del bloc quan el sanejat ha tocat el
+     * bloc (hores mentideres anul·lades). El bloc (capa V1/V2) es queda sense
+     * referència pròpia i la deducció pot retrocedir massa (fins a un faro llunyà).
+     * La columna BASE de l'escaleta (agrupacio null) marca on és realment el tema:
+     * l'últim ítem base ABANS del bloc (per ordre d'escaleta) acaba just on comença
+     * el tema; el "forat" fins al primer ítem fiable del bloc és l'espai que ocupa.
+     *
+     * Cas TNC 17/09: base ... S6(13:56:22) · ''(13:56:36) · 08 P2(13:56:46) [forat 47s]
+     * 08 P2-1/2/i (V1, hores mentideres) · reel 10 (V1, 13:57:59) → PISO = 13:56:46.
+     */
+    ER._applyBaseColumnFloor = function (data, worldBlockStartSec, blockLines, maxGapSec) {
+        try {
+            if (worldBlockStartSec == null || !blockLines || blockLines.length === 0) return worldBlockStartSec;
+
+            // Només quan el sanejat ha tocat aquest bloc (evita regressions).
+            var sanejat = false;
+            for (var s = 0; s < blockLines.length; s++) {
+                if (blockLines[s] && (blockLines[s]._onAirRaw || blockLines[s]._prevRaw)) { sanejat = true; break; }
+            }
+            if (!sanejat) return worldBlockStartSec;
+
+            var all = (data && data.escaleta && data.escaleta.liniesEscaleta) ? data.escaleta.liniesEscaleta : [];
+            if (!all.length) return worldBlockStartSec;
+            var gapMax = (maxGapSec != null) ? maxGapSec : 180;
+
+            // ⚠️ tcToSeconds(null) === 0 → cal comprovar el string abans de convertir
+            var self = this;
+            var tcOf = function (it2) {
+                var h = it2.horaEntradaOnAir;
+                if (h && h !== '00:00:00' && String(h).trim() !== '') return self.tcToSeconds(h);
+                h = it2.horaEntradaPrevista;
+                if (h && h !== '00:00:00' && String(h).trim() !== '') return self.tcToSeconds(h);
+                return null;
+            };
+
+            // Primer ítem del bloc en ORDRE D'ESCALETA (l'ordre és la font de veritat)
+            var firstIdx = -1;
+            for (var i = 0; i < all.length; i++) {
+                if (blockLines.indexOf(all[i]) !== -1) { firstIdx = i; break; }
+            }
+            if (firstIdx <= 0) return worldBlockStartSec;
+
+            // Hora fiable més primerenca del bloc (per mesurar el forat)
+            var firstReliable = null;
+            for (var b = 0; b < blockLines.length; b++) {
+                var sec = tcOf(blockLines[b]);
+                if (sec != null && (firstReliable === null || sec < firstReliable)) firstReliable = sec;
+            }
+            if (firstReliable === null) return worldBlockStartSec;
+
+            // Últim ítem de la columna BASE (agrupacio buida) ABANS del bloc, cap enrere
+            var floorSec = null;
+            var tries = 0;
+            for (var k = firstIdx - 1; k >= 0 && tries < 6; k--, tries++) {
+                var it = all[k];
+                if (!it || it.flotant === true) continue;
+                if (it.agrupacio && it.agrupacio.toString().trim() !== '') continue;
+                var st = tcOf(it);
+                if (st == null) continue;
+                floorSec = st + this.getItemDuradaSec(it);
+                break;
+            }
+            if (floorSec === null) return worldBlockStartSec;
+
+            var gap = firstReliable - floorSec;
+            if (gap < 0 || gap > gapMax) return worldBlockStartSec;
+
+            if (floorSec > worldBlockStartSec) {
+                log('🔒 [ER:Bounds] PISO columna base: IN ' + this.secondsToTC(worldBlockStartSec) + ' → ' +
+                    this.secondsToTC(floorSec) + ' (el forat de la base és el tema, salt ' + Math.round(gap) + 's)');
+                return floorSec;
+            }
+            return worldBlockStartSec;
+        } catch (e) {
+            log('⚠️ [ER:Bounds] Error PISO columna base: ' + e.message, 'WARN');
+            return worldBlockStartSec;
+        }
+    };
+
+    // ----------------------------------------------------------------
     // 6. PRECISION TRIM BOUNDS (Sistema 2+1 tiers)
     // ----------------------------------------------------------------
 
@@ -532,6 +756,9 @@
      * OUT: Tier 1 (max sortida de tots els blockLines) -> Tier 2 (següent OnAir) -> Fallback (block.out)
      */
     ER.calcPrecisionTrimBounds = function (data, blockId, mediaStart, mediaStop, config) {
+        // (2026-09-17) Sanejar OnAir mentiders ABANS de res: així els tiers, les
+        // deduccions i els marcadors deixen de contaminar-se amb ítems de prova.
+        try { this._sanitizeOnAirLies(data, config); } catch (eSan) { }
         var blockLines = this.getLinesForBlock(data, blockId);
         var allLines = data.escaleta && data.escaleta.liniesEscaleta ? data.escaleta.liniesEscaleta : [];
         var handles = config && config.handles != null ? config.handles : 60;
@@ -686,6 +913,17 @@
                 log('No es pot determinar l\'inici del bloc ' + blockId, 'ERROR');
                 return null;
             }
+        }
+
+        // (2026-09-17c) PISO de columna base: si el sanejat ha anul·lat hores del bloc,
+        // l'inici pot quedar massa enrere. El forat de la columna base marca el tema.
+        var _inPrePiso = worldBlockStartSec;
+        worldBlockStartSec = this._applyBaseColumnFloor(data, worldBlockStartSec, blockLines, 180);
+        if (_inPrePiso != null && worldBlockStartSec !== _inPrePiso) {
+            // El piso mou l'inici real del bloc → l'àncora l'ha de seguir
+            // (flow_markers.js la fa servir per situar els marcadors sobre el clip).
+            worldBlockAnchorSec = worldBlockStartSec;
+            log('🔒 [ER:Bounds] Àncora actualitzada al piso: ' + this.secondsToTC(worldBlockAnchorSec));
         }
 
         // ================================================================
@@ -845,8 +1083,13 @@
         try {
             var nxt = this.getNeighbourOnAirTimes(data, blockId);
             var nextOnAirSec = (nxt && nxt.nextStart != null) ? nxt.nextStart : null;
-            if (nextOnAirSec != null && outMarginSec > 0) {
-                var minOut = (nextOnAirSec - worldSecMediaStart) + outMarginSec;
+            // (2026-09-17) ABANS: minOut = inici del SEGUENT item + marge. Si el següent item
+            // era d'un ALTRE bloc (cas TNC: final del bloc 13:59:25, següent 07/v2 a 14:04:26)
+            // el clip s'estirava fins alla -> OUT 1196 s en lloc de 885 -> clip de 17 min.
+            // ARA: el marge s'aplica SOBRE EL FINAL DEL BLOC (mp4ExpandedOutPoint ja l'inclou).
+            if (outMarginSec > 0) {
+                var minOut = mp4ExpandedOutPoint + outMarginSec;
+                if (!nextOnAirSec) nextOnAirSec = worldSecMediaStart + mp4ExpandedOutPoint;  // nomes per al log
                 if (mp4ExpandedOutPoint < minOut) {
                     log('   \u2702\uFE0F [OUT-MARGIN] Clip ampliat fins al següent ítem + ' + outMarginSec.toFixed(1) + 's: ' +
                         mp4ExpandedOutPoint.toFixed(2) + 's \u2192 ' + minOut.toFixed(2) + 's (següent OnAir=' + this.secondsToTC(nextOnAirSec) + ')');

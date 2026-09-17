@@ -34,7 +34,12 @@
     var DEFAULT_ESCALETA_IDS = {
         TN_COMARQUES: "PRO1439",
         TN_MIGDIA:    "PRO1440",
-        TN_VESPRE:    "PRO1442"
+        TN_VESPRE:    "PRO1442",
+        // MATINS: digition crea un rundown per dia feiner (DILLUNS..DIVENDRES),
+        // aixi que l'ID puja ~1 per dia. Aquest es el darrer conegut (jueves
+        // 2026-09-17); si l'API diu "no existeix" es proven els veins (+1/-1/+2)
+        // i tambe l'estimat a partir dels 2-3 dies anteriors.
+        MATINS:       "PRO1378"
     };
 
     /**
@@ -66,6 +71,166 @@
      * @param {string} folderPath - Ruta on guardar el JSON
      * @returns {Promise<{path: string, filename: string}|null>}
      */
+    // ── SERIE D'ESCALETA IDS (2026-09-17) ──────────────────────────────
+    // Els rundowns de digition no son fixos: MATINS en crea un per dia feiner
+    // (DILLUNS..DIVENDRES), aixi que l'ID puja ~1 per dia i els festius el
+    // desplacen. El 17/09/2026 el motor demanava PRO1278 (inexistent) -> el
+    // motor publicava {"missatge":"L'escaleta no existeix"}. Solucio: estimar
+    // l'ID amb els 2-3 dies anteriors i, si falla, provar veins (+1/-1/+2...).
+
+    /**
+     * _escaletaIdParts: Separa prefix i numero d'un escaletaId ("PRO1378").
+     */
+    ER._escaletaIdParts = function (id) {
+        var m = String(id || '').match(/^([A-Za-z]*)(\d+)$/);
+        if (!m) return null;
+        return { prefix: m[1], num: parseInt(m[2], 10) };
+    };
+
+    /**
+     * _escaletaIdCandidates: Candidats al voltant d'un ID base (+1/-1/+2/-2...).
+     * @param {string} baseId
+     * @param {number} [maxPad=3] número de salts per banda
+     * @returns {Array<string>}
+     */
+    ER._escaletaIdCandidates = function (baseId, maxPad) {
+        var p = this._escaletaIdParts(baseId);
+        if (!p) return [];
+        var pad = (maxPad != null) ? maxPad : 3;
+        var out = [];
+        for (var d = 1; d <= pad; d++) {
+            out.push(p.prefix + (p.num + d));
+            out.push(p.prefix + (p.num - d));
+        }
+        return out;
+    };
+
+    /**
+     * _ymdToDate: "20260917" -> Date local.
+     */
+    ER._ymdToDate = function (ymd) {
+        var s = String(ymd || '');
+        if (!/^\d{8}$/.test(s)) return null;
+        return new Date(parseInt(s.substring(0, 4), 10), parseInt(s.substring(4, 6), 10) - 1, parseInt(s.substring(6, 8), 10));
+    };
+
+    /**
+     * _weekdaysBetween: Dies FEINERS entre dues dates YYYYMMDD (cap de setmana fora).
+     */
+    ER._weekdaysBetween = function (fromYmd, toYmd) {
+        var f = this._ymdToDate(fromYmd), t = this._ymdToDate(toYmd);
+        if (!f || !t || t <= f) return 0;
+        var n = 0, d = new Date(f.getTime());
+        while (d < t) {
+            d.setDate(d.getDate() + 1);
+            var dow = d.getDay();
+            if (dow !== 0 && dow !== 6) n++;
+        }
+        return n;
+    };
+
+    /**
+     * _estimateEscaletaIdFromHistory: Mira els IDs dels 2-3 dies anteriors
+     * (JSON VALIDS del programa al NAS) i estima el d'avui amb el pas per dia
+     * feiner. Els festius fan que el pas no sigui exacte, aixi que l'estimacio
+     * es nomes el PRIMER candidat: despres es proven els veins.
+     * @returns {Promise<{estimate:string, step:number, seen:Array}|null>}
+     */
+    ER._estimateEscaletaIdFromHistory = async function (programArchivo, dateDir) {
+        try {
+            if (!this._listEscaletas || !this.load) return null;
+            var datePrefix = String(dateDir || '').replace(/_/g, '');   // per excloure avui
+            var listRes = await this._listEscaletas();
+            if (!listRes || !listRes.raw) return null;
+            var files = JSON.parse(listRes.raw);
+            var dir = listRes.path || this.ESCALETES_PATH || this.ESCALETES_PATH_DOMAIN || '';
+            var token = '_' + String(programArchivo).toUpperCase() + '_';
+            var cands = [];
+            for (var i = 0; i < files.length; i++) {
+                var f = files[i];
+                if (!f || f.isDir) continue;
+                var nm = String(f.name || '');
+                if (nm.toUpperCase().indexOf(token) === -1) continue;
+                var d8 = nm.substring(0, 8);
+                if (!/^\d{8}$/.test(d8)) continue;
+                if (datePrefix && d8 === datePrefix) continue;         // avui no compta
+                cands.push({ name: nm, path: dir.replace(/[\/\\]+$/, '') + '\\' + nm, date: d8 });
+            }
+            if (cands.length === 0) return null;
+            cands.sort(function (a, b) { return a.name < b.name ? 1 : (a.name > b.name ? -1 : 0); });  // mes nou primer
+            var seen = [];
+            for (var c = 0; c < cands.length && seen.length < 3; c++) {
+                var data = null;
+                try { data = await this.load(cands[c].path); } catch (eL) { data = null; }
+                if (!data || !data.escaleta || !data.escaleta.id) continue;   // error del motor o buit
+                var pr = this._escaletaIdParts(data.escaleta.id);
+                if (!pr) continue;
+                seen.push({ date: cands[c].date, id: data.escaleta.id, num: pr.num, prefix: pr.prefix });
+            }
+            if (seen.length < 2) return null;
+            var newest = seen[0], oldest = seen[seen.length - 1];
+            var days = this._weekdaysBetween(oldest.date, newest.date);
+            var realStep = (days > 0) ? ((newest.num - oldest.num) / days) : 1;
+            // Pas de referencia: +1 per dia FEINER (MATINS crea un rundown diari).
+            // El pas REAL pot ser mes gran (festius, rundowns extra) -> l'estimacio
+            // es nomes UN candidat mes i els veins (+1/-1/+2...) el cobreixen.
+            var dToday = this._weekdaysBetween(newest.date, datePrefix);
+            if (!(dToday > 0)) dToday = 1;
+            var estimateStr = newest.prefix + (newest.num + dToday);
+            log('🎯 [ER:Fetch] Serie ' + programArchivo + ': ' +
+                seen.map(function (s) { return s.date.substring(4) + '=' + s.id; }).join(' · ') +
+                ' | dies feiners des del darrer=' + dToday + ' | pas real≈' + realStep.toFixed(2) +
+                ' → estimat avui: ' + estimateStr);
+            return { estimate: estimateStr, step: realStep, seen: seen };
+        } catch (e) {
+            log('⚠️ [ER:Fetch] Estimacio de serie fallida: ' + e.message);
+            return null;
+        }
+    };
+
+    /**
+     * _resolveEscaletaId: Troba l'escaletaId correcte per avui PROVANT-LO contra
+     * l'API (1 crida per candidat). Ordre: estimat per serie → base de config →
+     * veins (+1/-1/+2/-2/+3/-3). Es para al primer candidat que retorna una
+     * escaleta valida i en desa el JSON per no haver de repetir la crida.
+     * @returns {Promise<{id:string, raw:string}|null>}
+     */
+    ER._resolveEscaletaId = async function (programArchivo, baseId, dataStr, horaStr) {
+        var est = null;
+        try { est = await this._estimateEscaletaIdFromHistory(programArchivo, baseId); } catch (e0) { est = null; }
+        var list = [];
+        var add = function (id) { if (id && list.indexOf(id) === -1) list.push(id); };
+        add(baseId);
+        if (est && est.estimate) add(est.estimate);
+        var cands = this._escaletaIdCandidates(baseId, 3);
+        for (var i = 0; i < cands.length; i++) add(cands[i]);
+        var maxTry = Math.min(list.length, 3);   // (2026-09-17) 3 en comptes de 5: cada crida pot tardar ~30 s
+        log('🔎 [ER:Fetch] Resolent escaletaId (' + programArchivo + ') · candidats: ' + list.slice(0, maxTry).join(', '));
+        for (var c = 0; c < maxTry; c++) {
+            var id = list[c];
+            var url = this._buildFetchUrl(id, dataStr, horaStr);
+            var raw = null;
+            try {
+                raw = await window.FASTPASS_UI.Utils.callJSX(
+                    "FASTPASS.IO.curl('" + url.replace(/'/g, "\\'") + "', '" + API_AUTH.replace(/'/g, "\\'") + "')",
+                    { rawError: true }
+                );
+            } catch (eC) { raw = null; }
+            var js = null, ok = false;
+            try {
+                js = JSON.parse(String(raw || '').trim());
+                ok = !!(js && !js.missatge && js.escaleta && js.cleanFeed);
+            } catch (eP) { ok = false; }
+            if (ok) {
+                log('✅ [ER:Fetch] escaletaId resolt: ' + id + (c > 0 ? ' (candidat ' + (c + 1) + '/' + maxTry + ')' : ' (base)'));
+                return { id: id, raw: String(raw) };
+            }
+            log('   ⏭️ [ER:Fetch] ' + id + ' → ' + ((js && js.missatge) ? js.missatge : 'resposta no valida'));
+        }
+        log('❌ [ER:Fetch] Cap escaletaId valid (' + maxTry + ' provats) per a ' + programArchivo);
+        return null;
+    };
+
     ER.fetchNewEscaleta = async function (escaletaId, dateDir, programArchivo, blockId, folderPath) {
         if (!escaletaId) {
             escaletaId = DEFAULT_ESCALETA_IDS[programArchivo] || null;
@@ -108,7 +273,7 @@
 
         // ── Hora de la petició (2026-09-16) ─────────────────────────────────────
         // Si no hi ha JSON local del dia, s'usa l'hora d'inici del PROGRAMA
-        // (Config.programStartHours: TNC 13:50, TNM 14:30, TNV 21:00) i, si no es pot
+        // (Config.programStartHours: TNC 13:50, TNM 14:30, TNV 21:00, MAT 08:00) i, si no es pot
         // resoldre, l'hora actual. Abans s'enviava "14:00:00" fix, que només servia
         // per a TN COMARQUES i feia fallar la FOTO per a la resta de programes.
         if (!horaStr) {
@@ -124,7 +289,11 @@
             } catch (eWott) { wottH = null; }
             var startH = (cfgH && cfgH.programStartHours && wottH && cfgH.programStartHours[wottH] != null)
                 ? Number(cfgH.programStartHours[wottH]) : null;
-            if (isFinite(startH)) {
+            // ⚠️ BUGFIX (2026-09-17): `isFinite(null)` es TRUE a JavaScript (null -> 0),
+            // aixi que si el programa no te hora d'inici (MAT no era a la llista) es
+            // demanava l'escaleta amb hora "00:00:00" i l'API responia buit. Cal
+            // comprovar `startH != null` ABANS d'isFinite.
+            if (startH != null && isFinite(startH)) {
                 var hhH = Math.floor(startH);
                 var mmH = Math.round((startH - hhH) * 60);
                 horaStr = (hhH < 10 ? '0' : '') + hhH + ':' + (mmH < 10 ? '0' : '') + mmH + ':00';
@@ -136,6 +305,28 @@
                 log('\u23F0 [ER:Fetch] Hora de la petició: ' + horaStr + ' (hora actual)');
             }
         }
+
+        // ── RESOLUCIO DE L'ESCALETA ID (2026-09-17) ──────────────────────────
+        // Els rundowns de digition canvien (MATINS: un per dia feiner). Si el
+        // JSON del dia diu "L'escaleta no existeix", es proven candidats de la
+        // serie (+1/-1/+2...) fins trobar el bo, i es guarda la SEVA escaleta.
+        var probe = null;
+        try { probe = await this._resolveEscaletaId(programArchivo, escaletaId, dataStr, horaStr); } catch (ePr) { probe = null; }
+        if (probe && probe.raw) {
+            try {
+                var tsP = Date.now();
+                var fnP = 'escaleta_on_demand_' + tsP + '.json';
+                var safeP = (folderPath + '/' + fnP).replace(/\\/g, '/').replace(/'/g, "\\'");
+                await window.FASTPASS_UI.Utils.callJSX(
+                    "IO.writeTxt('" + safeP + "', '" + probe.raw.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "')"
+                );
+                log('✅ [ER:Fetch] FOTO guardada amb escaletaId ' + probe.id + ': ' + safeP);
+                return { path: safeP, filename: fnP };
+            } catch (eWP) {
+                log('⚠️ [ER:Fetch] No s\'ha pogut guardar la foto resolta: ' + eWP.message);
+            }
+        }
+        if (probe && probe.id) escaletaId = probe.id;
 
         var url = this._buildFetchUrl(escaletaId, dataStr, horaStr);
 
@@ -198,7 +389,7 @@
                     var safeFolderPath = (folderPath + '/' + filename).replace(/\\/g, '/').replace(/'/g, "\\'");
 
                     await window.FASTPASS_UI.Utils.callJSX(
-                        "IO.writeTxt('" + safeFolderPath + "', '" + rawResult.replace(/'/g, "\\'") + "')"
+                        "IO.writeTxt('" + safeFolderPath + "', '" + rawResult.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "')"
                     );
 
                     log('\u2705 [ER:Fetch] JSON guardat: ' + safeFolderPath);

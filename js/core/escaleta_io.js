@@ -571,7 +571,10 @@
         // RECENT per al bloc. Abans només s'usava findLatest (el més recent per data),
         // i una escaleta massa antiga o un fitxer d'error deixaven el semàfor en vermell
         // sense cap explicació ni estimació d'espera.
-        var validRes = null;
+        // (2026-09-17) Motiu llegible per al semafor: es reinicia a cada consulta i el
+   // fixa ER.load quan descarta un JSON d'error del motor.
+   ER._lastReject = null;
+   var validRes = null;
         try {
             if (typeof this.findLatestValid === 'function') {
                 validRes = await this.findLatestValid(programArchivo, blockId, datePrefix);
@@ -585,10 +588,13 @@
         } else {
             latest = await this.findLatest(programArchivo, blockId, datePrefix);
         }
-        if (!latest) return { found: false, ready: false, waitSec: waitSec };
+        if (!latest) return { found: false, ready: false, waitSec: waitSec,
+       reason: (ER._lastReject && ER._lastReject.reason) ? ER._lastReject.reason
+           : ((validRes && validRes.error) ? validRes.error : null) };
 
         var data = await this.load(latest.path);
-        if (!data) return { found: true, ready: false, filename: latest.filename, waitSec: waitSec };
+        if (!data) return { found: true, ready: false, filename: latest.filename, waitSec: waitSec,
+       reason: (ER._lastReject && ER._lastReject.reason) ? ER._lastReject.reason : null };
 
         var block = this.getBlock(data, blockId);
         var mediaScan = data && data.cleanFeed ? data.cleanFeed : {};
@@ -764,6 +770,15 @@
             // ── Validar que el JSON és una escaleta real, no un error del servidor ──
             // Ex: JSON V3 de TNC 06/07: {"missatge":"Error","debugInfo":"No s'ha localitzat..."}
             if (data.missatge || !data.cleanFeed || !data.escaleta) {
+        // Motiu real per al semafor (2026-09-17): abans nomes anava al log, aixi que
+        // l'usuari veia "ESPERANT" sense saber que el motor publicava un error
+        // (p. ex. {"missatge":"L'escaleta no existeix","debugInfo":"/v2/escaletes/PRO1278/_clips"}).
+        ER._lastReject = {
+            filename: String(jsonPath || '').split(/[\/\\]/).pop(),
+            reason: data.missatge
+                ? (data.missatge + (data.debugInfo ? ' [' + String(data.debugInfo).substring(0, 120) + ']' : ''))
+                : 'estructura invalida (sense cleanFeed/escaleta)'
+        };
                 log('\u26A0\uFE0F [ER:IO] JSON descartat (error del servidor o estructura invàlida): ' + jsonPath);
                 if (data.missatge) log('\u26A0\uFE0F [ER:IO]   Motiu: ' + data.missatge + (data.debugInfo ? ' [' + String(data.debugInfo).substring(0, 160) + ']' : ''));
                 return null;

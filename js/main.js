@@ -624,7 +624,11 @@ function applySliderLimits() {
                     // Guarda de temps: si l'API d'escaletes o el motor JSX no responen
                     // (xarxa/VPN), el botó no pot quedar-se penjat en "⏳ FOTO...".
                     // 45 s: el fetch fa un intent (curl --max-time 20 + marge).
-                    const FOTO_TIMEOUT_MS = 45000;
+                    // Guarda de temps: si l'API d'escaletes o el motor JSX no responen
+        // (2026-09-17): 45 s era insuficient. El handshake TLS amb digition triga
+        // ~26 s en aquesta xarxa, i la FOTO pot provar 2-3 candidats d'escaletaId
+        // abans d'encertar -> cal marge per a 3 intents (~30 s cadascun).
+        const FOTO_TIMEOUT_MS = 180000;
                     const result = await Promise.race([
                         reader.fetchNewEscaleta(
                             progData.escaletaId || null,

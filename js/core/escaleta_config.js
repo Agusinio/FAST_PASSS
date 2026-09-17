@@ -65,10 +65,10 @@
             var cfg = window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get();
             if (cfg && cfg.clipOutMarginSec != null) {
                 var v = Number(cfg.clipOutMarginSec);
-                return isFinite(v) && v >= 0 ? v : 30;
+                return isFinite(v) && v >= 0 ? v : 0;
             }
         } catch (e) { }
-        return 30;
+        return 0;
     };
 
     // ----------------------------------------------------------------
