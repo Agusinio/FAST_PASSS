@@ -474,18 +474,29 @@
 
                                             // mp4Duration es necessita per a l'extracció i el recàlcul de bounds
                                             const mp4Duration = bounds.mp4Duration;
+                                            // ── COLA EXTRA DEL CLIP (2026-09-16) ─────────────────
+                                            // El fitxer extret ha d'incloure clipExtraTailSec (60 s per
+                                            // defecte) MÉS ENLLÀ del final del bloc: si una connexió o un
+                                            // directe s'allarga, el material ja és al clip i només cal
+                                            // ESTIRAR-LO a la timeline. Retallar el que sobra no costa res;
+                                            // no tenir-ne, en canvi, fa perdre la peça.
+                                            // El clip insertat NO canvia (clipExpandedOutPoint = mp4Duration).
+                                            const extraTailSec = (ctx.config && ctx.config.clipExtraTailSec != null)
+                                                ? Number(ctx.config.clipExtraTailSec) : 60;
+                                            const extractDuration = mp4Duration +
+                                                ((isFinite(extraTailSec) && extraTailSec > 0) ? extraTailSec : 0);
                                             let useExtractedClip = false;
 
                                             // Estratègia: EXTREURE SEMPRE. Si el clip ja existeix, ffmpeg -y el sobreescriu.
                                             // Si el cleanFeed és massa petit, l'extracció fallarà (timeout a waitForFile).
                                             // Evitem checkSourceDuration perquè IO.executeShell amb pipes/fitxers temporals
                                             // no funciona correctament a ExtendScript (afegeix cometes extra als paths).
-                                            log(`🎬 [EXTRACT] Extraient clip: input=${effectiveMediaPath}, start=${bounds.mp4ExpandedInPoint.toFixed(2)}s, dur=${mp4Duration.toFixed(2)}s, output=${clipPath}`);
+                                            log(`🎬 [EXTRACT] Extraient clip: input=${effectiveMediaPath}, start=${bounds.mp4ExpandedInPoint.toFixed(2)}s, dur=${extractDuration.toFixed(2)}s (bloc ${mp4Duration.toFixed(2)}s + cola extra ${(extractDuration - mp4Duration).toFixed(0)}s), output=${clipPath}`);
                                             getUtils().status("🎬 Extraient clip via ffmpeg...", "info");
                                             const extractResult = await ffmpeg.extractClip(
                                                 effectiveMediaPath,
                                                 bounds.mp4ExpandedInPoint,
-                                                mp4Duration,
+                                                extractDuration,
                                                 clipPath
                                             );
                                             if (extractResult.ok) {

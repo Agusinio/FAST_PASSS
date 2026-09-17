@@ -749,9 +749,23 @@ function applySliderLimits() {
             ['Deduc (F2)',             () => callWorkflow('Markers', 'placeDeducedOnAirMarkers')],
             ['Prev (F3)',              () => callWorkflow('Markers', 'placeScheduledMarkers')],
             ['Correl (F3.5)',          () => callWorkflow('Assembly', 'correlationSnapMarkers')],
-            ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')]
+            ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],
+            ['Ordre (F6)',             () => callWorkflow('Markers', 'enforceMarkerOrder')]
         ];
         utils.log('🚀 [PIPE] Marcadors post-OUT: ' + phases.map(p => p[0]).join(' → ') + '. Verifica els marcadors i usa COLOCAR per als chyrons.', 'INFO');
+        // [2026-09-17] NOMES MARCADORS: si la V1 ja esta trocejada (>=2 clips) no tornem a
+        // fer OUT ni TROSSEJA: nomes es re-col·loquen els marcadors (F1-F6). Es substitueix
+        // la funcio de les dues primeres fases (l'array es const, pero els seus elements son
+        // mutables), aixi el bucle de sota queda intacte.
+        try {
+            const nV1 = parseInt(await utils.callJSX("FASTPASS.Clips.count(1,'video')") || "0", 10) || 0;
+            if (nV1 >= 2) {
+                phases[0][1] = async function () { utils.log('   [PIPE] OUT omes (V1 ja trocejada)', 'INFO'); };
+                phases[1][1] = async function () { utils.log('   [PIPE] TROSSEJA omes (V1 ja trocejada)', 'INFO'); };
+                utils.log('   [PIPE] V1 ja te ' + nV1 + ' clips -> saltant OUT i TROSSEJA (nomes marcadors)', 'INFO');
+            }
+        } catch (eNV) { }
+
         for (const ph of phases) {
             const t0 = Date.now();
             utils.log('🔄 [PIPE] ' + ph[0] + '...', 'INFO');

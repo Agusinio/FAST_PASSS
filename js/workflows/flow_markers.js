@@ -637,27 +637,40 @@
             var prevFaroTime = 0;
             var structuralItemsSet = {};
             for (var si = 0; si < structuralItems.length; si++) {
-                if (structuralItems[si].num) structuralItemsSet[structuralItems[si].num] = true;
+                if (structuralItems[si].num) structuralItemsSet[String(structuralItems[si].num)] = true;
             }
-            for (var li = 0; li < lines.length; li++) {
-                var lineSi = lines[li];
+            var seqOrderU = this._seqOrderForItems(manifest, lines, structuralItemsSet);
+            var linesOrdered = [];
+            for (var q1 = 0; q1 < seqOrderU.length; q1++) {
+                for (var q2 = 0; q2 < lines.length; q2++) {
+                    if (lines[q2].num && String(lines[q2].num) === seqOrderU[q1]) { linesOrdered.push(lines[q2]); break; }
+                }
+            }
+            for (var li = 0; li < linesOrdered.length; li++) {
+                var lineSi = linesOrdered[li];
                 var numSi = lineSi.num;
                 if (!numSi || !structuralItemsSet[numSi]) continue;  // només items estructurals
                 var hasFaro = (faroPositions[numSi] !== undefined);
                 if (hasFaro) {
                     // Assignar faro com a right limit als items pendents entre prevFaro i aquest
+                    var ultimPendent = null;
                     for (var li2 in faroLimitMap) {
                         if (faroLimitMap[li2].rightFaroTime === null) {
                             faroLimitMap[li2].rightFaroTime = faroPositions[numSi];
                             faroLimitMap[li2].rightNum = numSi;
+                            ultimPendent = li2;
                         }
                     }
+                    // El DARRER item sense OnAir abans d'aquest faro es pega al seu TALL
+                    // ANTERIOR (2026-09-17): el faro mana i empeny el deduit a la seva
+                    // esquerra. Cas real: 01dir -> tall anterior a l'IPD 01.
+                    if (ultimPendent !== null) faroLimitMap[ultimPendent].esUltimAbansFaro = true;
                     prevFaroNum = numSi;
                     prevFaroTime = faroPositions[numSi];
                 } else {
                     // Item sense faro (deduït): assignar left limit
                     if (!faroLimitMap[numSi]) {
-                        faroLimitMap[numSi] = { leftFaroTime: prevFaroTime, leftNum: prevFaroNum, rightFaroTime: null, rightNum: null };
+                        faroLimitMap[numSi] = { leftFaroTime: prevFaroTime, leftNum: prevFaroNum, rightFaroTime: null, rightNum: null, esUltimAbansFaro: false };
                     }
                 }
             }
@@ -683,6 +696,17 @@
                 if (idealPosSec < 0) idealPosSec = 0;
 
                 // Anclar entre faros adyacents per preservar l'ordre de l'escaleta
+                // 2026-09-17 (ORDRE): el faro (item amb OnAir) es la FONT DE VERITAT i no
+                // es mou mai. Si aquest item sense OnAir cau a la DRETA d'un faro que
+                // l'escaleta situa DESPRES, es col·loca al TALL ANTERIOR d'aquest faro.
+                var limits0 = faroLimitMap[lineNum];
+                if (limits0 && limits0.rightFaroTime !== null &&
+                    (limits0.esUltimAbansFaro === true || idealPosSec >= limits0.rightFaroTime - 0.05)) {
+                    var cutAbans = this._prevCutBefore(limits0.rightFaroTime, clips);
+                    idealPosSec = Math.min(cutAbans, limits0.rightFaroTime - 0.5);
+                    if (idealPosSec < 0) idealPosSec = 0;
+                    log('   [F2-ORDRE] ' + lineNum + ': ' + deduced.toFixed(1) + 's -> ' + idealPosSec.toFixed(2) + 's (tall anterior al faro ' + limits0.rightNum + '@' + limits0.rightFaroTime.toFixed(2) + 's)');
+                }
                 var limits = faroLimitMap[lineNum];
                 if (limits) {
                     if (limits.rightFaroTime !== null && idealPosSec >= limits.rightFaroTime) {
@@ -828,7 +852,10 @@
                 var c = FASTPASS_UI.Config.get();
                 if (c && c.snapWindowFaroSec != null) w = Number(c.snapWindowFaroSec);
             } catch (e) { }
-            return (isFinite(w) && w > 0) ? w : 1.0;
+            // 2026-09-17: pujat de 1,0 -> 1,5 s. La deriva entre l'hora d'emissio i el
+            // tall real dels faros era 1,04-1,28 s, aixi que amb 1,0 s no s'ajustaven mai
+            // i quedaven FORA del tall.
+            return (isFinite(w) && w > 0) ? w : 1.5;
         },
 
         /**
@@ -844,6 +871,76 @@
                 if (c && c.snapWindowDeducedSec != null) w = Number(c.snapWindowDeducedSec);
             } catch (e) { }
             return (isFinite(w) && w > 0) ? w : 2.5;
+        },
+
+        /**
+         * _extractPrefixFromComment: Extreu el prefix (num d'ítem) del comentari
+         * d'un marcador. Format: "01dir - CONNEXIÓ WASHINGTON" → "01dir".
+         */
+        _extractPrefixFromComment: function (comment) {
+            if (!comment) return '';
+            var idx = comment.indexOf(' -');
+            if (idx <= 0) return '';
+            return comment.substring(0, idx).replace(/^\s+|\s+$/g, '');
+        },
+
+        /**
+         * _prevCutBefore: Retorna el tall de V1 immediatament ANTERIOR a tSec.
+         * S'usa com a límit dret ("corte anterior") per als ítems sense OnAir que
+         * l'escaleta situa ABANS d'un faro: el faro (OnAir) és la font de veritat
+         * i l'ítem sense OnAir ha de quedar-se a la seva esquerra (2026-09-17).
+         * @param {number} tSec - temps del faro (s de timeline)
+         * @param {Array} clips - clips de V1 [{start,end}]
+         * @returns {number} temps del tall anterior (< tSec)
+         */
+        _prevCutBefore: function (tSec, clips) {
+            var arr = clips || [];
+            var best = null;
+            for (var i = 0; i < arr.length; i++) {
+                var cs = arr[i].start, ce = arr[i].end;
+                if (isFinite(cs) && cs < tSec - 0.05 && (best === null || cs > best)) best = cs;
+                if (isFinite(ce) && ce < tSec - 0.05 && (best === null || ce > best)) best = ce;
+            }
+            if (best === null) best = Math.max(0, tSec - 2.0);
+            return best;
+        },
+
+        /**
+         * _seqOrderForItems: Retorna els nums dels ítems indicats en ORDRE
+         * D'ESCALETA (camp `sequencia` del manifest), mai en ordre TC.
+         * És la base per garantir que un ítem sense OnAir no quedi a la dreta
+         * d'un faro que l'escaleta situa després (2026-09-17).
+         * @param {object} manifest
+         * @param {Array} lines - línies del bloc (poden venir en ordre TC)
+         * @param {object} numSet - { num: true } dels ítems a considerar
+         * @returns {Array<string>} nums ordenats i sense duplicats
+         */
+        _seqOrderForItems: function (manifest, lines, numSet) {
+            var tmp = [];
+            var all = (manifest && manifest.escaletaItems) ? manifest.escaletaItems : [];
+            for (var i = 0; i < all.length; i++) {
+                var it = all[i];
+                if (!it || !it.num) continue;
+                var nk = String(it.num);
+                if (numSet && !numSet[nk]) continue;
+                tmp.push({ num: nk, seq: (it.sequencia != null && isFinite(Number(it.sequencia))) ? Number(it.sequencia) : i });
+            }
+            if (tmp.length === 0) {
+                // Fallback: ordre rebut (pitjor, però mai pitjor que abans)
+                var arr = lines || [];
+                for (var j = 0; j < arr.length; j++) {
+                    if (arr[j].num && (!numSet || numSet[String(arr[j].num)])) tmp.push({ num: String(arr[j].num), seq: j });
+                }
+            }
+            tmp.sort(function (a, b) { return a.seq - b.seq; });
+            var out = [];
+            var seen = {};
+            for (var k = 0; k < tmp.length; k++) {
+                if (seen[tmp[k].num]) continue;
+                seen[tmp[k].num] = true;
+                out.push(tmp[k].num);
+            }
+            return out;
         },
 
         /**
@@ -893,6 +990,12 @@
             if (bestBreak !== null && (nearest === null || Math.abs(bestBreak - markerTime) <= nearestDist)) {
                 return { target: bestBreak, why: 'ruptura de densitat' };
             }
+            // FARO: el tall que OBRE la peca es el punt cert (2026-09-17).
+            // La deriva entre l'hora d'emissio i el tall real es ~1,0-1,3 s, i amb la
+            // finestra curta (±1,0 s) els faros quedaven FORA del tall (01: 36,64 vs
+            // 37,72; 02: 112,64 vs 113,92; 03: 138,64 vs 139,68). Amb el tall
+            // d'obertura el marcador cau a l'inici real de la seva peca.
+            if (openCut !== null) return { target: openCut, why: "tall d'obertura" };
             if (nearest !== null) return { target: nearest, why: 'tall real' };
             return { target: null, why: '' };
         },
@@ -991,6 +1094,108 @@
         },
 
         // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════
+        // 🟢 F6: enforceMarkerOrder — L'ORDRE DE L'ESCALETA ÉS SAGRAT
+        // ═══════════════════════════════════════════════════════════════
+        /**
+         * enforceMarkerOrder: Garanteix que els marcadors dels ítems ESTRUCTURALS
+         * mantenen l'ordre de l'escaleta (camp `sequencia` del manifest).
+         * Cap fase (F1-F5) pot deixar dos ítems estructurals creuats.
+         *
+         * Cas real 2026-09-17: el directe 01dir (sense OnAir) quedava DARRERE de
+         * l'IPD 01, que a l'escaleta va DESPRÉS (seq 34 vs 35).
+         *
+         * Regles (acordades amb l'usuari):
+         *  - El faro (ítem amb OnAir) és la font de veritat: NO es mou mai.
+         *  - L'ítem sense OnAir que queda a la dreta d'un faro que l'escaleta
+         *    situa després, es col·loca al TALL ANTERIOR d'aquest faro.
+         *  - Gràfics i tótems queden exempts (es reparteixen com fins ara).
+         *  - Entre dos ítems sense OnAir es manté l'ordre relatiu.
+         *  - Si la inversió és entre dos faros, s'avisa i no es toca res.
+         */
+        enforceMarkerOrder: async function () {
+            log('🟢 [F6·Ordre] Verificant l\'ordre dels marcadors estructurals (escaleta = sagrat)...');
+
+            const ctxData = await getAssemblyContext().loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F6·Ordre] loadAssemblyContext ha fallat.'); return; }
+            const { manifest, lines, clips } = ctxData;
+
+            var markersRaw = await callJSX('Markers.get()');
+            var markers = [];
+            try { markers = JSON.parse(markersRaw); } catch (e) { }
+            if (!markers || markers.length === 0) { log('⚠️ [F6·Ordre] Cap marcador a la seqüència.'); return; }
+
+            var hasOnAirByNum = this._buildOnAirMap(lines);
+
+            // Ordre d'escaleta: num → sequencia (font: manifest.escaletaItems)
+            var allEs = (manifest && manifest.escaletaItems) ? manifest.escaletaItems : [];
+            var seqByNum = {};
+            for (var i = 0; i < allEs.length; i++) {
+                var it = allEs[i];
+                if (!it || !it.num) continue;
+                var nk = String(it.num);
+                if (seqByNum[nk] == null) seqByNum[nk] = (it.sequencia != null && isFinite(Number(it.sequencia))) ? Number(it.sequencia) : i;
+            }
+
+            // Marcadors estructurals amb num conegut (gràfics/tótems exempts)
+            var list = [];
+            for (var mi = 0; mi < markers.length; mi++) {
+                var mk = markers[mi];
+                var t = (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time);
+                if (!isFinite(t)) continue;
+                var pfx = this._extractPrefixFromComment(mk.comments);
+                if (!pfx) continue;
+                if (this._isGraphicByNum(pfx)) continue;
+                if (seqByNum[pfx] == null) continue;
+                list.push({
+                    num: pfx, time: t, comment: mk.comments,
+                    hasOnAir: hasOnAirByNum[pfx] === true,
+                    color: (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : 6
+                });
+            }
+            if (list.length < 2) { log('🟢 [F6·Ordre] Pocs marcadors estructurals per verificar. ✓ FINALITZAT.'); return; }
+            list.sort(function (a, b) { return seqByNum[a.num] - seqByNum[b.num]; });
+
+            var placements = [];
+            var prev = null;
+            for (var li = 0; li < list.length; li++) {
+                var cur = list[li];
+                if (prev && cur.time < prev.time - 0.02) {
+                    if (cur.hasOnAir && !prev.hasOnAir) {
+                        // El faro mana: el deduït previ s'ha d'avançar (tall anterior).
+                        var novaPrev = Math.min(this._prevCutBefore(cur.time, clips), cur.time - 0.5);
+                        if (novaPrev < 0) novaPrev = 0;
+                        log('   🔧 [F6·Ordre] Inversio: ' + prev.num + ' (' + prev.time.toFixed(2) + 's) va DESPRES de ' + cur.num +
+                            ' (' + cur.time.toFixed(2) + 's) a la llista, pero l\'escaleta el situa ABANS. El faro ' + cur.num +
+                            ' no es toca -> ' + prev.num + ' al tall anterior: ' + novaPrev.toFixed(2) + 's');
+                        prev.time = novaPrev;
+                        placements.push({ prefix: prev.num, timeSec: novaPrev, comment: prev.comment, colorIdx: prev.color });
+                    } else if (!cur.hasOnAir && prev.hasOnAir) {
+                        var novaCur = Math.max(prev.time + 0.5, this._prevCutBefore(cur.time, clips));
+                        if (novaCur >= cur.time) novaCur = cur.time;
+                        log('   🔧 [F6·Ordre] Inversio: ' + cur.num + ' (' + cur.time.toFixed(2) + 's) va ABANS de ' + prev.num +
+                            ' (' + prev.time.toFixed(2) + 's), pero l\'escaleta el situa DESPRES -> ' + novaCur.toFixed(2) + 's');
+                        cur.time = novaCur;
+                        placements.push({ prefix: cur.num, timeSec: novaCur, comment: cur.comment, colorIdx: cur.color });
+                    } else if (!cur.hasOnAir && !prev.hasOnAir) {
+                        var novaCur2 = prev.time + 0.5;
+                        log('   🔧 [F6·Ordre] Inversio entre deduits: ' + cur.num + ' passa a ' + novaCur2.toFixed(2) + 's (ordre relatiu)');
+                        cur.time = novaCur2;
+                        placements.push({ prefix: cur.num, timeSec: novaCur2, comment: cur.comment, colorIdx: cur.color });
+                    } else {
+                        log('   ⚠️ [F6·Ordre] Inversio entre DOS faros (' + prev.num + ' / ' + cur.num + '): no es toca res (OnAir = veritat).');
+                    }
+                }
+                prev = cur;
+            }
+
+            if (placements.length === 0) { log('🟢 [F6·Ordre] Ordre correcte. ✓ FINALITZAT.'); return; }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F6·Ordre');
+            log('🟢 [F6·Ordre] Corregits: ' + (result.placed || 0) + ' marcadors. ✓ FINALITZAT.');
+        },
+
+
         // 🟢 F5: snapOrphanMarkers — Snap d'huérfans als talls més propers
         // ═══════════════════════════════════════════════════════════════
         snapOrphanMarkers: async function () {
