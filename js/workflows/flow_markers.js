@@ -483,7 +483,7 @@
 
             const ctxData = await getAssemblyContext().loadAssemblyContext();
             if (!ctxData) { log('⚠️ [F1·OnAir] loadAssemblyContext ha fallat. Abortant.'); return; }
-            const { manifest, reader, lines, clips, firstUngroupedItem } = ctxData;
+            const { manifest, reader, lines, clips, firstUngroupedItem, ungroupedItems } = ctxData;
 
             const classData = this._classifyItems(lines);
             const { structuralItems } = classData;
@@ -524,7 +524,11 @@
                 var comment = (line.num ? line.num + ' - ' : '') + titol;
                 comment = comment.trim();
 
-                var colorIdx = 6;
+                // (2026-09-17) ABANS: colorIdx fix 6 (blau), aixi que un item del bloc que
+                // NO es del projecte (agrupacio==null) sortia blau i no es distingia.
+                // Ara s'aplica MARKER_COLORS.md: 1=VERMELL (no verticalitzable),
+                // 4=GROC (grafic), 6=BLAU (del projecte).
+                var colorIdx = this._getColorIdx(line);
 
                 log('   🟢 [F1·OnAir] ' + (line.num || '?') + ': → ' + safeT.toFixed(2) + 's');
                 itemPositions.set(line.num, safeT);
@@ -533,11 +537,40 @@
                     prefix: line.num,
                     timeSec: safeT,
                     comment: comment,
-                    colorIdx: colorIdx
+                    colorIdx: colorIdx,
+                    // (2026-09-17) name='color=N': el color NO és llegible des de
+                    // Markers.get() (retorna -1) i placeByPrefixes fa delete+create, així
+                    // que el codi de color viatja al name (convenció ja usada a Markers.set).
+                    name: 'color=' + colorIdx
                 });
             }
 
             // ── Afegir ítems no agrupats intercalats (D12) ──
+            // ── (2026-09-17) TOTS els ítems NO agrupats del bloc ──────────────
+            // Cas: bloc en calent amb ítems que no són del projecte (sense V1).
+            // ABANS només se'n marcava UN (firstUngroupedItem); ara es marquen TOTS
+            // en VERMELL (color 1, MARKER_COLORS.md) per delimitar el bloc.
+            var _ugList = (ungroupedItems && ungroupedItems.length) ? ungroupedItems
+                : (firstUngroupedItem ? [firstUngroupedItem] : []);
+            for (var _ugi = 0; _ugi < _ugList.length; _ugi++) {
+                var _ug = _ugList[_ugi];
+                var _ugOnAir = _ug.horaEntradaOnAir;
+                var _ugHasOnAir = _ugOnAir && _ugOnAir !== '00:00:00' && String(_ugOnAir).trim() !== '';
+                if (!_ugHasOnAir) continue;
+                var _ugOnAirSec = reader.tcToSeconds(_ugOnAir);
+                if (_ugOnAirSec === null || _ugOnAirSec === undefined) continue;
+                var _ugPosSec = tlClipStartSec + (_ugOnAirSec - refF1);
+                if (!(_ugPosSec >= 0)) continue;
+                var _ugComment = ((_ug.num ? _ug.num + ' - ' : '') + (_ug.titol || '').substring(0, 60)).trim();
+                placements.push({
+                    prefix: _ug.num,
+                    timeSec: _ugPosSec,
+                    comment: _ugComment,
+                    colorIdx: 1,
+                    name: 'color=1'
+                });
+                log('   🔴 [F1·Ungrouped] ' + (_ug.num || '?') + ': → ' + _ugPosSec.toFixed(2) + 's [VERMELL: no es del bloc]');
+            }
             if (firstUngroupedItem) {
                 var ugOnAir = firstUngroupedItem.horaEntradaOnAir;
                 var ugHasOnAir = ugOnAir && ugOnAir !== '00:00:00' && ugOnAir.trim() !== '';
@@ -552,7 +585,8 @@
                                 prefix: firstUngroupedItem.num,
                                 timeSec: ugPosSec,
                                 comment: ugComment,
-                                colorIdx: 1
+                                colorIdx: 1,
+                                name: 'color=1'
                             });
                             log('   🔴 [F1·Ungrouped] ' + (firstUngroupedItem.num || '?') + ': → ' + ugPosSec.toFixed(2) + 's');
                         }
@@ -588,7 +622,6 @@
 
             var placements = [];
             var itemPositions = new Map();
-            var placedByD10 = {}; // Evita duplicar el mateix ítem per D10 + bucle
 
             // ── Carregar marcadors existents (faros de F1) per anclar deduïts ──
             var markersRaw2 = await callJSX('Markers.get()');
@@ -606,26 +639,36 @@
                 if (pfx) faroPositions[pfx] = (typeof allMarkersF2[fi].time === 'number') ? allMarkersF2[fi].time : parseFloat(allMarkersF2[fi].time);
             }
 
-            if (structuralItems.length > 0) {
-                var firstItem = structuralItems[0];
-                var firstNum = firstItem.num;
-                if (firstNum) {
-                    var hasFirstItemMarker = false;
-                    for (var mi2 = 0; mi2 < allMarkersF2.length; mi2++) {
-                        var mk2 = allMarkersF2[mi2];
-                        if (typeof mk2.time === 'number' && Math.abs(mk2.time) < 0.02) {
-                            var mkPrefix2 = _extractPrefixF2(mk2.comments || '');
-                            if (mkPrefix2 === String(firstNum)) { hasFirstItemMarker = true; break; }
-                        }
+            // (2026-09-17) El marcador d'inici (00:00) és el del PRIMER ÍTEM ESTRUCTURAL del
+            // bloc recorregut en ORDRE D'ESCALETA (`lines`, que ve de manifest.escaletaItems
+            // filtrat pel bloc) — MAI en ordre de TC: ordenar per TC és el que fa entrar els
+            // OnAir mentiders (el realitzador llança ítems abans del programa). Cas TNC: el
+            // 1r estructural és "08i" (va abans del "10" a l'escaleta). L'usuari confirma
+            // manualment on comença l'ítem clicant IN, per tant aquest marcador viu a 0 i
+            // porta el seu número i nom.
+            var startItem = null;
+            for (var ls0 = 0; ls0 < lines.length; ls0++) {
+                var cand0 = lines[ls0];
+                if (!cand0 || !cand0.num) continue;
+                if (reader.isItemEstructural(cand0)) { startItem = cand0; break; }
+            }
+            var placedByStart = {};
+            if (startItem && startItem.num) {
+                var startNum = String(startItem.num);
+                var hasStartMarker = false;
+                for (var mi2 = 0; mi2 < allMarkersF2.length; mi2++) {
+                    var mk2 = allMarkersF2[mi2];
+                    if (typeof mk2.time === 'number' && Math.abs(mk2.time) < 0.02) {
+                        if (_extractPrefixF2(mk2.comments || '') === startNum) { hasStartMarker = true; break; }
                     }
-                    if (!hasFirstItemMarker) {
-                        var firstTitol = (firstItem.titol || '').substring(0, 60);
-                        var firstComment = firstNum + ' - ' + firstTitol;
-                        placements.push({ prefix: firstNum, timeSec: 0, comment: firstComment.trim(), colorIdx: 6 });
-                        itemPositions.set(firstNum, 0);
-                        placedByD10[firstNum] = true;
-                        log('🟠 [F2·Deducido] Forçant marcador 1r ítem ' + firstNum + ' a 00:00 (no existia)');
-                    }
+                }
+                if (!hasStartMarker) {
+                    var startTitol = (startItem.titol || '').substring(0, 60).trim();
+                    var startComment = startTitol ? (startNum + ' - ' + startTitol) : startNum;
+                    placements.push({ prefix: startNum, timeSec: 0, comment: startComment, colorIdx: 6, name: 'color=6' });
+                    itemPositions.set(startNum, 0);
+                    placedByStart[startNum] = true;
+                    log('🟠 [F2·Deduced] Marcador d\'inici: "' + startComment + '" a 00:00 (1r ítem del bloc)');
                 }
             }
 
@@ -681,13 +724,13 @@
                 var onAir = line.horaEntradaOnAir;
                 var hasOnAir = onAir && onAir !== '00:00:00' && onAir.trim() !== '';
 
-                // Saltar ítems ja col·locats per D10 (evita duplicat)
-                if (lineNum && placedByD10[lineNum]) {
-                    log('   ⏭️ [F2·Deduced] ' + lineNum + ': ja col·locat per D10 a 00:00. Saltant.');
+                if (hasOnAir || faroPositions[lineNum] !== undefined) continue; // F1 ja l'ha col·locat
+
+                // Saltar l'ítem d'inici: ja té el seu marcador a 00:00 (vegeu més amunt)
+                if (lineNum && placedByStart[lineNum]) {
+                    log('   ⏭️ [F2·Deduced] ' + lineNum + ': ja col·locat a 00:00. Saltant.');
                     continue;
                 }
-
-                if (hasOnAir || faroPositions[lineNum] !== undefined) continue; // F1 ja l'ha col·locat
 
                 var deduced = reader._deduceOnAirEntrada(line, manifest.escaletaItems, null);
                 if (deduced === null) continue;
@@ -1038,10 +1081,14 @@
             // Només es considera "deduït" si consta a l'escaleta que l'ítem NO té OnAir
             // (si el mapa no es pot llegir, tots es tracten com a faro → conservador).
             var hasOnAirByNum = {};
+            var lineByNum = {};   // (2026-09-17) num → línia, per recalcular el color
             try {
                 var ctxF4 = await getAssemblyContext().loadAssemblyContext();
                 var linesF4 = (ctxF4 && ctxF4.lines) ? ctxF4.lines : [];
                 hasOnAirByNum = this._buildOnAirMap(linesF4);
+                for (var lb = 0; lb < linesF4.length; lb++) {
+                    if (linesF4[lb] && linesF4[lb].num) lineByNum[String(linesF4[lb].num)] = linesF4[lb];
+                }
                 var nFaro = 0, nDed = 0;
                 for (var kx in hasOnAirByNum) { if (hasOnAirByNum[kx]) nFaro++; else nDed++; }
                 log('   🟠 [F4·Faro] Finestra deduïts = ±' + this._snapWindowDeduced().toFixed(1) + 's · nums amb OnAir: ' + nFaro + ' · sense OnAir (deduïts): ' + nDed);
@@ -1078,7 +1125,19 @@
 
                 if (target === null || Math.abs(target - markerTime) < MIN_MOVE) { alreadyOk++; continue; }
 
-                var mkColor = (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : 6;
+                // (2026-09-17) El color NO és llegible: Markers.get() retorna -1 perquè
+                // .color és una propietat del wrapper JSX i no persisteix. El codi de color
+                // viatja al NAME ('color=N', convenció de Markers.set); si no hi és, es
+                // recalcula des de l'escaleta (MARKER_COLORS.md). Sense això, el
+                // delete+create de placeByPrefixes deixava tots els marcadors en blau (6).
+                var mkColor = 6;
+                var nm = (mk.name !== undefined && mk.name !== null) ? String(mk.name) : '';
+                if (nm.indexOf('color=') === 0) {
+                    var nmC = parseInt(nm.substring(6), 10);
+                    if (!isNaN(nmC) && nmC >= 0) mkColor = nmC;
+                } else if (lineByNum[String(prefix)]) {
+                    mkColor = this._getColorIdx(lineByNum[String(prefix)]);
+                }
                 placements.push({ prefix: prefix, timeSec: target, comment: comment, colorIdx: mkColor });
                 log('   🟠 [F4·Faro] ' + prefix + (isDeduced ? ' (deduït, win ±' + win.toFixed(1) + 's)' : ' (faro)') + ': ' +
                     markerTime.toFixed(2) + 's → ' + target.toFixed(2) + 's (' + why + ', Δ=' + (target - markerTime).toFixed(3) + 's)');
@@ -1126,6 +1185,12 @@
             if (!markers || markers.length === 0) { log('⚠️ [F6·Ordre] Cap marcador a la seqüència.'); return; }
 
             var hasOnAirByNum = this._buildOnAirMap(lines);
+            // (2026-09-17) num → línia, per recalcular el color en lloc de confiar en
+            // mk.color (Markers.get() retorna -1: el color no és llegible).
+            var lineByNumF6 = {};
+            for (var l6 = 0; l6 < lines.length; l6++) {
+                if (lines[l6] && lines[l6].num) lineByNumF6[String(lines[l6].num)] = lines[l6];
+            }
 
             // Ordre d'escaleta: num → sequencia (font: manifest.escaletaItems)
             var allEs = (manifest && manifest.escaletaItems) ? manifest.escaletaItems : [];
@@ -1137,7 +1202,13 @@
                 if (seqByNum[nk] == null) seqByNum[nk] = (it.sequencia != null && isFinite(Number(it.sequencia))) ? Number(it.sequencia) : i;
             }
 
-            // Marcadors estructurals amb num conegut (gràfics/tótems exempts)
+            // (2026-09-17) Els ítems NO agrupats (sense V1, marcats en VERMELL) no
+            // participen a la guarda d'ordre: són fites per delimitar el bloc.
+            var ungroupedSet = {};
+            for (var iu = 0; iu < allEs.length; iu++) {
+                var itu = allEs[iu];
+                if (itu && itu.num && (itu.agrupacio === null || itu.agrupacio === undefined)) ungroupedSet[String(itu.num)] = true;
+            }
             var list = [];
             for (var mi = 0; mi < markers.length; mi++) {
                 var mk = markers[mi];
@@ -1145,12 +1216,22 @@
                 if (!isFinite(t)) continue;
                 var pfx = this._extractPrefixFromComment(mk.comments);
                 if (!pfx) continue;
+                // Marcadors estructurals amb num conegut (gràfics/tótems exempts)
                 if (this._isGraphicByNum(pfx)) continue;
+                if (ungroupedSet[pfx]) continue;      // vermells (no agrupats): delimiten el bloc, no s'ordenen
                 if (seqByNum[pfx] == null) continue;
+                var mkColor = 6;
+                var nm6 = (mk.name !== undefined && mk.name !== null) ? String(mk.name) : '';
+                if (nm6.indexOf('color=') === 0) {
+                    var nmC6 = parseInt(nm6.substring(6), 10);
+                    if (!isNaN(nmC6) && nmC6 >= 0) mkColor = nmC6;
+                } else if (lineByNumF6[pfx]) {
+                    mkColor = this._getColorIdx(lineByNumF6[pfx]);
+                }
                 list.push({
                     num: pfx, time: t, comment: mk.comments,
                     hasOnAir: hasOnAirByNum[pfx] === true,
-                    color: (typeof mk.color === 'number' && mk.color >= 0) ? mk.color : 6
+                    color: mkColor
                 });
             }
             if (list.length < 2) { log('🟢 [F6·Ordre] Pocs marcadors estructurals per verificar. ✓ FINALITZAT.'); return; }
