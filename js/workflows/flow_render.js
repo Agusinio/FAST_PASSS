@@ -9,7 +9,6 @@
     FASTPASS_UI.Workflows = FASTPASS_UI.Workflows || {};
 
     const getUtils = () => window.FASTPASS_UI.Utils;
-    const getRenderLogic = () => window.FASTPASS_UI.Logic.Render;
     const getScanner = () => window.FASTPASS_UI.Logic.Scan;
 
     const log = (m, lvl) => getUtils().log(m, lvl || "DEBUG");
@@ -68,21 +67,44 @@
     }
 
     /**
-     * pickCopyTrack: Pista on copiar el clip del cabezal. Ha de ser desbloquejada,
-     * diferent de la de la portada, i NO pot tenir cap clip a partir de `fromSec`:
-     * Clips.duplicate fa overwriteClip del MEDIA SENCER (fromSec → fromSec + durada
-     * del media) i machacaria tot el que trobés en aquell tram.
-     * @returns {number} pista (1-based) o 0 si no n'hi ha cap de segura.
+     * waitFile: Espera que un fitxer existeixi (cep.fs.stat). `stat` NO retorna `.size`
+     * en aquest equip, així que aquí només es comprova l'existència; la mida es valida
+     * llegint el fitxer.
+     * @returns {Promise<boolean>}
      */
-    function pickCopyTrack(info, fromSec, portadaTrack) {
-        for (let i = info.tracks.length - 1; i >= 0; i--) {
-            const t = info.tracks[i];
-            if ((i + 1) === portadaTrack || t.locked) continue;
-            let maxEnd = 0;
-            (t.clips || []).forEach(function (c) { if (c.end > maxEnd) maxEnd = c.end; });
-            if (maxEnd <= fromSec + 0.05) return i + 1;
+    async function waitFile(path, tries) {
+        for (let i = 0; i < (tries || 20); i++) {
+            const st = window.cep.fs.stat(path);
+            if (st && st.err === 0) return true;
+            await getUtils().delay(100);
         }
-        return 0;
+        return false;
+    }
+
+    /**
+     * pickVideoBase: Nom base (sense extensió) del VÍDEO de referència de la carpeta del
+     * projecte, perquè el PNG surti amb la MATEIXA hora que el vídeo ja exportat.
+     * Prioritat: noms amb el prefix PROG_TEMA_ → el MÉS RECENT (el nom acaba en _HH_MM
+     * i ordenat desc dóna la darrera hora del dia).
+     * @param {Array} files - Llista de la carpeta ({name, created, mtime})
+     * @param {string} prefix - "PROG_TEMA_" del nom que tocaria ara
+     * @returns {string|null} nom sense extensió o null
+     */
+    function pickVideoBase(files, prefix) {
+        if (!files || !files.length) return null;
+        const mp4s = files.filter(function (f) { return /\.mp4$/i.test(f.name || ''); });
+        if (!mp4s.length) return null;
+        const same = prefix
+            ? mp4s.filter(function (f) { return (f.name || '').toUpperCase().indexOf(prefix) === 0; })
+            : [];
+        const list = same.length ? same : mp4s;
+        list.sort(function (a, b) {
+            const na = String(a.name || '').toUpperCase();
+            const nb = String(b.name || '').toUpperCase();
+            if (na !== nb) return nb.localeCompare(na);
+            return (b.created || 0) - (a.created || 0);
+        });
+        return String(list[0].name).replace(/\.mp4$/i, '');
     }
 
     /**
@@ -229,9 +251,12 @@
          * MECÀNICA (opció 2, 2026-09-18) — TOT passa en una ZONA NETA situada més
          * enllà del final del projecte, per no tocar MAI el muntatge real:
          *   1. CTI = Timeline.get() → clip de V1 que el conté (frame = mediaIn).
-         *   2. Còpia d'aquest clip a la zona neta (Clips.duplicate; si no hi ha cap
-         *      pista segura, Clips.insertClipFrom) amb l'inPoint alineat al cabezal.
-         *   3. La PRIMERA portada del tema (Scan.portadas) DAMUNT de la còpia, centrada.
+         *   2. Còpia d'aquest clip a la ZONA NETA de la MATEIXA V1 amb
+         *      Clips.insertClipFrom (ripple: més enllà del final del projecte no desplaça
+         *      res; NO s'usa Clips.duplicate perquè fa overwriteClip al START del clip
+         *      font i machacaria la V1 real) i l'inPoint alineat al cabezal.
+         *   3. La PRIMERA portada del tema (Scan.portadas) a V2, damunt de la còpia i
+         *      centrada.
          *   4. Cabezal a la zona neta i captura amb Render.snapshot (exportFrameQE:
          *      el mateix mecanisme del freeze que ja funciona).
          *   5. Neteja: s'esborren NOMÉS la còpia i la portada (per TEMPS) i el cabezal
@@ -247,8 +272,9 @@
             const T_V1 = 1;
             let cti = 0;
             let tempTC = 0;
-            let tCopy = 0;
             let tPort = 0;
+            // Out point original de la seqüència, si l'hem hagut d'ampliar per capturar.
+            let outRestore = null;
             
             try {
                 const config = FASTPASS_UI.Config.get();
@@ -295,47 +321,28 @@
                 });
                 tempTC = Math.ceil(maxEnd) + CLEAN_MARGIN;
 
-                // La portada, sempre a la pista de MÉS AMUNT (per sobre de la còpia).
-                for (let i = nVT - 1; i >= 0; i--) {
-                    if (!info.tracks[i].locked) { tPort = i + 1; break; }
-                }
-                if (!tPort) throw new Error("Totes les pistes de vídeo estan bloquejades.");
+                // La còpia va a la MATEIXA V1 (zona neta) i la portada a V2, damunt seu.
+                const T_PORT = (config.tracks && config.tracks.video && config.tracks.video.fondos) || 2;
+                log(`🧹 [Portada] Zona neta @ ${tempTC}s (final projecte=${maxEnd.toFixed(2)}s) | còpia a V${T_V1} | portada a V${T_PORT} (${nVT} pistes de vídeo)`);
 
-                const safe = pickCopyTrack(info, parseFloat(src.start), tPort);
-                tCopy = safe || (tPort > 1 ? tPort - 1 : 0);
-                if (!tCopy) throw new Error("No hi ha cap pista lliure per la còpia del clip.");
-                log(`🧹 [Portada] Zona neta @ ${tempTC}s (final projecte=${maxEnd.toFixed(2)}s) | portada=V${tPort} | còpia=V${tCopy}${safe ? '' : ' (sense pista segura → insertClipFrom)'}`);
-
-                // ── 4. CÒPIA del clip de V1 a la zona neta ───────────────────────
-                let idxCopy = -1;
-                if (safe) {
-                    // Clips.duplicate fa overwriteClip del MEDIA SENCER a la pista destí:
-                    // només és segur perquè pickCopyTrack garanteix que aquella pista no
-                    // té cap clip des de l'inici del clip font cap endavant.
-                    const dup = await callJSX(`Clips.duplicate(${T_V1}, ${src.index}, ${tCopy}, 'video', 0)`);
-                    log(`🧬 [Portada] Clips.duplicate V1[${src.index}] → V${tCopy} → ${dup}`);
-                    await utils.delay(300);
-                    if (String(dup).indexOf('OK') === 0) idxCopy = parseInt(String(dup).split(':')[1]);
-                    if (isNaN(idxCopy) || idxCopy < 0) throw new Error("La còpia del clip ha fallat: " + dup);
-                    // Blindatge: l'índex es re-resol pel TEMPS (immune a reindexacions).
-                    const idxT = await clipIndexAt(tCopy, parseFloat(src.start));
-                    if (idxT >= 0) idxCopy = idxT;
-                } else {
-                    // Ripple insert: més enllà del final del projecte no desplaça res.
-                    const ins = await callJSX(`Clips.insertClipFrom(${T_V1}, ${src.index}, ${tCopy}, ${tempTC}, 'video')`);
-                    log(`🧬 [Portada] Clips.insertClipFrom V1[${src.index}] → V${tCopy} @ ${tempTC}s → ${ins}`);
-                    await utils.delay(300);
-                    if (String(ins).indexOf('OK') !== 0) throw new Error("La còpia del clip ha fallat: " + ins);
-                    idxCopy = await clipIndexAt(tCopy, tempTC);
-                    if (idxCopy < 0) throw new Error(`No trobo la còpia a V${tCopy} @ ${tempTC}s.`);
-                }
+                // ── 4. CÒPIA del clip de V1 a la zona neta (a la MATEIXA V1) ─────
+                // S'usa insertClipFrom (ripple): com que tempTC és més enllà del final de
+                // TOT el projecte, el ripple NO desplaça cap clip. NO s'usa Clips.duplicate
+                // perquè fa overwriteClip al START del clip font (media sencer) i
+                // machacaria la V1 real.
+                const ins = await callJSX(`Clips.insertClipFrom(${T_V1}, ${src.index}, ${T_V1}, ${tempTC}, 'video')`);
+                log(`🧬 [Portada] Clips.insertClipFrom V1[${src.index}] → V1 @ ${tempTC}s → ${ins}`);
+                if (String(ins).indexOf('OK') !== 0) throw new Error("La còpia del clip a V1 ha fallat: " + ins);
+                await utils.delay(300);
+                const idxCopy = await clipIndexAt(T_V1, tempTC);
+                if (idxCopy < 0) throw new Error(`No trobo la còpia a V${T_V1} @ ${tempTC}s.`);
 
                 // inPoint ABANS de tancar la durada: Premiere ignora el setter d'inPoint
                 // en el MATEIX evalScript que la inserció → cal una crida pròpia.
-                await callJSX(`Clips.inPoint(${tCopy}, ${idxCopy}, ${mediaIn}, 'video')`);
-                const mv = await callJSX(`Clips.moveToRange(${tCopy}, ${idxCopy}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
+                await callJSX(`Clips.inPoint(${T_V1}, ${idxCopy}, ${mediaIn}, 'video')`);
+                const mv = await callJSX(`Clips.moveToRange(${T_V1}, ${idxCopy}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
                 log(`📐 [Portada] Còpia a la zona neta: ${mv}`);
-                log(`   · còpia V${tCopy}[${idxCopy}] → ${await callJSX(`Clips.get(${tCopy}, ${idxCopy}, 'video')`)}`);
+                log(`   · còpia V${T_V1}[${idxCopy}] → ${await callJSX(`Clips.get(${T_V1}, ${idxCopy}, 'video')`)}`);
 
                 // ── 5. PORTADA DAMUNT de la còpia, CENTRADA ──────────────────────
                 const look = await callJSX(`IO.lookFor('${utils.escape(JSON.stringify([portada.name]))}')`);
@@ -343,27 +350,47 @@
                     const payload = JSON.stringify([portada.path.replace(/\\/g, '/')]);
                     log(`📥 [Portada] Import al projecte → ${await callJSX(`IO.importFiles('${utils.escape(payload)}', 'root')`)}`);
                 }
-                const insP = await callJSX(`Clips.insert('${utils.escape(portada.name)}', ${tPort}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
-                if (String(insP).indexOf('OK') !== 0) throw new Error("No s'ha pogut inserir la portada: " + insP);
+                // Pista de la portada: V2, damunt de la còpia. Si V2 estigués bloquejada de
+                // veritat, es prova la de sobre (la zona neta és buida a totes les pistes).
+                let insP = "";
+                let insErr = "";
+                for (let t = T_PORT; t <= nVT; t++) {
+                    insP = await callJSX(`Clips.insert('${utils.escape(portada.name)}', ${t}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
+                    if (String(insP).indexOf('OK') === 0) { tPort = t; break; }
+                    insErr = insP;
+                    // Si l'item no és al projecte, cap pista servirà: no cal seguir provant.
+                    if (String(insP).indexOf('ERR_ITEM_NOT_FOUND') === 0) break;
+                    log(`⚠️ [Portada] insert a V${t} → ${insP} · es prova la pista de sobre...`, "WARN");
+                }
+                if (!tPort) throw new Error("No s'ha pogut inserir la portada (1a opció V" + T_PORT + "): " + insErr);
                 // El JSX aplica l'endSec al DARRER clip de la pista → reforcem per TEMPS.
                 await callJSX(`Clips.endAt(${tPort}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
                 const idxPort = await clipIndexAt(tPort, tempTC);
                 if (idxPort < 0) throw new Error(`No trobo la portada a V${tPort} @ ${tempTC}s.`);
 
-                // Centrat: Posició (0,0) = centre exacte del frame; l'escala es manté (la
-                // que aplica Premiere en importar la imatge) tret que PORTADA_SCALE estigui
-                // fixada a dalt del fitxer.
+                // Escala de la portada: es conserva la que aplica Premiere en importar la
+                // imatge (o PORTADA_SCALE si està fixada) i `Anim.setMotionValues` força
+                // a més "Uniform Scale" + "Scale Width".
+                const cur = await callJSX(`Anim.getMotionValues(${tPort}, ${idxPort})`);
                 let sc = PORTADA_SCALE;
-                if (sc == null) {
-                    const cur = await callJSX(`Anim.getMotionValues(${tPort}, ${idxPort})`);
-                    try {
-                        const o = JSON.parse(cur);
-                        if (o && typeof o.scale === 'number' && o.scale > 0) sc = o.scale;
-                    } catch (eS) { log("⚠️ [Portada] Escala il·legible (" + cur + ")", "WARN"); }
-                }
+                try {
+                    const o = JSON.parse(cur);
+                    if (sc == null && o && typeof o.scale === 'number' && o.scale > 0) sc = o.scale;
+                } catch (eS) { log("⚠️ [Portada] Motion il·legible (" + cur + ")", "WARN"); }
                 if (sc == null) sc = 100;
-                const mvJson = JSON.stringify({ position: [0, 0], scale: sc }).replace(/'/g, "\\'");
-                log(`🎯 [Portada] Centrat V${tPort}[${idxPort}]: Posició (0,0) + Scale ${sc}% → ${await callJSX(`Anim.setMotionValues(${tPort}, ${idxPort}, '${mvJson}')`)}`);
+                const scVia = (PORTADA_SCALE == null) ? 'llegida de la imatge' : 'forçada per PORTADA_SCALE';
+                log(`🎯 [Portada] Escala V${tPort}[${idxPort}] = ${sc}% (${scVia}) → ${await callJSX(`Anim.setMotionValues(${tPort}, ${idxPort}, '${JSON.stringify({ scale: sc }).replace(/'/g, "\\'")}')`)}`);
+
+                // ── CENTRAT: Posició crua [0.5, 0.5] ─────────────────────────────
+                // ⚠️ Motion → Position és NORMALITZADA (0..1) i 0.5 = CENTRE del frame;
+                // (0,0) seria la cantonada superior esquerra (per això sortia descentrat).
+                // `Anim.setMotionValues` NO serveix per això: espera PÍXELS i els divideix
+                // per la mida del frame, que la capa JS no pot consultar → s'escriu el
+                // valor normalitzat EN CRU amb Clips.setProp (l'àtom ja ho preveu per a
+                // "ADBE Video Position"). El valor actual es mostra en PÍXELS per poder-lo
+                // comparar amb la UI (el centre és frameSize/2).
+                const cRes = await callJSX(`Clips.setProp(${tPort}, ${idxPort}, 'AE.ADBE Motion', 'ADBE Video Position', [0.5, 0.5], 'video')`);
+                log(`🎯 [Portada] Posició centrada [0.5, 0.5] → ${cRes} | motion=${await callJSX(`Anim.getMotionValues(${tPort}, ${idxPort})`)}`);
 
                 // ── 6. CABEZAL + CAPTURA (mateix mecanisme que el freeze) ────────
                 // La captura ha de caure EXACTAMENT a tempTC: és l'únic instant en què
@@ -372,30 +399,95 @@
                 await utils.delay(500);
 
                 // Destí: la MATEIXA carpeta que el MP4 i amb EXACTAMENT el mateix nom.
-                let outDir = await callJSX("Context.folder()");
-                if (!outDir) outDir = config.rutas.destinoBase || "C:\\Temp";
-                if (!state.lastRenderName) {
-                    log("⚠️ [Portada] Encara no s'ha exportat el vídeo: el PNG es nomenarà amb l'hora actual.", "WARN");
+                const projFolder = await callJSX("Context.folder()");
+                let outDir = (projFolder && String(projFolder).indexOf('ERR') !== 0) ? projFolder : '';
+                if (!outDir) {
+                    outDir = config.rutas.destinoBase || "C:\\Temp";
+                    log(`⚠️ [Portada] Context.folder() no vàlid ("${projFolder}") → destí alternatiu: ${outDir}`, "WARN");
                 }
-                const nameBase = state.lastRenderName || buildRenderName(await callJSX('Context.activeSeq()')).replace(/\.mp4$/i, "");
+                // NOM del PNG: el MATEIX que el vídeo que JA és a la carpeta del projecte
+                // (inclosa l'hora), no l'hora actual.
+                const refBase = buildRenderName(await callJSX('Context.activeSeq()')).replace(/\.mp4$/i, "");
+                const refPrefix = refBase.replace(/_\d{2}_\d{2}$/, '_').toUpperCase();
+                let files = null;
+                try { files = await utils.readFolder(outDir); } catch (eL) { log("⚠️ [Portada] No puc llistar la carpeta: " + eL.message, "WARN"); }
+                const videoBase = pickVideoBase(files, refPrefix);
+                let nameBase = videoBase || state.lastRenderName || "";
+                if (videoBase) {
+                    log(`🎬 [Portada] Vídeo de referència a la carpeta: ${videoBase}.mp4 → el PNG serà ${videoBase}.png`);
+                } else if (nameBase) {
+                    log(`🎬 [Portada] Cap .mp4 a la carpeta · s'usa el darrer render d'aquesta sessió: ${nameBase}.mp4`, "WARN");
+                } else {
+                    nameBase = refBase;
+                    log(`⚠️ [Portada] Cap .mp4 de referència: el PNG es nomenarà amb l'hora actual (${nameBase})`, "WARN");
+                }
                 const destPath = `${outDir}\\${nameBase}.png`;
                 utils.ensureFolders(outDir);
-                log(`📸 [Portada] Captura a ${destPath} (t=${tempTC}s)`);
+                log(`📸 [Portada] Captura a ${destPath} (t=${tempTC}s) | carpeta projecte=${projFolder}`);
 
-                const snapRes = await getRenderLogic().capture(destPath, tempTC);
-                if (!snapRes.success) throw new Error("Error Snapshot: " + snapRes.log);
-                utils.status(`Portada OK: ${nameBase}.png`, "exito");
-                log(`✅ [Portada] PNG generat: ${destPath}`);
+                // S'escriu DIRECTAMENT al destí final amb QE (com el freeze dels chyrons):
+                // exportFrameQE ja crea la carpeta si cal i funciona amb rutes UNC. Evitem
+                // el pas per C:\temp + cep.fs.rename (era on es perdia el PNG).
+                //
+                // El fotograma s'exporta amb un timecode DINS del rang de la seqüència: si
+                // l'Out point està fixat i queda ABANS de la zona neta, QE no escriu res.
+                // S'amplia temporalment i es restaura al finally.
+                const out0 = parseFloat(await callJSX('Timeline.getOut()') || "0");
+                const needOut = tempTC + PORTADA_DUR;
+                if (out0 > 0 && out0 < needOut) {
+                    outRestore = out0;
+                    const rOut = await callJSX(`Timeline.out(${needOut})`);
+                    log(`📐 [Portada] Out point ampliat temporalment ${out0.toFixed(2)}s → ${needOut}s (${rOut})`);
+                } else {
+                    log(`📐 [Portada] Out point = ${out0.toFixed(2)}s · captura a ${needOut}s`);
+                }
+
+                // Captura amb DUES vies: 1a QE (Render.snapshot → exportFramePNG) i, si no
+                // ha escrit el fitxer, l'API estàndard (Render.frame → seq.exportFrame).
+                const snapRes = await callJSX(`Render.snapshot('${utils.escape(destPath.replace(/\.png$/i, ''))}', ${tempTC})`);
+                log(`📸 [Portada] Render.snapshot → ${snapRes}`);
+                let pngOk = await waitFile(destPath, 20);
+                let via = 'QE';
+                if (!pngOk) {
+                    log("⚠️ [Portada] QE no ha escrit el PNG · provant la via API (Render.frame)...", "WARN");
+                    const rFrame = await callJSX(`Render.frame('${utils.escape(destPath)}', ${tempTC})`);
+                    log(`📸 [Portada] Render.frame → ${rFrame}`);
+                    pngOk = await waitFile(destPath, 20);
+                    via = 'API';
+                }
+
+                // Verificació: el fitxer hi és i no és buit (`cep.fs.stat` no retorna .size
+                // en aquest equip → la mida es comprova LLEGINT).
+                if (!pngOk) throw new Error(`El PNG no s'ha escrit a ${destPath} (QE=${snapRes})`);
+                const rr = window.cep.fs.readFile(destPath);
+                const pngBytes = (rr && rr.err === 0 && rr.data)
+                    ? ((typeof rr.data.length === 'number') ? rr.data.length : (rr.data.byteLength || 0))
+                    : -1;
+                if (pngBytes <= 0) throw new Error("El PNG existeix però no es pot llegir (" + destPath + ", err=" + (rr && rr.err) + ")");
+                utils.status(`Portada OK: ${nameBase}.png (${Math.round(pngBytes / 1024)} KB)`, "exito");
+                log(`✅ [Portada] PNG generat via ${via}: ${destPath} (${Math.round(pngBytes / 1024)} KB)`);
 
             } catch (e) {
                 getUtils().handleError(e, "RenderPortada");
             } finally {
                 // ── NETEJA: només el que hem inserit (per TEMPS, immune a reindexar) ──
                 try {
-                    if (tempTC > 0 && tCopy > 0 && tPort > 0) {
-                        const rC = await callJSX(`Clips.removeAt(${tCopy}, ${tempTC}, 'video')`);
-                        const rP = await callJSX(`Clips.removeAt(${tPort}, ${tempTC}, 'video')`);
-                        log(`🧹 [Portada] Neteja de la zona neta: còpia V${tCopy} → ${rC} | portada V${tPort} → ${rP}`);
+                    if (tempTC > 0) {
+                        const rC = await callJSX(`Clips.removeAt(${T_V1}, ${tempTC}, 'video')`);
+                        const rP = (tPort > 0) ? await callJSX(`Clips.removeAt(${tPort}, ${tempTC}, 'video')`) : '—';
+                        log(`🧹 [Portada] Neteja de la zona neta (V${T_V1} / V${tPort} @ ${tempTC}s): còpia → ${rC} | portada → ${rP}`);
+                        // ÀUDIO FANTASMA: el ripple insert de la còpia arrossega l'àudio del
+                        // clip font a A1/A2 → cal esborrar el clip d'àudio que comença a tempTC.
+                        const nAud = parseInt(await callJSX("Tracks.count('audio')") || "0");
+                        const rA = [];
+                        for (let a = 1; a <= nAud; a++) {
+                            rA.push('A' + a + '→' + await callJSX(`Clips.removeAt(${a}, ${tempTC}, 'audio')`));
+                        }
+                        log(`🧹 [Portada] Neteja d'àudio fantasma: ${rA.join(' | ')}`);
+                    }
+                    if (outRestore !== null) {
+                        const rb = await callJSX(`Timeline.out(${outRestore})`);
+                        log(`📐 [Portada] Out point restaurat a ${outRestore}s → ${rb}`);
                     }
                     await callJSX(`Timeline.set(${cti})`);
                 } catch (eC) {
