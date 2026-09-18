@@ -72,6 +72,31 @@ FASTPASS.Render = {
     /**
      * MÉTODE ATÒMIC: Afegeix a la cua d'AME.
      */
+    renderDirect: function(presetPath, outputFolder, outputFileName) {
+        try {
+            var seq = FASTPASS.Context.getWorkSequence();
+            var f = new File(presetPath);
+            if (!f.exists) return "ERR_PRESET_NOT_FOUND";
+
+            var outFolder = new Folder(outputFolder);
+            if (!outFolder.exists) {
+                outFolder.create();
+                $.writeln("[9_Render.direct] carpeta creada: " + outFolder.fsName);
+            }
+            var fullOutputPath = outFolder.fsName + "\\" + outputFileName;
+            $.writeln("[9_Render.direct] exportAsMediaDirect -> " + fullOutputPath + " | preset=" + f.fsName);
+
+            seq.exportAsMediaDirect(fullOutputPath, f.fsName, 0);
+
+            var outF = new File(fullOutputPath);
+            if (!outF.exists) return "ERR_NO_OUTPUT";
+            return "OK_DIRECT";
+        } catch(e) {
+            $.writeln("[9_Render.direct] EXC: " + e.message);
+            return "EXC: " + e.message;
+        }
+    },
+
     addToAME: function(presetPath, outputFolder, outputFileName) {
         try {
             var seq = FASTPASS.Context.getWorkSequence();

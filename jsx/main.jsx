@@ -668,6 +668,11 @@ $.global.Render = {
     },
     queue: function(pr, o, n) { 
         return ($.global.FASTPASS.Render) ? FASTPASS.Render.addToAME(pr, o, n) : "ERR"; 
+    },
+    // (2026-09-18) Render DIRECTE des de Premiere (exportAsMediaDirect, motor d'Adobe),
+    // sense AME. Cal exposar-lo aquí perquè el panell crida Render.<mètode>.
+    renderDirect: function(pr, o, n) {
+        return ($.global.FASTPASS.Render) ? FASTPASS.Render.renderDirect(pr, o, n) : "ERR";
     }
 };
 
