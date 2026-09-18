@@ -82,7 +82,7 @@
         "name": "Render y Exportación",
         "status": "active",
         "priority": "high",
-        "description": "VÍDEO: envía a Adobe Media Encoder con preset H264 1080x1920. PORTADA: genera PNG del frame actual.",
+        "description": "VÍDEO: exportAsMediaDirect a la carpeta del projecte (preset VERTIKAL .epr). PORTADA: duplica el clip de V1 del cabezal a una zona neta (més enllà del final), hi col·loca la 1a portada del tema centrada + captura del frame (Render.snapshot) → PNG amb el MATEIX nom que el MP4.",
         "files": ["js/workflows/flow_render.js", "js/logic/9_Render_Logic.js"],
         "ui": "Sección RENDER: VÍDEO, PORTADA"
       },

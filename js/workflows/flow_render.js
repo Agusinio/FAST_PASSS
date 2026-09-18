@@ -15,6 +15,94 @@
     const log = (m, lvl) => getUtils().log(m, lvl || "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
 
+    // ── PORTADA (2026-09-18) ─────────────────────────────────────────────────
+    // Durada (s) dels clips temporals que es fan servir a la zona neta.
+    const PORTADA_DUR = 2;
+    // Marge (s) més enllà del final del projecte on es fa tota la composició.
+    const CLEAN_MARGIN = 30;
+    // Escala forçada de la portada en % (null = mantenir la que aplica Premiere).
+    const PORTADA_SCALE = null;
+
+    /**
+     * buildRenderName: Nom del fitxer de render (amb extensió) a partir del nom de la
+     * seqüència activa. FONT ÚNICA del nom: el MP4 (runVideo) i el PNG de la portada
+     * (runPortada) surten amb el MATEIX nom i la MATEIXA hora.
+     * @param {string} seqName - Nom de la seqüència activa (ex: "TNC_V1_TEMA").
+     * @returns {string} ex: "TNC_TEMA_13_15.mp4"
+     */
+    function buildRenderName(seqName) {
+        if (!seqName) return "Export_TBD.mp4";
+        // El nom de la seqüència pot ser PROG_BLOC_TEMA o PROG_TEMA. ABANS es feia
+        // sempre split("_") + slice(2) → amb "TNC_AFECTACIONS METRO..." (2 parts) no
+        // hi havia TEMA i sortia el literal "TEMA". Ara: 3+ parts → tema = tot menys
+        // PROG i BLOC; 2 parts → tema = la 2a. Fallback: títol del projecte/net.
+        const parts = seqName.split("_");
+        const prog = (parts[0] || "PROG").trim();
+        let tema = (parts.length >= 3 ? parts.slice(2).join("_") : (parts[1] || "")).trim();
+        if (!tema) {
+            try {
+                const projName = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.lastOpenedProjectName) || "";
+                tema = projName.replace(/\.[^.]+$/, "")
+                    .replace(/^Pruebas[_\s-]*/i, "")
+                    .replace(/^[A-Z0-9]+[_\s-]+V\d[_\s-]*/i, "")
+                    .trim();
+            } catch (eN) { }
+        }
+        if (!tema) tema = "TEMA";
+        const now = new Date();
+        const timeStr = ("0" + now.getHours()).slice(-2) + "_" + ("0" + now.getMinutes()).slice(-2);
+        return `${prog}_${tema}_${timeStr}.mp4`;
+    }
+
+    /**
+     * clipIndexAt: Índex del clip d'una pista que conté un temps determinat.
+     * @returns {number} índex (0-based) o -1
+     */
+    async function clipIndexAt(trackIdx, atSec) {
+        try {
+            const raw = await callJSX(`Clips.at(${trackIdx}, ${atSec}, 'video')`);
+            if (!raw || raw === "null") return -1;
+            const o = JSON.parse(raw);
+            return (o && typeof o.index === 'number') ? o.index : -1;
+        } catch (e) { return -1; }
+    }
+
+    /**
+     * pickCopyTrack: Pista on copiar el clip del cabezal. Ha de ser desbloquejada,
+     * diferent de la de la portada, i NO pot tenir cap clip a partir de `fromSec`:
+     * Clips.duplicate fa overwriteClip del MEDIA SENCER (fromSec → fromSec + durada
+     * del media) i machacaria tot el que trobés en aquell tram.
+     * @returns {number} pista (1-based) o 0 si no n'hi ha cap de segura.
+     */
+    function pickCopyTrack(info, fromSec, portadaTrack) {
+        for (let i = info.tracks.length - 1; i >= 0; i--) {
+            const t = info.tracks[i];
+            if ((i + 1) === portadaTrack || t.locked) continue;
+            let maxEnd = 0;
+            (t.clips || []).forEach(function (c) { if (c.end > maxEnd) maxEnd = c.end; });
+            if (maxEnd <= fromSec + 0.05) return i + 1;
+        }
+        return 0;
+    }
+
+    /**
+     * pngSize: Mides (px) d'un PNG llegint la capçalera IHDR amb el `fs` de Node.
+     * Només s'usa per al log de diagnòstic de la portada.
+     * @returns {{w:number,h:number}|null}
+     */
+    function pngSize(path) {
+        try {
+            const fs = getUtils()._nodeFs();
+            if (!fs || !fs.readFileSync) return null;
+            const buf = fs.readFileSync(String(path).replace(/\//g, "\\"));
+            if (!buf || buf.length < 24) return null;
+            if (buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4E || buf[3] !== 0x47) return null;
+            const w = buf.readUInt32BE(16);
+            const h = buf.readUInt32BE(20);
+            return (w > 0 && h > 0) ? { w: w, h: h } : null;
+        } catch (e) { return null; }
+    }
+
     FASTPASS_UI.Workflows.Render = {
 
         /**
@@ -32,31 +120,9 @@
                 getUtils().status("Processant nom...", "procesando");
 
                 const seqName = await callJSX('Context.activeSeq()');
-                let fileName = "Export_TBD.mp4";
-                
-                if (seqName) {
-                    // (2026-09-18) El nom de la seqüència pot ser PROG_BLOC_TEMA o
-                    // PROG_TEMA. ABANS es feia sempre split("_") + slice(2) → amb
-                    // "TNC_AFECTACIONS METRO..." (2 parts) no hi havia TEMA i sortia
-                    // el literal "TEMA". Ara: 3+ parts → tema = tot menys PROG i BLOC;
-                    // 2 parts → tema = la 2a. Fallback: títol del projecte/net.
-                    const parts = seqName.split("_");
-                    const prog = (parts[0] || "PROG").trim();
-                    let tema = (parts.length >= 3 ? parts.slice(2).join("_") : (parts[1] || "")).trim();
-                    if (!tema) {
-                        try {
-                            const projName = (window.FASTPASS_UI.State && window.FASTPASS_UI.State.lastOpenedProjectName) || "";
-                            tema = projName.replace(/\.[^.]+$/, "")
-                                .replace(/^Pruebas[_\s-]*/i, "")
-                                .replace(/^[A-Z0-9]+[_\s-]+V\d[_\s-]*/i, "")
-                                .trim();
-                        } catch (eN) { }
-                    }
-                    if (!tema) tema = "TEMA";
-                    const now = new Date();
-                    const timeStr = ("0" + now.getHours()).slice(-2) + "_" + ("0" + now.getMinutes()).slice(-2);
-                    fileName = `${prog}_${tema}_${timeStr}.mp4`;
-                }
+                // Font ÚNICA del nom (buildRenderName): el PNG de la portada (runPortada)
+                // surt amb el mateix nom i la mateixa hora que aquest MP4.
+                const fileName = buildRenderName(seqName);
 
                 // (2026-09-18) csInterface viu a FASTPASS_UI.Utils.csInterface (utils.js L7/12),
                 // NO a FASTPASS_UI.csInterface → abans petava amb "Cannot read properties of
@@ -157,19 +223,52 @@
         },
 
         /**
-         * PORTADA PRO: Importació, Aïllament i Snapshot automàtic del darrer PNG.
+         * runPortada: Exporta el PNG de la PORTADA (PNG TEMA-TITOL) compost amb el
+         * frame del clip de V1 que hi ha sota el cabezal.
+         *
+         * MECÀNICA (opció 2, 2026-09-18) — TOT passa en una ZONA NETA situada més
+         * enllà del final del projecte, per no tocar MAI el muntatge real:
+         *   1. CTI = Timeline.get() → clip de V1 que el conté (frame = mediaIn).
+         *   2. Còpia d'aquest clip a la zona neta (Clips.duplicate; si no hi ha cap
+         *      pista segura, Clips.insertClipFrom) amb l'inPoint alineat al cabezal.
+         *   3. La PRIMERA portada del tema (Scan.portadas) DAMUNT de la còpia, centrada.
+         *   4. Cabezal a la zona neta i captura amb Render.snapshot (exportFrameQE:
+         *      el mateix mecanisme del freeze que ja funciona).
+         *   5. Neteja: s'esborren NOMÉS la còpia i la portada (per TEMPS) i el cabezal
+         *      torna on era. No es toca cap mute/lock de cap pista.
+         *   6. El PNG va a la MATEIXA carpeta que el MP4 i amb EXACTAMENT el mateix nom
+         *      (inclosa l'hora): PROG_TEMA_13_15.mp4 → PROG_TEMA_13_15.png
          */
         runPortada: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            log("📸 Iniciant Portada Pro (Modo Aïllat)...");
+            log("📸 [Portada] Inici (còpia a zona neta + captura de frame)...");
+
+            const utils = getUtils();
+            const T_V1 = 1;
+            let cti = 0;
+            let tempTC = 0;
+            let tCopy = 0;
+            let tPort = 0;
             
             try {
                 const config = FASTPASS_UI.Config.get();
                 const state = FASTPASS_UI.State;
-                // 1. BUSCAR LA PORTADA RECENT (Logic.Scan)
+
+                // ── 1. CTI → clip de V1 que el conté ─────────────────────────────
+                cti = parseFloat((await callJSX('Timeline.get()')) || "0");
+                const srcRaw = await callJSX(`Clips.at(${T_V1}, ${cti}, 'video')`);
+                if (!srcRaw || srcRaw === "null") {
+                    throw new Error(`No hi ha cap clip a V${T_V1} sota el cabezal (${cti.toFixed(2)}s).`);
+                }
+                const src = JSON.parse(srcRaw);
+                // Frame EXACTE que es veu sota el cabezal = inPoint + desplaçament.
+                const mediaIn = parseFloat(src.inPoint) + (cti - parseFloat(src.start));
+                log(`🎯 [Portada] CTI=${cti.toFixed(2)}s → V1[${src.index}] "${src.name}" (${parseFloat(src.start).toFixed(2)}→${parseFloat(src.end).toFixed(2)}s) | frame del cabezal = media ${mediaIn.toFixed(2)}s`);
+
+                // ── 2. PORTADA: la PRIMERA del tema ──────────────────────────────
                 // La data de treball es passa explícitament perquè Scan.portades
                 // filtri els PNG per la data del projecte actual (no només mtime).
-                const stateDateDir = state.dateDir || getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
+                const stateDateDir = state.dateDir || utils.getFormattedDate().replace(/["\s]/g, "").trim();
                 const ctx = { config, progData: state.progData, bloque: state.bloque, dateDir: stateDateDir };
                 const portadas = await getScanner().portadas(ctx);
                 const portada = (portadas && portadas.length > 0) ? portadas[0] : null;
@@ -177,54 +276,132 @@
                 if (!portada) {
                     throw new Error("No s'ha trobat cap PNG de portada que coincideixi amb el Programa i el Bloc.");
                 }
+                const sz = pngSize(portada.path);
+                log(`🖼️ [Portada] Portada del tema: ${portada.name}${sz ? ' (' + sz.w + 'x' + sz.h + ' px)' : ''}`);
 
-                log(`🔍 Portada trobada: ${portada.name}`);
-
-                // 2. IMPORTAR PORTADA AL PROJECTE (Literal)
-                const importPayload = JSON.stringify([portada.path.replace(/\\/g, '\\\\')]);
-                await callJSX(`IO.importFiles('${importPayload}', 'root')`);
-
-                // 3. AÏLLAMENT DE PISTES (Solo V1 + V10)
-                log("🔒 Aïllant pistes per la captura...");
-                await callJSX(`Tracks.setGlobalState('video', 'mute', true)`);
-                await callJSX(`Tracks.mute(${T_MP4}, false, 'video')`); // Encenem V1
-                await callJSX(`Tracks.mute(${T_PORTADA}, false, 'video')`); // Encenem V10
-
-                // 4. INSERIR PORTADA AL TIMELINE (En el cabezal)
-                const ctiRaw = await callJSX('Timeline.get()');
-                const cti = parseFloat(ctiRaw || "0");
-                
-                log(`📌 Inserint ${portada.name} a V${T_PORTADA}`);
-                await callJSX(`Clips.insert('${getUtils().escape(portada.name)}', ${T_PORTADA}, ${cti}, null, 'video')`);
-
-                // 5. EXPORTACIÓ FRAME (Snapshot a carpeta destino Portades)
-                const targetDir = config.rutas.portadas || config.rutas.destinoBase || "C:\\Temp";
-                let nameBase = state.lastRenderName || (await callJSX('Context.activeSeq()')) || "Portada_TBD";
-                const destPath = `${targetDir}\\${nameBase}.png`;
-
-                log(`📸 Generant Snapshot a: ${destPath}`);
-                const snapRes = await getRenderLogic().capture(destPath, cti);
-
-                // 6. NETEJA I RESTAURACIÓ
-                log("🧹 Netejant clip temporal i restaurant pistes...");
-                
-                // Borrar l'últim clip de V10 (el que acabem de posar)
-                const clipsCount = await callJSX(`Clips.count(${T_PORTADA}, 'video')`);
-                if (parseInt(clipsCount) > 0) {
-                    await callJSX(`Clips.remove(${T_PORTADA}, ${parseInt(clipsCount) - 1}, 'video')`);
+                // ── 3. ZONA NETA: més enllà del final de TOT el projecte ─────────
+                const vRaw = await callJSX(`Clips.debugTracks('video')`);
+                let info = null;
+                try { info = JSON.parse(vRaw); } catch (eV) { }
+                if (!info || !info.tracks || !info.tracks.length) {
+                    throw new Error("No puc llegir les pistes de vídeo (" + vRaw + ").");
                 }
+                const nVT = info.tracks.length;
+                if (nVT < 2) throw new Error("Calen com a mínim 2 pistes de vídeo (còpia + portada).");
 
-                // Restaurar visibilitat totes pistes
-                await callJSX(`Tracks.setGlobalState('video', 'mute', false)`);
+                let maxEnd = parseFloat((await callJSX('Timeline.duration()')) || "0");
+                info.tracks.forEach(function (t) {
+                    (t.clips || []).forEach(function (c) { if (c.end > maxEnd) maxEnd = c.end; });
+                });
+                tempTC = Math.ceil(maxEnd) + CLEAN_MARGIN;
 
-                if (snapRes.success) {
-                    getUtils().status("Portada OK", "exito");
-                    log("✅ Portada generada amb èxit.");
+                // La portada, sempre a la pista de MÉS AMUNT (per sobre de la còpia).
+                for (let i = nVT - 1; i >= 0; i--) {
+                    if (!info.tracks[i].locked) { tPort = i + 1; break; }
+                }
+                if (!tPort) throw new Error("Totes les pistes de vídeo estan bloquejades.");
+
+                const safe = pickCopyTrack(info, parseFloat(src.start), tPort);
+                tCopy = safe || (tPort > 1 ? tPort - 1 : 0);
+                if (!tCopy) throw new Error("No hi ha cap pista lliure per la còpia del clip.");
+                log(`🧹 [Portada] Zona neta @ ${tempTC}s (final projecte=${maxEnd.toFixed(2)}s) | portada=V${tPort} | còpia=V${tCopy}${safe ? '' : ' (sense pista segura → insertClipFrom)'}`);
+
+                // ── 4. CÒPIA del clip de V1 a la zona neta ───────────────────────
+                let idxCopy = -1;
+                if (safe) {
+                    // Clips.duplicate fa overwriteClip del MEDIA SENCER a la pista destí:
+                    // només és segur perquè pickCopyTrack garanteix que aquella pista no
+                    // té cap clip des de l'inici del clip font cap endavant.
+                    const dup = await callJSX(`Clips.duplicate(${T_V1}, ${src.index}, ${tCopy}, 'video', 0)`);
+                    log(`🧬 [Portada] Clips.duplicate V1[${src.index}] → V${tCopy} → ${dup}`);
+                    await utils.delay(300);
+                    if (String(dup).indexOf('OK') === 0) idxCopy = parseInt(String(dup).split(':')[1]);
+                    if (isNaN(idxCopy) || idxCopy < 0) throw new Error("La còpia del clip ha fallat: " + dup);
+                    // Blindatge: l'índex es re-resol pel TEMPS (immune a reindexacions).
+                    const idxT = await clipIndexAt(tCopy, parseFloat(src.start));
+                    if (idxT >= 0) idxCopy = idxT;
                 } else {
-                    throw new Error("Error Snapshot: " + snapRes.log);
+                    // Ripple insert: més enllà del final del projecte no desplaça res.
+                    const ins = await callJSX(`Clips.insertClipFrom(${T_V1}, ${src.index}, ${tCopy}, ${tempTC}, 'video')`);
+                    log(`🧬 [Portada] Clips.insertClipFrom V1[${src.index}] → V${tCopy} @ ${tempTC}s → ${ins}`);
+                    await utils.delay(300);
+                    if (String(ins).indexOf('OK') !== 0) throw new Error("La còpia del clip ha fallat: " + ins);
+                    idxCopy = await clipIndexAt(tCopy, tempTC);
+                    if (idxCopy < 0) throw new Error(`No trobo la còpia a V${tCopy} @ ${tempTC}s.`);
                 }
 
-            } catch (e) { getUtils().handleError(e, "RenderPortadaPro"); }
+                // inPoint ABANS de tancar la durada: Premiere ignora el setter d'inPoint
+                // en el MATEIX evalScript que la inserció → cal una crida pròpia.
+                await callJSX(`Clips.inPoint(${tCopy}, ${idxCopy}, ${mediaIn}, 'video')`);
+                const mv = await callJSX(`Clips.moveToRange(${tCopy}, ${idxCopy}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
+                log(`📐 [Portada] Còpia a la zona neta: ${mv}`);
+                log(`   · còpia V${tCopy}[${idxCopy}] → ${await callJSX(`Clips.get(${tCopy}, ${idxCopy}, 'video')`)}`);
+
+                // ── 5. PORTADA DAMUNT de la còpia, CENTRADA ──────────────────────
+                const look = await callJSX(`IO.lookFor('${utils.escape(JSON.stringify([portada.name]))}')`);
+                if (String(look) !== "true") {
+                    const payload = JSON.stringify([portada.path.replace(/\\/g, '/')]);
+                    log(`📥 [Portada] Import al projecte → ${await callJSX(`IO.importFiles('${utils.escape(payload)}', 'root')`)}`);
+                }
+                const insP = await callJSX(`Clips.insert('${utils.escape(portada.name)}', ${tPort}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
+                if (String(insP).indexOf('OK') !== 0) throw new Error("No s'ha pogut inserir la portada: " + insP);
+                // El JSX aplica l'endSec al DARRER clip de la pista → reforcem per TEMPS.
+                await callJSX(`Clips.endAt(${tPort}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
+                const idxPort = await clipIndexAt(tPort, tempTC);
+                if (idxPort < 0) throw new Error(`No trobo la portada a V${tPort} @ ${tempTC}s.`);
+
+                // Centrat: Posició (0,0) = centre exacte del frame; l'escala es manté (la
+                // que aplica Premiere en importar la imatge) tret que PORTADA_SCALE estigui
+                // fixada a dalt del fitxer.
+                let sc = PORTADA_SCALE;
+                if (sc == null) {
+                    const cur = await callJSX(`Anim.getMotionValues(${tPort}, ${idxPort})`);
+                    try {
+                        const o = JSON.parse(cur);
+                        if (o && typeof o.scale === 'number' && o.scale > 0) sc = o.scale;
+                    } catch (eS) { log("⚠️ [Portada] Escala il·legible (" + cur + ")", "WARN"); }
+                }
+                if (sc == null) sc = 100;
+                const mvJson = JSON.stringify({ position: [0, 0], scale: sc }).replace(/'/g, "\\'");
+                log(`🎯 [Portada] Centrat V${tPort}[${idxPort}]: Posició (0,0) + Scale ${sc}% → ${await callJSX(`Anim.setMotionValues(${tPort}, ${idxPort}, '${mvJson}')`)}`);
+
+                // ── 6. CABEZAL + CAPTURA (mateix mecanisme que el freeze) ────────
+                // La captura ha de caure EXACTAMENT a tempTC: és l'únic instant en què
+                // la còpia mostra el frame del cabezal (mediaIn).
+                await callJSX(`Timeline.set(${tempTC})`);
+                await utils.delay(500);
+
+                // Destí: la MATEIXA carpeta que el MP4 i amb EXACTAMENT el mateix nom.
+                let outDir = await callJSX("Context.folder()");
+                if (!outDir) outDir = config.rutas.destinoBase || "C:\\Temp";
+                if (!state.lastRenderName) {
+                    log("⚠️ [Portada] Encara no s'ha exportat el vídeo: el PNG es nomenarà amb l'hora actual.", "WARN");
+                }
+                const nameBase = state.lastRenderName || buildRenderName(await callJSX('Context.activeSeq()')).replace(/\.mp4$/i, "");
+                const destPath = `${outDir}\\${nameBase}.png`;
+                utils.ensureFolders(outDir);
+                log(`📸 [Portada] Captura a ${destPath} (t=${tempTC}s)`);
+
+                const snapRes = await getRenderLogic().capture(destPath, tempTC);
+                if (!snapRes.success) throw new Error("Error Snapshot: " + snapRes.log);
+                utils.status(`Portada OK: ${nameBase}.png`, "exito");
+                log(`✅ [Portada] PNG generat: ${destPath}`);
+
+            } catch (e) {
+                getUtils().handleError(e, "RenderPortada");
+            } finally {
+                // ── NETEJA: només el que hem inserit (per TEMPS, immune a reindexar) ──
+                try {
+                    if (tempTC > 0 && tCopy > 0 && tPort > 0) {
+                        const rC = await callJSX(`Clips.removeAt(${tCopy}, ${tempTC}, 'video')`);
+                        const rP = await callJSX(`Clips.removeAt(${tPort}, ${tempTC}, 'video')`);
+                        log(`🧹 [Portada] Neteja de la zona neta: còpia V${tCopy} → ${rC} | portada V${tPort} → ${rP}`);
+                    }
+                    await callJSX(`Timeline.set(${cti})`);
+                } catch (eC) {
+                    log("⚠️ [Portada] Neteja: " + eC.message, "WARN");
+                }
+            }
         },
 
         runClose: async function () {
