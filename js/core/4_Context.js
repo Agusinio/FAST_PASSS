@@ -596,9 +596,51 @@
             }
         },
 
+        /**
+         * initMainHoverHint (2026-09-18): feedback visual del "Ctrl+clic = AHIR".
+         * Si el cursor està SOBRE el botó MAIN i es manté CONTROL premut, el botó
+         * mostra "AHIR" (que és exactament el que farà el clic en aquest mode).
+         * En deixar anar CONTROL o sortir del botó, es restaura el text d'estat.
+         * Idempotent (es pot cridar a cada updateButton).
+         */
+        initMainHoverHint: function () {
+            const btn = document.getElementById('btnMainAction');
+            if (!btn || btn._hoverHintInstalled) return;
+            btn._hoverHintInstalled = true;
+
+            let baseLabel = null;
+            let hovering = false;
+            let ctrlDown = false;
+            let showing = false;
+
+            const apply = (on) => {
+                if (on && !showing) {
+                    baseLabel = btn.innerText;          // text real d'aquest moment
+                    btn.innerText = 'AHIR';
+                    showing = true;
+                } else if (!on && showing) {
+                    btn.innerText = (baseLabel !== null) ? baseLabel : btn.innerText;
+                    showing = false;
+                }
+            };
+            const sync = () => apply(ctrlDown && hovering);
+
+            btn.addEventListener('mouseenter', () => { hovering = true; sync(); });
+            btn.addEventListener('mouseleave', () => { hovering = false; sync(); });
+            // mousemove: detecta Ctrl encara que el focus no sigui al panell CEP
+            btn.addEventListener('mousemove', (e) => { ctrlDown = !!e.ctrlKey || !!e.metaKey; sync(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Control') { ctrlDown = true; sync(); } });
+            document.addEventListener('keyup', (e) => { if (e.key === 'Control') { ctrlDown = false; sync(); } });
+            // Si la finestra perd el focus amb Ctrl premut, evitem quedar-nos amb "AHIR"
+            window.addEventListener('blur', () => { ctrlDown = false; hovering = false; sync(); });
+        },
+
         updateButton(state, data) {
             const btn = document.getElementById('btnMainAction');
             if (!btn) return;
+
+            // Feedback "AHIR" en passar el cursor amb Ctrl premut (una sola instal·lació)
+            this.initMainHoverHint();
         
             // 📍 Forzamos tamaño mínimo por si el CSS falla
             btn.style.minHeight = "60px"; 
