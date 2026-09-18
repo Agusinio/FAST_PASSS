@@ -449,7 +449,9 @@ function applySliderLimits() {
         if (btnMarksF35) btnMarksF35.addEventListener('click', () => callWorkflow('Assembly', 'correlationSnapMarkers'));
         if (btnMarksF4) btnMarksF4.addEventListener('click', () => callWorkflow('Assembly', 'snapFaroMarkers'));
         if (btnMarksF5) btnMarksF5.addEventListener('click', () => callWorkflow('Markers', 'snapOrphanMarkers'));
-        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Markers', 'placeGraphicMarkers'));
+        // (2026-09-18) Botó 🎨 "Gráfica" → importador MAPA (ZZZ_GRAFISME → bin GRAF → V6).
+        // ABANS: callWorkflow('Markers','placeGraphicMarkers') (F6·Gràfics de l'escaleta).
+        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Mapa', 'run'));
 
         // Botons ocults de moment (preservats per a ús futur):
         // const btnResetGrafs = document.getElementById('btnResetGrafs');
@@ -497,7 +499,7 @@ function applySliderLimits() {
         const btnChyronColocar = document.getElementById('btnChyronColocar');
         if (btnChyronColocar) btnChyronColocar.addEventListener('click', () => runPlaceAllChyrons());
 
-        // --- BOTONS GRÀFICS (IPD, Doble Pantalla, MAPA, TOTEM) ---
+        // --- BOTONS GRÀFICS (IPD, Doble Pantalla, MAPA, TOTEM, GRÀFICA/MAPA-GRAF) ---
         const btnGrafIpd = document.getElementById('btnGrafIpd');
         const btnGrafDoblePantalla = document.getElementById('btnGrafDoblePantalla');
         const btnGrafMapa = document.getElementById('btnGrafMapa');
