@@ -18,6 +18,8 @@
     const log = (m) => getUtils().log(m, "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
     const P = () => window.FASTPASS_UI.Logic.SrtParser;
+    // FALLBACK de subtítols: cerca relajada a la carpeta de verticalització.
+    const getScanner = () => window.FASTPASS_UI.Logic.Scan;
 
     /**
      * Helper: Escriu _MOD.srt, l'importa al projecte i el reinsereix
@@ -289,6 +291,90 @@
                 log("💥 SRT: Excepció a runPreparar: " + e.message + " | stack: " + (e.stack || "N/A"));
                 getUtils().handleError(e, "SrtPreparar");
             }
+        },
+
+        /**
+         * _srtCtx: Construeix el context {config, progData, bloque, dateDir} des dels
+         * selectors del panell i de l'estat (mateixes fonts que MainButton/SrtEditor).
+         * @returns {Object|null}
+         */
+        _srtCtx: function () {
+            const config = FASTPASS_UI.Config.get();
+            const idProg = (document.getElementById('programa') || {}).value;
+            const progData = config.mapeoProgramas && config.mapeoProgramas[idProg];
+            if (!progData) return null;
+            const bloque = (document.getElementById('bloc') || {}).value;
+            const dateDir = (FASTPASS_UI.State && FASTPASS_UI.State.dateDir) ||
+                getUtils().getFormattedDate().replace(/["\s]/g, "").trim();
+            return { config: config, progData: progData, programa: idProg, bloque: bloque, dateDir: dateDir };
+        },
+
+        /**
+         * runSrtFallback: Càrrega de subtítols de RECANVI quan el mecanisme principal
+         * (blocs de 15 min) no troba res.
+         * Busca el .SRT a la carpeta de verticalització (la MATEIXA on viuen els MP4 del
+         * bloc) amb relaxació progressiva de filtres (Scan.srtFallback) i el carrega a
+         * l'editor de subtítols amb SrtEditor.loadSrt (que llegeix el fitxer, munta la
+         * taula d'entrades, la waveform i els marcadors). NO importa res al projecte.
+         * @returns {boolean} true si s'ha carregat algun SRT
+         */
+        runSrtFallback: async function () {
+            log("🆘 SRT_FALLBACK: cercant .SRT a la carpeta de verticalització...");
+            try {
+                const ctx = this._srtCtx();
+                if (!ctx) { getUtils().status("Selecciona un programa", "warn"); return false; }
+                if (!window.SrtEditor || !window.SrtEditor.loadSrt) {
+                    getUtils().status("Error: SrtEditor no disponible", "error");
+                    return false;
+                }
+                const cand = await getScanner().srtFallback(ctx);
+                if (!cand) {
+                    getUtils().status("Fallback: cap .SRT a " + (ctx.config.rutas.verticalitzacio || "la carpeta de verticalització"), "warn");
+                    log("⚠️ SRT_FALLBACK: cap candidat a " + (ctx.config.rutas.verticalitzacio || "?"));
+                    return false;
+                }
+                log("🆘 SRT_FALLBACK: N" + cand.level + " (" + cand.reason + ", " + cand.candidates +
+                    " candidat(s)) → " + cand.path);
+                const ok = await window.SrtEditor.loadSrt(cand.path);
+                if (ok) {
+                    getUtils().status("SRT carregat (fallback N" + cand.level + "): " + cand.name, "exito");
+                    log("✅ SRT_FALLBACK: carregat a l'editor: " + cand.name);
+                    return true;
+                }
+                getUtils().status("Fallback: no s'ha pogut carregar " + cand.name, "error");
+                return false;
+            } catch (e) {
+                log("💥 SRT_FALLBACK: " + e.message);
+                getUtils().handleError(e, "SrtFallback");
+                return false;
+            }
+        },
+
+        /**
+         * runSrtLoad: Punt d'entrada del botó ⬇️ (CARREGAR).
+         *   1. Mecanisme PRINCIPAL: blocs de 15 min (SrtEditor.loadEmergencySrt).
+         *   2. Si no ha carregat res → FALLBACK (carpeta de verticalització).
+         * @param {boolean} [forceFallback] - true (Ctrl+clic) → va directe al fallback.
+         */
+        runSrtLoad: async function (forceFallback) {
+            const ed = window.SrtEditor;
+            if (!ed || !ed.loadSrt) { getUtils().status("Error: SrtEditor no disponible", "error"); return; }
+            if (!forceFallback) {
+                // El carregador d'emergència no retorna si ha reeixit → es compara el
+                // fitxer carregat ABANS i DESPRÉS (_srtPath el fixa loadSrt).
+                const before = String(ed._srtPath || '');
+                log("📥 SRT_LOAD: mecanisme principal (blocs de 15 min)...");
+                try { await ed.loadEmergencySrt(); } catch (eE) { log("⚠️ SRT_LOAD: emergència: " + eE.message); }
+                const after = String(ed._srtPath || '');
+                if (after && after !== before) {
+                    log("✅ SRT_LOAD: carregat amb els blocs de 15 min: " + after);
+                    return;
+                }
+                log("⚠️ SRT_LOAD: els blocs de 15 min no han carregat res → FALLBACK.");
+            } else {
+                log("📥 SRT_LOAD: Ctrl+clic → FALLBACK directe.");
+            }
+            await this.runSrtFallback();
         },
 
         /**

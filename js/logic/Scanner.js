@@ -340,6 +340,82 @@
 
                 return freshFiles.map(function (f) { return { name: f.name, path: pathNAS + f.name }; });
             } catch (e) { return []; }
+        },
+
+        /**
+         * srtFallback: Cerca un .SRT a la carpeta de verticalització (la MATEIXA on
+         * viuen els MP4 del bloc) SENSE els filtres estrictes de Scan.mediaAssets
+         * (que exigeix prefix + data de treball i, si no, retorna buit).
+         *
+         * Relaxació progressiva (s'atura al primer nivell amb candidats):
+         *   N1: {archivo}_{bloque}_ + DATA de treball (nom o, si no, creació)
+         *   N2: {archivo}_{bloque}_ (qualsevol data)
+         *   N3: qualsevol .SRT de la DATA de treball
+         *   N4: qualsevol .SRT de la carpeta
+         * Dins de cada nivell es tria el MÉS RECENT (data del nom/creació desc).
+         *
+         * @param {Object} ctx - { config, progData, bloque, dateDir }
+         * @returns {{name:string, path:string, level:number, reason:string, candidates:number}|null}
+         */
+        srtFallback: async function (ctx) {
+            try {
+                if (!ctx || !ctx.config || !ctx.config.rutas || !ctx.progData) return null;
+                var dir = String(ctx.config.rutas.verticalitzacio || '');
+                if (!dir) return null;
+                var last = dir.charAt(dir.length - 1);
+                if (last !== '\\' && last !== '/') dir += '\\';
+
+                var allFiles = await utils.readFolder(dir);
+                if (!allFiles || allFiles.length === 0) {
+                    utils.log('[SCAN:srtFallback] Carpeta inaccessible o buida: ' + dir, 'WARN');
+                    return null;
+                }
+                var srts = allFiles.filter(function (f) { return /\.srt$/i.test(f.name || ''); });
+                if (srts.length === 0) {
+                    utils.log('[SCAN:srtFallback] Cap .SRT a ' + dir, 'WARN');
+                    return null;
+                }
+
+                var self = this;
+                // Més recent primer: data del nom/creació (YYYYMMDD) desc, després created.
+                srts.sort(function (a, b) {
+                    var da = self._fileDateYYYYMMDD(a) || '';
+                    var db = self._fileDateYYYYMMDD(b) || '';
+                    if (da !== db) return db.localeCompare(da);
+                    return (b.created || 0) - (a.created || 0);
+                });
+
+                var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                var prefix = String(ctx.progData.archivo || '').toUpperCase() + '_' +
+                    String(ctx.bloque || '').toUpperCase() + '_';
+                var hasPrefix = function (f) { return (f.name || '').toUpperCase().indexOf(prefix) !== -1; };
+                var ofDate = function (f) { return dateTarget ? (self._fileDateYYYYMMDD(f) === dateTarget) : true; };
+
+                var levels = [
+                    { level: 1, reason: 'prefix + data de treball', list: srts.filter(function (f) { return hasPrefix(f) && ofDate(f); }) },
+                    { level: 2, reason: 'prefix (qualsevol data)', list: srts.filter(hasPrefix) },
+                    { level: 3, reason: 'data de treball', list: srts.filter(ofDate) },
+                    { level: 4, reason: 'qualsevol .SRT de la carpeta', list: srts }
+                ];
+                for (var i = 0; i < levels.length; i++) {
+                    var L = levels[i];
+                    if (L.list.length === 0) continue;
+                    var pickF = L.list[0];
+                    utils.log('[SCAN:srtFallback] N' + L.level + ' (' + L.reason + '): ' + L.list.length +
+                        ' candidat(s) · triat "' + pickF.name + '" (' + (self._fileDateYYYYMMDD(pickF) || 'sense data') + ')', 'INFO');
+                    return {
+                        name: pickF.name,
+                        path: dir + pickF.name,
+                        level: L.level,
+                        reason: L.reason,
+                        candidates: L.list.length
+                    };
+                }
+                return null;
+            } catch (e) {
+                utils.log('💥 [SCAN:srtFallback] ' + e.message, 'ERROR');
+                return null;
+            }
         }
     };
 

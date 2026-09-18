@@ -73,9 +73,9 @@
         "name": "Gestión de Subtítulos (SRT)",
         "status": "active",
         "priority": "high",
-        "description": "Preparar pistas de texto, ajustar IN/OUT de clips SRT, estiramiento proporcional (acordeón).",
-        "files": ["js/workflows/flow_srt.js", "js/logic/10_Srt_Logic.js"],
-        "ui": "Sección SUBTÍTOLS: PREPARAR, IN, OUT, AJUSTAR"
+        "description": "Editor SRT (visor + waveform + marcadors). CARREGAR ⬇️: blocs de 15 min i, si no n'hi ha, FALLBACK al .SRT de la carpeta de verticalització (Scan.srtFallback, relaxació de filtres per nivells). Ctrl+clic = fallback directe.",
+        "files": ["js/workflows/flow_srt.js", "js/logic/Scanner.js", "js/editor/srt_editor.js"],
+        "ui": "Sección SRT: ⬇️ CARREGAR (Ctrl+clic = fallback), IN, OUT, AJUSTAR, 💾 EXPORTAR, ♻️ RESET"
       },
       {
         "id": "RENDER",

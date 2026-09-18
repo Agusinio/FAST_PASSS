@@ -531,7 +531,11 @@ function applySliderLimits() {
                 if (e && (e.ctrlKey || e.metaKey)) e.preventDefault();
                 u.log("[SRT_CARREGAR] Carregant SRT (mecanisme principal: blocs de 15 min)...");
                 if (window.SrtEditor && window.SrtEditor.loadEmergencySrt) {
-                    await window.SrtEditor.loadEmergencySrt();
+                    // Fallback automàtic: si els blocs de 15 min no han carregat res,
+                    // s'intenta el .SRT de la carpeta de verticalització (workflow Srt).
+                    // Ctrl+clic → força directament el fallback.
+                    const forceFb = !!(e && (e.ctrlKey || e.metaKey));
+                    await callWorkflow('Srt', 'runSrtLoad', forceFb);
                 } else {
                     u.status("Error: SrtEditor no disponible", "error");
                 }
