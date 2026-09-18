@@ -555,21 +555,34 @@
         /**
          * _chooseSlot: Tria pista i instant per no trepitjar cap rètol.
          * candidates: número o array de números (ordre de preferència, ex: [V6,V7]).
-         * Si la primera candidata està lliure s'hi queda; si no, guanya la que
-         * tingui el primer forat (desplaçant l'inici si cal).
+         * Si la primera candidata està lliure s'hi queda; si no, prova les altres
+         * pistes (alternar V6/V7 és correcte: són el mateix tipus de wott i no han
+         * de coincidir en imatge). NO retrocedeix mai abans de startSec ni se surt
+         * de maxEnd: un wott no es pot colar a l'ítem anterior.
+         * @param {number} [maxEnd] - límit superior (final del clip de referència o
+         *                            següent marcador). null = sense límit.
          * @returns {Promise<{track:number, start:number, moved:boolean}>}
          */
-        _chooseSlot: async function (candidates, startSec, durSec, ctx) {
+        _chooseSlot: async function (candidates, startSec, durSec, ctx, maxEnd) {
             const list = (Array.isArray(candidates) ? candidates : [candidates]).filter(t => t);
             if (list.length === 0) return { track: null, start: startSec, moved: false };
-            const dur = Math.max(durSec || 0, 0.5);
+            let dur = Math.max(durSec || 0, 0.5);
+            // Si el límit no hi deixa ni el mínim (0.5s), encongim la durada perquè hi càpiga.
+            if (maxEnd !== null && maxEnd !== undefined) {
+                const room = maxEnd - startSec;
+                if (room <= 0) return { track: list[0], start: startSec, moved: false };
+                if (room < dur) dur = room;
+            }
             let best = null;
             for (const tr of list) {
                 const ranges = await this._trackBusyRanges(tr, ctx);
                 const free = this._firstFreeStart(ranges, startSec, dur);
                 if (free <= startSec + 0.01) return { track: tr, start: startSec, moved: false };
+                if (maxEnd !== null && maxEnd !== undefined && (free + dur) > maxEnd + 0.01) continue;  // no cap dins del límit
                 if (!best || free < best.start) best = { track: tr, start: free, moved: true };
             }
+            // Cap pista dona un forat DINS del límit → es col·loca on tocava (encara
+            // que hagi de compartir uns dècimes): mai a l'ítem anterior.
             return best || { track: list[0], start: startSec, moved: false };
         },
 
@@ -661,8 +674,30 @@
                 // del SEU CLIP de referència — el clip de V1 que conté l'instant ideal —
                 // i ACABA quan acaba aquest clip. No depèn de la durada del clip ni de
                 // la durada del wott. (TITOLET i Traducció tenen regles pròpies.)
+                // (2026-09-18) A MÉS del final del clip de V1, un wott no pot passar-se del
+                // SEGÜENT marcador: hi ha efectes entre clips que no es detecten com a tall
+                // però que sí tenen marcador → així cap wott es cola al 1r clip del següent ítem.
+                const nextMarkerAfter = (tSec) => {
+                    let best = null;
+                    for (const m of markersFull) {
+                        if (m.time > tSec + 0.01 && (best === null || m.time < best)) best = m.time;
+                    }
+                    return best;
+                };
+
                 const CHYRON_OFFSET_SEC = 0.40;   // 10 frames a 25 fps
                 const CHYRON_OFFSET_FRAMES = 10;
+
+                // (2026-09-18) Els TITOLET/INSERT no fan snap i quedaven SENSE límit
+                // (doSnap=false → placeEnd=null). També s'han de limitar: final del clip
+                // de V1 que conté l'instant i el SEGÜENT marcador (el que arribi abans).
+                const limitNoSnap = (instant, refTime) => {
+                    const ciT = this._clipAtInstant(allClipsV1, instant);
+                    const nmT = nextMarkerAfter(refTime);
+                    let limT = ciT ? ciT.end : null;
+                    if (nmT !== null && nmT > instant + 0.1 && (limT === null || nmT < limT)) limT = nmT;
+                    return (limT !== null && limT > instant) ? limT : null;
+                };
                 let allClipsV1 = [];
                 try { allClipsV1 = await getClipsLogic().getTrackClips(1, 'video'); } catch (eCL) { log(`⚠️ [${label}] Sense clips de V1: ${eCL.message}`); }
                 let placedCount = 0;
@@ -716,14 +751,41 @@
                             if (ci) {
                                 const durOwn = (durInfo.dur > 0) ? durInfo.dur : null;   // si no es resol, mana el media
                                 placeStart = ci.start + CHYRON_OFFSET_SEC;
-                                placeEnd = (durOwn === null) ? null : Math.min(ci.end, placeStart + durOwn);
-                                const trimmed = (durOwn !== null && placeStart + durOwn > ci.end + 0.001);
+                                // Límit = el que arribi ABANS: final del clip de V1 de referència
+                                // o el SEGÜENT marcador (efectes no detectats com a tall). Es
+                                // compta des del marcador de l'ÍTEM (mk.time), no des de placeStart,
+                                // perquè si el clip de V1 comença abans el límit seria el propi.
+                                const nm = nextMarkerAfter(mk.time);
+                                let lim = ci.end, limWhy = 'final del clip';
+                                if (nm !== null && nm > placeStart + 0.1 && nm < lim) {
+                                    lim = nm;
+                                    limWhy = 'marcador ' + nm.toFixed(2) + 's';
+                                }
+                                placeEnd = (durOwn === null) ? lim : Math.min(lim, placeStart + durOwn);
+                                // Protecció: si el clip de referència és tan curt que no hi
+                                // cap ni l'offset de 10 frames, no s'hi posa rètol (abans
+                                // sortien durades negatives, p.ex. @135.92→135.76).
+                                if (placeEnd <= placeStart + 0.05) {
+                                    log(`   ⏭️ [${label}] ${String(chy.name).substring(0, 34)}… saltat: clip de referència massa curt (${(lim - ci.start).toFixed(2)}s)`, "WARN");
+                                    continue;
+                                }
+                                const trimmed = (durOwn !== null && placeStart + durOwn > lim + 0.001);
                                 log(`   📐 [${label}] ${String(chy.name).substring(0, 34)}… → clip [${ci.start.toFixed(2)}-${ci.end.toFixed(2)}] → entra a ${placeStart.toFixed(2)}s (+${CHYRON_OFFSET_FRAMES}f), surt a ${(placeEnd === null ? placeStart + Math.max(durInfo.dur, 0.5) : placeEnd).toFixed(2)}s` +
-                                    (trimmed ? ' (acurtat: el clip s\'acaba abans)' : ' (durada pròpia del wott)'));
+                                    (trimmed ? ' (acurtat per ' + limWhy + ')' : ' (durada pròpia del wott)'));
+                            }
+                        } else if (!doSnap) {
+                            // TITOLET/INSERT (sense snap): abans quedaven sense cap límit.
+                            const limT = limitNoSnap(placeStart, mk.time);
+                            if (limT !== null) {
+                                placeEnd = limT;
+                                log(`   📐 [${label}] (INSERT) ${String(chy.name).substring(0, 30)}… @ ${placeStart.toFixed(2)}s → límit ${limT.toFixed(2)}s`);
                             }
                         }
                         const chyronDur = (placeEnd !== null) ? Math.max(0.5, placeEnd - placeStart) : durInfo.dur;
-                        const slot = await this._chooseSlot(trackResolver(chy, cfg), placeStart, chyronDur, ctx);
+                        // maxEnd = el límit del wott (final del clip de referència o següent
+                        // marcador) → _chooseSlot no pot desplaçar-lo fora d'aquest rang.
+                        const slot = await this._chooseSlot(trackResolver(chy, cfg), placeStart, chyronDur, ctx,
+                            (placeEnd !== null) ? placeEnd : null);
                         if (!slot.track) {
                             log(`   ⚠️ [${label}] Sense pista disponible per a ${chy.name}`, "WARN");
                             continue;
@@ -735,6 +797,17 @@
                         const escapedName = getUtils().escape(chy.name);
                         const endParam = (placeEnd !== null) ? placeEnd.toFixed(4) : 'null';
                         await callJSX(`Clips.insert('${escapedName}', ${slot.track}, ${slot.start.toFixed(4)}, ${endParam}, 'video')`);
+                        // (2026-09-18) IMPORTANT: el JSX Clips.insert aplica l'endSec al DARRER
+                        // clip de la pista, NO al que acaba d'inserir → cal fixar-lo pel clip
+                        // que comença a slot.start. Sense això els wotts quedaven més llargs
+                        // del compte, se solapaven i es colaven fora del seu ítem (i sortien
+                        // durades negatives).
+                        if (placeEnd !== null) {
+                            const rEndAt = await callJSX(`Clips.endAt(${slot.track}, ${slot.start.toFixed(4)}, ${placeEnd.toFixed(4)}, 'video')`);
+                            if (String(rEndAt).indexOf('OK') === -1) {
+                                log(`   ⚠️ [${label}] endAt V${slot.track} @ ${slot.start.toFixed(2)}s → ${rEndAt}`, "WARN");
+                            }
+                        }
                         this._addPlaced(ctx, slot.track, slot.start, (placeEnd !== null) ? placeEnd : slot.start + Math.max(durInfo.dur, 0.5));
                         log(`   ✅ [${label}] ${chy.name} → V${slot.track} @ ${slot.start.toFixed(2)}s` +
                             ((placeEnd !== null) ? ` → ${placeEnd.toFixed(2)}s (dur ${(placeEnd - slot.start).toFixed(1)}s)` : ` (dur ${durInfo.dur.toFixed(1)}s)`) +
@@ -824,10 +897,32 @@
                     const norm = FASTPASS_UI.Logic.Project.normItemId(itemId);
                     const baseM = norm.match(/^\d+/);
                     const base = baseM ? baseM[0] : norm;
-                    if (markersById[norm] !== undefined) return { time: markersById[norm], ref: 'marcador ' + norm };
-                    if (markersByBase[base] !== undefined) return { time: markersByBase[base], ref: 'marcador ' + base + ' (base)' };
+                    // (2026-09-18) El marcador d'INICI (00:00) NO és una posició d'emissió
+                    // real: el força el flux de marcadors perquè el bloc comença al segon 0.
+                    // Si l'ítem només té aquest, val més l'inici del bloc (CasA/CasB, que ja
+                    // respecta el rètol del conductor). Sense això el 1r Tema-Títol anava a
+                    // "0 + tc" en lloc d'anar després del conductor.
+                    const MIN_MARKER = 0.5;
+                    if (markersById[norm] !== undefined) {
+                        if (markersById[norm] < MIN_MARKER) return { time: null, ref: 'marcador ' + norm + ' a 0 → inici del bloc' };
+                        return { time: markersById[norm], ref: 'marcador ' + norm };
+                    }
+                    if (markersByBase[base] !== undefined) {
+                        if (markersByBase[base] < MIN_MARKER) return { time: null, ref: 'marcador ' + base + ' a 0 → inici del bloc' };
+                        return { time: markersByBase[base], ref: 'marcador ' + base + ' (base)' };
+                    }
                     return { time: null, ref: 'inici del bloc' };
                 };
+
+                // Ordenar per POSICIÓ REAL: el 1r Tema-Títol és el que obre el bloc i el seu
+                // congelat s'estén fins al següent. Sense ordenar, el freeze anava cap enrere
+                // (p.ex. placeTime=116.92s amb stretchEnd=1.00s).
+                ttList.sort((a, b) => {
+                    const ra = markerTimeFor(a.item), rb = markerTimeFor(b.item);
+                    const pa = (ra.time !== null) ? ra.time : startOfBlock;
+                    const pb = (rb.time !== null) ? rb.time : startOfBlock;
+                    return pa - pb;
+                });
 
                 let placed = 0;
                 for (let i = 0; i < ttList.length; i++) {
@@ -929,8 +1024,21 @@
                             if (m.time > clipStart + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
                         }
                         const margen = nextMarkerTime - clipStart;
-                        placeTime = (margen >= MIN_MARGEN_CASA) ? (clipStart + 0.40) : (clipStart + 0.40 + 4.40);
-                        log(`📌 [Titol·Cas${margen >= MIN_MARGEN_CASA ? 'A' : 'B'}] inici del bloc @ ${placeTime.toFixed(2)}s`);
+                        // (2026-09-18) CasB: el Tema-Títol ha d'entrar quan ACABA el rètol
+                        // del conductor (durada REAL del clip, p.ex. 0.40+3.79=4.19s), no
+                        // amb la constant 4.40s (que donava 4.80s). La constant queda només
+                        // com a últim recurs si no es pot llegir el final del conductor.
+                        const condEnd = (firstV6 && isFinite(firstV6.end) && firstV6.end > 0) ? firstV6.end : null;
+                        if (margen >= MIN_MARGEN_CASA) {
+                            placeTime = clipStart + 0.40;                 // CasA: Tema-Títol primer
+                        } else if (condEnd !== null) {
+                            placeTime = condEnd;                          // CasB: just quan acaba
+                        } else {
+                            placeTime = clipStart + 0.40 + 4.40;          // CasB (fallback)
+                        }
+                        log(`📌 [Titol·Cas${margen >= MIN_MARGEN_CASA ? 'A' : 'B'}] inici del bloc @ ` +
+                            `${placeTime.toFixed(2)}s` +
+                            (condEnd !== null ? ` (fi del rètol conductor @ ${condEnd.toFixed(2)}s)` : ' (constant 4.40s)'));
                     }
                 }
             } catch (e) { }
