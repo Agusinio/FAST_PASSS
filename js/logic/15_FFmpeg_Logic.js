@@ -106,6 +106,13 @@
                         clearInterval(checkInterval);
                         utils.log(`✅ Fitxer detectat: ${filePath}`);
                         resolve(filePath);
+                    } else if (content && content.trim().indexOf("FAIL") === 0) {
+                        // (2026-09-22) Els .ps1 generats escriuen FAIL(...) quan la comanda falla:
+                        // no cal esperar el timeout de 3 min (abans el flux semblava "penjat").
+                        clearInterval(checkInterval);
+                        const msg = `ERR_CMD: ${content.trim()} → ${filePath}`;
+                        utils.log(`❌ ${msg}`);
+                        reject(new Error(msg));
                     } else if (Date.now() - startTime >= timeoutMs) {
                         clearInterval(checkInterval);
                         const msg = `ERR_TIMEOUT: El fitxer no s'ha generat en ${timeoutMs / 1000}s → ${filePath}`;
@@ -129,20 +136,33 @@
                 utils.log("⚠️ [checkClipExists] clipPath buit. Retornant false.");
                 return false;
             }
-            const safeFile = JSON.stringify(clipPath);
-            const statResult = await utils.callJSX(`IO.stat(${safeFile})`);
-            
-            // IO.stat retorna JSON amb {size, modified, created} si existeix,
-            // o una string d'error si no (ex: "ERR: File not found")
+            // (2026-09-22) ABANS s'usava `IO.stat`, que NO està exposat pel bridge JSX:
+            // cada crida llançava "ERR:IO.stat is not a function" i responia SEMPRE
+            // "no existeix" → els fitxers ja generats no es reutilitzaven mai.
+            // Ara s'usa l'àtom existent `IO.listFolder` (scanDirectory → [{name,path,size}])
+            // i es comprova nom + mida > 0.
+            const win = String(clipPath).replace(/\//g, '\\');
+            const cut = win.lastIndexOf('\\');
+            if (cut <= 0) return false;
+            const dir = win.substring(0, cut);
+            const wantName = win.substring(cut + 1).toLowerCase();
+
+            let listRaw = '';
+            try { listRaw = await utils.callJSX(`IO.listFolder(${JSON.stringify(dir)})`); } catch (eL) { listRaw = ''; }
             try {
-                const stat = JSON.parse(statResult);
-                // Validar que és un objecte amb size > 0 (fitxer real, no buit)
-                const exists = stat && typeof stat === 'object' && typeof stat.size === 'number' && stat.size > 0;
-                utils.log(`🔍 [checkClipExists] clipPath=${clipPath} → ${exists ? "EXISTEIX (size=" + stat.size + " bytes)" : "NO EXISTEIX (stat=" + statResult + ")"}`);
-                return exists;
+                const list = JSON.parse(listRaw) || [];
+                for (const f of list) {
+                    if (String(f.name || '').toLowerCase() === wantName) {
+                        const size = (typeof f.size === 'number') ? f.size : parseInt(f.size || '0', 10) || 0;
+                        const exists = size > 0;
+                        utils.log(`🔍 [checkClipExists] ${wantName} → ${exists ? "EXISTEIX (size=" + size + " bytes)" : "EXISTEIX però buit (0 bytes)"}`);
+                        return exists;
+                    }
+                }
+                utils.log(`🔍 [checkClipExists] ${wantName} → NO EXISTEIX a ${dir}`);
+                return false;
             } catch (e) {
-                // stat ha retornat error (fitxer no trobat)
-                utils.log(`🔍 [checkClipExists] clipPath=${clipPath} → NO EXISTEIX (stat error: ${statResult.substring(0, 100)})`);
+                utils.log(`🔍 [checkClipExists] ${wantName} → NO EXISTEIX (listFolder: ${String(listRaw).substring(0, 80)})`);
                 return false;
             }
         },
@@ -321,34 +341,77 @@
         },
 
         /**
-         * reverse: Inverteix un clip i l'importa al projecte un cop generat.
+         * reverse: Inverteix un clip (marxa enrere) i l'importa al projecte.
          *
-         * @param {string} inputPath    - Ruta del clip original
-         * @param {string} [outputPath] - Ruta de sortida opcional (default: mateixa carpeta del projecte)
-         * @param {string} [binName]    - Nom del bin on importar (default: "FFmpeg")
+         * ⚠️ (2026-09-21) REESCRIT per al TEMA-TÍTOL PETIT ("titulillo"):
+         *   - L'original llançava ffmpeg amb runCommand + waitForFile, però `waitForFile` espera
+         *     que IO.readTxt retorni exactament "OK" (només funciona amb fitxers de TEXT) → amb
+         *     un .mov no acabava mai. Ara s'usa el patró fiable d'extractClip: .ps1 + .done.
+         *   - PRESERVA L'ALPHA: els wotts de Tema-Títol són qtrle/argb (QuickTime amb canal
+         *     alfa); amb .mp4/h264 la transparència es perd. Sortida: .mov qtrle argb.
+         *   - Si la sortida ja existeix, es REUTILITZA (no es torna a renderitzar).
+         *
+         * @param {string} inputPath    - Clip original (preferentment .mov amb alpha)
+         * @param {string} [outputPath] - Sortida (per defecte: carpeta del projecte + "_REV.mov")
+         * @param {string} [binName]    - Bin d'importació (per defecte "CHY")
+         * @returns {Promise<{ok:boolean, path:string, name:string, error:(string|null)}>}
          */
         reverse: async function(inputPath, outputPath, binName) {
-            if (!inputPath) return "ERR_NO_INPUT";
-
-            if (!outputPath) {
-                const projectFolder = await utils.getProjectPath();
-                const fileName = inputPath.split(/[\\\/]/).pop();
-                const baseName = fileName.substring(0, fileName.lastIndexOf('.'));
-                outputPath = `${projectFolder}\\${baseName}_REV.mp4`;
-            }
-
-            utils.log(`🔄 Iniciant inversió: ${inputPath}`);
-            const args = `-i "${inputPath}" -vf "reverse" -af "areverse" -y "${outputPath}"`;
-
-            const launchResult = await this.runCommand(args);
-            if (launchResult.indexOf("ERR") !== -1) return launchResult;
-
-            // Esperar que FFmpeg acabi i importar el resultat
+            const bin = binName || 'CHY';
+            if (!inputPath) return { ok: false, path: '', name: '', error: 'ERR_NO_INPUT' };
             try {
-                await this.waitForFile(outputPath);
-                return await this._importResult(outputPath, binName || "FFmpeg");
+                const fileName = inputPath.split(/[\\\/]/).pop();
+                const dot = fileName.lastIndexOf('.');
+                const baseName = (dot > 0) ? fileName.substring(0, dot) : fileName;
+                if (!outputPath) {
+                    const projectFolder = await utils.getProjectPath();
+                    outputPath = `${projectFolder}\\${baseName}_REV.mov`;
+                }
+                const outName = outputPath.split(/[\\\/]/).pop();
+
+                // 1) Ja existeix? → reutilitzar (re-runs instantanis, sense tornar a esperar ffmpeg)
+                let already = false;
+                try { already = await this.checkClipExists(outputPath); } catch (eChk) { }
+                if (already) {
+                    utils.log(`♻️ [reverse] Ja existeix, es reutilitza: ${outName}`);
+                } else {
+                    const ffmpegBin = await getFfmpeg();
+                    const timestamp = Date.now();
+                    const psFile = `C:\\temp\\reverse_${timestamp}.ps1`;
+                    const doneFile = `C:\\temp\\reverse_${timestamp}_done.txt`;
+
+                    // -vf reverse (marxa enrere) · qtrle/argb (conserva alpha) · -an (els wotts no porten so)
+                    // (2026-09-22) El .ps1 s'ha d'escriure amb BOM UTF-8: PowerShell 5.1 llegeix
+                    // els .ps1 sense BOM com a ANSI i corromp els accents (p.ex. "colònies" →
+                    // "colÃ²nies") → ffmpeg no troba el fitxer, no genera la sortida i el flux
+                    // s'esperava els 180 s del timeout (semblava "penjat"). El BOM (\uFEFF) fa
+                    // que PS detecti UTF-8.
+                    let psContent = `& "${ffmpegBin}" -i "${inputPath}" -vf "reverse" -c:v qtrle -pix_fmt argb -an -y "${outputPath}"\r\n`;
+                    // El .done s'escriu SEMPRE (OK o FAIL): així qui espera pot abortar de seguida.
+                    psContent += `if (Test-Path "${outputPath}") { Write-Output "OK" > "${doneFile}" } else { Write-Output "FAIL:exit=$LASTEXITCODE" > "${doneFile}" }\r\n`;
+
+                    const cepFs = window.cep.fs;
+                    if (!cepFs || !cepFs.writeFile) {
+                        return { ok: false, path: outputPath, name: outName, error: 'cep.fs.writeFile no disponible' };
+                    }
+                    cepFs.writeFile(psFile, '\uFEFF' + psContent);
+                    utils.log(`🔄 [reverse] Invertint clip: ${fileName} → ${outName}`);
+
+                    const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`;
+                    await utils.callJSX(`IO.executeShell(${JSON.stringify(psCmd)})`);
+                    utils.log(`⏳ [reverse] Polling .done: ${doneFile}`);
+                    await this.waitForFile(doneFile, 1000, 180000);
+                    await utils.callJSX(`IO.remove(${JSON.stringify(doneFile)})`).catch(() => {});
+                    await utils.callJSX(`IO.remove(${JSON.stringify(psFile)})`).catch(() => {});
+                    utils.log(`✅ [reverse] Clip invertit: ${outputPath}`);
+                }
+
+                // 2) Importar al projecte (bin CHY: així queda a l'abast de Clips.insert per nom)
+                await this._importResult(outputPath, bin);
+                return { ok: true, path: outputPath, name: outName, error: null };
             } catch (e) {
-                return e.message;
+                utils.log(`❌ [reverse] ${e.message}`);
+                return { ok: false, path: outputPath || '', name: '', error: e.message };
             }
         },
 

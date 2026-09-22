@@ -662,11 +662,15 @@ FASTPASS.Anim = {
             var cropT = (pCropT) ? (parseFloat(pCropT.getValue()) || 0) : 0;
             var cropB = (pCropB) ? (parseFloat(pCropB.getValue()) || 0) : 0;
 
-            // 🎯 Doble Finestra: si el clip és de V2/V3 amb escala de DF (~68%) i li falten
-            // els recortes de la DF (el PAS4 els escriu i persisteixen, però Premiere els
-            // perd en seleccionar/interactuar amb el clip), re-aplicar-los ABANS de moure.
+            // 🎯 Doble Finestra: si el clip és d'una de les 2 finestres (V4/V5) amb escala de
+            // DF (~68%) i li falten els recortes de la DF (el PAS4 els escriu i persisteixen,
+            // però Premiere els perd en seleccionar/interactuar amb el clip), re-aplicar-los
+            // ABANS de moure.
+            // (2026-09-22) Mapa final de pistes: finestres de la DF = V4 (`video1`, capa
+            // inferior) i V5 (`video2`, capa superior). Mantenir sincronitzat amb el PAS4 de
+            // flow_graphics.js: si es canvia allí, canviar-ho aquí alhora.
             var _dfReap = "noDF";
-            if ((target.track === 2 || target.track === 3) && scale > 50 && scale < 90) {
+            if ((target.track === 4 || target.track === 5) && scale > 50 && scale < 90) {
                 var _pKey2 = "v" + target.track;
                 var _preset2 = (this._dfPreset) ? this._dfPreset[_pKey2] : null;
                 var _pL2 = 0, _pR2 = 0, _pT2 = 0, _pB2 = 0;
@@ -675,8 +679,8 @@ FASTPASS.Anim = {
                     _pR2 = (_preset2.cropRight != null) ? parseFloat(_preset2.cropRight) : 0;
                     _pT2 = (_preset2.cropTop != null) ? parseFloat(_preset2.cropTop) : 0;
                     _pB2 = (_preset2.cropBottom != null) ? parseFloat(_preset2.cropBottom) : 0;
-                } else if (target.track === 3) {
-                    // Fallback: configuració V3 de la DF (mantenir sincronitzada amb PAS4).
+                } else if (target.track === 5) {
+                    // Fallback: configuració de la capa SUPERIOR de la DF (mantenir sincronitzada amb PAS4).
                     _pR2 = 64.5; _pT2 = 14; _pB2 = 15.5;
                 }
                 if (pCropL && _pL2 > 0.01 && cropL <= 0.01) { try { pCropL.setValue(_pL2); } catch(ePL) {} cropL = _pL2; }

@@ -789,6 +789,19 @@
             if (corrected > 0) {
                 log('\uD83D\uDCD0 [ER:IO] ' + corrected + ' duracions corregides a l\'escaleta');
             }
+            // (2026-09-21) SANEJAT GLOBAL d'hores mentideres: abans només s'aplicava dins de
+            // calcPrecisionTrimBounds, però els fluxos de MARCADORS/ANÀLISI tornen a llegir el
+            // JSON i tornaven a donar per bo el TC mentider (cas TNM V2 21/09: "20p7" disparat
+            // a 14:27:34, anterior a l'inici de programa, i amb duradaOnAir "0:-1" corrupta).
+            // Ara es neteja a la CÀRREGA, abans que cap consumidor el llegeixi.
+            try {
+                if (typeof this._sanitizeOnAirLies === 'function') {
+                    var nLies = this._sanitizeOnAirLies(data, null);
+                    if (nLies > 0) log('\uD83D\uDD75\uFE0F [ER:IO] ' + nLies + ' hores mentideres neutralitzades a la càrrega');
+                }
+            } catch (eLies) {
+                log('\u26A0\uFE0F [ER:IO] No s\'han pogut sanejar les hores mentideres: ' + eLies.message, 'WARN');
+            }
             state._escaletaCache = { path: jsonPath, data: data };
             return data;
         } catch (e) {

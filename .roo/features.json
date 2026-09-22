@@ -240,6 +240,110 @@
     ],
     "active": [
       {
+        "id": "SLIDER_NO_ES_MOU_AMB_ESPAI",
+        "desc": "Al pulsar ESPACIO (play), el slider de reencuadre se iba al centro / perdía su posición",
+        "status": "pending_validation",
+        "fix": "main.js: (1) el tick ya no apaga el reencuadre con UNA pérdida momentánea de foco — necesita 2 ticks (~1 s) sin focus (_reframeNoFocusTicks), porque el AppActivate del VBS del ESPACIO hacía perder el foco un instante; (2) _applySliderRange ya NO reposiciona el thumb con la X del clip objetivo (solo aplica el rango y recorta si queda fuera): era el 'cur=333' que recentraba el slider al reactivar el reencuadre; (3) al enviar la tecla ya no se hace devolverFocoHost (blur) porque el VBS ya trae el foco a Premiere. Log: '🎚️ Slider límits(px): … cur=712 (clip=333) …'.",
+        "files": ["js/main.js", "index.html"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "PLAY_PANELL_FOCUS_HOST",
+        "desc": "El ESPACIO no hacía PLAY/PAUSA: el play del panel NUNCA ha funcionado porque qe.project.getActiveSequence().play() NO EXISTE en esta versión de Premiere (log: 'ERR:qe...play is not a function')",
+        "status": "pending_validation",
+        "fix": "Diagnóstico en el log: app.setAppFocus y app.bringToFront NO EXISTEN en esta versión de Premiere (is not a function) y el QE no tiene play(). Solución final: bin/send_space.vbs (WMI → PID de 'Adobe Premiere Pro.exe' → AppActivate → SendKeys ' ') lanzado con File.execute() vía callJSX (wscript: sin consola ni parpadeo; NO se usa IO.executeShell para no abrir un .bat). Solo se envía si el panel tiene el foco (document.hasFocus) y no es un eco propio (anti-bucle 1,5 s). comprobarApisPlay() elige la vía (QE → setAppFocus → bringToFront → VBS) y avisa en el log; devolverFocoHost ya no repite APIs inexistentes. Validado: cscript detecta el PID 15928 ✔.",
+        "files": ["js/main.js", "bin/send_space.vbs", "index.html"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "ESPAI_FOCUS_BOTONS",
+        "desc": "Al pulsar ESPACIO con el foco en un botón del panel (p. ej. ▶ tras usar el slider) se saltaba al clip siguiente en lugar de hacer PLAY/PAUSA",
+        "status": "pending_validation",
+        "fix": "main.js (sección 7): handler global keydown en captura. ESPACIO/ENTER sobre BUTTON/A/input-button → preventDefault + stopPropagation + blur (mata el click fantasma y el foco pegajoso). ESPACIO (fuera de campos de texto, incluido el <input type=range> del slider) → SrtEditor.togglePlay(), que hace el play/stop REAL de Premiere con el QE DOM (app.enableQE(); qe.project.getActiveSequence().play()/.stop()) y, si el visor tiene vídeo, lo alinea; NO exige que el visor tenga vídeo cargado (si no lo tiene, el ESPACIO ya no queda inhábil). Los INPUT de texto/TEXTAREA/SELECT/contenteditable se excluyen. Validado headless (C:\\temp\\fp_space_test.html): ▶ clicks=0, foco→BODY, plays=1/2/3 en los tres escenarios (botón, slider y sin foco), text no interceptado.",
+        "files": ["js/main.js", "index.html"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "INVERSIO_PEREZOSA_TITULILLO",
+        "desc": "El titulillo se enviaba a invertir (ffmpeg) siempre, aunque el reverso no se fuera a colocar en el timeline",
+        "status": "pending_validation",
+        "fix": "flow_chyrons.js: inversión PEREZOSA con caché por fase (getRev()). _placeTemaTitolTransicions solo invierte dentro del bucle de reversos a colocar (cas B / varios TTs grandes); _fillTitulilloGaps solo invierte en la sección 3 si reverseStart > gapStart + 0.20. El log de cobertura ya no lee rev.ok (informa '[sense espai per al revers]'). El congelado no depende del reverso.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "SRT_RESET_REBUSCA",
+        "desc": "El botón RESET (♻️) de subtítulos solo restauraba el SRT ya cargado; ahora vuelve a BUSCAR los .SRT del tema del bloque",
+        "status": "pending_validation",
+        "fix": "Nuevo Workflow.Srt.runSrtReset(): 1) SrtEditor.resetToOriginal() (restaura tabla/marcadores y limpia los clips de subtítulos de la secuencia); 2) vuelve a buscar el .SRT del tema con Scan.mediaAssets(ctx, State.detectedTheme) (carpeta de verticalización, prefijo {archivo}_{bloque}_ + fecha de trabajo) y, si no, Scan.srtFallback (día de trabajo) → SrtEditor.loadSrt(path). main.js: el botón ahora llama callWorkflow('Srt','runSrtReset').",
+        "files": ["js/workflows/flow_srt.js", "js/main.js", "index.html"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "SRT_NOMES_DEL_DIA",
+        "desc": "El fallback de SRT cargaba subtítulos de OTRO día (TNC V1 del 22/09 cargó el .SRT del 21/09 'EMPRESES DE LLEURE... CERDANYA')",
+        "status": "pending_validation",
+        "fix": "Scanner.srtFallback: todos los niveles exigen la fecha de trabajo (N1 = prefijo+data, N2 = cualquier .SRT del día). Eliminados 'prefix (qualsevol data)' y 'qualsevol .SRT de la carpeta'; sin dateDir no carga nada; aviso explícito en log y panel. El mecanismo principal (bloques de 15 min) ya filtraba por fecha.",
+        "files": ["js/logic/Scanner.js", "js/workflows/flow_srt.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "BOTO_MAIN_CUADRAT",
+        "desc": "El botón MAIN cambiaba de forma (se ajustaba al texto) al arrancar el panel y en cada cambio de estado",
+        "status": "pending_validation",
+        "fix": "style.css: regla #btnMainAction/btn-big-sq con width/height/min/max + !important, flex:0 0 auto, box-sizing:border-box y texto ajustado dentro (2 líneas). 4_Context.js: eliminadas las 5 asignaciones className='square-large'/'btn-new' (clase INEXISTENTE: el botón perdía btn-big-sq) y los estilos inline width:100%/minHeight:60px; se limpia el borde rojo del estado LOCKED al cambiar de estado. Validado headless (Edge + style.css real): 60x60 con todos los textos, incluso con width:100% inline o sin la clase.",
+        "files": ["style.css", "js/core/4_Context.js", "index.html"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "REVERS_TITULILLO_FRAME",
+        "desc": "El reverso del titulillo (la animación invertida delante del Tema-Títol) quedaba 1 frame a la izquierda",
+        "status": "pending_validation",
+        "fix": "flow_chyrons.js: el IN del reverso se alinea a la rejilla de frames (Math.ceil((endZone-durP)/FRAME)) porque durP es ESTIMADA (1,02 s = 25,5 frames; el _REV.mov real son 25 frames = 1,00 s) y endZone-durP caía en medio frame (80,66 s = frame 2016,5). Constante REV_FRAME = 0.04. En la fase 6, insertTitol() acepta endSec y ancla el reverso al gran.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "TT_AL_MARCADOR",
+        "desc": "El Tema-Títol grande entraba 1 s (25 frames) después del marcador (se le sumaba el tc del nombre del wott)",
+        "status": "pending_validation",
+        "fix": "flow_chyrons.js: ttPos.time = TC del marcador (sin + tc). Conductor: ttPlaceTime = targetTime (sin tc) → marcador + 6.24. El titulillo de salida y las transiciones se alinean solos.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "GRAF_REF_CLIP_V1",
+        "desc": "El GRAF tomaba como referencia el cabezal (CTI) y no el clip a sustituir",
+        "status": "pending_validation",
+        "fix": "flow_mapa.js: _resolveRefClip (V1 seleccionado → V1 bajo el CTI → otra selección); el material se inserta en el IN del clip y el espacio hábil es su rango [start,end]; congelado alineado al IN; _itemAtCti/_freezeUnderCti reciben la posición de referencia.",
+        "files": ["js/workflows/flow_mapa.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "AUDIO_GRAFISMOS",
+        "desc": "Grafismos/rótulos colocaban su audio enlazado (A1, o A2+ según targeting)",
+        "status": "pending_validation",
+        "fix": "Nuevo Logic.Clips.insertNoAudio: Clips.insert + Clips.at + Clips.removeLinkedAudio (átomo existente) + red de seguridad por NOMBRE (nunca toca el audio del programa). Usado en flow_mapa.js (_placeClips) y flow_retols.js (_placeChyronsByType, traducciones x2).",
+        "files": ["js/logic/6_Clips_Logic.js", "js/workflows/flow_mapa.js", "js/workflows/flow_retols.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "TITULILLO_SALIDA_MARCADOR",
+        "desc": "Titulillo de cobertura: el reverso acababa en la posición calculada del Tema-Títol grande, no en el TC del marcador del ítem",
+        "status": "pending_validation",
+        "fix": "_fillTitulilloGaps (flow_chyrons.js): endZone = TC del marcador del ítem (Markers.get + prefijo) → el reverso termina ahí; el congelado estira hasta el grande (zoneEnd) para no dejar hueco.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "date": "2026-09-22"
+      },
+      {
+        "id": "DF_MAPA_A_CONFIG",
+        "desc": "Doble Finestra/Mapa usaban números de pista fijos (V1/V2/V3) en lugar de la config",
+        "status": "pending_validation",
+        "fix": "flow_graphics.js: PAS0/PAS1/PAS2/PAS3/PAS4, _dpUnlockTracks y runMapa leen tracks.video (mp4/video1/video2/fondos). _colocarFonsMapa recibe la pista fondos. Preset DF con claves 'v'+pista; 7_KF.jsx acepta V4/V5. flow_mapa.js: GRAF/grafismos = graficos (V3) y congelado = tematitol (V6).",
+        "files": ["js/workflows/flow_graphics.js", "jsx/modules/7_KF.jsx", "js/workflows/flow_mapa.js"],
+        "date": "2026-09-22"
+      },
+      {
         "id": "#17",
         "desc": "TNV V3: OUT del MP4 extendido ~41s — posible inconsistencia de datos en la escaleta",
         "status": "investigating",

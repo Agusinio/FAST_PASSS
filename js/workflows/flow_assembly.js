@@ -55,6 +55,9 @@
         placeGraphicMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.placeGraphicMarkers();
         },
+        placeInferredItems: async function () {
+            return FASTPASS_UI.Workflows.Markers.placeInferredItems();
+        },
         _setupEstructural: async function () {
             return FASTPASS_UI.Workflows.Markers._setupEstructural();
         },

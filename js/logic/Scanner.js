@@ -343,15 +343,18 @@
         },
 
         /**
-         * srtFallback: Cerca un .SRT a la carpeta de verticalització (la MATEIXA on
-         * viuen els MP4 del bloc) SENSE els filtres estrictes de Scan.mediaAssets
-         * (que exigeix prefix + data de treball i, si no, retorna buit).
+         * srtFallback: Cerca un .SRT de RECANVI a la carpeta de verticalització (la MATEIXA
+         * on viuen els MP4 del bloc) SENSE els filtres estrictes de Scan.mediaAssets.
          *
-         * Relaxació progressiva (s'atura al primer nivell amb candidats):
-         *   N1: {archivo}_{bloque}_ + DATA de treball (nom o, si no, creació)
-         *   N2: {archivo}_{bloque}_ (qualsevol data)
-         *   N3: qualsevol .SRT de la DATA de treball
-         *   N4: qualsevol .SRT de la carpeta
+         * (2026-09-22) **SEMPRE dins de la DATA DE TREBALL.** Abans hi havia dos nivells sense
+         * filtre de data — «prefix (qualsevol data)» i «qualsevol .SRT de la carpeta» — que
+         * podien carregar subtítols D'UN ALTRE DIA: cas real, el TNC V1 del 22/09 va carregar
+         * el .SRT del 21/09 «EMPRESES DE LLEURE… LA CERDANYA» ✗. Ara, si no hi ha cap .SRT de
+         * la data de treball, NO es carrega res (es diu el motiu al log i al panell).
+         *
+         * Nivells (s'atura al primer amb candidats), tots filtrats per la data de treball:
+         *   N1: {archivo}_{bloque}_ + DATA de treball
+         *   N2: qualsevol .SRT de la DATA de treball
          * Dins de cada nivell es tria el MÉS RECENT (data del nom/creació desc).
          *
          * @param {Object} ctx - { config, progData, bloque, dateDir }
@@ -386,16 +389,26 @@
                 });
 
                 var dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                if (!dateTarget) {
+                    utils.log('[SCAN:srtFallback] Sense data de treball (dateDir) → NO es carrega cap .SRT (per seguretat).', 'WARN');
+                    return null;
+                }
                 var prefix = String(ctx.progData.archivo || '').toUpperCase() + '_' +
                     String(ctx.bloque || '').toUpperCase() + '_';
                 var hasPrefix = function (f) { return (f.name || '').toUpperCase().indexOf(prefix) !== -1; };
-                var ofDate = function (f) { return dateTarget ? (self._fileDateYYYYMMDD(f) === dateTarget) : true; };
+                var ofDate = function (f) { return self._fileDateYYYYMMDD(f) === dateTarget; };
+
+                // (2026-09-22) FILTRE ESTRICTE DE DATA: només .SRT del dia de treball.
+                var delDia = srts.filter(ofDate);
+                if (delDia.length === 0) {
+                    utils.log('[SCAN:srtFallback] Cap .SRT de la data ' + dateTarget + ' a ' + dir +
+                        ' (' + srts.length + ' .SRT d\'altres dies descartats). NO es carrega cap subtítol.', 'WARN');
+                    return null;
+                }
 
                 var levels = [
-                    { level: 1, reason: 'prefix + data de treball', list: srts.filter(function (f) { return hasPrefix(f) && ofDate(f); }) },
-                    { level: 2, reason: 'prefix (qualsevol data)', list: srts.filter(hasPrefix) },
-                    { level: 3, reason: 'data de treball', list: srts.filter(ofDate) },
-                    { level: 4, reason: 'qualsevol .SRT de la carpeta', list: srts }
+                    { level: 1, reason: 'prefix + data de treball', list: delDia.filter(hasPrefix) },
+                    { level: 2, reason: 'data de treball', list: delDia }
                 ];
                 for (var i = 0; i < levels.length; i++) {
                     var L = levels[i];

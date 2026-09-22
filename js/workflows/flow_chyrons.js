@@ -20,6 +20,10 @@
     const log = (m, lvl) => getUtils().log(m, lvl || "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
 
+    // (2026-09-22) 1 frame a 25 fps. S'usa per alinear els titulillos (entrada i revers) a la
+    // rejilla de frames del timeline i per als ajustos d'1 frame de la cobertura.
+    const REV_FRAME = 0.04;
+
     FASTPASS_UI.Workflows.Chyrons = {
 
         // ═══════════════════════════════════════════════════════════════
@@ -398,6 +402,20 @@
         },
 
         /**
+         * _isEnviatWott: El rètol és un ENVIAT (reporter connectat amb la seu)?
+         * NOMÉS aquest tipus es reubica al seu ÍTEM DE CONNEXIÓ. Els altres tipus que també
+         * porten "connexió" al nom o al rol ("Directe PRESENCIAL Berlín", Programes...) es
+         * queden al seu ítem, com sempre (petició d'usuari 2026-09-21).
+         * @param {Object} chy - {name, rol}
+         * @returns {boolean}
+         */
+        _isEnviatWott: function (chy) {
+            const n = String((chy && chy.name) || '').toUpperCase();
+            const r = String((chy && chy.rol) || '').toUpperCase();
+            return n.indexOf('ENVIAT') !== -1 || r.indexOf('ENVIAT') !== -1;
+        },
+
+        /**
          * _isConexioMarker: El marcador és el punt de connexió del directe?
          * Criteris: el comentari conté CONNEXIÓ/CONNEXIO/CONEXIO o el seu id
          * acaba en "dir" (ex: "01dir - CONNEXIÓ DIRECTE ILLA").
@@ -581,9 +599,25 @@
                 if (maxEnd !== null && maxEnd !== undefined && (free + dur) > maxEnd + 0.01) continue;  // no cap dins del límit
                 if (!best || free < best.start) best = { track: tr, start: free, moved: true };
             }
-            // Cap pista dona un forat DINS del límit → es col·loca on tocava (encara
-            // que hagi de compartir uns dècimes): mai a l'ítem anterior.
-            return best || { track: list[0], start: startSec, moved: false };
+            if (best) return best;
+            // (2026-09-21) No hi cap amb la durada completa dins del límit (l'ÍTEM) → es torna a
+            // provar ENCONGINT la durada, perquè el rètol quedi SEMPRE dins del seu ítem
+            // (regla de l'usuari: el marcador és definitiu i un rètol no en pot sortir).
+            if (maxEnd !== null && maxEnd !== undefined && (maxEnd - startSec) > 0.55) {
+                let bestShrunk = null;
+                for (const tr of list) {
+                    const ranges = await this._trackBusyRanges(tr, ctx);
+                    const freeMin = this._firstFreeStart(ranges, startSec, 0.5);
+                    if (freeMin + 0.5 > maxEnd + 0.01) continue;
+                    if (!bestShrunk || freeMin < bestShrunk.start) bestShrunk = { track: tr, start: freeMin };
+                }
+                if (bestShrunk) {
+                    return { track: bestShrunk.track, start: bestShrunk.start, moved: true, shrunk: true, maxDur: maxEnd - bestShrunk.start };
+                }
+            }
+            // Últim recurs (no hauria de passar): la pista està ocupada → es col·loca a l'instant
+            // ideal i es marca overlap perquè el log ho digui ben clar (mai sortint de l'ítem).
+            return { track: list[0], start: startSec, moved: false, overlap: true };
         },
 
         /**
@@ -700,11 +734,44 @@
                 };
                 let allClipsV1 = [];
                 try { allClipsV1 = await getClipsLogic().getTrackClips(1, 'video'); } catch (eCL) { log(`⚠️ [${label}] Sense clips de V1: ${eCL.message}`); }
+                // (2026-09-21) ÍTEMS DE CONNEXIÓ: un rètol "Enviat/Directe/Presencial" pot venir
+                // penjat a un ítem ANTERIOR (tipus donapas) perquè el sistema de ròtols el
+                // genera amb el lineID del donapas. Mana el seu ÍTEM DE CONNEXIÓ: es busca el
+                // marcador de connexió i el rètol es col·loca ALLÀ (amb la finestra d'aquell ítem).
+                const markerLabelByTime = {};
+                for (const m of structuralMarkers) { markerLabelByTime[(m.time || 0).toFixed(2)] = String(m.comments || ''); }
+                const labelDe = (t) => markerLabelByTime[(t || 0).toFixed(2)] || '';
+                const conexioDe = {};    // nom del rètol → time del marcador de connexió
+                const conexioPer = {};   // time del marcador de connexió (2 decimals) → [chyrons]
+                for (const mk0 of markersFull) {
+                    const e0 = structureById[mk0.fullId];
+                    if (!e0 || !e0.chyrons) continue;
+                    for (const c0 of e0.chyrons) {
+                        // NOMÉS el tipus ENVIAT es reubica al seu ítem de connexió (els rètols
+                        // "Directe PRESENCIAL Berlín"/Programes es queden al seu ítem, com sempre).
+                        if (!filterFn(c0) || !this._isEnviatWott(c0)) continue;
+                        const tCx = this._connexioMarkerTime(allMarkers, mk0.time);
+                        if (tCx === null || Math.abs(tCx - mk0.time) < 0.05) continue;   // ja és al seu ítem
+                        conexioDe[c0.name] = tCx;
+                        const k = tCx.toFixed(2);
+                        (conexioPer[k] = conexioPer[k] || []).push(c0);
+                        log(`   🔌 [${label}] CONNEXIÓ: "${String(c0.name).substring(0, 50)}…" ve penjat a l'ítem ${mk0.fullId} @ ${mk0.time.toFixed(2)}s → es col·locarà a l'ítem de connexió "${labelDe(tCx)}" @ ${tCx.toFixed(2)}s`);
+                    }
+                }
                 let placedCount = 0;
                 for (const mk of markersFull) {
                     const entry = structureById[mk.fullId];
-                    if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
-                    let matching = entry.chyrons.filter(c => filterFn(c));
+                    let matching = (entry && entry.chyrons) ? entry.chyrons.filter(c => filterFn(c)) : [];
+                    // Els rètols de connexió que pertanyen a un ALTRE ítem es treuen d'aquí...
+                    if (matching.length > 0 && Object.keys(conexioDe).length > 0) {
+                        matching = matching.filter(c => !(this._isEnviatWott(c) && conexioDe[c.name] !== undefined && Math.abs(conexioDe[c.name] - mk.time) > 0.05));
+                    }
+                    // ...i s'afegeixen a l'ítem de la SEVA connexió.
+                    const vinguts = (conexioPer[mk.time.toFixed(2)] || []).filter(c => !matching.some(m => m.name === c.name));
+                    if (vinguts.length > 0) {
+                        matching = matching.concat(vinguts);
+                        log(`   🔌 [${label}] Marcador ${mk.fullId} @ ${mk.time.toFixed(2)}s: +${vinguts.length} rètol(s) de connexió provinents d'un altre ítem`);
+                    }
                     if (matching.length === 0) continue;
                     // TITOLET: el sistema genera variants de posició i versions del
                     // mateix rètol; es deixa només la més recent de cada text.
@@ -740,37 +807,54 @@
                         const snapped = doSnap ? await this._snapToNearestCut(idealTime) : idealTime;
                         const durInfo = FASTPASS_UI.Logic.Project._resolveWottDur(wottIdx, chy);
 
-                        // Clip de referència = el clip de V1 que conté l'instant ideal.
-                        // El rètol hi entra 10 frames després del seu inici i S'ACURTA
-                        // si el clip s'acaba abans que el wott. MAI s'allarga: si el
-                        // wott és més curt que el clip, conserva la seva durada pròpia
-                        // (regla de l'usuari, 16/09).
+                        // Clip de referència = el clip de V1 que conté l'instant ideal. El rètol
+                        // hi entra 10 frames després de l'inici del clip O del marcador de l'ítem
+                        // (el que sigui més tard) i S'ACURTA si l'ítem s'acaba abans que el wott.
+                        // MAI s'allarga: si el wott és més curt que el clip, conserva la seva
+                        // durada pròpia (regla de l'usuari, 16/09 · marcador sagrat, 21/09).
                         let placeStart = snapped, placeEnd = null;
+                        // (2026-09-21) EL MARCADOR DELIMITA L'ÍTEM: un rètol no pot entrar mai
+                        // ABANS del seu marcador ni sortir-se'n (ni passar del SEGÜENT marcador).
+                        // Els talls de Premiere NO són frontera fiable — entre dos INSERTS hi ha
+                        // efectes que no es detecten com a tall — així que l'entrada és
+                        // max(inici del clip de V1, marcador de l'ítem) + 10 frames.
+                        let limSlot = null;
                         if (doSnap && allClipsV1.length > 0) {
                             const ci = this._clipAtInstant(allClipsV1, snapped);
                             if (ci) {
                                 const durOwn = (durInfo.dur > 0) ? durInfo.dur : null;   // si no es resol, mana el media
-                                placeStart = ci.start + CHYRON_OFFSET_SEC;
-                                // Límit = el que arribi ABANS: final del clip de V1 de referència
-                                // o el SEGÜENT marcador (efectes no detectats com a tall). Es
-                                // compta des del marcador de l'ÍTEM (mk.time), no des de placeStart,
-                                // perquè si el clip de V1 comença abans el límit seria el propi.
-                                const nm = nextMarkerAfter(mk.time);
-                                let lim = ci.end, limWhy = 'final del clip';
-                                if (nm !== null && nm > placeStart + 0.1 && nm < lim) {
+                                placeStart = Math.max(ci.start, mk.time) + CHYRON_OFFSET_SEC;
+                                // Límit DUR: el SEGÜENT marcador (frontera de l'ítem). Si no n'hi ha
+                                // cap, el final del clip de V1 de referència.
+                                // (2026-09-21) ÍTEM EFECTIU = el que CONTÉ l'instant d'entrada: per als
+                                // rètols de connexió (Enviat/Directe/Presencial) ancorats al PUNT DE
+                                // CONNEXIÓ, la finestra és la de l'ÍTEM DE CONNEXIÓ, no la de l'ítem que
+                                // porta el número al nom (donapas) — si no, quedarien fora i saltats.
+                                let mkEff = mk;
+                                for (const m of markersFull) {
+                                    if (m.time <= placeStart + 0.01 && m.time >= mkEff.time) mkEff = m;
+                                }
+                                const nm = nextMarkerAfter(mkEff.time);
+                                let lim, limWhy;
+                                if (nm !== null && nm > mkEff.time + 0.1) {
                                     lim = nm;
                                     limWhy = 'marcador ' + nm.toFixed(2) + 's';
+                                } else {
+                                    lim = ci.end;
+                                    limWhy = 'final del clip (sense marcador següent)';
                                 }
+                                limSlot = lim;
                                 placeEnd = (durOwn === null) ? lim : Math.min(lim, placeStart + durOwn);
                                 // Protecció: si el clip de referència és tan curt que no hi
                                 // cap ni l'offset de 10 frames, no s'hi posa rètol (abans
                                 // sortien durades negatives, p.ex. @135.92→135.76).
                                 if (placeEnd <= placeStart + 0.05) {
-                                    log(`   ⏭️ [${label}] ${String(chy.name).substring(0, 34)}… saltat: clip de referència massa curt (${(lim - ci.start).toFixed(2)}s)`, "WARN");
+                                    log(`   ⏭️ [${label}] ${String(chy.name).substring(0, 34)}… saltat: l'ítem no té espai ni per a l'offset de 10 frames (${(lim - placeStart).toFixed(2)}s disponibles)`, "WARN");
                                     continue;
                                 }
                                 const trimmed = (durOwn !== null && placeStart + durOwn > lim + 0.001);
                                 log(`   📐 [${label}] ${String(chy.name).substring(0, 34)}… → clip [${ci.start.toFixed(2)}-${ci.end.toFixed(2)}] → entra a ${placeStart.toFixed(2)}s (+${CHYRON_OFFSET_FRAMES}f), surt a ${(placeEnd === null ? placeStart + Math.max(durInfo.dur, 0.5) : placeEnd).toFixed(2)}s` +
+                                    (mkEff.fullId !== mk.fullId ? ` [ítem ${mkEff.fullId}]` : '') +
                                     (trimmed ? ' (acurtat per ' + limWhy + ')' : ' (durada pròpia del wott)'));
                             }
                         } else if (!doSnap) {
@@ -782,17 +866,33 @@
                             }
                         }
                         const chyronDur = (placeEnd !== null) ? Math.max(0.5, placeEnd - placeStart) : durInfo.dur;
-                        // maxEnd = el límit del wott (final del clip de referència o següent
-                        // marcador) → _chooseSlot no pot desplaçar-lo fora d'aquest rang.
+                        // maxEnd = límit de l'ÍTEM (final del clip de referència o següent
+                        // marcador) → _chooseSlot pot buscar un forat lliure en tot l'ítem però
+                        // mai colar-se a l'ítem anterior ni al següent (2026-09-21).
                         const slot = await this._chooseSlot(trackResolver(chy, cfg), placeStart, chyronDur, ctx,
-                            (placeEnd !== null) ? placeEnd : null);
+                            (limSlot !== null) ? limSlot : ((placeEnd !== null) ? placeEnd : null));
                         if (!slot.track) {
                             log(`   ⚠️ [${label}] Sense pista disponible per a ${chy.name}`, "WARN");
                             continue;
                         }
+                        if (slot.shrunk) {
+                            log(`   ⚠️ [${label}] ${String(chy.name).substring(0, 30)}… escurçat a ${(slot.maxDur || 0).toFixed(2)}s per encabir-se dins del seu ítem @ ${slot.start.toFixed(2)}s`, "WARN");
+                        }
+                        if (slot.overlap) {
+                            log(`   ⚠️ [${label}] ${String(chy.name).substring(0, 30)}… SENSE ESPAI LLIURE a la pista: col·locat sobre un altre rètol @ ${slot.start.toFixed(2)}s`, "WARN");
+                        }
                         if (placeEnd !== null && slot.moved) {
+                            // El final mai pot passar del límit de l'ÍTEM (marcador següent) ni
+                            // del forat disponible si el rètol s'ha hagut d'escurçar.
                             const ci2 = this._clipAtInstant(allClipsV1, slot.start);
-                            if (ci2) placeEnd = (durInfo.dur > 0) ? Math.min(ci2.end, slot.start + durInfo.dur) : null;
+                            let end2 = (durInfo.dur > 0) ? (slot.start + durInfo.dur) : (ci2 ? ci2.end : null);
+                            if (ci2 && end2 !== null) end2 = Math.min(end2, ci2.end);
+                            if (limSlot !== null && end2 !== null) end2 = Math.min(end2, limSlot);
+                            if (slot.shrunk && slot.maxDur) {
+                                const maxE = slot.start + slot.maxDur;
+                                end2 = (end2 === null) ? maxE : Math.min(end2, maxE);
+                            }
+                            placeEnd = end2;
                         }
                         const escapedName = getUtils().escape(chy.name);
                         const endParam = (placeEnd !== null) ? placeEnd.toFixed(4) : 'null';
@@ -917,31 +1017,61 @@
                 // Ordenar per POSICIÓ REAL: el 1r Tema-Títol és el que obre el bloc i el seu
                 // congelat s'estén fins al següent. Sense ordenar, el freeze anava cap enrere
                 // (p.ex. placeTime=116.92s amb stretchEnd=1.00s).
-                ttList.sort((a, b) => {
-                    const ra = markerTimeFor(a.item), rb = markerTimeFor(b.item);
-                    const pa = (ra.time !== null) ? ra.time : startOfBlock;
-                    const pb = (rb.time !== null) ? rb.time : startOfBlock;
-                    return pa - pb;
-                });
+                const baseOf = (itemId) => {
+                    const n = FASTPASS_UI.Logic.Project.normItemId(itemId);
+                    const bm = n.match(/^\d+/);
+                    return { norm: n, base: bm ? bm[0] : n };
+                };
+                const ttPos = ttList.map(t => {
+                    const refInfo = markerTimeFor(t.item);
+                    // (2026-09-22) El Tema-Títol GRAN entra EXACTAMENT al TC del marcador de
+                    // l'ítem. ABANS s'hi sumava el tc del nom del wott ("00.01" → +1,00 s =
+                    // 25 frames @25fps) i entrava més tard del marcador (queixa de l'usuari).
+                    // La referència és l'IN del clip: el wott s'insereix amb start = marcador i
+                    // la seva animació arrenca al primer frame. El tc queda al log com a dada.
+                    const tcSec = getUtils().timeToSeconds(t.tc || "000000");
+                    const bi = baseOf(t.item);
+                    return {
+                        tt: t,
+                        ref: refInfo.ref + ' · tc wott ' + String(t.tc || '000000') + (tcSec > 0.01 ? ' (' + tcSec.toFixed(2) + 's IGNORAT: el gran va al marcador)' : ''),
+                        time: (refInfo.time !== null) ? refInfo.time : startOfBlock,
+                        hasMarker: (markersById[bi.norm] !== undefined) || (markersByBase[bi.base] !== undefined)
+                    };
+                }).sort((a, b) => a.time - b.time);
+
+                // (2026-09-22) BLINDATGE contra el doble Tema-Títol: dos Tema-Títols a la MATEIXA
+                // posició (típicament dos ítems del bloc sense marcador propi → tots dos cauen a
+                // l'inici del bloc) fan que el segon tapï el primer. En cas de col·lisió es
+                // prefereix el de l'ítem que TÉ marcador a la seqüència; si cap en té, es queda el primer.
+                const ttFinal = [];
+                for (const p of ttPos) {
+                    const dup = ttFinal.find(x => Math.abs(x.time - p.time) < 0.05);
+                    if (!dup) { ttFinal.push(p); continue; }
+                    const nameP = String(p.tt.name).substring(0, 45);
+                    const nameD = String(dup.tt.name).substring(0, 45);
+                    if (p.hasMarker && !dup.hasMarker) {
+                        log(`   🔁 [Titol] A ${p.time.toFixed(2)}s el candidat "${nameD}" (ítem ${dup.tt.item}, sense marcador) es canvia per "${nameP}" (ítem ${p.tt.item}, amb marcador)`, 'WARN');
+                        dup.tt = p.tt; dup.ref = p.ref; dup.hasMarker = true;
+                    } else {
+                        log(`   ⏭️ [Titol] "${nameP}" (ítem ${p.tt.item}) aniria també a ${p.time.toFixed(2)}s → se surt (taparia "${nameD}")`, 'WARN');
+                    }
+                }
+                if (ttFinal.length < ttPos.length) {
+                    log(`   🛡️ [Titol] ${ttPos.length - ttFinal.length} Tema-Títol(s) descartat(s) per col·lisió de posició`);
+                }
 
                 let placed = 0;
-                for (let i = 0; i < ttList.length; i++) {
-                    const tt = ttList[i];
-                    const tcSec = getUtils().timeToSeconds(tt.tc || "000000");
-                    const refInfo = markerTimeFor(tt.item);
-                    const placeTime = (refInfo.time !== null) ? (refInfo.time + tcSec) : startOfBlock;
+                const ttPlaced = [];
+                for (let i = 0; i < ttFinal.length; i++) {
+                    const tt = ttFinal[i].tt;
+                    const placeTime = ttFinal[i].time;
+                    ttPlaced.push({ placeTime: placeTime, item: tt.item });
 
                     // Final del freeze: el següent Tema‑Titol gran, o el final del bloc
-                    let stretchEnd = null;
-                    if (i < ttList.length - 1) {
-                        const nextRef = markerTimeFor(ttList[i + 1].item);
-                        if (nextRef.time !== null) {
-                            stretchEnd = nextRef.time + getUtils().timeToSeconds(ttList[i + 1].tc || "000000");
-                        }
-                    }
+                    let stretchEnd = (i < ttFinal.length - 1) ? ttFinal[i + 1].time : null;
                     if (stretchEnd === null) stretchEnd = (seqEnd && seqEnd > 0) ? seqEnd : null;
 
-                    log(`📌 [Titol] ${i + 1}/${ttList.length} "${String(tt.name).substring(0, 60)}" → ${placeTime.toFixed(2)}s (${refInfo.ref}) · freeze fins ${stretchEnd !== null ? stretchEnd.toFixed(2) + 's' : 'final'}`);
+                    log(`📌 [Titol] ${i + 1}/${ttFinal.length} "${String(tt.name).substring(0, 60)}" → ${placeTime.toFixed(2)}s (${ttFinal[i].ref}) · freeze fins ${stretchEnd !== null ? stretchEnd.toFixed(2) + 's' : 'final'}`);
 
                     try {
                         const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
@@ -953,6 +1083,42 @@
                         log(`   ❌ [Titol] Freeze fallit per ${tt.name}: ${freezeErr.message}`, "ERROR");
                     }
                     await getUtils().delay(200);
+                }
+
+                // ── 6. TRANSICIONS amb el TEMA-TÍTOL PETIT ("titulillo") ──────────────────
+                // (2026-09-21) El titulillo (~1 s, amb animació) s'usa com a transició:
+                // entrant a l'inici del bloc (si el gran va després del conductor) i sortint
+                // (versió invertida per ffmpeg) just abans de cada Tema-Títol gran.
+                try {
+                    await this._placeTemaTitolTransicions({
+                        struct: struct,
+                        wottIdx: wottIdx,
+                        ttPlaced: ttPlaced,
+                        clipStart: clipStart,
+                        track: T_THEME,
+                        minSec: MIN_SEC,
+                        case: this._lastTitolCase || 'A'
+                    });
+                } catch (eTT) {
+                    log(`   ⚠️ [Titol·Petit] Transicions fallides: ${eTT.message}`, "WARN");
+                }
+
+                // ── 7. COBERTURA: "sempre hi ha d'haver titulillo" (2026-09-22) ────────────
+                // Si el Tema-Títol gran entra tard (el seu ítem és a mig bloc), V5 queda buida
+                // des de l'inici: s'hi col·loca el titulillo (identitat del programa) + el
+                // congelat estirat + el titulillo invertit per transicionar al gran.
+                try {
+                    await this._fillTitulilloGaps({
+                        struct: struct,
+                        wottIdx: wottIdx,
+                        ttPlaced: ttPlaced,
+                        clipStart: clipStart,
+                        track: T_THEME,
+                        minSec: MIN_SEC,
+                        minGapSec: 2.5
+                    });
+                } catch (eFg) {
+                    log(`   ⚠️ [Titol·Petit·cobertura] ${eFg.message}`, "WARN");
                 }
 
                 if (placed === 0) {
@@ -1012,6 +1178,9 @@
             const cfg = FASTPASS_UI.Config.get();
             const MIN_MARGEN_CASA = 0.40 + 6.24 + 4.40; // ~11.04s
             let placeTime = clipStart + 0.40;
+            // (2026-09-21) Es guarda el CAS triat: el TEMA-TÍTOL PETIT (titulillo) fa la
+            // transició d'entrada només en CasB (el gran va DESPRÉS del conductor).
+            this._lastTitolCase = 'A';
             try {
                 const v6Count = parseInt(await callJSX(`Clips.count(${cfg.tracks.video.chyrons}, 'video')`) || '0');
                 if (v6Count > 0) {
@@ -1023,7 +1192,21 @@
                         for (const m of sortedM) {
                             if (m.time > clipStart + 0.5) { nextMarkerTime = Math.min(nextMarkerTime, m.time); break; }
                         }
-                        const margen = nextMarkerTime - clipStart;
+                        // (2026-09-21) La finestra disponible s'ha de mesurar com ho fa el
+                        // CONDUCTOR (placeChyronConductor → marge del CLIP). El Titol només
+                        // mirava el marcador següent, i amb un clip de 6.20s però el marcador
+                        // lluny, triava CasA (0.40s) mentre el Conductor triava CasB (també
+                        // 0.40s) → s'hi trepitjaven. Ara: marge = MÍNIM(marcador, clip).
+                        let margenClip = null;
+                        try {
+                            const clipsV1 = await getClipsLogic().getTrackClips(cfg.tracks.video.mp4 || 1, 'video');
+                            let bc = null;
+                            for (const cl of clipsV1) { if (cl.start <= clipStart + 0.01 && cl.end > clipStart) { bc = cl; break; } }
+                            if (!bc) { for (const cl of clipsV1) { if (cl.start >= clipStart - 0.05) { bc = cl; break; } } }
+                            if (bc) margenClip = bc.end - clipStart;
+                        } catch (eMC) { }
+                        const margenMarker = nextMarkerTime - clipStart;
+                        const margen = (margenClip !== null) ? Math.min(margenMarker, margenClip) : margenMarker;
                         // (2026-09-18) CasB: el Tema-Títol ha d'entrar quan ACABA el rètol
                         // del conductor (durada REAL del clip, p.ex. 0.40+3.79=4.19s), no
                         // amb la constant 4.40s (que donava 4.80s). La constant queda només
@@ -1036,13 +1219,284 @@
                         } else {
                             placeTime = clipStart + 0.40 + 4.40;          // CasB (fallback)
                         }
+                        this._lastTitolCase = (margen >= MIN_MARGEN_CASA) ? 'A' : 'B';
                         log(`📌 [Titol·Cas${margen >= MIN_MARGEN_CASA ? 'A' : 'B'}] inici del bloc @ ` +
                             `${placeTime.toFixed(2)}s` +
-                            (condEnd !== null ? ` (fi del rètol conductor @ ${condEnd.toFixed(2)}s)` : ' (constant 4.40s)'));
+                            (condEnd !== null ? ` (fi del rètol conductor @ ${condEnd.toFixed(2)}s)` : ' (constant 4.40s)') +
+                            ` [marge=${margen.toFixed(2)}s: marcador=${margenMarker.toFixed(2)}s` +
+                            (margenClip !== null ? `, clip=${margenClip.toFixed(2)}s` : '') + `]`);
                     }
                 }
             } catch (e) { }
             return placeTime;
+        },
+
+        /**
+         * _ensureReversedTitolPetit: Assegura la versió INVERTIDA (ffmpeg) del titulillo i
+         * l'importa al bin CHY. Es genera un sol cop: si ja existeix (`FFmpeg.reverse` ho
+         * comprova), es reutilitza.
+         * (2026-09-22) Es crida de forma **PEREZOSA** (`getRev()` a
+         * `_placeTemaTitolTransicions` / `_fillTitulilloGaps`): només s'envia a invertir quan
+         * el revers s'ha de col·locar de veritat al timeline.
+         * @param {{name:string, path:string, dur:number}} petit
+         * @returns {Promise<{ok:boolean, name:string, path:string}>}
+         */
+        _ensureReversedTitolPetit: async function (petit) {
+            const ff = (window.FASTPASS_UI && window.FASTPASS_UI.Logic) ? window.FASTPASS_UI.Logic.FFmpeg : null;
+            if (!ff || typeof ff.reverse !== 'function') {
+                log('   ⚠️ [Titol·Petit] Lògica FFmpeg no disponible: no es pot invertir el titulillo', 'WARN');
+                return { ok: false, name: '', path: '' };
+            }
+            const src = (petit && petit.path) || '';
+            if (!src) {
+                log('   ⚠️ [Titol·Petit] El titulillo no té ruta al manifest → no es pot invertir', 'WARN');
+                return { ok: false, name: '', path: '' };
+            }
+            const res = await ff.reverse(src, null, 'CHY');
+            if (!res || !res.ok) {
+                log(`   ⚠️ [Titol·Petit] Inversió fallida: ${res ? res.error : '?'}`, 'WARN');
+                return { ok: false, name: '', path: '' };
+            }
+            log(`   🔄 [Titol·Petit] Versió invertida llesta: ${res.name}`);
+            return { ok: true, name: res.name, path: res.path };
+        },
+
+        /**
+         * _placeTemaTitolTransicions: Transicions amb el TEMA-TÍTOL PETIT ("titulillo").
+         *
+         * El titulillo és el Tema-Títol d'~1 s (qtrle amb alpha) amb animació d'entrada que
+         * fins ara es descartava. La seva versió INVERTIDA (ffmpeg) fa d'animació de SORTIDA.
+         * Col·locacions, a la pista de Tema-Títol:
+         *   • CasB (el Tema-Títol gran va DESPRÉS del conductor): titulillo ENTRANT a l'inici
+         *     del bloc + titulillo SORTINT just abans del primer gran.
+         *   • Amb més d'un Tema-Títol gran: titulillo SORTINT just abans de cada següent
+         *     (transició "entre temes").
+         * @param {Object} p - {struct, wottIdx, ttPlaced:[{placeTime}], clipStart, track, minSec, case}
+         * @returns {Promise<number>} Nombre de transicions col·locades
+         */
+        _placeTemaTitolTransicions: async function (p) {
+            const petit = FASTPASS_UI.Logic.Project.pickTemaTitolPetit(p.struct, p.wottIdx, p.minSec);
+            if (!petit) {
+                log(`   ℹ️ [Titol·Petit] Cap titulillo petit (≤${p.minSec}s) al bin CHY: sense transicions.`);
+                return 0;
+            }
+            log(`   🎬 [Titol·Petit] Titulillo triat: "${String(petit.name).substring(0, 60)}" (${petit.dur.toFixed(2)}s, id=${petit.idNum})`);
+            // (2026-09-22) INVERSIÓ PEREZOSA: el titulillo NOMÉS s'envia a invertir (ffmpeg) la
+            // primera vegada que realment s'ha de col·locar un revers al timeline. Si el bloc no
+            // necessita cap sortida (p. ex. cas A amb un sol Tema-Títol gran), no es toca ffmpeg.
+            // Abans es generava SEMPRE, encara que després no s'usés enlloc.
+            let _revCache = null;
+            const getRev = async () => {
+                if (_revCache === null) _revCache = await this._ensureReversedTitolPetit(petit);
+                return _revCache;
+            };
+            const durP = petit.dur;
+            const insertTitol = async (name, start, label, endSec) => {
+                if (!name || !(durP > 0.05) || start < p.clipStart) return false;
+                const esc = getUtils().escape(name);
+                const endTarget = (typeof endSec === 'number') ? endSec : (start + durP);
+                const ins = await callJSX(`Clips.insert('${esc}', ${p.track}, ${start.toFixed(4)}, null, 'video')`);
+                const end = await callJSX(`Clips.endAt(${p.track}, ${start.toFixed(4)}, ${endTarget.toFixed(4)}, 'video')`);
+                log(`      ${label} → V${p.track} @ ${start.toFixed(2)}s→${endTarget.toFixed(2)}s (${(endTarget - start).toFixed(2)}s) [ins=${ins} · end=${end}]`);
+                return true;
+            };
+            let n = 0;
+            // a) ENTRANT (direcció normal) a l'inici del bloc — només si el gran va després del conductor
+            if (p.case === 'B') {
+                if (await insertTitol(petit.name, p.clipStart + 0.40, '🟢 [Titol·Petit] ENTRANT')) n++;
+            }
+            // b) SORTINT (versió invertida) just abans de cada Tema-Títol gran (el primer, només en CasB)
+            for (let i = 0; i < p.ttPlaced.length; i++) {
+                const target = p.ttPlaced[i].placeTime;
+                // (2026-09-22) IN del revers ALINEAT a la rejilla de frames: amb la durada
+                // estimada del wott (p. ex. 1,02 s = 25,5 frames) `target - durP` cau en un MIG
+                // frame, Premiere el snapea cap enrere i el revers quedava 1 frame a l'esquerra
+                // del Tema-Títol. Amb ceil() encaixa exactament contra el gran.
+                const start = Math.ceil((target - durP) / REV_FRAME - 1e-6) * REV_FRAME;
+                if (start < p.clipStart + 0.10) continue;
+                if (i === 0 && p.case !== 'B') continue;
+                // (2026-09-22) Ara sí: només invertim quan el revers ha d'anar al timeline.
+                const rev = await getRev();
+                if (!rev.ok) {
+                    log(`   ⚠️ [Titol·Petit] Sense versió invertida: no es col·loca la sortida @ ${start.toFixed(2)}s`, 'WARN');
+                    continue;
+                }
+                if (await insertTitol(rev.name, start, `🔴 [Titol·Petit] SORTINT (abans del gran ${i + 1}/${p.ttPlaced.length})`, target)) n++;
+            }
+            if (n > 0) log(`   ✨ [Titol·Petit] ${n} transició(ns) de titulillo col·locades`, 'INFO');
+            return n;
+        },
+
+        /**
+         * _fillTitulilloGaps (2026-09-22): "SEMPRE hi ha d'haver titulillo".
+         *
+         * Quan el Tema-Títol GRAN entra tard (el seu ítem és a mig bloc, cas TN_MIGDIA
+         * 21/09: el gran anava a 107,88s), la pista de Tema-Títol (V5) queda BUIDA des de
+         * l'inici del bloc fins a ell. Aquest mètode busca aquests buits i els omple amb la
+         * identitat del programa:
+         *
+         *     [titulillo animat] → [congelat estirat] → [titulillo invertit] → [Tema-Títol gran]
+         *
+         *  - El titulillo és el Tema-Títol petit (~1s, qtrle amb alpha).
+         *  - El congelat (PNG net del titulillo via Render.snapshot) permet ALLARGAR-LO fins al
+         *    gran (mateixa mecànica que _freezeTemaTitol, amb el desplaçament = durada del
+         *    titulillo en lloc de 8s).
+         *  - El titulillo INVERTIT (ffmpeg) fa la transició d'entrada al Tema-Títol gran.
+         *  - (2026-09-22) El revers acaba al TC del MARCADOR de l'ítem (`Markers.get()` +
+         *    prefix del nº), no a la posició calculada del gran.
+         *
+         * NOMÉS actua sobre ZONES BUIDES de V5: no trepitja cap clip existent.
+         *
+         * @param {Object} p - {struct, wottIdx, ttPlaced:[{placeTime}], clipStart, track, minSec, minGapSec}
+         * @returns {Promise<number>} Nombre de buits omplerts
+         */
+        _fillTitulilloGaps: async function (p) {
+            const utils = getUtils();
+            const T = p.track;
+            const MIN_FILL = (typeof p.minGapSec === 'number') ? p.minGapSec : 2.5;
+            if (!p.ttPlaced || p.ttPlaced.length === 0) return 0;
+            const petit = FASTPASS_UI.Logic.Project.pickTemaTitolPetit(p.struct, p.wottIdx, p.minSec);
+            if (!petit || !(petit.dur > 0.05)) {
+                log('   ℹ️ [Titol·Petit·cobertura] Cap titulillo petit al bin CHY: no es pot cobrir el buit.');
+                return 0;
+            }
+            const durP = petit.dur;
+            // (2026-09-22) 1 frame @25fps. El titulillo NO s'ha d'estirar més enllà de la seva
+            // durada real (si s'estira, el darrer frame es veu buit i "desapareix" un moment) i
+            // el congelat ha d'entrar EXACTAMENT on acaba el titulillo (1 frame abans de durP,
+            // si no el buit s'allarga un frame més).
+            const FRAME = 0.04;
+            const escapedPetit = utils.escape(petit.name);
+            // (2026-09-22) INVERSIÓ PEREZOSA (vegeu _placeTemaTitolTransicions): el revers només
+            // s'envia a invertir (ffmpeg) si el buit s'ha d'omplir de veritat (secció 3 del bucle).
+            let _revCache = null;
+            const getRev = async () => {
+                if (_revCache === null) _revCache = await this._ensureReversedTitolPetit(petit);
+                return _revCache;
+            };
+
+            let clipsV5 = [];
+            try { clipsV5 = (await getClipsLogic().getTrackClips(T, 'video')) || []; } catch (eC) { clipsV5 = []; }
+            clipsV5 = clipsV5.slice().sort((a, b) => a.start - b.start);
+
+            // (2026-09-22) MARCADORS: el titulillo de SALIDA (revers) ha d'acabar al TC del
+            // marcador de l'ítem (emparellat pel PREFIX del nº, mateixa normalització que
+            // placeChyronTitol) i no a la posició calculada del Tema-Títol gran (que és
+            // marcador + tc del wott). Així la sortida mor just al marcador i el gran hi entra.
+            let markersById = {}, markersByBase = {};
+            try {
+                const mRaw = await callJSX('Markers.get()');
+                const mAll = mRaw ? JSON.parse(mRaw) : [];
+                const STRUCT_RE = /^\d+[a-z]{0,3}\s*-\s*.+$/i;
+                for (const m of mAll) {
+                    if (!STRUCT_RE.test((m.comments || '').trim())) continue;
+                    const norm = FASTPASS_UI.Logic.Project.normItemId(String(m.comments || "").split('-')[0].trim());
+                    if (!norm) continue;
+                    if (markersById[norm] === undefined || m.time < markersById[norm]) markersById[norm] = m.time;
+                    const bm = norm.match(/^\d+/);
+                    const base = bm ? bm[0] : norm;
+                    if (markersByBase[base] === undefined || m.time < markersByBase[base]) markersByBase[base] = m.time;
+                }
+            } catch (eMk) { }
+            const markerTimeForItem = (itemId) => {
+                const norm = FASTPASS_UI.Logic.Project.normItemId(itemId);
+                const bm = norm.match(/^\d+/);
+                const base = bm ? bm[0] : norm;
+                // El marcador a 0 no és cap posició d'emissió real (vegeu placeChyronTitol).
+                if (markersById[norm] !== undefined && markersById[norm] >= 0.5) return markersById[norm];
+                if (markersByBase[base] !== undefined && markersByBase[base] >= 0.5) return markersByBase[base];
+                return null;
+            };
+
+            // Insert + fixar el final (l'endSec de Clips.insert pot acabar al darrer clip de la pista)
+            const insEnd = async (name, start, end, label) => {
+                const ins = await callJSX(`Clips.insert('${utils.escape(name)}', ${T}, ${start.toFixed(4)}, null, 'video')`);
+                const e2 = await callJSX(`Clips.endAt(${T}, ${start.toFixed(4)}, ${end.toFixed(4)}, 'video')`);
+                log(`      ${label} → V${T} @ ${start.toFixed(2)}s→${end.toFixed(2)}s [ins=${ins} · end=${e2}]`);
+            };
+
+            let fets = 0;
+            const ordenats = p.ttPlaced.slice().sort((a, b) => a.placeTime - b.placeTime);
+            for (let i = 0; i < ordenats.length; i++) {
+                const ttTime = ordenats[i].placeTime;
+                // (2026-09-22) El revers (titulillo de SALIDA) acaba al TC del MARCADOR de
+                // l'ítem; si l'ítem no té marcador propi es manté la posició del gran.
+                const mkTime = markerTimeForItem(ordenats[i].item);
+                const endZone = (mkTime !== null) ? mkTime : ttTime;
+                const zoneEnd = Math.max(endZone, ttTime);   // el congelat mai deixa forat davant del gran
+                // Inici del buit = final de l'últim clip de V5 que comença abans del gran
+                let gapStart = p.clipStart + 0.40;
+                for (let ci = 0; ci < clipsV5.length; ci++) {
+                    const c = clipsV5[ci];
+                    if (c.start < ttTime - 0.05 && c.end > gapStart) gapStart = c.end;
+                }
+                const gapDur = zoneEnd - gapStart;
+                if (gapDur < MIN_FILL) {
+                    log(`   ℹ️ [Titol·Petit·cobertura] Buit de ${gapDur.toFixed(2)}s abans del gran ${i + 1}: no s'omple (mínim ${MIN_FILL}s).`);
+                    continue;
+                }
+                const sortMax = (mkTime !== null) ? mkTime : ttTime;
+                const sortPosOk = (sortMax - durP) > gapStart + 0.20;
+                log(`   🕳️ [Titol·Petit·cobertura] Buit de ${gapDur.toFixed(2)}s a V${T} (${gapStart.toFixed(2)}s→${zoneEnd.toFixed(2)}s): titulillo + congelat + revers` +
+                    ` · sortida fins a ${sortMax.toFixed(2)}s (${mkTime !== null ? 'marcador de l\'ítem ' + ordenats[i].item : 'el gran'})` +
+                    (sortPosOk ? '' : ' [sense espai per al revers]') + '.');
+
+                // 1) Titulillo ANIMAT a l'inici del buit (acaba 1 frame abans de la seva durada real)
+                await insEnd(petit.name, gapStart, gapStart + durP - FRAME, '🟢 [cobertura] titulillo ENTRANT');
+                const freezeStart = gapStart + durP - FRAME;
+                // REVERS (titulillo de SALIDA): el seu IN s'ALINEA a la rejilla de frames i el
+                // final queda enganxat EXACTAMENT al Tema-Títol gran (endZone).
+                // Amb la durada ESTIMADA del wott (p. ex. 1,02 s = 25,5 frames; el _REV.mov real
+                // fa 25 frames = 1,00 s) el càlcul `endZone - durP` cau en un MIG frame (80,66 s
+                // = frame 2016,5), Premiere el snapeja cap enrere i el revers quedava 1 frame a
+                // l'esquerra del gran → queixa de l'usuari. Amb ceil() encaixa exacte (80,68 s).
+                const reverseStart = Math.ceil((endZone - durP) / FRAME - 1e-6) * FRAME;
+
+                // 2) CONGELAT: snapshot net del titulillo i PNG estirat fins al final de la zona
+                //    (el revers el retallarà pel davant)
+                if ((zoneEnd - freezeStart) > 0.40) {
+                    const TEMP_TC = 600;   // 10:00:00 (mateixa tècnica que _freezeTemaTitol)
+                    await callJSX(`Clips.insert('${escapedPetit}', ${T}, ${TEMP_TC}, null, 'video')`);
+                    await utils.delay(300);
+                    const snapTC = TEMP_TC + Math.max(0.04, durP - 0.05);
+                    await callJSX(`Timeline.set(${snapTC})`);
+                    await utils.delay(400);
+                    const folder = await callJSX("Context.folder()");
+                    const snapPath = `${folder}\\Snapshots\\freeze_titulillo_${Date.now()}.png`;
+                    const snapRes = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapTC})`);
+                    await callJSX(`Timeline.set(${gapStart})`);
+                    // Treure el titulillo temporal (és a TEMP_TC)
+                    try {
+                        const clT = await getClipsLogic().getTrackClips(T, 'video');
+                        let idxT = -1;
+                        for (let ci = 0; ci < clT.length; ci++) { if (Math.abs(clT[ci].start - TEMP_TC) < 0.5) { idxT = ci; break; } }
+                        if (idxT >= 0) await callJSX(`Clips.remove(${T}, ${idxT}, 'video')`);
+                    } catch (eDel) { }
+                    if (snapRes && String(snapRes).indexOf('OK') === 0) {
+                        const fName = snapPath.split("\\").pop();
+                        await callJSX(`IO.importFiles('${utils.escape(JSON.stringify([snapPath]))}', 'CHY')`);
+                        await insEnd(fName, freezeStart, zoneEnd, '🧊 [cobertura] congelat estirat');
+                    } else {
+                        log(`   ⚠️ [Titol·Petit·cobertura] Snapshot fallit (${snapRes}): buit sense congelat`, 'WARN');
+                    }
+                }
+
+                // 3) Titulillo INVERTIT just abans del Tema-Títol gran (transició).
+                //    (2026-09-22) Acaba a endZone = TC del MARCADOR de l'ítem.
+                //    (2026-09-22) NOMÉS ARA, quan el revers va de veritat al timeline, s'envia
+                //    a invertir (ffmpeg): si no hi ha buit a cobrir, no es genera res.
+                if (reverseStart > gapStart + 0.20) {
+                    const rev = await getRev();
+                    if (rev.ok) {
+                        await insEnd(rev.name, reverseStart, endZone, '🔴 [cobertura] titulillo SORTINT (acaba al marcador del gran)');
+                    } else {
+                        log('   ⚠️ [Titol·Petit·cobertura] Sense versió invertida: no es fa la transició al gran', 'WARN');
+                    }
+                }
+                fets++;
+            }
+            if (fets > 0) log(`   ✨ [Titol·Petit·cobertura] ${fets} buit(s) de V${T} omplert(s) amb titulillo`, 'INFO');
+            return fets;
         },
 
         _findClipAtTime: async function(timeSec) {
@@ -1184,6 +1638,25 @@
                         getUtils().status('Bloc sense presentador: conductor omès', 'warn');
                         return;
                     }
+                    // ── (2026-09-22) FIX: el conductor NOMÉS va si el bloc OBRE amb plató ──
+                    // Abans s'agafava el PRIMER ítem de plató on fos dins del bloc (p. ex. un
+                    // 02dp "DONA PAS …" a mig bloc) i, com que no era el primer ítem, el codi
+                    // queia a la rama "posterior" i l'hi col·locava igualment (a 0.40 s!), tot
+                    // i que el bloc no té intro/presentació al principi.
+                    // Regla: el ítem de plató ha de ser el PRIMER ítem REAL de l'escaleta del
+                    // bloc (el primer amb num i títol; s'ignoren files de capçalera).
+                    var primerItemReal = null;
+                    for (var pi = 0; pi < linesEsc.length; pi++) {
+                        var lp = linesEsc[pi];
+                        if (lp && String(lp.num || '').trim() && String(lp.titol || '').trim()) { primerItemReal = lp; break; }
+                    }
+                    if (primerItemReal && itemPlato !== primerItemReal) {
+                        var titolPrimer = String((primerItemReal.titol || '') || primerItemReal.num || '').substring(0, 60);
+                        log('⏭️ [Conductor] El bloc NO obre amb plató (1r ítem: "' + titolPrimer + '"; plató detectat: ' +
+                            String(itemPlato.num || '?') + '). Ometent conductor.', 'WARN');
+                        getUtils().status('Bloc sense intro al principi: conductor omès', 'warn');
+                        return;
+                    }
                     targetId = String(itemPlato.num || '').trim();
                     const mkPlato = findMarkerByPrefix(targetId);
                     const primerMarcadorTime = (structuralMarkers.length > 0) ? structuralMarkers[0].time : null;
@@ -1228,14 +1701,14 @@
                 let conductTime;
 
                 // ── Posició REAL del Tema-Titol de plató (2026-09-16) ───────────
-                // placeChyronTitol col·loca el Tema-Titol amb la regla
-                //     marcador de l'ítem + tc del nom     (01i: 0.00 + 1.00 = 1.00s)
-                // i el conductor ha d'anar JUST DESPRÉS d'ell. Abans es calculava amb
-                // marges fixos (clipStart + 0:10 + 6:06 = 6.64s) i, com que el TT real
-                // anava a 1.00s, el conductor entrava 0.60s abans d'hora (havia de ser
-                // 7:06 = 7.24s). Com que els chyrons "màgics" es col·loquen a partir
-                // d'aquest instant, l'error s'arrossegava a tota la resta.
+                // (2026-09-22) placeChyronTitol col·loca ara el Tema-Titol a **marcador de
+                // l'ítem + 0** (l'IN del clip va exactament al marcador; el tc del nom del
+                // wott s'IGNORA), i el conductor ha d'anar JUST DESPRÉS d'ell.
+                // Abans la regla era "marcador + tc del nom" (01i: 0.00 + 1.00 = 1.00s).
+                // Si l'ítem de plató NO té marcador propi, el Tema-Títol va a l'inici del bloc
+                // (0.40s) i el conductor entra a 6.64s (6:16), no a 7.24s (7:06).
                 let ttPlaceTime = null;
+                let ttHasRealMarker = false;
                 try {
                     const idxTT = await FASTPASS_UI.Logic.Project.getWottIndex();
                     const minTT = (typeof cfg.temaTitolMinSec === 'number') ? cfg.temaTitolMinSec : 4.0;
@@ -1244,8 +1717,14 @@
                     for (let tti = 0; tti < ttList.length; tti++) {
                         if (FASTPASS_UI.Logic.Project.normItemId(ttList[tti].item) !== normTarget) continue;
                         const tcSecTT = getUtils().timeToSeconds(ttList[tti].tc || "000000");
-                        ttPlaceTime = targetTime + tcSecTT;
-                        log(`🎯 [Conductor] Tema‑Titol de plató "${String(ttList[tti].name).substring(0, 40)}" @ ${ttPlaceTime.toFixed(2)}s (marcador ${targetTime.toFixed(2)} + tc ${tcSecTT.toFixed(2)})`);
+                        ttPlaceTime = targetTime;   // (2026-09-22) el gran va EXACTAMENT al marcador
+                        // (2026-09-22) Amb marcador propi (>= 0.5s) el conductor va JUST DESPRES del
+                        // Tema-Titol real. Sense marcador propi el Tema-Titol anira a l'INICI DEL BLOC
+                        // (0.40s), aixi que el conductor ha d'anar a inicI del bloc + 6.24 = 6.64s (6:16)
+                        // en lloc de 1.00 + 6.24 = 7.24s (7:06).
+                        ttHasRealMarker = (targetTime >= 0.5);
+                        if (!ttHasRealMarker) log("   [Conductor] L'item de plato no te marcador propi: el Tema-Titol va a l'inici del bloc i el conductor NO el seguira", 'WARN');
+                        log(`🎯 [Conductor] Tema‑Titol de plató "${String(ttList[tti].name).substring(0, 40)}" @ ${ttPlaceTime.toFixed(2)}s (marcador ${targetTime.toFixed(2)} · tc del wott ${tcSecTT.toFixed(2)}s ignorat)`);
                         break;
                     }
                 } catch (eTT) {
@@ -1273,7 +1752,7 @@
                     const margenDisponible = clipEnd - clipStart;
                     const MIN_MARGEN = MARGEN_INICIO + DUR_TEMA_TITOL + 4.40; // ~11.04s
 
-                    if (ttPlaceTime !== null && (clipEnd - (ttPlaceTime + DUR_TEMA_TITOL)) >= 0.5) {
+                    if (ttPlaceTime !== null && ttHasRealMarker && (clipEnd - (ttPlaceTime + DUR_TEMA_TITOL)) >= 0.5) {
                         // Cas A: just després del Tema‑Titol REAL
                         conductTime = ttPlaceTime + DUR_TEMA_TITOL;
                         log(`📌 [Conductor·CasA] Després del Tema‑Titol real: ${ttPlaceTime.toFixed(2)} + ${DUR_TEMA_TITOL.toFixed(2)} → @ ${conductTime.toFixed(2)}s`);
@@ -1284,7 +1763,7 @@
                         conductTime = clipStart + MARGEN_INICIO;
                         log(`📌 [Conductor·CasB] Marge insuficient (${margenDisponible.toFixed(2)}s < ${MIN_MARGEN.toFixed(2)}s): Conductor @ ${conductTime.toFixed(2)}s`);
                     }
-                } else if (ttPlaceTime !== null) {
+                } else if (ttPlaceTime !== null && ttHasRealMarker) {
                     conductTime = ttPlaceTime + DUR_TEMA_TITOL;
                     log(`📌 [Conductor] Després del Tema‑Titol real (no primer ítem): @ ${conductTime.toFixed(2)}s`);
                 } else {
@@ -1312,9 +1791,13 @@
         },
 
         placeChyronNom: async function () {
+            // (2026-09-21) NOM-CARREC → SEMPRE V6. S'ha ELIMINAT la pista V7 com a
+            // alternativa: el nom-càrrec no pot acabar mai a la pista de lloc/data.
+            // Cas real TNV 2026-09-21: el rètol "Directe PRESENCIAL Berlín" queia a V7
+            // perquè V6 estava ocupat.
             await this._placeChyronsByType(
                 c => (c.rol || '').toUpperCase() === "NOMCARREC" || c.name.includes("Nom") || c.name.includes("Carrec"),
-                (c, cfg) => [cfg.tracks.video.chyrons, cfg.tracks.video.lloc || cfg.tracks.video.llocdata],
+                (c, cfg) => [cfg.tracks.video.chyrons],
                 "Nom"
                 // ── Reencuadre automàtic DESACTIVAT de moment: el botó NOM només col·loca
                 //    els chyrons. L'efecte Auto Reframe s'aplica manualment amb el botó REFRAME.
@@ -1454,22 +1937,90 @@
                     // TITOLET (grafismes de l'INSERT): tots a V7, repartits dins del seu
                     // ítem (el tc del nom no és fiable i no s'han de repartir de pista).
                     if (this._isTitolet(c)) return [V7];
-                    // Rètols de connexió (Directe/Enviat/Presencial): V6 preferent i V7 de
-                    // reserva, perquè no es trepitgin (abans tots dos anaven a V7 i se
-                    // solapaven a 00.00 i 00.01 del mateix directe).
-                    if (this._isConexioWott(c)) return [V6, V7];
-                    // Rètols de LOCALITZACIÓ (ex: "Directe PRESENCIAL Barcelona") i de
-                    // PROGRAMES: V7 preferent (deixen V6 lliure per als noms), V6 de reserva.
-                    if (rName.indexOf('DIRECTE') !== -1 || rRol === 'DIRECTE' ||
-                        rName.indexOf('PROGRAMES') !== -1 || rRol.indexOf('PROGRAMES') !== -1) {
+                    // Rètols de LOCALITZACIÓ ("Directe PRESENCIAL <lloc>") i de PROGRAMES:
+                    // V7 preferent (deixen V6 lliure per als noms) i V6 de reserva — COM SEMPRE.
+                    // ⚠️ (2026-09-21) Aquests NO són nom-càrrec: el canvi del tipus Enviat/
+                    // connexió no els ha d'afectar (petició d'usuari: "Directe_PRESENCIAL,
+                    // com estava; a V6 no, a V7 estaven perfectes").
+                    if (/DIRECTE[_ ]+PRESENCIAL|DIRECTE[_ ]+PROGRAMES/.test(rName) ||
+                        rRol === 'PRESENCIAL' || rRol === 'PROGRAMES' ||
+                        rName.indexOf('PROGRAMES') !== -1) {
                         return [V7, V6];
                     }
+                    // Rètols de connexió pròpiament dits (Enviat / Directe del connector) =
+                    // nom-càrrec del connector: NOMÉS V6, sense V7 de reserva (2026-09-21).
+                    if (this._isConexioWott(c)) return [V6];
                     return [V6, V7];
                 },
                 "Resto",
                 undefined,
                 { dedupeTitolet: true }
             );
+        },
+
+        /**
+         * _repararClipsV7: Torna a la seva posició original qualsevol clip de la pista de
+         * traduccions que un insert hagi retallat, desplaçat o esborrat.
+         * Per què funciona: `Clips.insert` (overwrite) col·loca el clip amb la durada per
+         * defecte del mèdia i pot tocar el veí; com que les traduccions són PNG (elàstics),
+         * el clip afectat es pot tornar a estirar a la SEVA posició original sense moure res
+         * més (idea d'usuari 2026-09-21: més barat que moure tota la pista i tornar-la).
+         * @param {number} track  - Pista (1-based)
+         * @param {Array}  snap   - [{name,start,end}] posició original dels clips NO nostres
+         * @param {Array}  placed - [[start,end]] rangs que hem col·locat (no es reparen si hi cauen)
+         * @returns {number} Nombre de clips restaurats
+         */
+        _repararClipsV7: async function (track, snap, placed) {
+            if (!snap || snap.length === 0) return 0;
+            let total = 0;
+            // 2 passades: restaurar un clip pot tornar a tocar el seu veí.
+            for (let pass = 0; pass < 2; pass++) {
+                const cur = [];
+                try {
+                    const n = parseInt(await callJSX(`Clips.count(${track}, 'video')`) || '0');
+                    for (let i = 0; i < n; i++) {
+                        const raw = await callJSX(`Clips.get(${track}, ${i}, 'video')`);
+                        if (raw && raw !== 'null') cur.push(JSON.parse(raw));
+                    }
+                } catch (eR) {
+                    log(`   ⚠️ [Repartir] no s'ha pogut llegir la pista per reparar: ${eR.message}`, "WARN");
+                    return total;
+                }
+                let fixed = 0;
+                for (const s0 of snap) {
+                    const dins = placed.some(p => (s0.start < p[1] - 0.05) && (s0.end > p[0] + 0.05));
+                    if (dins) {
+                        log(`   ⚠️ [Repartir] "${s0.name}" (${s0.start.toFixed(2)}-${s0.end.toFixed(2)}s) no es repara: el seu lloc original l'ocupa un slot repartit`, "WARN");
+                        continue;
+                    }
+                    let best = null, bestD = Infinity;
+                    for (const c of cur) {
+                        if (c.name !== s0.name) continue;
+                        // No confondre una traducció NOSTRA (acabada de col·locar) amb el clip
+                        // original si comparteixen nom.
+                        if (placed.some(p => Math.abs(c.start - p[0]) < 0.05 && Math.abs(c.end - p[1]) < 0.05)) continue;
+                        const d = Math.abs(c.start - s0.start);
+                        if (d < bestD) { bestD = d; best = c; }
+                    }
+                    if (!best) {
+                        // Esborrat del tot → tornar-lo a inserir a la seva posició original.
+                        const esc = getUtils().escape(s0.name);
+                        await callJSX(`Clips.insert('${esc}', ${track}, ${s0.start.toFixed(4)}, null, 'video')`);
+                        const r2 = await callJSX(`Clips.endAt(${track}, ${s0.start.toFixed(4)}, ${s0.end.toFixed(4)}, 'video')`);
+                        log(`   🩹 [Repartir] "${s0.name}" havia estat esborrat per un insert → re-insertat @ ${s0.start.toFixed(2)}-${s0.end.toFixed(2)}s (${r2})`, "WARN");
+                        fixed++; total++;
+                        continue;
+                    }
+                    if (Math.abs(best.start - s0.start) > 0.05 || Math.abs(best.end - s0.end) > 0.05) {
+                        const r = await callJSX(`Clips.moveToRange(${track}, ${best.index}, ${s0.start.toFixed(4)}, ${s0.end.toFixed(4)}, 'video')`);
+                        log(`   🩹 [Repartir] "${s0.name}" tocat per un insert [${best.start.toFixed(2)}-${best.end.toFixed(2)}] → restaurat a [${s0.start.toFixed(2)}-${s0.end.toFixed(2)}]s (${r})`, "WARN");
+                        fixed++; total++;
+                    }
+                }
+                if (fixed === 0) break;
+            }
+            if (total > 0) log(`🩹 [Repartir] ${total} clip(s) d'altres blocs restaurats a la seva posició original.`);
+            return total;
         },
 
         repartirChyronTraduccio: async function () {
@@ -1494,11 +2045,13 @@
                     const clip = JSON.parse(raw);
                     if (clip.selected) selectedV1.push(clip);
                 }
+                const allV3 = [];
                 const selectedV3 = [];
                 for (let i = 0; i < v3Count; i++) {
                     const raw = await callJSX(`Clips.get(${T_TRAD}, ${i}, 'video')`);
                     if (!raw || raw === 'null') continue;
                     const clip = JSON.parse(raw);
+                    allV3.push(clip);
                     if (clip.selected) selectedV3.push(clip);
                 }
                 log(`🎯 [Repartir] V1: ${selectedV1.length}, Trad (V7): ${selectedV3.length}`);
@@ -1521,12 +2074,47 @@
                 log(`📦 [Repartir] ${groups.length} tram(s)`);
 
                 let placedCount = 0;
-                await callJSX(`Clips.clearTrack(${T_TRAD}, 'video')`);
-                log(`   🧹 [Repartir] V7 (trad) netejat`);
 
-                const rangeStart = selectedV1[0].start;
-                const rangeEnd = selectedV1[selectedV1.length - 1].end;
-                const rangeDur = rangeEnd - rangeStart;
+                // (2026-09-21) ABANS: `Clips.clearTrack(T_TRAD)` → esborrava TOT el que hi
+                // havia a la pista de traduccions (també les d'altres ítems, que NO s'han
+                // de tocar). Ara NOMÉS es retiren les traduccions SELECCIONADES; la resta de
+                // la pista queda intacta i, si algun insert la toca, es REPARA (vegeu el final).
+                let removed = 0;
+                for (const cl of selectedV3) {
+                    const r = await callJSX(`Clips.removeAt(${T_TRAD}, ${cl.start}, 'video')`);
+                    if (String(r).indexOf('OK') === 0) removed++;
+                }
+                log(`   🧹 [Repartir] ${removed}/${selectedV3.length} traducció(ns) seleccionades retirades de V${T_TRAD} (la resta de la pista NO es toca)`);
+
+                // Instantània dels clips NO seleccionats de V7: serveix per REPARAR qualsevol
+                // clip que un insert hagi retallat, desplaçat o esborrat. Com que les
+                // traduccions són PNG (elàstics), es pot tornar a estirar el clip a la seva
+                // posició original en lloc de moure tota la pista (idea d'usuari 2026-09-21).
+                const snapAltres = allV3.filter(c => !c.selected)
+                    .map(c => ({ name: c.name, start: c.start, end: c.end }));
+
+                // Marcadors: el límit de l'últim slot és el final del clip de referència (V1)
+                // o el SEGÜENT MARCADOR, el que estigui més a prop.
+                let markersT = [];
+                try {
+                    const mkRaw = await callJSX('Markers.get()');
+                    const mks = JSON.parse(mkRaw) || [];
+                    markersT = mks
+                        .map(mk => (typeof mk.time === 'number') ? mk.time : parseFloat(mk.time))
+                        .filter(t => isFinite(t))
+                        .sort((a, b) => a - b);
+                    log(`   📏 [Repartir] marcadors llegits: ${markersT.length}`);
+                } catch (eMK) {
+                    log(`   ⚠️ [Repartir] no s'han pogut llegir els marcadors (${eMK.message}): el límit serà el final del clip de V1`, "WARN");
+                }
+                const primeraDespres = (t) => {
+                    for (const m of markersT) { if (m > t + 0.05) return m; }
+                    return null;
+                };
+
+                // Rangs que hem col·locat nosaltres: un clip de la instantània que hi caigui
+                // no es "repara" (ja no hi té lloc).
+                const placedRanges = [];
 
                 for (let gi = 0; gi < groups.length; gi++) {
                     const group = groups[gi];
@@ -1542,28 +2130,85 @@
                     };
                     const M = Math.max(...group.map(c => extractTotal(c)), group.length);
                     const N = group.length;
-                    const slotDur = rangeDur / M;
-                    log(`   📐 [Repartir] Tram ${gi+1}/${groups.length}: ${N}/${M} trad. slotDur=${slotDur.toFixed(2)}s`);
-
                     group.sort((a, b) => extractSeq(a) - extractSeq(b));
+
+                    // (2026-09-21) REFERÈNCIA PER TRAM: cada bloc es reparteix dins del SEU clip
+                    // de V1. ABANS s'usava un únic rang global (inici del 1r clip seleccionat →
+                    // final de l'últim) per a TOTS els trams → el bloc 2 es calculava amb
+                    // l'inici del bloc 1 i acabava envaint el bloc veí.
+                    let ref = this._clipAtInstant(selectedV1, group[0].start);
+                    if (!ref) {
+                        // Fallback: el clip de V1 seleccionat més proper (per centre).
+                        ref = selectedV1.reduce((best, c) => {
+                            const dc = Math.abs((c.start + c.end) / 2 - group[0].start);
+                            const db = (best === null) ? Infinity : Math.abs((best.start + best.end) / 2 - group[0].start);
+                            return (dc < db) ? c : best;
+                        }, null);
+                    }
+                    if (!ref) {
+                        log(`   ⚠️ [Repartir] Tram ${gi+1}: sense clip de referència a V1 → saltat`, "WARN");
+                        continue;
+                    }
+                    const bStart = ref.start, bEnd = ref.end;
+                    const slotNominal = (bEnd - bStart) / M;
+                    // Límit de l'últim slot: final del clip de referència (V1) o SEGÜENT
+                    // MARCADOR, el que estigui més a prop. Un marcador INTERN (que no arriba a
+                    // l'últim slot) s'ignora: no marca el final del bloc.
+                    let limit = bEnd, limitWhy = `final del clip de referència (V1) @ ${bEnd.toFixed(2)}s`;
+                    const mkLim = primeraDespres(bStart + slotNominal * (M - 1));
+                    if (mkLim !== null && mkLim < bEnd - 0.05) {
+                        limit = mkLim;
+                        limitWhy = `marcador @ ${mkLim.toFixed(2)}s (abans del final de V1 @ ${bEnd.toFixed(2)}s)`;
+                    }
+                    // Slots UNIFORMES fins al límit: tots (l'últim inclòs) duren el mateix.
+                    const slotDur = (limit - bStart) / M;
+                    if (!(slotDur > 0.2)) {
+                        log(`   ⚠️ [Repartir] Tram ${gi+1}: espai insuficient (${(limit - bStart).toFixed(2)}s per a ${M} slots) → saltat`, "WARN");
+                        continue;
+                    }
+                    log(`   📐 [Repartir] Tram ${gi+1}/${groups.length}: ${N}/${M} trad. | ref V1 [${bStart.toFixed(2)}-${bEnd.toFixed(2)}] | límit ${limit.toFixed(2)}s (${limitWhy}) | slotDur=${slotDur.toFixed(2)}s (tots iguals)`);
+
                     const seqToChy = new Map();
                     for (const chy of group) seqToChy.set(extractSeq(chy), chy);
 
                     for (let s = 0; s < M; s++) {
                         const seqNum = s + 1;
                         const chy = seqToChy.get(seqNum) || null;
-                        if (chy) {
-                            const newStart = rangeStart + slotDur * s;
-                            const newEnd = (s === M - 1) ? rangeEnd : rangeStart + slotDur * (s + 1);
-                            const escapedName = getUtils().escape(chy.name);
-                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${newStart}, ${newEnd}, 'video')`);
-                            log(`      ✅ [${seqNum}/${M}] → V7 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s`);
-                            placedCount++;
-                        } else log(`      ⬜ [${seqNum}/${M}] buit`);
+                        if (!chy) { log(`      ⬜ [${seqNum}/${M}] buit`); continue; }
+                        const slotStart = bStart + slotDur * s;
+                        const slotEnd = bStart + slotDur * (s + 1);   // l'últim acaba exactament al límit
+                        const escapedName = getUtils().escape(chy.name);
+                        // Insert SENSE endSec: el JSX l'aplicaria al DARRER clip de la pista
+                        // (quirk de l'API) i podria retallar traduccions d'altres blocs.
+                        await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${slotStart.toFixed(4)}, null, 'video')`);
+                        // Durada exacta del slot, per temps (immunitzat a renumeració de clips).
+                        const trimRes = await callJSX(`Clips.endAt(${T_TRAD}, ${slotStart.toFixed(4)}, ${slotEnd.toFixed(4)}, 'video')`);
+                        // Verificació de la durada real del clip col·locat.
+                        let chkDur = null;
+                        try {
+                            const chkRaw = await callJSX(`Clips.at(${T_TRAD}, ${(slotStart + 0.02).toFixed(4)}, 'video')`);
+                            const ck = (chkRaw && chkRaw !== 'null') ? JSON.parse(chkRaw) : null;
+                            if (ck) chkDur = ck.end - ck.start;
+                        } catch (eCk) { }
+                        placedRanges.push([slotStart, slotEnd]);
+                        placedCount++;
+                        log(`      ✅ [${seqNum}/${M}] → V${T_TRAD} @ ${slotStart.toFixed(2)}→${slotEnd.toFixed(2)}s (${slotDur.toFixed(2)}s) | retall: ${trimRes}` +
+                            ((chkDur !== null && Math.abs(chkDur - slotDur) > 0.15) ? ` ⚠️ durada real ${chkDur.toFixed(2)}s` : ''));
+                        if (String(trimRes).indexOf('OK') !== 0) {
+                            log(`      ⚠️ [Repartir] no s'ha pogut fixar la durada de la traducció @ ${slotStart.toFixed(2)}s (${trimRes})`, "WARN");
+                        }
                         if (s % 3 === 2) await getUtils().delay(100);
                     }
                 }
+
+                // (2026-09-21) REPARACIÓ: si algun insert ha retallat, desplaçat o esborrat un
+                // clip que NO era nostre, es torna a la seva posició original (els PNG es
+                // poden estirar → només cal tocar el clip afectat, no tota la pista).
+                await this._repararClipsV7(T_TRAD, snapAltres, placedRanges);
                 getUtils().status(`Repartit: ${placedCount} trad.`, "exito");
+                // (2026-09-21) Tornar la auto-selecció a V1: targeting només V1/A1 + clip de V1.
+                await getUtils().targetOnlyV1("Repartir");
+                await getUtils().focusV1("Repartir");
                 log(`🎬 [Repartir] ${placedCount} trad. repartides.`, "INFO");
             } catch (e) { getUtils().handleError(e, "Repartir"); }
         }

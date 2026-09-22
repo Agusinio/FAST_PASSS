@@ -329,8 +329,11 @@
                 }
                 const cand = await getScanner().srtFallback(ctx);
                 if (!cand) {
-                    getUtils().status("Fallback: cap .SRT a " + (ctx.config.rutas.verticalitzacio || "la carpeta de verticalització"), "warn");
-                    log("⚠️ SRT_FALLBACK: cap candidat a " + (ctx.config.rutas.verticalitzacio || "?"));
+                    // (2026-09-22) El fallback NO surt mai del dia de treball: si no hi ha cap
+                    // .SRT d'aquesta data, no es carrega res (abans podia carregar el d'AHIR).
+                    const fecha = String(ctx.dateDir || '').replace(/_/g, '-');
+                    getUtils().status("SRT: no hi ha cap .SRT del dia " + (fecha || '?') + " — no es carrega res", "warn");
+                    log("⚠️ SRT_FALLBACK: cap .SRT de la data " + (ctx.dateDir || "?") + " a " + (ctx.config.rutas.verticalitzacio || "?"));
                     return false;
                 }
                 log("🆘 SRT_FALLBACK: N" + cand.level + " (" + cand.reason + ", " + cand.candidates +
@@ -347,6 +350,63 @@
                 log("💥 SRT_FALLBACK: " + e.message);
                 getUtils().handleError(e, "SrtFallback");
                 return false;
+            }
+        },
+
+        /**
+         * runSrtReset (2026-09-22): Botó ♻️ (RESET / neteja subtítols).
+         *   1. Restaura l'estat inicial del SRT que ja hi havia carregat: taula sense
+         *      edicions, sense marcadors i esborra els clips de subtítols de la seqüència
+         *      (comportament de sempre: `SrtEditor.resetToOriginal`).
+         *   2. **TORNA A BUSCAR els .SRT DEL TEMA** del bloc i el carrega: mateix mecanisme
+         *      que el SCAN principal (`Scan.mediaAssets` amb el tema detectat → carpeta de
+         *      verticalització, prefix `{archivo}_{bloque}_` + data de treball) i, si no en
+         *      troba, el fallback del MATEIX DIA (`Scan.srtFallback`). Així el reset també
+         *      "refresca" quin subtítol toca, no només la taula.
+         * Mai surt del dia de treball (2026-09-22: prohibit carregar SRT d'un altre dia).
+         */
+        runSrtReset: async function () {
+            const ed = window.SrtEditor;
+            if (!ed || !ed.resetToOriginal) { getUtils().status("Error: SrtEditor no disponible", "error"); return; }
+            log("♻️ SRT_RESET: reiniciant subtítols i tornant a buscar els .SRT del tema...");
+
+            // 1) Estat inicial (taula, marcadors i clips de subtítols de la seqüència)
+            try { await ed.resetToOriginal(); } catch (eR) { log("⚠️ SRT_RESET: " + eR.message, "WARN"); }
+
+            // 2) Tornar a buscar el .SRT del tema del bloc
+            try {
+                const ctx = this._srtCtx();
+                if (!ctx) { getUtils().status("Selecciona un programa", "warn"); return; }
+                const tema = (FASTPASS_UI.State && FASTPASS_UI.State.detectedTheme) || '';
+                log("🔎 SRT_RESET: buscant .SRT del tema" + (tema ? ' ("' + tema + '")' : '') +
+                    " · bloc " + (ctx.bloque || '?') + " · data " + (ctx.dateDir || '?'));
+
+                const media = await getScanner().mediaAssets(ctx, tema);
+                let cand = (media && media.srt) ? media.srt : null;
+                let via = 'mediaAssets';
+                if (!cand) {
+                    cand = await getScanner().srtFallback(ctx);
+                    via = 'fallback (dia de treball)';
+                }
+                if (!cand) {
+                    const fecha = String(ctx.dateDir || '').replace(/_/g, '-');
+                    getUtils().status("SRT reset · cap .SRT del tema amb data " + (fecha || '?') + " — no es carrega res", "warn");
+                    log("⚠️ SRT_RESET: cap .SRT del tema/bloc per a la data " + (ctx.dateDir || '?'));
+                    return;
+                }
+                if (!ed.loadSrt) { getUtils().status("Error: SrtEditor.loadSrt no disponible", "error"); return; }
+
+                log("♻️ SRT_RESET: " + via + " → " + cand.path);
+                const ok = await ed.loadSrt(cand.path);
+                if (ok) {
+                    getUtils().status("SRT resetejat i recarregat: " + cand.name, "exito");
+                    log("✅ SRT_RESET: carregat a l'editor: " + cand.name);
+                } else {
+                    getUtils().status("SRT reset · no s'ha pogut carregar " + cand.name, "error");
+                }
+            } catch (e) {
+                log("💥 SRT_RESET: " + e.message);
+                getUtils().handleError(e, "SrtReset");
             }
         },
 

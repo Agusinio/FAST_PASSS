@@ -66,6 +66,55 @@
                         const st = this._lastConclusion;
                         if (st === 'MASSA') u.status("MASSA D'HORA: avui encara no hi ha res publicat", "warn");
                         else if (st === 'ESPERANT') {
+                            // ── FALLBACK FOTO (2026-09-22) ──────────────────────────────────────
+                            // Si el bloqueig és que no hi ha escaleta vàlida (el cas típic: el bloc
+                            // demanat no en té al NAS o el JSON és un error de digition), es fa la
+                            // FOTO automàtica — exactament el que fa el botó FOTO — i es recalcula
+                            // l'estat. Si la FOTO desbloqueja el bloc, s'executa el flux directament;
+                            // si no, es mostren els missatges informatius de sempre.
+                            try {
+                                const semF = (this._lastButtonData && this._lastButtonData.semaforo) || null;
+                                // "No hi ha escaleta valida": no s'ha trobat cap escaleta del dia/bloc
+                                // (found !== true) o la trobada NO és una escaleta completa/valida
+                                // (complete.ok === false) → és exactament quan la FOTO ajuda.
+                                const escFalta = !!(semF && semF.esc && (
+                                    semF.esc.found !== true ||
+                                    (semF.esc.complete && semF.esc.complete.ok === false)
+                                ));
+                                const MB = (window.FASTPASS_UI.Workflows && window.FASTPASS_UI.Workflows.MainButton) || null;
+                                if (escFalta && MB && MB._photoEscaleta && MB._setupContext) {
+                                    const ctxF = await MB._setupContext();
+                                    // Ordre oficial: (1) el nostre bloc —ja comprovat— (2) bloc POSTERIOR
+                                    // del mateix dia (se n'extreu el nostre bloc) (3) FOTO via API.
+                                    var escOkF = false;
+                                    if (MB._escaletaFromLaterBlock) {
+                                        try {
+                                            const laterF = await MB._escaletaFromLaterBlock(ctxF, (ctxF.dateDir || '').replace(/_/g, ''));
+                                            if (laterF) {
+                                                u.log('📋 [MAIN] Escaleta del bloc ' + laterF.blockId + ' (posterior) copiada per al bloc ' + ctxF.bloque, 'INFO');
+                                                escOkF = true;
+                                            }
+                                        } catch (eLater) {
+                                            u.log('⚠️ [MAIN] Blocs posteriors: ' + eLater.message, 'WARN');
+                                        }
+                                    }
+                                    var fotoRes = escOkF ? { ok: true } : await MB._photoEscaleta(ctxF);
+                                    if (fotoRes.ok) {
+                                        await this.checkContext({ force: true });
+                                        const st2 = this._lastConclusion;
+                                        if (st2 === 'NEW' || st2 === 'UPDATE' || st2 === 'GO' || st2 === 'LOAD') {
+                                            u.log('🔄 [MAIN] FOTO automàtica OK → estat ' + st2 + '. Executant.', 'INFO');
+                                            await FASTPASS_UI.Workflows.MainButton.runMainAction((st2 === 'NEW') ? 'NEW' : st2, this._lastButtonData);
+                                            return;
+                                        }
+                                        u.status('FOTO feta, però el bloc encara no es pot muntar (' + st2 + ')', 'warn');
+                                        return;
+                                    }
+                                    u.log("⚠️ [MAIN] FOTO automàtica fallida: " + fotoRes.error, 'WARN');
+                                }
+                            } catch (eF) {
+                                u.log('⚠️ [MAIN] FOTO automàtica: ' + eF.message, 'WARN');
+                            }
                             const mot = (this._lastButtonData && this._lastButtonData.motiu) || '';
                             const sem = (this._lastButtonData && this._lastButtonData.semaforo) || null;
                             const cc = (sem && sem.esc && sem.esc.complete) ? sem.esc.complete : null;
@@ -635,21 +684,44 @@
             window.addEventListener('blur', () => { ctrlDown = false; hovering = false; sync(); });
         },
 
+        /**
+         * setMainBusy / _mainBusy (2026-09-22): Estat d'espera del botó MAIN mentre el panell
+         * arrenca (motor JSX + primer checkContext). Evita que es vegi "NOU" abans d'hora
+         * (i que l'usuari cliqui amb el sistema a mig carregar).
+         * Es desactiva sol quan updateButton() pinta un estat real.
+         * @param {string} [text] - Text del botó (per defecte "⏳ ARRENCANT...")
+         * @param {string} [title] - Tooltip explicatiu
+         */
+        setMainBusy: function (text, title) {
+            this._mainBusy = true;
+            const btn = document.getElementById('btnMainAction');
+            if (!btn) return;
+            btn.innerText = text || 'ESPERA';
+            btn.title = title || "El panell s'està inicialitzant (motor JSX + primer escaneig). Espera un moment…";
+            btn.disabled = true;
+            // (2026-09-22) NO es toca cap classe: el botó ha de mantenir SEMPRE la forma
+            // quadrada (`btn-big-sq`, fixada pel CSS). Abans s'hi posava `square-large`
+            // (classe inexistent) → el botó s'ajustava al text en arrencar el panell.
+        },
+        _mainBusy: false,
+
         updateButton(state, data) {
             const btn = document.getElementById('btnMainAction');
             if (!btn) return;
+            this._mainBusy = false;   // ja hi ha un estat real: fora l'estat d'espera
 
             // Feedback "AHIR" en passar el cursor amb Ctrl premut (una sola instal·lació)
             this.initMainHoverHint();
-        
-            // 📍 Forzamos tamaño mínimo por si el CSS falla
-            btn.style.minHeight = "60px"; 
-            btn.style.width = "100%";
-            
+
+            // (2026-09-22) La FORMA del botó la fixa SEMPRE el CSS (`btn-big-sq`/`#btnMainAction`
+            // = 60×60 amb min/max i !important). Aquí s'hi forçava `minHeight=60px` i
+            // `width:100%` inline → el botó deixava de ser quadrat i s'ajustava al text.
             // 🔍 [CORRECCIÓN] No deshabilitar el botón si estamos en modo LOAD/NEW/GO/UPDATE 
             // solo por el Registry, a menos que el estado sea explícitamente DISABLED o WAITING.
             // Si el Registry lo puso en disabled, este updateButton debe prevalecer si el contexto es válido.
             btn.disabled = (state === 'DISABLED' || state === 'WAITING');
+            // El color/borde vermell de l'estat LOCKED no s'ha de quedar enganxat en els altres
+            if (state !== 'LOCKED') { btn.style.border = 'none'; btn.style.color = ''; }
             
             // Si el Registry ha deshabilitado el flujo pero nosotros queremos crear uno nuevo, 
             // permitimos que el botón principal siga funcionando.
@@ -657,7 +729,6 @@
             switch (state) {
                 case 'NEW':
                     btn.innerText = "CREAR";
-                    btn.className = "square-large btn-new";
                     btn.onclick = function (ev) {
                         FASTPASS_UI.Core.Context._onMainClick(ev, 'NEW', data);
                     };
@@ -665,15 +736,13 @@
                 case 'UPDATE':
                 case 'GO':
                 case 'LOAD':
-                    btn.innerText = "ACTUALITZAR";
-                    btn.className = "square-large btn-new";
+                    btn.innerText = "ACTUAL.";
                     btn.onclick = function (ev) {
                         FASTPASS_UI.Core.Context._onMainClick(ev, state, data);
                     };
                     break;
                 case 'MASSA':
                     btn.innerText = "MASSA D'HORA";
-                    btn.className = "square-large";
                     btn.title = "Avui encara no hi ha res publicat. Ctrl+clic = treballar amb AHIR.";
                     btn.onclick = function (ev) {
                         FASTPASS_UI.Core.Context._onMainClick(ev, null, data);
@@ -681,7 +750,6 @@
                     break;
                 case 'ESPERANT':
                     btn.innerText = "ESPERANT...";
-                    btn.className = "square-large";
                     btn.title = "La ingesta encara no ha arribat al TC final. Ctrl+clic = treballar amb AHIR.";
                     btn.onclick = function (ev) {
                         FASTPASS_UI.Core.Context._onMainClick(ev, null, data);

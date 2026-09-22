@@ -17,6 +17,9 @@
     const getClipsLogic = () => window.FASTPASS_UI.Logic.Clips;
     const getAssemblyContext = () => window.FASTPASS_UI.Core.AssemblyContext;
     const getMP4 = () => window.FASTPASS_UI.Workflows.MP4;
+    // Motor de densitat de talls (zones/ruptures): passada estàndard i passada FINA
+    // per als IPD (molts plans curts) → calcDensityFootprintV2(clips, windowSec, talls/min).
+    const getAssemblyLogic = () => window.FASTPASS_UI.Logic.Assembly;
 
     const log = (m, lvl) => getUtils().log(m, lvl || "DEBUG");
     const callJSX = (s) => getUtils().callJSX(s);
@@ -151,6 +154,13 @@
 
             const structuralItems = [];
             const graphicItems = [];
+            // (2026-09-21) Ítems d'ESCALETA del bloc que no tenen cap hora (ni OnAir ni
+            // Prevista): ABANS es descartaven en SILENCI amb el `continue` de sota i el
+            // bloc es quedava sense el seu marcador (cas real TNV 2026-09-20: ítem "13"
+            // "++++IPD VOTACIONS..." amb OnAir I Prevista anul·lats pel sanejat d'hores
+            // mentideres de escaleta_bounds). Ara es conserven per deduir-ne la posició
+            // entre els seus veïns d'escaleta amb el motor de densitat (F5·Inferits).
+            const unplacedItems = [];
             for (const line of lines) {
                 const rawNum = (line.num || '').toString().trim();
                 if (rawNum === '' || rawNum === '.') {
@@ -158,7 +168,15 @@
                     continue;
                 }
                 const horaRef = line.horaEntradaOnAir || line.horaEntradaPrevista;
-                if (!horaRef || horaRef === "00:00:00") continue;
+                if (!horaRef || horaRef === "00:00:00") {
+                    if (line.agrupacio && line.flotant !== true) {
+                        unplacedItems.push(line);
+                        log(`   🔎 [SENSE-HORA] ${line.num}: sense OnAir ni Prevista → es deduirà la posició (agrupació ${line.agrupacio})`);
+                    } else {
+                        log(`   ⏭️ [SKIP] ${line.num}: sense hora i fora del bloc (sense agrupació) → ignorat`);
+                    }
+                    continue;
+                }
                 const dSec = getRawDuradaSec(line);
                 const hasOnAir = line.horaEntradaOnAir
                     && line.horaEntradaOnAir !== '00:00:00'
@@ -177,7 +195,7 @@
                     graphicItems.push(line);
                 }
             }
-            log(`📋 Items: ${structuralItems.length} estructurals, ${graphicItems.length} gràfics`);
+            log(`📋 Items: ${structuralItems.length} estructurals, ${graphicItems.length} gràfics` + (unplacedItems.length ? `, ${unplacedItems.length} sense hora (a deduir a F5)` : ''));
 
             const farosItems = [];
             const aproximadosItems = [];
@@ -199,7 +217,7 @@
             log(`📋 Gràfics (total acumulat): ${graphicItems.length}`);
 
             return {
-                structuralItems, graphicItems, farosItems, aproximadosItems,
+                structuralItems, graphicItems, farosItems, aproximadosItems, unplacedItems,
                 parseDurada, getEffectiveDuradaSec, getRawDuradaSec,
                 isGraphicByNum, isForcedStructuralByNum
             };
@@ -1154,6 +1172,238 @@
 
         // ═══════════════════════════════════════════════════════════════
         // ═══════════════════════════════════════════════════════════════
+        // 🔎 F5·Inferits: placeInferredItems — Marcadors dels ítems d'escaleta que
+        // NO tenen cap hora (ni OnAir ni Prevista) i que per tant no han pogut
+        // entrar a F1/F2/F3.
+        //
+        // La posició es dedueix SEMPRE DINS de la finestra que formen els seus veïns
+        // d'escaleta (ítem anterior i ítem següent JA col·locats), amb el motor de
+        // densitat de talls (14_Assembly_Logic.calcDensityFootprintV2):
+        //   A) Ruptura LOW→HIGH dins la finestra → inici de la peça editada (IPD:
+        //      molts plans curts després d'un pla llarg). Passada estàndard + FINA
+        //      (6s / 8 talls·min) per tenir sensibilitat als IPD.
+        //   B) Si no hi ha ruptura: el clip de la finestra clarament més llarg que els
+        //      seus veïns (≥2× mediana) → el seu INICI és l'inici de la peça.
+        //   C) Últim recurs: punt mig de la finestra (amb avís al log).
+        // MAI es col·loca a menys de 0,5 s d'un marcador veí (no xoca amb F1-F4).
+        // ═══════════════════════════════════════════════════════════════
+        placeInferredItems: async function () {
+            log('🔎 [F5·Inferits] Iniciant deducció d\'ítems d\'escaleta sense hora...');
+
+            const ctxData = await getAssemblyContext().loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F5·Inferits] loadAssemblyContext ha fallat. Abortant.'); return 0; }
+            const { lines, clips } = ctxData;
+            if (!clips || clips.length === 0) { log('⚠️ [F5·Inferits] Sense clips a V1.'); return 0; }
+
+            const classData = this._classifyItems(lines);
+            const unplacedItems = classData.unplacedItems || [];
+            if (unplacedItems.length === 0) {
+                log('🔎 [F5·Inferits] Cap ítem sense hora. ✓ FINALITZAT.');
+                return 0;
+            }
+
+            // ── Marcadors ja col·locats (F1-F4): prefix → temps ──
+            var markersRaw = await callJSX('Markers.get()');
+            var mk = [];
+            try { mk = JSON.parse(markersRaw); } catch (eMK) { }
+            var posByPrefix = {};
+            for (var m = 0; m < mk.length; m++) {
+                var mc = mk[m].comments || '';
+                var sp = mc.indexOf(' -');
+                var pf = (sp > 0) ? mc.substring(0, sp).trim() : '';
+                if (!pf) continue;
+                var tt = (typeof mk[m].time === 'number') ? mk[m].time : parseFloat(mk[m].time);
+                if (!isNaN(tt)) posByPrefix[pf] = tt;
+            }
+
+            // ── Ordre d'ESCALETA (camp `sequencia`), MAI pel TC ──
+            // `lines` ve d'AssemblyContext ORDENAT PER HORA (assembly_context.js:125), i els
+            // ítems SENSE hora (com el 13 IPD) queden al PRINCIPI: si es recorre tal qual, el
+            // veí "següent" acaba sent el 12dp. Aquí mana l'escaleta (regla del projecte).
+            var ordered = lines.slice().sort(function (a, b) {
+                var sa = (a && a.sequencia != null && isFinite(Number(a.sequencia))) ? Number(a.sequencia) : Number.MAX_SAFE_INTEGER;
+                var sb = (b && b.sequencia != null && isFinite(Number(b.sequencia))) ? Number(b.sequencia) : Number.MAX_SAFE_INTEGER;
+                return (sa === sb) ? 0 : (sa - sb);
+            });
+            var orderIdx = {};
+            for (var li = 0; li < ordered.length; li++) {
+                if (ordered[li] && ordered[li].num) orderIdx[String(ordered[li].num)] = li;
+            }
+
+            // ── Densitat de talls: passada estàndard + passada FINA (IPD) ──
+            var dens = this._calcDensityFootprint(clips);
+            var densFine = null;
+            try { densFine = getAssemblyLogic().calcDensityFootprintV2(clips, 6, 8); }
+            catch (eDF) { log('⚠️ [F5·Inferits] Passada fina de densitat fallida: ' + eDF.message, 'WARN'); }
+
+            var placements = [];
+            var inferits = 0;
+
+            for (var u = 0; u < unplacedItems.length; u++) {
+                var line = unplacedItems[u];
+                var num = String(line.num || '');
+                if (!num) continue;
+                var idx = (orderIdx[num] !== undefined) ? orderIdx[num] : -1;
+                if (idx < 0) { log('⚠️ [F5·Inferits] ' + num + ': no consta a l\'escaleta del bloc. Saltant.', 'WARN'); continue; }
+
+                // Veïns per ESCALETA amb marcador ja col·locat
+                var prevTime = null, prevNum = null, nextTime = null, nextNum = null;
+                for (var b = idx - 1; b >= 0; b--) {
+                    var nb = (ordered[b] && ordered[b].num) ? String(ordered[b].num) : '';
+                    if (nb && posByPrefix[nb] !== undefined) { prevTime = posByPrefix[nb]; prevNum = nb; break; }
+                }
+                for (var f = idx + 1; f < ordered.length; f++) {
+                    var nf = (ordered[f] && ordered[f].num) ? String(ordered[f].num) : '';
+                    if (nf && posByPrefix[nf] !== undefined) { nextTime = posByPrefix[nf]; nextNum = nf; break; }
+                }
+                var lo = (prevTime !== null) ? prevTime : ((typeof clips[0].start === 'number') ? clips[0].start : 0);
+                var hi = (nextTime !== null) ? nextTime : clips[clips.length - 1].end;
+                log('   🔎 [F5·Inferits] ' + num + ': finestra [' + (prevNum || '—') + '@' + lo.toFixed(2) + 's → ' + (nextNum || '—') + '@' + hi.toFixed(2) + 's]');
+                if (hi - lo < 1.0) {
+                    log('   ⚠️ [F5·Inferits] ' + num + ': finestra massa estreta → saltant.', 'WARN');
+                    continue;
+                }
+                // Zona útil: 0,5 s de marge respecte dels marcadors veïns
+                var uLo = lo + ((prevNum !== null) ? 0.5 : 0);
+                var uHi = hi - ((nextNum !== null) ? 0.5 : 0);
+                if (uHi < uLo) uHi = uLo;
+
+                // Criteri A: ruptura de densitat (inici de peça editada)
+                var candA = this._pickInferredByDensity(dens, densFine, uLo, uHi, hi);
+                var tCand = null, why = '';
+                if (candA) { tCand = candA.time; why = candA.why; }
+
+                // Criteri B: peça única / clip amb durada outlier dins la finestra
+                // (s'hi passa la finestra SENCERA: la peça pot començar just al límit
+                //  del marcador anterior; el marge de 0,5 s s'aplica després)
+                if (tCand === null) {
+                    var candB = this._pickInferredByDuration(clips, lo, hi);
+                    if (candB) { tCand = candB.time; why = candB.why; }
+                }
+
+                // Criteri C: punt mig (últim recurs)
+                if (tCand === null) { tCand = (uLo + uHi) / 2; why = 'punt mig de la finestra (sense senyal de densitat)'; }
+
+                var tFinal = Math.min(uHi, Math.max(uLo, tCand));
+                if (tFinal < 0) tFinal = 0;
+
+                var titol = (line.titol || '').substring(0, 60).trim();
+                var comment = ((num + ' - ') + titol).trim();
+                // IPD → turquesa (7), la convenció que detecta runAplicarIpdDesdeMarkers
+                var isIpd = /IPD/i.test(num + ' ' + titol);
+                var colorIdx = isIpd ? 7 : this._getColorIdx(line);
+
+                log('   📍 [F5·Inferits] ' + num + (isIpd ? ' [IPD]' : '') + ': → ' + tFinal.toFixed(2) + 's · ' + why + ' · color=' + colorIdx +
+                    (Math.abs(tFinal - tCand) > 0.05 ? ' (ajustat de ' + tCand.toFixed(2) + 's per no xocar amb el veí)' : ''));
+
+                placements.push({
+                    prefix: line.num,
+                    timeSec: parseFloat(tFinal.toFixed(2)),
+                    comment: comment,
+                    colorIdx: colorIdx,
+                    name: 'color=' + colorIdx
+                });
+                inferits++;
+            }
+
+            if (placements.length === 0) { log('🔎 [F5·Inferits] Cap posició deduïble. ✓ FINALITZAT.'); return 0; }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F5·Inferits');
+            log('🔎 [F5·Inferits] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+            return inferits;
+        },
+
+        /**
+         * _pickInferredByDensity: Cerca dins [lo, hi] una ruptura de densitat que marqui
+         * l'INICI d'una peça editada (LOW→HIGH: pla llarg → molts plans curts = IPD).
+         * Les ruptures que toquen el marcador SEGÜENT (rightEdge - 0,5s) es descarten:
+         * són l'inici de la peça del veí de la dreta, no d'aquest ítem.
+         * Prioritat: parell DP+DIR > confiança > passada fina.
+         * @returns {{time:number, why:string}|null}
+         */
+        _pickInferredByDensity: function (dens, densFine, lo, hi, rightEdge) {
+            var packs = [];
+            if (dens && dens.breaks) packs.push({ list: dens.breaks, tag: 'estàndard' });
+            if (densFine && densFine.breaks) packs.push({ list: densFine.breaks, tag: 'fina' });
+            // Direcció del canvi: la V2 NO porta fromType/toType, així que s'usa la ZONA
+            // que comença a la ruptura: si és HIGH → inici de peça editada (LOW→HIGH).
+            var zoneTypeAt = function (time) {
+                if (!dens || !dens.zones) return null;
+                for (var z = 0; z < dens.zones.length; z++) {
+                    var zo = dens.zones[z];
+                    if (time >= zo.start - 0.35 && time <= zo.end) return zo.type;
+                }
+                return null;
+            };
+            var best = null;
+            for (var p = 0; p < packs.length; p++) {
+                var list = packs[p].list;
+                for (var i = 0; i < list.length; i++) {
+                    var br = list[i];
+                    var t = (typeof br.time === 'number') ? br.time : parseFloat(br.time);
+                    if (isNaN(t) || t < lo || t > hi) continue;
+                    if (br.toType && br.toType !== 'HIGH') continue;              // (V1) només inici de peça
+                    if (rightEdge !== undefined && t > rightEdge - 0.5) continue; // és del veí de la dreta
+                    var zt = zoneTypeAt(t);                                        // (V2) direcció per zona
+                    if (zt && zt !== 'HIGH') continue;
+                    var score = (br.confidence || 0) + (br.dpDirPair ? 0.5 : 0) + (packs[p].tag === 'fina' ? 0.1 : 0);
+                    if (!best || score > best.score) {
+                        best = {
+                            score: score, time: t,
+                            why: 'ruptura de densitat ' + (br.fromType ? (br.fromType + '→' + br.toType) : (zt ? ('LOW→' + zt) : 'canvi de patró')) +
+                                ' (conf ' + (br.confidence || 0).toFixed(2) + (br.dpDirPair ? ', DP+DIR' : '') + ', ' + packs[p].tag + ')'
+                        };
+                    }
+                }
+            }
+            return best ? { time: best.time, why: best.why } : null;
+        },
+
+        /**
+         * _pickInferredByDuration: Si dins [lo, hi] hi ha un clip clarament més llarg que
+         * els seus veïns (≥2× la mediana i ≥5 s), és la "peça" inserida → el seu INICI és
+         * la posició de l'ítem. Cobreix el cas en què el TROSSEJA no ha partit la peça en
+         * plans (cas real: IPD de 21,3 s en un sol clip entre clips de 3-5 s).
+         * @returns {{time:number, why:string}|null}
+         */
+        _pickInferredByDuration: function (clips, lo, hi) {
+            // El clip del veí de la DRETA (start ≈ hi) queda FORA: és una altra peça.
+            var inside = [];
+            var rightLimit = hi - 0.5;
+            for (var i = 0; i < clips.length; i++) {
+                var c = clips[i];
+                if (!c) continue;
+                if (c.start >= lo - 0.05 && c.start <= rightLimit) inside.push(c);
+            }
+            if (inside.length === 0) return null;
+            // Cas net: UNA sola peça dins de la finestra → l'ítem és aquella peça sencera
+            // (cas real: IPD de 21,3 s en un sol clip entre els veïns 12dir i 14).
+            if (inside.length === 1) {
+                var d1 = inside[0].end - inside[0].start;
+                return {
+                    time: inside[0].start,
+                    why: 'peça única dins la finestra (' + d1.toFixed(1) + 's) → inici de la peça'
+                };
+            }
+            // Diverses peces: la clarament més llarga (≥2× la mediana i ≥5 s) és la peça inserida
+            var durs = inside.map(function (x) { return x.end - x.start; }).sort(function (a, b) { return a - b; });
+            var med = durs[Math.floor(durs.length / 2)] || 0;
+            var best = null;
+            for (var j = 0; j < inside.length; j++) {
+                var d = inside[j].end - inside[j].start;
+                if (med > 0 && d >= med * 2 && d >= 5) {
+                    if (!best || d > best.d) {
+                        best = {
+                            d: d, time: inside[j].start,
+                            why: 'peça de ' + d.toFixed(1) + 's (≥2× mediana ' + med.toFixed(1) + 's) → inici de la peça'
+                        };
+                    }
+                }
+            }
+            return best ? { time: best.time, why: best.why } : null;
+        },
+
+        // ═══════════════════════════════════════════════════════════════
         // 🟢 F6: enforceMarkerOrder — L'ORDRE DE L'ESCALETA ÉS SAGRAT
         // ═══════════════════════════════════════════════════════════════
         /**
@@ -1270,10 +1520,112 @@
                 prev = cur;
             }
 
-            if (placements.length === 0) { log('🟢 [F6·Ordre] Ordre correcte. ✓ FINALITZAT.'); return; }
+            if (placements.length === 0) {
+                log('🟢 [F6·Ordre] Ordre correcte. ✓ FINALITZAT.');
+                // (2026-09-22) ATENCIÓ: aquest `return` és el camí NORMAL (ordre ja correcte).
+                // La cobertura F7 s'ha de cridar ALSO aquí, si no no s'executava mai quan
+                // tot l'ordre ja era bo (era el cas del TN_MIGDIA: 02dp/02dir sense marcador).
+                await this.ensureMarkerCoverage();
+                return;
+            }
 
             var result = await this._safePlaceByPrefixes(placements, 'F6·Ordre');
             log('🟢 [F6·Ordre] Corregits: ' + (result.placed || 0) + ' marcadors. ✓ FINALITZAT.');
+
+            // ── (2026-09-22) F7·COBERTURA ─────────────────────────────────────────
+            // Després d'ordenar, garantim que TOTS els ítems estructurals del bloc tenen
+            // marcador: si en falta algun (cas real TN_MIGDIA 21/09: ítems "02dp" DONA PAS
+            // i "02dir"/CONNEXIÓ), tots els seus rètols (Enviat, Directe, portades,
+            // Tema-Títol…) es quedaven sense àncora i no es col·locaven.
+            await this.ensureMarkerCoverage();
+        },
+
+        /**
+         * ensureMarkerCoverage (2026-09-22 · F7): Garanteix que cada ítem estructural de
+         * l'escaleta del bloc tingui marcador a la seqüència, perquè els chyrons puguin
+         * ancorar-s'hi (donapas "dp", connexions "dir/CONNEXIÓ", etc.).
+         *
+         * SEGURETAT: només AFEGEIX marcadors d'ítems que NO en tenen. Mai mou, renombra ni
+         * esborra cap marcador existent. La posició dels que falta s'interpola linealment
+         * entre els seus veïns d'escaleta que SÍ tenen marcador (per ordre d'escaleta);
+         * si només hi ha un veí, es col·loca a 0,5 s seu.
+         */
+        ensureMarkerCoverage: async function () {
+            try {
+                const ctxData = await getAssemblyContext().loadAssemblyContext();
+                if (!ctxData || !ctxData.lines || ctxData.lines.length === 0) return;
+
+                const lines = ctxData.lines;
+                const classData = this._classifyItems(lines);
+                // Ítems que haurien de tenir marcador: estructurals + els que es deduïen (sense hora)
+                const items = []
+                    .concat(classData.structuralItems || [])
+                    .concat(classData.unplacedItems || []);
+
+                // Prefixos que ja tenen marcador a la seqüència
+                const markersRaw = await callJSX('Markers.get()');
+                let markers = [];
+                try { markers = markersRaw ? JSON.parse(markersRaw) : []; } catch (eM) { markers = []; }
+                const jaTe = {};
+                for (let mi = 0; mi < markers.length; mi++) {
+                    const pref = this._extractPrefixFromComment(markers[mi].comments || '');
+                    if (pref) jaTe[String(pref).toLowerCase()] = markers[mi].time;
+                }
+
+                // Ordre d'escaleta i posició coneguda de cada ítem
+                const idx = [];
+                for (let li = 0; li < lines.length; li++) {
+                    const num = String(lines[li].num || '').trim();
+                    if (!num) continue;
+                    idx.push({ num: num, i: li, time: (jaTe[num.toLowerCase()] !== undefined) ? jaTe[num.toLowerCase()] : null });
+                }
+
+                const placements = [];
+                const saltats = [];
+                for (let k = 0; k < idx.length; k++) {
+                    const it = idx[k];
+                    // Només ítems que haurien de portar marcador
+                    if (!items.some(function (x) { return String(x.num || '').trim() === it.num; })) continue;
+                    if (it.time !== null) continue;   // ja en té
+
+                    // Veïns amb marcador (per ordre d'escaleta)
+                    let prev = null, next = null;
+                    for (let a = k - 1; a >= 0; a--) { if (idx[a].time !== null) { prev = idx[a]; break; } }
+                    for (let b = k + 1; b < idx.length; b++) { if (idx[b].time !== null) { next = idx[b]; break; } }
+
+                    let t = null;
+                    if (prev && next) {
+                        const span = next.time - prev.time;
+                        const ratio = (k - prev.i) / Math.max(1, (next.i - prev.i));
+                        t = prev.time + span * ratio;
+                    } else if (prev) {
+                        t = prev.time + 0.5;
+                    } else if (next) {
+                        t = Math.max(0, next.time - 0.5);
+                    }
+                    if (t === null || isNaN(t)) { saltats.push(it.num); continue; }
+                    if (t < 0) t = 0;
+
+                    const line = lines[it.i] || {};
+                    placements.push({
+                        prefix: it.num,
+                        timeSec: parseFloat(t.toFixed(2)),
+                        comment: it.num + ' - ' + String(line.titol || '').substring(0, 60),
+                        colorIdx: this._getColorIdx(line)
+                    });
+                }
+
+                if (placements.length === 0) {
+                    log('🛡️ [F7·Cobertura] Tots els ítems estructurals del bloc ja tenen marcador. ✓');
+                    return;
+                }
+                log('🛡️ [F7·Cobertura] Ítems SENSE marcador: ' + placements.map(function (p) { return p.prefix + '@' + p.timeSec + 's'; }).join(', '));
+                const res = await this._safePlaceByPrefixes(placements, 'F7·Cobertura');
+                log('🛡️ [F7·Cobertura] Afegits ' + (res.placed || 0) + ' marcador(s)' +
+                    (saltats.length ? ' · sense veïns per situar: ' + saltats.join(', ') : '') + '. ✓ FINALITZAT.');
+            } catch (e) {
+                log('⚠️ [F7·Cobertura] ' + e.message, 'WARN');
+            }
         },
 
 

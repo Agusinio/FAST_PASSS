@@ -80,25 +80,52 @@
      * no cobreix el rang temporal del bloc).
      *
      * El MP4 del bloc comença al seu propi TC (block.in), per tant
-     * mp4ExpandedInPoint=0 (inici del fitxer). La duració del
-     * contingut (bounds.mp4Duration) es preserva.
+     * mp4ExpandedInPoint=0 (inici del fitxer).
+     *
+     * ⚠️ (2026-09-21) ABANS es reutilitzava `bounds.mp4Duration`, que pot estar CORRUPTE: quan
+     * el bloc s'emet després del final del cleanFeed, `mp4ExpandedOutPoint` queda limitat al
+     * final del cleanFeed i el pedaç «Ajustant…» d'escaleta_bounds deixa `mp4Duration = 1.0s`
+     * → el clip del bloc sortia d'1 segon (cas real TNM V2 21/09: clip de 61s al timeline per a
+     * un bloc de 2:21; l'escaleta i el timeline no coincidien). Ara la durada es RECALCULA amb
+     * els temps ABSOLUTS del bloc (worldBlockEndSec − worldBlockStartSec) + els handles.
      *
      * Els valors absoluts (worldBlockStartSec, worldBlockEndSec) es
      * mantenen intactes perquè els marcadors depenen d'ells.
      *
-     * @param {Object} bounds - Resultat original de calcPrecisionTrimBounds()
+     * @param {Object} bounds  - Resultat original de calcPrecisionTrimBounds()
+     * @param {number} [handles=0] - Handles (marges) en segons, perquè el clip tingui cua
      * @returns {{ mp4ExpandedInPoint: number, mp4ExpandedOutPoint: number, mp4Duration: number }}
      */
-    ER.calcFallbackBoundsForBlockMedia = function (bounds) {
+    ER.calcFallbackBoundsForBlockMedia = function (bounds, handles) {
         if (!bounds) return null;
 
-        // El MP4 individual del bloc comença al seu propi TC intern.
-        // mp4ExpandedInPoint=0 perquè el clip comença a l'inici del fitxer.
-        // La duració del contingut es manté idèntica.
+        var h = (typeof handles === 'number' && isFinite(handles)) ? handles : 0;
+        var ref = bounds.ref || {};
+        var dur = null;
+        var src = '';
+
+        if (ref.worldBlockStartSec != null && ref.worldBlockEndSec != null &&
+            (ref.worldBlockEndSec - ref.worldBlockStartSec) > 1) {
+            var cont = ref.worldBlockEndSec - ref.worldBlockStartSec;
+            dur = cont + h;
+            src = 'bloc ' + cont.toFixed(1) + 's + handle ' + h.toFixed(1) + 's';
+        } else if (bounds.mp4Duration > 1) {
+            dur = bounds.mp4Duration;
+            src = 'mp4Duration original (sense worldBlock*Sec)';
+        }
+
+        if (dur === null) {
+            log('⚠️ No es pot recalcular la durada del bloc (falten worldBlockStartSec/EndSec) → es manté ' +
+                (bounds.mp4Duration || 0).toFixed(1) + 's');
+            dur = bounds.mp4Duration || 0;
+        } else {
+            log('📐 Durada del bloc recalculada: ' + dur.toFixed(1) + 's (' + src + ')');
+        }
+
         return {
             mp4ExpandedInPoint:  0,
-            mp4ExpandedOutPoint: bounds.mp4Duration || 0,
-            mp4Duration:         bounds.mp4Duration || 0
+            mp4ExpandedOutPoint: dur,
+            mp4Duration:         dur
         };
     };
 

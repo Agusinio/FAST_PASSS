@@ -247,6 +247,70 @@
             const endParam = (endSec !== null && endSec !== undefined) ? `, ${endSec}` : ', null';
             const typeParam = type || 'video';
             return await utils.callJSX(`Clips.insert('${safeName}', ${trackIdx}, ${startSec}${endParam}, '${typeParam}')`);
+        },
+
+        /**
+         * insertNoAudio: Insereix un clip de VÍDEO i ELIMINA l'àudio que Premiere hi
+         * enllaça (grafismes .mov/.mp4 amb so, wotts amb pista d'àudio...).
+         *
+         * Sense JSX nou: es componen àtoms existents —
+         *   1. `Clips.insert` (overwriteClip; ja intenta treure l'àudio fantasma, però
+         *      NOMÉS mira A1).
+         *   2. `Clips.at` per localitzar l'índex del clip inserit.
+         *   3. `Clips.removeLinkedAudio` = desenllaça el clip i elimina l'àudio enllaçat
+         *      ALLÀ ON HAGI CAIGUT (A1, A2, A3..., segons el targeting de l'operador).
+         *   4. Xarxa de seguretat: si encara queda un clip d'àudio amb el MATEIX NOM al
+         *      mateix start, s'elimina per índex amb `Clips.remove(..., 'audio')`.
+         *      Mai es toca l'àudio del programa (noms diferents).
+         *
+         * @param {string} itemName - Nom del project item (com a Clips.insert)
+         * @param {number} trackIdx - Pista de VÍDEO (1-based)
+         * @param {number} startSec - Posició d'inserció (s)
+         * @param {number|null} [endSec] - Final opcional (s)
+         * @returns {Promise<{res:string, idx:number|null, audio:string}>}
+         */
+        insertNoAudio: async function (itemName, trackIdx, startSec, endSec) {
+            const t0 = parseFloat(startSec) || 0;
+            const safeName = (itemName || '').replace(/'/g, "\\'");
+            const endParam = (endSec !== null && endSec !== undefined) ? `, ${endSec}` : ', null';
+            const res = await utils.callJSX(`Clips.insert('${safeName}', ${trackIdx}, ${t0.toFixed(4)}${endParam}, 'video')`);
+
+            // 1. Índex del clip inserit
+            let idx = null;
+            try {
+                const atRaw = await utils.callJSX(`Clips.at(${trackIdx}, ${(t0 + 0.05).toFixed(4)}, 'video')`);
+                if (atRaw && atRaw !== 'null') idx = JSON.parse(atRaw).index;
+            } catch (eAt) { }
+
+            let audio = 'SENSE_CLIP';
+            if (idx !== null) {
+                // 2. Àtom existent: desenllaçar i eliminar l'àudio enllaçat
+                audio = await utils.callJSX(`Clips.removeLinkedAudio(${trackIdx}, ${idx})`);
+                // 3. Xarxa de seguretat per NOM (l'àudio del programa no es toca mai).
+                //    UN sol àtom de diagnòstic (`Clips.audioAround`) retorna totes les pistes
+                //    d'àudio al voltant de t0: molt més barat que escanejar pista a pista.
+                try {
+                    const base = String(itemName || '').replace(/\.[^.]+$/, '').toLowerCase();
+                    const aroundRaw = await utils.callJSX(`Clips.audioAround(${t0.toFixed(4)})`);
+                    const around = (aroundRaw && String(aroundRaw).indexOf('ERR') !== 0) ? JSON.parse(aroundRaw) : null;
+                    const trks = (around && around.tracks) ? around.tracks : [];
+                    for (let ti = 0; ti < trks.length; ti++) {
+                        const aNum = ti + 1;   // audioAround llista les pistes en ordre (A1, A2...)
+                        const cs = trks[ti].clips || [];
+                        for (let ci = cs.length - 1; ci >= 0; ci--) {
+                            const c = cs[ci];
+                            const sameStart = Math.abs(c.start - t0) < 0.15;
+                            const sameName = String(c.name || '').replace(/\.[^.]+$/, '').toLowerCase() === base;
+                            if (!sameStart || !sameName) continue;
+                            const rm = await utils.callJSX(`Clips.remove(${aNum}, ${c.idx}, 'audio')`);
+                            audio += ` +rmA${aNum}[${c.idx}]=${rm}`;
+                            utils.log(`🔇 [Clips] àudio sobrant eliminat: A${aNum}[${c.idx}] "${c.name}" → ${rm}`);
+                        }
+                    }
+                } catch (eSw) { utils.log(`⚠️ [Clips] xarxa de seguretat d'àudio: ${eSw.message}`); }
+            }
+            utils.log(`🔇 [Clips] insert sense àudio → V${trackIdx}@${t0.toFixed(2)}s "${itemName}" ins=${res} idx=${idx} àudio=${audio}`);
+            return { res: res, idx: idx, audio: audio };
         }
     };
 

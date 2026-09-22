@@ -11,6 +11,9 @@ var FASTPASS_UI = window.FASTPASS_UI || {};
 FASTPASS_UI.Sync = FASTPASS_UI.Sync || {}; 
 var isUserDraggingSlider = false;
 var reframeActive = false;
+// (2026-09-22) Ticks seguits (de 500 ms) sense focus del panell abans d'apagar el reencuadre:
+// una pèrdua momentània (AppActivate del VBS en enviar l'ESPAI) NO l'ha d'apagar.
+var _reframeNoFocusTicks = 0;
 // Últim clip objectiu detectat per Sync.syncKfMode (track@start@nom). Serveix per
 // saber quan l'usuari canvia de clip i adoptar el mode (slider/keyframe) d'origen.
 var lastKfClipId = "";
@@ -178,33 +181,74 @@ function applySliderLimits() {
         sliderSeqW = seqW;
         slider.min = Math.round(minPx);
         slider.max = Math.round(maxPx);
-        // Posicionar el thumb a la X actual (px). Centre per defecte = seqW/2.
+        // (2026-09-22) NO reposicionar el thumb amb el valor del clip si el slider ja té un
+        // valor: en activar/reactivar el reencuadre (o en recalcular els límits) saltava a la
+        // X del clip objectiu — que pot ser un ALTRE clip (el de sota el CTI) i no el que
+        // l'usuari estava encuadrant → «el slider es col·loca al centre» ✗.
+        // Ara només es recorregeix si queda FORA del rang nou; la sincronització amb el clip
+        // la fa el poll (`updateSliderFromPremiere`).
         var v = parseInt(slider.value, 10);
-        if (isNaN(v) || !isFinite(curPx)) v = Math.round(seqW / 2);
-        else v = Math.round(curPx);
-        if (v < slider.min) slider.value = slider.min;
-        else if (v > slider.max) slider.value = slider.max;
-        else slider.value = v;
+        if (isNaN(v) || !isFinite(v)) v = Math.round(seqW / 2);
+        if (v < slider.min) v = slider.min;
+        else if (v > slider.max) v = slider.max;
+        slider.value = v;
         // forceLog: salta el filtre de tema perquè el rang del slider sempre es vegi.
-        FASTPASS_UI.Utils.forceLog("🎚️ Slider límits(px): " + Math.round(minPx) + ".." + Math.round(maxPx) + " cur=" + v + " seqW=" + seqW);
+        FASTPASS_UI.Utils.forceLog("🎚️ Slider límits(px): " + Math.round(minPx) + ".." + Math.round(maxPx) + " cur=" + v + " (clip=" + Math.round(curPx) + ") seqW=" + seqW);
     }
 }
 
 // 2. ARRANQUE DEL SISTEMA (BOOTSTRAP SINCRO)
 (async function () {
     console.log('🔴 MAIN.JS cargado');
+    var _tBoot = Date.now();
+    // ── TIMING D'ARRENCADA (2026-09-22) ──────────────────────────────────────
+    // Es escriu DIRECTAMENT amb window.cep.fs a <extensió>\_boot_timing.log, sense
+    // dependre de utils.log (que descarta els missatges si encara no ha resolt la
+    // ruta de log — era el motiu pel qual les línies ⏱️ [BOOT] no apareixien).
+    var _bootLines = [];
+    var _bootRoot = null;
+    var _bootFlush = function () {
+        var txt = 'FASTPASS · timing d\'arrencada del panell\n' + _bootLines.join('\n') + '\n';
+        // 1) Carpeta de l'extensió (el destí natural).
+        try {
+            if (_bootRoot) window.cep.fs.writeFile(_bootRoot + '\\_boot_timing.log', txt);
+        } catch (eF) { }
+        // 2) Còpia a C:\temp (per si la ruta nativa fallés o no es trobés el fitxer).
+        try { window.cep.fs.writeFile('C:\\temp\\_boot_timing.log', txt); } catch (eF2) { }
+    };
+    var _bootMark = function (label, lvl) {
+        var ms = Date.now() - _tBoot;
+        _bootLines.push('+' + ms + ' ms\t' + label);
+        _bootFlush();
+        try { console.log('⏱️ [BOOT] ' + label + ' (+' + ms + ' ms)'); } catch (eC) { }
+        try { if (utils && utils.log) utils.log('⏱️ [BOOT] ' + label + ' (+' + ms + ' ms)', lvl || 'INFO'); } catch (eL) { }
+    };
+    try { _bootRoot = csInterface.getSystemPath(SystemPath.EXTENSION).replace(/[\\/]+$/, ''); } catch (eRoot) { _bootRoot = null; }
+    var _bootMarkSafe = function (label) { try { _bootMark(label); } catch (eM) { } };
+    _bootMarkSafe('main.js: arrencada');
+    // ── ESTAT D'ESPERA DEL BOTÓ MAIN ─────────────────────────────────────────
+    // Mentre el motor JSX i el primer checkContext no acabin, el botó MAIN no ha de
+    // mostrar "NOU" ni acceptar clics: es posa en estat BUSY. Es desactiva sol quan
+    // updateButton() pinta el primer estat real (NEW/UPDATE/ESPERANT/…).
+    try {
+        if (window.FASTPASS_UI && FASTPASS_UI.Core && FASTPASS_UI.Core.Context
+            && typeof FASTPASS_UI.Core.Context.setMainBusy === 'function') {
+            FASTPASS_UI.Core.Context.setMainBusy('ESPERA', "Carregant el motor de Premiere i l'estat del dia…");
+        }
+    } catch (eBusy) { }
     var utils = window.FASTPASS_UI ? window.FASTPASS_UI.Utils : null;
-    
+
     try {
         // 1. Obtenemos la ruta nativa
         var extensionRoot = csInterface.getSystemPath(SystemPath.EXTENSION);
-        
-        // 2. BLINDAJE TOTAL: 
+
+        // 2. BLINDAJE TOTAL:
         // Convertimos todas las barras a inclinadas / (formato URL/Unix)
         // Esto evita que Windows interprete \U o \T como caracteres especiales
         var safeRoot = extensionRoot.replace(/\\/g, "/");
 
         utils.log("📂 Ruta detectada: " + safeRoot, "DEBUG");
+        _bootMarkSafe('ruta de l\'extensió resolta');
 
         // 3. LLAMADA QUIRÚRGICA:
         // Usamos comillas simples para el envoltorio y dobles para el contenido
@@ -213,11 +257,13 @@ function applySliderLimits() {
         if (result && result.indexOf("OK") !== -1) {
             window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
             utils.log("✅ Motor JSX montado con éxito.");
+            _bootMarkSafe('motor JSX a punt (jsx_BOOTSTRAP)');
 
             // ── Detecció de motor JSX desactualitzat ─────────────────────────────
             // Si la carpeta de l'extensió té .jsx més nous que els que el motor va
             // carregar, es recarrega automàticament: així no cal reiniciar Premiere
             // cada cop que s'actualitza l'extensió.
+            var _tFresh = Date.now();
             try {
                 const bootRaw = await utils.callJSX("System.bootInfo()");
                 const bootStamp = parseInt((JSON.parse(bootRaw || "{}")).stamp, 10) || 0;
@@ -226,24 +272,39 @@ function applySliderLimits() {
                     utils.log("🔄 [JSX] Extensió més nova que el motor (disk=" + diskStamp + " boot=" + bootStamp + "). Recarregant mòduls...", "INFO");
                     const rl = await utils.callJSX("System.reloadModules()");
                     utils.status("Motor JSX recarregat (" + rl + ")", "exito");
+                    _bootMarkSafe('recàrrega de mòduls JSX (motor desactualitzat)');
                 } else {
                     utils.log("✅ [JSX] Motor al dia (disk=" + diskStamp + " boot=" + bootStamp + ")", "DEBUG");
                 }
             } catch (eJsx) {
                 utils.log("⚠️ [JSX] Comprovació de frescor fallida: " + eJsx.message, "DEBUG");
             }
+            _bootMarkSafe('comprovació de frescor JSX (' + (Date.now() - _tFresh) + ' ms)');
             //utils.isJsxReady = true;
-            
+
             if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context) {
+                var _tInit = Date.now();
                 await FASTPASS_UI.Core.Context.init();
+                _bootMarkSafe('Context.init (config + 1r checkContext) (' + (Date.now() - _tInit) + ' ms)');
             }
+            var _totBoot = Date.now() - _tBoot;
+            _bootMarkSafe('ARRENCADA COMPLETA');
+            utils.status("⏱️ Panell a punt (" + (Math.round(_totBoot / 100) / 10) + " s)", "info");
         } else {
             // Si el motor falla, ahora el 'result' nos dirá EXACTAMENTE en qué línea del JSX falló
             console.error("❌ Fallo en el motor: " + result);
+            _bootMarkSafe('ERROR: el motor JSX no ha carregat → ' + String(result).substring(0, 100));
+            // El botó es queda en BUSY perquè no es pot treballar sense motor.
+            try {
+                if (FASTPASS_UI.Core && FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context.setMainBusy) {
+                    FASTPASS_UI.Core.Context.setMainBusy('ERROR', 'El motor JSX no s\'ha carregat: ' + String(result).substring(0, 120));
+                }
+            } catch (eB2) { }
         }
 
     } catch (error) {
         console.error("💥 Error fatal:", error);
+        _bootMarkSafe('ERROR fatal: ' + (error && error.message ? error.message : String(error)));
     }
 })();
 
@@ -431,6 +492,11 @@ function applySliderLimits() {
                 slPending = { norm: parseInt(slider.value, 10) / sliderSeqW, final: true };
                 if (slRaf) { cancelAnimationFrame(slRaf); slRaf = 0; }
                 slFlush();                                                 // 🚀 FASE 1: COMMIT garantit
+                // (2026-09-22) El codi ORIGINAL cridava aquí `Timeline.nuclearRefresh()`, que
+                // incloïa `app.setAppFocus()`: per això l'ESPAI (Play/Pausa de Premiere) funcionava
+                // després d'usar el slider. Es recupera aquell efecte: el focus del teclat torna a
+                // Premiere en deixar anar el slider (amb debounce, vegeu devolverFocoHost).
+                devolverFocoHost('slider');
             };
         }
 
@@ -556,9 +622,10 @@ function applySliderLimits() {
         if (btnSrtExport) btnSrtExport.addEventListener('click', function () {
             if (window.SrtEditor) window.SrtEditor.exportToPremiere();
         });
-        if (btnSrtReset) btnSrtReset.addEventListener('click', function () {
-            if (window.SrtEditor) window.SrtEditor.resetToOriginal();
-        });
+        // (2026-09-22) RESET ♻️ → reinicia la taula I **torna a buscar els .SRT del tema**
+        // del bloc (abans només restaurava el SRT que ja hi havia carregat, així que si
+        // s'havia carregat el subtítol equivocat no hi havia manera de refrescar-lo).
+        if (btnSrtReset) btnSrtReset.addEventListener('click', () => callWorkflow('Srt', 'runSrtReset'));
 
         // --- WORKFLOW: RENDER ---
         const btnRenderVideo = document.getElementById('btnRenderVideo');
@@ -760,6 +827,7 @@ function applySliderLimits() {
             ['Prev (F3)',              () => callWorkflow('Markers', 'placeScheduledMarkers')],
             ['Correl (F3.5)',          () => callWorkflow('Assembly', 'correlationSnapMarkers')],
             ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],
+            ['Inferits (F5)',          () => callWorkflow('Markers', 'placeInferredItems')],
             ['Ordre (F6)',             () => callWorkflow('Markers', 'enforceMarkerOrder')]
         ];
         utils.log('🚀 [PIPE] Marcadors post-OUT: ' + phases.map(p => p[0]).join(' → ') + '. Verifica els marcadors i usa COLOCAR per als chyrons.', 'INFO');
@@ -855,6 +923,16 @@ function applySliderLimits() {
             }
         } else {
             utils.log('➖ [CHY] Sense marcadors IPD (turquesa o títol amb IPD): no cal revisar IPD.', 'INFO');
+        }
+
+        // ── FOCUS FINAL (2026-09-21): deixar el targeting NOMÉS a V1/A1 i el clip de V1
+        //    seleccionat (el "clip objectiu" del panell). Sense això, després de COL·LOCAR
+        //    quedaven totes les pistes enfocades i el slider/KEYFRAME no apuntaven a V1.
+        try {
+            await utils.targetOnlyV1('Col·locar');
+            await utils.focusV1('Col·locar');
+        } catch (eF) {
+            utils.log('⚠️ [CHY] No s\'ha pogut restaurar el focus a V1: ' + eF.message, 'WARN');
         }
     }
 
@@ -960,6 +1038,217 @@ document.addEventListener('click', function (e) {
         setReframeActive(false);
     }
 });
+
+// 7.b (2026-09-22) PLAY/PAUSA des del panell: quines APIs hi ha en AQUESTA versió de Premiere?
+// El log del 22/09 (14:54) mostra que el play del panell mai ha funcionat:
+//   💥 [JSX ERROR]: ERR:qe.project.getActiveSequence().play is not a function
+//   💥 [JSX ERROR]: ERR:qe.project.getActiveSequence().stop is not a function
+// → el QE DOM d'aquesta versió NO té play()/stop(). Es comprova UNA vegada i es diu al log.
+let _qePlayOk = null;
+let _focusApis = null;        // { setAppFocus:bool, bringToFront:bool } (del diagnòstic)
+function comprobarApisPlay() {
+    if (_qePlayOk !== null) return;
+    try {
+        FASTPASS_UI.Utils.callJSX(
+            "(function(){try{var out=[];try{app.enableQE();var s=qe.project.getActiveSequence();" +
+            "out.push('qe.seq.play='+(s&&typeof s.play==='function'?'SI':'NO'));" +
+            "out.push('qe.seq.stop='+(s&&typeof s.stop==='function'?'SI':'NO'));}catch(e){out.push('qe=ERR:'+e.message)}" +
+            "try{var a=app.project.activeSequence;out.push('app.seq.play='+(a&&typeof a.play==='function'?'SI':'NO'));}catch(e2){out.push('app.seq=ERR:'+e2.message)}" +
+            "try{out.push('bringToFront='+(typeof app.bringToFront==='function'?'SI':'NO'));}catch(e3){}" +
+            "try{out.push('setAppFocus='+(typeof app.setAppFocus==='function'?'SI':'NO'));}catch(e5){}" +
+            "return out.join(' · ');}catch(e4){return 'ERR:'+e4.message}})()"
+        ).then(function (r) {
+            var s = String(r);
+            _qePlayOk = (s.indexOf('qe.seq.play=SI') !== -1);
+            _focusApis = {
+                setAppFocus: (s.indexOf('setAppFocus=SI') !== -1),
+                bringToFront: (s.indexOf('bringToFront=SI') !== -1)
+            };
+            var via = _qePlayOk ? 'QE (SrtEditor.togglePlay)'
+                : (_focusApis.setAppFocus ? 'app.setAppFocus()'
+                    : (_focusApis.bringToFront ? 'app.bringToFront()'
+                        : 'tecla ESPAI via bin/send_space.vbs (VBS, wscript sense consola)'));
+            FASTPASS_UI.Utils.log('🔎 [PLAY] APIs → ' + r + ' → via: ' + via, 'WARN');
+        }).catch(function () { _qePlayOk = false; _focusApis = { setAppFocus: false, bringToFront: false }; });
+    } catch (e) { _qePlayOk = false; }
+}
+
+// 7.c (2026-09-22) RETORNAR EL FOCUS DEL TECLAT A PREMIERE
+// Amb el panell enfocat, l'ESPAI no pot arribar a Premiere (i el panell no té cap API de
+// play usable). La solució bona és NO quedar-se el focus: després de cada interacció amb el
+// panell (mouseup) el focus del teclat torna a Premiere amb `app.bringToFront()` (el panell
+// està acoblat dins de la finestra de Premiere → no canvia res visualment) i es fa `blur()`
+// dels controls. Així l'ESPAI és Play/Pausa natiu de Premiere, sempre.
+// NO es fa mai si el focus és en un CAMP DE TEXT (l'usuari està escrivint).
+let _focoTimer = null;
+function devolverFocoHost(motiu) {
+    var abans = null;
+    try { abans = document.hasFocus(); } catch (eH1) { }
+    try {
+        var a = document.activeElement;
+        if (a && a.blur) a.blur();
+    } catch (eB) { }
+    try { window.blur(); } catch (eW) { }
+    var despres = null;
+    try { despres = document.hasFocus(); } catch (eH2) { }
+    FASTPASS_UI.Utils.log('🖱 [FOCUS] (' + motiu + ') hasFocus del panell: ' + abans + ' → ' + despres, 'DEBUG');
+    clearTimeout(_focoTimer);
+    _focoTimer = setTimeout(function () {
+        try {
+            // Només es criden les APIs que el diagnòstic ha confirmat (aquesta versió de Premiere
+            // no té ni setAppFocus ni bringToFront → no es torna a intentar i no s'embruta el log).
+            var apis = _focusApis || { setAppFocus: true, bringToFront: true };
+            var parts = ['var out=[];'];
+            if (apis.setAppFocus) parts.push('try{app.setAppFocus();out.push("setAppFocus=OK")}catch(e){out.push("setAppFocus=ERR")}');
+            if (apis.bringToFront) parts.push('try{app.bringToFront();out.push("bringToFront=OK")}catch(e2){out.push("bringToFront=ERR")}');
+            if (parts.length === 1) {
+                FASTPASS_UI.Utils.log('🖱 [FOCUS] (' + motiu + ') sense APIs natives de focus a Premiere (es fa servir el VBS de la tecla)', 'DEBUG');
+                return;
+            }
+            parts.push('return out.join(" · ")');
+            FASTPASS_UI.Utils.callJSX('(function(){' + parts.join('') + '})()')
+                .then(function (r) {
+                    FASTPASS_UI.Utils.log('🖱 [FOCUS] focus del teclat → Premiere (' + motiu + ') → ' + r, 'DEBUG');
+                }).catch(function () { });
+        } catch (eC) { }
+    }, 60);
+}
+function _focusEsCampDeText() {
+    try {
+        var el = document.activeElement;
+        if (!el) return false;
+        var tag = String(el.tagName || '').toUpperCase();
+        var tipo = String(el.type || '').toLowerCase();
+        if (tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true) return true;
+        if (tag === 'INPUT' && ['range', 'checkbox', 'radio', 'button', 'submit', 'reset'].indexOf(tipo) === -1) return true;
+        return false;
+    } catch (e) { return false; }
+}
+
+// 7.d (2026-09-22) FALLBACK FINAL: enviar la TECLA ESPAI a Premiere.
+// El log demostra que en aquesta versió de Premiere NO existeixen `app.setAppFocus()` ni
+// `app.bringToFront()` (⇒ "is not a function") i el QE no té `play()`. Com que el panell, amb
+// el focus del teclat, no deixa arribar l'ESPAI a Premiere, l'única via que queda és enviar la
+// tecla des del sistema: `bin/send_space.vbs` (AppActivate del PID de Premiere + SendKeys " "),
+// llançat amb `File.execute()` → s'obre amb wscript.exe (SENSE consola ni parpadeig).
+function _rutaExtensioWindows() {
+    try {
+        if (typeof SystemPath !== 'undefined' && SystemPath.EXTENSION && window.__adobe_cep__) {
+            var cs = new CSInterface();
+            var ext = cs.getSystemPath(SystemPath.EXTENSION);
+            if (ext) return String(ext).replace(/\//g, '\\').replace(/[\\]+$/, '');
+        }
+    } catch (e1) { }
+    try {
+        var href = window.location.href;
+        var qi = href.indexOf('/index.html');
+        if (qi > 0) {
+            var p = decodeURIComponent(href.substring(0, qi));
+            if (p.indexOf('file:///') === 0) p = p.substring(8);
+            return p.replace(/\//g, '\\');
+        }
+    } catch (e2) { }
+    return '';
+}
+let _teclaEnviadaTs = 0;      // anti-rebot + talla de bucle
+function enviarTeclaEspai(motiu) {
+    var ara = Date.now();
+    if (ara - _teclaEnviadaTs < 250) return;    // dues crides seguides → només una
+    var root = _rutaExtensioWindows();
+    if (!root) {
+        FASTPASS_UI.Utils.log('⌨️ [TECLAT] no puc resoldre la ruta de l\'extensió per enviar la tecla', 'WARN');
+        return;
+    }
+    _teclaEnviadaTs = ara;
+    var vbs = root + '\\bin\\send_space.vbs';
+    var esc = vbs.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    FASTPASS_UI.Utils.callJSX(
+        "(function(){try{var f=new File('" + esc + "');" +
+        "if(!f.exists) return 'ERR_NO_VBS';" +
+        "return f.execute() ? 'OK' : 'ERR_EXEC';}catch(e){return 'ERR:'+e.message}})()"
+    ).then(function (r) {
+        FASTPASS_UI.Utils.log('⌨️ [TECLAT] tecla ESPAI enviada a Premiere (' + (motiu || '') + ') → ' + r, 'DEBUG');
+    }).catch(function () { });
+}
+
+document.addEventListener('mouseup', function () {
+    if (_focusEsCampDeText()) return;      // escrivint en un camp → no es toca el focus
+    devolverFocoHost('mouseup');
+}, true);
+
+// Comprovació única de les APIs de play, quan el motor JSX ja està calent.
+setTimeout(function () { try { comprobarApisPlay(); } catch (e) { } }, 1500);
+
+// 7. (2026-09-22) BARRA ESPACIADORA / ENTER — PROBLEMA DE FOC
+// El navegador "pulsa" l'element que té el FOCUS quan es prem ESPAI o ENTER. Com que el
+// panell no netejava mai el focus, després de clicar un botó (p. ex. ▶ de clip següent)
+// el focus s'hi quedava ENGANXAT i cada ESPAI tornava a executar aquell botó: "saltava al
+// clip següent" en lloc de fer PLAY/PAUSA ✗.
+// Aquí:
+//   1) ESPAI/ENTER sobre un botó o enllaç: es neutralitza el clic fantasma (preventDefault)
+//      i es treu el focus (blur) perquè no es repetisca.
+//   2) ESPAI (fora de camps de text): PLAY/PAUSA real de Premiere via
+//      SrtEditor.togglePlay() → QE DOM (no cal que el visor tingui vídeo carregat).
+// Els camps de text (INPUT/TEXTAREA/SELECT/contenteditable) NO es toquen: allà l'espai és
+// contingut i Enter confirma.
+document.addEventListener('keydown', function (e) {
+    var esSpace = (e.key === ' ' || e.key === 'Spacebar' || e.code === 'Space');
+    var esEnter = (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter');
+    if (!esSpace && !esEnter) return;
+
+    var el = document.activeElement;
+    var tag = el ? String(el.tagName || '').toUpperCase() : '';
+    var tipo = (el && el.type) ? String(el.type).toLowerCase() : '';
+    // "Camp de text" (INPUT de text, TEXTAREA, SELECT, contenteditable): allà ESPAI/ENTER són
+    // contingut i NO s'hi toca res. Els controls que NO són de text sí que s'han de gestionar:
+    // el slider d'encuadre deixa el focus en el <input type="range"> i l'ESPAI hi ha de fer
+    // PLAY/PAUSA (abans no feia res i el focus hi quedava enganxat).
+    var NO_TEXT = ['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'];
+    var esCampText = (tag === 'TEXTAREA' || tag === 'SELECT' ||
+        (el && el.isContentEditable === true) ||
+        (tag === 'INPUT' && NO_TEXT.indexOf(tipo) === -1));
+    if (esCampText) return;
+
+    // 1) Que ESPAI/ENTER no "cliquin" el botó/control que té el focus (i que el focus no s'hi quedi)
+    if (tag === 'BUTTON' || tag === 'A' ||
+        (tag === 'INPUT' && ['button', 'submit', 'reset'].indexOf(tipo) !== -1)) {
+        e.preventDefault();
+        e.stopPropagation();
+        try { el.blur(); } catch (eB) { }
+    }
+    if (esEnter) return;
+
+    // 2) ESPAI → PLAY/PAUSA
+    // (2026-09-22) En aquesta versió de Premiere el QE DOM NO té play()/stop()
+    // (`ERR:qe.project.getActiveSequence().play is not a function` al log). Per tant:
+    //   · si el QE hi fos → SrtEditor.togglePlay() (play/stop via QE)
+    //   · si no → es retorna el focus del teclat a Premiere perquè l'ESPAI sigui el
+    //     Play/Pausa NATIU (sense consola, sense processos externs).
+    e.preventDefault();
+    if (_qePlayOk === true && window.SrtEditor && typeof window.SrtEditor.togglePlay === 'function') {
+        FASTPASS_UI.Utils.log('⌨️ [TECLAT] ESPAI → play/pausa (QE)', 'DEBUG');
+        window.SrtEditor.togglePlay();
+    } else {
+        // (2026-09-22) En aquesta versió de Premiere no hi ha cap API de play ni de focus
+        // (QE sense play(), sense app.setAppFocus/bringToFront) → si el panell té el focus del
+        // teclat, l'ESPAI no pot arribar a Premiere: s'envia la tecla des del sistema (VBS).
+        // Guarda anti-bucle: si aquest ESPAI és l'eco del que acabem d'enviar (<1,5 s), no
+        // se n'envia cap altre.
+        var esEco = (Date.now() - _teclaEnviadaTs) < 1500;
+        if (document.hasFocus() && !esEco) {
+            FASTPASS_UI.Utils.log('⌨️ [TECLAT] ESPAI → enviant la tecla a Premiere (focus al panell)', 'DEBUG');
+            enviarTeclaEspai('espai');
+            // (2026-09-22) Aquí NO es fa `devolverFocoHost`: el VBS ja porta el focus a Premiere
+            // (AppActivate) i el `blur()` del panell només afegia una pèrdua de focus extra que
+            // feia que el tick apagués el reencuadre (i el slider saltava de posició) ✗.
+        } else {
+            FASTPASS_UI.Utils.log('⌨️ [TECLAT] ESPAI → ' + (esEco
+                ? 'eco del nostre enviament: ignorat'
+                : 'focus retornat a Premiere (Play/Pausa natiu)'), 'DEBUG');
+            devolverFocoHost('espai');
+        }
+    }
+}, true);
 
 
 /**
@@ -1069,8 +1358,18 @@ setInterval(function () {
     // quedar sondejant en segon pla (cas real: 17 min de poll a 2 Hz).
     if (reframeActive) {
         if (!document.hasFocus()) {
-            setReframeActive(false);
+            // (2026-09-22) NO apagar el reencuadre de seguida: quan el panell envia la tecla
+            // ESPAI a Premiere (AppActivate del VBS) el focus del teclat se'n va un instant i el
+            // reencuadre s'apagava → al reactivar-lo el slider saltava a la X del clip objectiu
+            // (un altre clip, el de sota el CTI) ✗. Ara calen 2 ticks seguits (~1 s) sense focus
+            // per apagar-lo; una pèrdua momentània no el toca.
+            _reframeNoFocusTicks++;
+            if (_reframeNoFocusTicks >= 2) {
+                _reframeNoFocusTicks = 0;
+                setReframeActive(false);
+            }
         } else {
+            _reframeNoFocusTicks = 0;
             if (FASTPASS_UI.Sync && FASTPASS_UI.Sync.updateSliderFromPremiere) {
                 FASTPASS_UI.Sync.updateSliderFromPremiere();
             }

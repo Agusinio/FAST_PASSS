@@ -877,6 +877,52 @@
         },
 
         /**
+         * pickTemaTitolPetit: Selecciona el TEMA-TÍTOL PETIT ("titulillo") del bloc.
+         *
+         * El sistema genera, per bloc, un Tema-Títol petit (~1 s, qtrle amb alpha) amb
+         * animació d'entrada, a més dels grans (10,4 s). Fins ara es descartava
+         * (`pickTemaTitols` només accepta els > minSec). Serveix per fer TRANSICIONS:
+         * entrant a l'inici del bloc i sortint (versió invertida) abans del Tema-Títol gran.
+         *
+         * Normalment se'n generen diverses versions → es queda **el DARRER GENERAT**
+         * (l'ID més alt del nom, p.ex. ..._Tema-Titol_..._00600388.mov).
+         *
+         * @param {Array} structure - State.structure
+         * @param {Object} durations - getWottIndex()
+         * @param {number} maxSec    - Llindar "petit" (= cfg.temaTitolMinSec)
+         * @returns {{item:string,name:string,path:string,tc:string,dur:number,idNum:number}|null}
+         */
+        pickTemaTitolPetit: function (structure, durations, maxSec) {
+            const list = structure || [];
+            const idx = (durations && durations.byName) ? durations : { byName: {}, byNorm: {}, byId: {}, items: [], bytesPerSec: 0 };
+            let best = null;
+            for (let ei = 0; ei < list.length; ei++) {
+                const entry = list[ei];
+                if (!entry || !entry.chyrons) continue;
+                for (let ci = 0; ci < entry.chyrons.length; ci++) {
+                    const c = entry.chyrons[ci];
+                    const up = String(c.name || '').toUpperCase();
+                    const rol = String(c.rol || '').toUpperCase();
+                    const isTT = (rol === 'TEMA-TITOL') || (up.indexOf('TEMA-TITOL') !== -1);
+                    if (!isTT) continue;
+                    if (up.indexOf('PORTADA') !== -1) continue;          // les portades (PNG) no són el titulillo
+                    const res = this._resolveWottDur(idx, c);
+                    if (!(res.dur > 0) || !(res.dur <= maxSec)) continue;
+                    const rec = {
+                        item: String(entry.id || ''),
+                        name: c.name,
+                        path: c.path || '',
+                        tc: String(c.tc || '000000'),
+                        dur: res.dur,
+                        idNum: this._wottIdNum(c.name)
+                    };
+                    if (!best || rec.idNum > best.idNum) best = rec;      // el DARRER generat
+                }
+            }
+            return best;
+        },
+
+        /**
          * close: Tanca el projecte i elimina el lock.
          */
         close: async function () {

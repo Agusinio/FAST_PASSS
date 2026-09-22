@@ -192,18 +192,35 @@
          */
         _ensureExtLogPath: function() {
             if (this._extLogPath) return this._extLogPath;
+            // (2026-09-22) ABANS només es provava window.location.href: durant l'ARRENCADA del
+            // panell (les línies ⏱️ [BOOT]) encara no està resolta → la ruta era null i
+            // utils.log DESCARTAVA aquells missatges (no es veien enlloc). Ara es prova primer
+            // la ruta nativa de l'extensió (el mateix mètode que fa servir main.js).
+            var candidates = [];
+            try {
+                if (this.csInterface && typeof SystemPath !== 'undefined' && SystemPath.EXTENSION) {
+                    var ext = this.csInterface.getSystemPath(SystemPath.EXTENSION);
+                    if (ext) candidates.push(String(ext).replace(/[\\/]+$/, ''));
+                }
+            } catch (eExt) { }
             try {
                 var href = window.location.href;
                 var qi = href.indexOf('/index.html');
                 if (qi > 0) {
                     var p = decodeURIComponent(href.substring(0, qi));
                     if (p.indexOf('file:///') === 0) p = p.substring(8);
-                    var full = p.replace(/\//g, '\\') + '\\_keyframe_trace.log';
-                    try { window.cep.fs.writeFile(full, ''); } catch (eTrunc) { }
+                    candidates.push(p.replace(/\//g, '\\'));
+                }
+            } catch (eHref) { }
+            for (var i = 0; i < candidates.length; i++) {
+                var full = candidates[i] + '\\_keyframe_trace.log';
+                try {
+                    window.cep.fs.writeFile(full, '');
                     this._logBuffer = [];
                     this._extLogPath = full;
-                }
-            } catch (e) { }
+                    return full;
+                } catch (eW) { }
+            }
             return this._extLogPath;
         },
 
@@ -464,6 +481,13 @@
             // La data FIABLE és la de CREACIÓ (creationTime / File.created), que cap
             // procés modifica. Per això en rutes UNC es llegeix SEMPRE via JSX
             // (scanDirectory → File.created) i mai s'usa mtime com a created.
+            //
+            // ⚠️ (2026-09-22) INTENT DESCARTAT d'optimitzar-ho amb cep.fs.readdir +
+            // cep.fs.stat també en UNC: en aquesta màquina el stat sobre UNC NO dóna
+            // creationTime → created quedava buit → filterByWorkDate descartava TOTS
+            // els wotts/portades ("69 -> 0, NO datables") i no es col·locava res.
+            // Revertit al JSX. Si es vol tornar a intentar, cal PRIMER verificar que
+            // cep.fs.stat('./ruta UNC') retorna creationTime.
             var isUnc = (path || '').indexOf('\\\\') === 0 || (path || '').indexOf('//') === 0;
             if (isUnc) {
                 return await this._readFolderViaJsx(path);
@@ -855,6 +879,81 @@
                 this.log(`⚠️ Error al refrescar secuencia activa: ${e.message}`, "WARN");
                 state.activeSequenceName = "";
                 return "";
+            }
+        },
+
+        /**
+         * 🎯 focusV1: Torna el "clip objectiu" del panell a V1 (auto-selecció a V1).
+         * Per què cal: `Anim.setMotionValues` (i els inserts/overwrites) acaben amb un toggle
+         * de selecció intern; si l'últim clip SELECCIONAT és de V2/V3/V6/V7, el clip objectiu
+         * del panell (Anim.sliderApply / Anim.modeInfo → _sliderTarget → Clips.getSelectedVideo,
+         * que recorre les pistes d'abaix cap amunt) deixa de ser V1.
+         * Tècnica (sense JSX nou): re-aplicar al clip de V1 els SEUS MATEIXOS valors de Motion
+         * (getMotionValues → setMotionValues) → mateix estat visual, però V1 torna a quedar
+         * seleccionat. Patró validat a DoblePantalla (2026-09-21).
+         * @param {string} [tag]    - Etiqueta pel log (ex: "DoblePantalla", "Repartir").
+         * @param {number} [refSec] - Segon de referència (p. ex. l'inici del clip tractat).
+         *                            Si no es passa, s'usa el clip de V1 sota el CTI.
+         * @returns {Promise<boolean>} true si el focus s'ha pogut restaurar a V1.
+         */
+        focusV1: async function(tag, refSec) {
+            const t = tag || "FOCUS";
+            try {
+                let raw = null;
+                if (typeof refSec === 'number' && isFinite(refSec)) {
+                    raw = await this.callJSX(`Clips.at(1, ${(refSec + 0.1).toFixed(2)}, 'video')`);
+                }
+                if (!raw || raw === 'null') {
+                    const cti = parseFloat(await this.callJSX('Timeline.get()') || '0');
+                    raw = await this.callJSX(`Clips.at(1, ${cti.toFixed(2)}, 'video')`);
+                }
+                if (!raw || raw === 'null') {
+                    this.log(`🎯 [${t}] focus V1: cap clip de V1 per seleccionar.`, "WARN");
+                    return false;
+                }
+                const c1 = JSON.parse(raw);
+                const mvRaw = await this.callJSX(`Anim.getMotionValues(1, ${c1.index})`);
+                if (!mvRaw || String(mvRaw).indexOf('ERR') === 0) {
+                    this.log(`🎯 [${t}] focus V1: sense valors de Motion a V1[${c1.index}] (${mvRaw}).`, "WARN");
+                    return false;
+                }
+                const selAbans = await this.callJSX('Clips.getSelectedVideo()');
+                const res = await this.callJSX(`Anim.setMotionValues(1, ${c1.index}, '${String(mvRaw).replace(/'/g, "\\'")}')`);
+                await this.delay(150);
+                const selDespres = await this.callJSX('Clips.getSelectedVideo()');
+                this.log(`🎯 [${t}] focus → V1[${c1.index}] "${c1.name}" | toggle ${res} | clip objectiu: ${selAbans} → ${selDespres}`, "INFO");
+                return true;
+            } catch (eF) {
+                this.log(`🎯 [${t}] focus V1: ${eF.message}`, "WARN");
+                return false;
+            }
+        },
+
+        /**
+         * 🎯 targetOnlyV1: Deixa el TARGETING (autoselecció de pista) NOMÉS a V1 i A1.
+         * Per què cal: `Tracks.target(1, true)` (que fan alguns fluxos) no desactiva les
+         * altres pistes; si alguna operació (inserts amb ripple, `_limitarTargets`, etc.) les
+         * ha deixat totes activades, Premiere queda amb "totes les pistes enfocades" i un
+         * insert cauria a qualsevol pista. Aquí ho deixem determinista: V1 i A1 actius.
+         * @param {string} [tag] - Etiqueta pel log (ex: "Col·locar").
+         * @returns {Promise<boolean>}
+         */
+        targetOnlyV1: async function(tag) {
+            const t = tag || "FOCUS";
+            try {
+                const nV = parseInt(await this.callJSX("Tracks.count('video')") || '0', 10) || 0;
+                for (let i = 1; i <= nV; i++) {
+                    await this.callJSX(`Tracks.target(${i}, ${i === 1}, 'video')`);
+                }
+                const nA = parseInt(await this.callJSX("Tracks.count('audio')") || '0', 10) || 0;
+                for (let i = 1; i <= nA; i++) {
+                    await this.callJSX(`Tracks.target(${i}, ${i === 1}, 'audio')`);
+                }
+                this.log(`🎯 [${t}] targeting → només V1 (de ${nV} pistes de vídeo) i A1 (de ${nA} d'àudio)`, "INFO");
+                return true;
+            } catch (eT) {
+                this.log(`🎯 [${t}] targeting: ${eT.message}`, "WARN");
+                return false;
             }
         },
 

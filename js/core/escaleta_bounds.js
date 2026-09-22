@@ -926,6 +926,11 @@
             log('🔒 [ER:Bounds] Àncora actualitzada al piso: ' + this.secondsToTC(worldBlockAnchorSec));
         }
 
+        // (2026-09-21) REFERÈNCIA NETA: ELIMINADA. El càlcul per tiers + PISO ja era correcte
+        // (item 18 OnAir 14:45:25 + 1:36 = 14:47:01, + MOLINET 1 corregit 7s→5s = 14:47:06), i
+        // la Prevista de 19p7 (14:47:08) és el PLA SENSE CORREGIR (2s de més) → adoptar-la
+        // desplaçava el bloc 2s tard. La referència de 19p7 no és una "veritat" millor.
+
         // ================================================================
         // OUT: worldBlockEndSec
         // ================================================================

@@ -222,26 +222,95 @@
 
                 log(`📤 Destí: ${outputDir}\\${fileName}`);
 
-                // (2026-09-18) Render DIRECTE des de Premiere amb el motor d'Adobe
-                // (exportAsMediaDirect, tipus "Vulcan") → NO obra AME. És síncrona: Premiere
-                // queda ocupat mentre exporta.
-                // (2026-09-18) Render DIRECTE des de Premiere via `exportAsMediaDirect`
-                // (motor d'Adobe, tipus "Vulcan"). NO hi ha fallback a AME: si falla,
-                // s'informa i s'atura (per petició de l'usuari).
+                // ── (2026-09-21) EXPORTACIÓ = "EL QUE QUEDA" (decisió d'usuari en directe) ──
+                // L'exportació directa de Premiere NO accepta cap rang (ignora IN/OUT) i no es
+                // vol fer servir AME. Per tant, ABANS d'exportar es RETALLA el timeline a l'OUT
+                // de la seqüència: s'ajusten (endAt) o s'eliminen tots els clips que hi ha més
+                // enllà de l'OUT, a totes les pistes, i s'exporta el que queda.
+                let outSec = 0, rngSrc = '';
+                try {
+                    const rngRaw = await callJSX('Render.exportRange()');
+                    const rng = (rngRaw && String(rngRaw).indexOf('{') === 0) ? JSON.parse(rngRaw) : null;
+                    if (rng && rng.outSec > 0.1) { outSec = rng.outSec; rngSrc = rng.src + (rng.mode === 2 ? ' (àrea de treball)' : ''); }
+                } catch (eRng) { }
+                if (!(outSec > 0.1)) {
+                    // Fallback: el punt OUT de la seqüència (Timeline.getOut)
+                    try { outSec = parseFloat(await callJSX('Timeline.getOut()') || '0') || 0; rngSrc = 'OUT de la seqüència'; } catch (eO) { }
+                }
+                if (outSec > 0.1) {
+                    log(`✂️ [Render] Retall a ${outSec.toFixed(2)}s (${rngSrc})`);
+                    getUtils().status('Retallant el timeline a l\'OUT…', 'procesando');
+                    const tr = await this._trimTailAtOut(outSec);
+                    log(`✂️ [Render] Timeline retallat a l'OUT (${outSec.toFixed(2)}s): ${tr.trimmed} clip(s) ajustat(s), ${tr.removed} eliminat(s) · ${tr.tracks} pista/es tocades`);
+                } else {
+                    log('⚠️ [Render] La seqüència no té OUT ni àrea de treball: s\'exporta el timeline tal com està', 'WARN');
+                }
+
                 getUtils().status('Renderitzant des de Premiere…', 'procesando');
                 const rDir = await callJSX(`Render.renderDirect('${presetPath}', '${getUtils().escape(outputDir)}', '${getUtils().escape(fileName)}')`);
                 log('🎬 [Render] directe → ' + rDir);
 
                 if (rDir && String(rDir).indexOf('OK') === 0) {
                     getUtils().status(`OK: ${fileName}`, 'exito');
-                    log('✅ [Render] Exportat directament des de Premiere (sense AME): ' + fileName, 'INFO');
+                    log(`✅ [Render] Exportat${outSec > 0.1 ? ' (retallat a ' + outSec.toFixed(2) + 's)' : ''}: ${fileName}`, 'INFO');
                     FASTPASS_UI.State.lastRenderName = fileName.replace('.mp4', '');
                 } else {
-                    getUtils().status('Render directe fallit: ' + rDir, 'error');
-                    throw new Error('Render directe fallit: ' + rDir);
+                    getUtils().status('Render fallit: ' + rDir, 'error');
+                    throw new Error('Render fallit: ' + rDir);
                 }
 
             } catch (e) { getUtils().handleError(e, "RenderVideo"); }
+        },
+
+        /**
+         * _trimTailAtOut: Retalla el timeline a l'OUT de la seqüència.
+         *
+         * Elimina (o ajusta amb endAt) TOTS els clips de TOTES les pistes (vídeo, àudio i
+         * subtítols) que passen de l'OUT. Així l'exportació directa de Premiere —que no
+         * accepta cap rang— exporta exactament "el que queda" ✔.
+         *
+         * Composició d'àtoms JSX existents (Tracks.count, Clips.count/get/remove/endAt):
+         * zero JSX nou.
+         *
+         * @param {number} outSec - OUT de la seqüència en segons
+         * @returns {Promise<{trimmed:number, removed:number, tracks:number}>}
+         */
+        _trimTailAtOut: async function (outSec) {
+            const res = { trimmed: 0, removed: 0, tracks: 0 };
+            // (2026-09-21) NOMÉS vídeo i àudio. La pista de SUBTÍTOLS ja ve cortada d'origen
+            // (no s'ha de tocar).
+            const kinds = ['video', 'audio'];
+            for (const kind of kinds) {
+                let nTracks = 0;
+                try { nTracks = parseInt(await callJSX(`Tracks.count('${kind}')`) || '0', 10) || 0; } catch (eT) { continue; }
+                for (let t = 1; t <= nTracks; t++) {
+                    let n = 0;
+                    try { n = parseInt(await callJSX(`Clips.count(${t}, '${kind}')`) || '0', 10) || 0; } catch (eC) { continue; }
+                    if (n === 0) continue;
+                    let did = false;
+                    // De dalt a baix: en eliminar clips, els índexs es renumeren.
+                    for (let i = n - 1; i >= 0; i--) {
+                        let clip = null;
+                        try {
+                            const raw = await callJSX(`Clips.get(${t}, ${i}, '${kind}')`);
+                            if (raw && raw !== 'null') clip = JSON.parse(raw);
+                        } catch (eG) { continue; }
+                        if (!clip) continue;
+                        const label = `${kind.toUpperCase()}${t}[${i}] "${String(clip.name || '').substring(0, 40)}"`;
+                        if (clip.start >= outSec - 0.02) {
+                            const r = await callJSX(`Clips.remove(${t}, ${i}, '${kind}')`);
+                            res.removed++; did = true;
+                            log(`      ✂️ ${label} (${clip.start.toFixed(2)}→${clip.end.toFixed(2)}s) ELIMINAT (tot ell després de l'OUT) [${r}]`);
+                        } else if (clip.end > outSec + 0.02) {
+                            const r = await callJSX(`Clips.endAt(${t}, ${clip.start.toFixed(4)}, ${outSec.toFixed(4)}, '${kind}')`);
+                            res.trimmed++; did = true;
+                            log(`      ✂️ ${label} (${clip.start.toFixed(2)}→${clip.end.toFixed(2)}s) RETALLAT a ${outSec.toFixed(2)}s [${r}]`);
+                        }
+                    }
+                    if (did) res.tracks++;
+                }
+            }
+            return res;
         },
 
         /**

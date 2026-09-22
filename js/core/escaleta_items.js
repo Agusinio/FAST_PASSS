@@ -118,7 +118,10 @@
             var prevOnAir = prevItem.horaEntradaOnAir;
             if (prevOnAir && prevOnAir !== "00:00:00") {
                 var anchorSec = this.tcToSeconds(prevOnAir);
-                var anchorDur = this.parseDurada(prevItem.duradaOnAir || prevItem.durada);
+                // (2026-09-21) getItemDuradaSec ignora durades CORRUPTES (p.ex. "0:-1" del
+                // 20p7 de TNM V2): abans parseDurada("0:-1") = -1s s'acumulava i desviava
+                // tota la deducció.
+                var anchorDur = this.getItemDuradaSec(prevItem);
                 var result = anchorSec + anchorDur + accumulatedDur;
                 // BUG #21: Si l'ítem objectiu té horaEntradaPrevista i aquesta és
                 // ANTERIOR al resultat deduït, usar la Prevista. Això passa quan
@@ -139,7 +142,7 @@
                 if (data && prevItem.titol && this._isCareta(prevItem.titol)) {
                     accumulatedDur += this._getCorrectedDuration(prevItem, data);
                 } else {
-                    accumulatedDur += this.parseDurada(prevItem.duradaOnAir || prevItem.durada);
+                    accumulatedDur += this.getItemDuradaSec(prevItem);   // ignora durades corruptes (≤0)
                 }
             }
         }

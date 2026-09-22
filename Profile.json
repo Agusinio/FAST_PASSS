@@ -21,12 +21,15 @@
         "TNs": {
             "tracks": {
                 "v_mp4": 1,
-                "v_fondos": 2,
+                "v_fondos": 3,
                 "v_graf": 3,
-                "v_tema": 5,
-                "v_chyrons": 6,
-                "v_lloc": 7,
-                "v_trad": 9,
+                "v_graficos": 3,
+                "v_video1": 4,
+                "v_video2": 5,
+                "v_tema": 6,
+                "v_chyrons": 7,
+                "v_lloc": 8,
+                "v_trad": 4,
                 "s_s1": 1,
                 "s_s2": 2
             },
@@ -60,12 +63,15 @@
         "Sumari Matins": {
             "tracks": {
                 "v_mp4": 1,
-                "v_fondos": 2,
+                "v_fondos": 3,
                 "v_graf": 3,
-                "v_tema": 5,
-                "v_chyrons": 6,
-                "v_lloc": 7,
-                "v_trad": 8,
+                "v_graficos": 3,
+                "v_video1": 4,
+                "v_video2": 5,
+                "v_tema": 6,
+                "v_chyrons": 7,
+                "v_lloc": 8,
+                "v_trad": 4,
                 "s_s1": 1,
                 "s_s2": 2
             },
@@ -82,12 +88,15 @@
         "Fotomató": {
             "tracks": {
                 "v_mp4": 1,
-                "v_fondos": 2,
+                "v_fondos": 3,
                 "v_graf": 3,
-                "v_tema": 5,
-                "v_chyrons": 6,
-                "v_lloc": 7,
-                "v_trad": 8,
+                "v_graficos": 3,
+                "v_video1": 4,
+                "v_video2": 5,
+                "v_tema": 6,
+                "v_chyrons": 7,
+                "v_lloc": 8,
+                "v_trad": 4,
                 "s_s1": 1,
                 "s_s2": 2
             },
@@ -96,12 +105,15 @@
         "User Defined": {
             "tracks": {
                 "v_mp4": 1,
-                "v_fondos": 2,
+                "v_fondos": 3,
                 "v_graf": 3,
-                "v_tema": 5,
-                "v_chyrons": 6,
-                "v_lloc": 7,
-                "v_trad": 8,
+                "v_graficos": 3,
+                "v_video1": 4,
+                "v_video2": 5,
+                "v_tema": 6,
+                "v_chyrons": 7,
+                "v_lloc": 8,
+                "v_trad": 4,
                 "s_s1": 1,
                 "s_s2": 2
             },

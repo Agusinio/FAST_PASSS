@@ -398,10 +398,11 @@
                         const idealTime = mk.time + tcSeconds;
                         const placeTime = await this._snapToNearestCut(idealTime);
                         const track = trackResolver(chy, cfg);
-                        const escapedName = getUtils().escape(chy.name);
 
-                        await callJSX(`Clips.insert('${escapedName}', ${track}, ${placeTime}, null, 'video')`);
-                        log(`   ✅ [${label}] ${chy.name} → V${track} @ ${placeTime.toFixed(2)}s`);
+                        // (2026-09-22) insert NO-AUDIO: els wotts porten component d'àudio i
+                        // Premiere el podia deixar enllaçat (A2/A3 segons el targeting).
+                        const insRes = await getClipsLogic().insertNoAudio(chy.name, track, placeTime, null);
+                        log(`   ✅ [${label}] ${chy.name} → V${track} @ ${placeTime.toFixed(2)}s [${insRes.res} · àudio ${insRes.audio}]`);
                         placedCount++;
                     }
                 }
@@ -724,8 +725,8 @@
                             const slotDur = clipDur / N;
                             const placeTime = clipStart + slotDur * i;
                             const placeEnd = (i === N - 1) ? clipStart + clipDur : clipStart + slotDur * (i + 1);
-                            const escapedName = getUtils().escape(group[i].name);
-                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime}, ${placeEnd}, 'video')`);
+                            // (2026-09-22) insert NO-AUDIO (vegeu _placeChyronsByType)
+                            await getClipsLogic().insertNoAudio(group[i].name, T_TRAD, placeTime, placeEnd);
                             log(`      ✅ [${i+1}/${N}] ${group[i].name.substring(0, 40)}... → V7 @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s (dur=${(placeEnd - placeTime).toFixed(2)}s)`);
                             placedCount++;
                         }
@@ -933,9 +934,8 @@
                         if (chy) {
                             const newStart = rangeStart + slotDur * s;
                             const newEnd = (s === M - 1) ? rangeEnd : rangeStart + slotDur * (s + 1);
-                            const escapedName = getUtils().escape(chy.name);
-                            
-                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${newStart}, ${newEnd}, 'video')`);
+                            // (2026-09-22) insert NO-AUDIO (vegeu _placeChyronsByType)
+                            await getClipsLogic().insertNoAudio(chy.name, T_TRAD, newStart, newEnd);
                             log(`      ✅ [${seqNum}/${M}] "${chy.name.substring(0, 30)}..." → V7 @ ${newStart.toFixed(2)}s→${newEnd.toFixed(2)}s (dur=${(newEnd - newStart).toFixed(2)}s)`);
                             placedCount++;
                         } else {

@@ -151,6 +151,31 @@ button:hover { filter: brightness(1.2); }
 button.secondary { background-color: var(--color-secondary); }
 button.btn-sq-std { width: var(--boto-std-sq); height: var(--boto-std-sq); min-height: var(--boto-std-sq); }
 button.btn-big-sq { width: var(--boto-gran-vip); height: var(--boto-gran-vip); font-size: 11px; }
+
+/* BOTÓ MAIN (NOU / CREAR / ACTUAL. / ESPERA / MASSA D'HORA / BLOQUEJAT…): SEMPRE el
+   mateix quadrat de 60×60, passi el que passi amb el text.
+   (2026-09-22) El JS li assignava `className = "square-large"` (una classe que NO existeix
+   al CSS) i `style.width = "100%"` inline → el botó perdia el 60×60 i s'ajustava al text;
+   es veia molt lleig sobretot en arrencar el panell (una forma diferent de la de treball).
+   Ara la forma la fixa NOMÉS el CSS, amb min/max i !important perquè ni el JS ni el
+   contingut la puguin canviar: el text s'ajusta DINS del quadrat (2 línies si cal). */
+button.btn-big-sq,
+#btnMainAction {
+    width: var(--boto-gran-vip) !important;
+    min-width: var(--boto-gran-vip) !important;
+    max-width: var(--boto-gran-vip) !important;
+    height: var(--boto-gran-vip) !important;
+    min-height: var(--boto-gran-vip) !important;
+    max-height: var(--boto-gran-vip) !important;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    padding: 2px;
+    font-size: 10px;
+    line-height: 1.05;
+    text-align: center;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+}
 button.btn-big-sq-full { width: 150%; height: var(--boto-gran-vip); font-size: 11px; }
 
 /* SETUP */

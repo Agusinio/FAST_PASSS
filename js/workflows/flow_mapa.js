@@ -1,8 +1,8 @@
 /* ============================================================================
  * flow_mapa.js — Botó 🎨 "Gráfica" (grup GRF): importador MAPA
  *
- * (2026-09-18) Amb el cabezal (CTI) col·locat on s'ha d'insertar el material,
- * aquest workflow ofereix 3 opcions:
+ * (2026-09-18) Amb el clip a substituir SELECCIONAT al timeline (2026-09-22: la
+ * REFERÈNCIA és el clip seleccionat, no el cabezal), aquest workflow ofereix 3 opcions:
  *   1) Importar el(s) fitxer(s) de la carpeta del dia que coincideixin amb el nom
  *      de l'ÍTEM D'ESCALETA on és el cabezal.
  *   2) Obrir el navegador de fitxers perquè l'usuari triï.
@@ -10,9 +10,9 @@
  *
  * Carpeta del dia: ...\ZZZ_GRAFISME\<DD MES>  (les subcarpetes són "17 SETEMBRE",
  * NO "2026_09_17" → cal traduir la data del projecte).
- * El material s'importa al BIN "GRAF" i es col·loca a V6 des del CTI, en ordre
- * d'escaleta. Si no hi cap tot, es retallen tots de manera proporcional.
- * Ítem de referència: el del marcador anterior o en la posició del CTI.
+ * El material s'importa al BIN "GRAF" i es col·loca a la pista de grafismes, en ordre
+ * d'escaleta, des de l'IN del clip seleccionat. Si no hi cap tot, es retallen els clips.
+ * Ítem de referència: el del marcador anterior o en la posició del clip seleccionat.
  * ========================================================================== */
 (function () {
     'use strict';
@@ -23,8 +23,11 @@
     // ── Configuració ──────────────────────────────────────────────────────
     var GRAF_ROOT = '\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\ZZZ_GRAFISME';
     var GRAF_BIN = 'GRAF';
-    var TRACK_GRAF = 5;    // (18/09) el gràfic importat va a V5
-    var TRACK_FREEZE = 6;  // (18/09) el congelat (PNG del tema-títol) es replica a V6
+    // (2026-09-22) Mapa FINAL de pistes: GRAF/grafismes = fondos = V3 (v_graf/v_graficos),
+    // congelat del tema-títol = V6 (v_tema). Es resolen des de la CONFIG a _flow()
+    // (aquí només són el fallback si la configuració no respon).
+    var TRACK_GRAF = 3;
+    var TRACK_FREEZE = 6;
     var VIDEO_EXT = ['mov', 'mp4', 'mxf', 'm4v', 'avi', 'mts', 'm2t', 'wmv', 'r3d'];
     var MESOS = ['GENER', 'FEBRER', 'MARÇ', 'ABRIL', 'MAIG', 'JUNY',
         'JULIOL', 'AGOST', 'SETEMBRE', 'OCTUBRE', 'NOVEMBRE', 'DESEMBRE'];
@@ -66,6 +69,19 @@
                 var cti = parseFloat(await callJSX('Timeline.get()') || '0');
                 L('🗺️ [MAPA] Inici · CTI=' + cti.toFixed(2) + 's');
 
+                // (2026-09-22) REFERÈNCIA = el CLIP A SUBSTITUIR pel grafisme (el de V1 que hi
+                // ha a la posició del cabezal / el clip seleccionat). El CTI sol era erroni:
+                // el material comença a l'IN del clip i ocupa tot el seu rang.
+                var ref = await this._resolveRefClip(cti);
+                if (!ref) {
+                    L('⚠️ [MAPA] Sense clip de referència → no es col·loca res. Selecciona el clip a substituir (V1) o posa-hi el cabezal.', 'WARN');
+                    U().status('MAPA: selecciona el clip a substituir', 'warn');
+                    return;
+                }
+                var refSec = ref.start;
+                L('🗺️ [MAPA] Referència (' + ref.src + '): V' + ref.track + '[' + ref.index + '] "' + ref.name +
+                    '" ' + ref.start.toFixed(2) + 's→' + ref.end.toFixed(2) + 's (dur ' + (ref.end - ref.start).toFixed(2) + 's)');
+
                 var dateDir = this._resolveDateDir();
                 var folder = this._folderForDate(dateDir);
                 if (!folder) {
@@ -75,11 +91,21 @@
                 }
                 L('🗺️ [MAPA] Carpeta: ' + folder);
 
-                var item = await this._itemAtCti(cti);
+                // (2026-09-22) Pistes segons la CONFIG activa (mapa final de pistes):
+                // grafismes → tracks.video.graficos (V3) · congelat → tracks.video.tematitol (V6).
+                try {
+                    var cv = window.FASTPASS_UI.Config.get().tracks.video;
+                    if (cv && cv.graficos) TRACK_GRAF = cv.graficos;
+                    else if (cv && cv.graf) TRACK_GRAF = cv.graf;
+                    if (cv && cv.tematitol) TRACK_FREEZE = cv.tematitol;
+                    L('🗺️ [MAPA] Pistes de la config → GRAF=V' + TRACK_GRAF + ' · congelat=V' + TRACK_FREEZE);
+                } catch (eCfg) { L('⚠️ [MAPA] no s\'ha pogut llegir la config de pistes: ' + eCfg.message, 'WARN'); }
+
+                var item = await this._itemAtCti(refSec);
                 if (!item || !item.nombre) {
-                    L('⚠️ [MAPA] Cap ítem d\'escaleta al cabezal (ni marcador anterior)', 'WARN');
+                    L('⚠️ [MAPA] Cap ítem d\'escaleta al clip de referència (ni marcador anterior)', 'WARN');
                 } else {
-                    L('🗺️ [MAPA] Ítem al cabezal: "' + item.num + ' - ' + item.nombre + '"');
+                    L('🗺️ [MAPA] Ítem al clip de referència: "' + item.num + ' - ' + item.nombre + '"');
                 }
 
                 var files = await this._filesIn(folder);
@@ -102,12 +128,19 @@
                 var items = await this._import(picked);
                 if (!items.length) { U().status('MAPA: importació fallida', 'error'); return; }
 
-                // (18/09) ABANS de tocar V5: capturar el CONGELAT (PNG del tema-títol) que
-                // hi ha sota el cabezal. Després es replica a V6 fins al final d'aquest clip.
-                var freeze = await this._freezeUnderCti(cti);
+                // (18/09) ABANS de tocar la pista de grafismes: capturar el CONGELAT (PNG del
+                // tema-títol) que hi ha sota el clip de referència. Després es replica a la
+                // pista de congelat fins al final d'aquest clip.
+                var freeze = await this._freezeUnderCti(refSec);
 
-                await this._placeClips(items, cti, freeze);
+                await this._placeClips(items, refSec, freeze, ref);
                 U().status('MAPA: ' + items.length + ' clip(s) a V' + TRACK_GRAF, 'exito');
+
+                // (2026-09-21) Tornar la auto-selecció a V1: targeting només V1/A1 + clip de V1.
+                try {
+                    await U().targetOnlyV1('MAPA-GRAF');
+                    await U().focusV1('MAPA-GRAF');
+                } catch (eF) { L('⚠️ [MAPA] focus V1: ' + eF.message, 'WARN'); }
             } catch (e) {
                 L('💥 [MAPA] ' + e.message, 'ERROR');
                 try { U().handleError(e, 'Mapa'); } catch (e2) { }
@@ -156,9 +189,72 @@
         },
 
         // ═══════════════════════════════════════════════════════════════
-        // ÍTEM D'ESCALETA AL CABEZAL (marcador anterior o a la posició)
+        // CLIP DE REFERÈNCIA: el clip a SUBSTITUIR pel grafisme
+        // (2026-09-22) El grafisme substitueix AQUEST clip: comença a la seva IN i ocupa
+        // tot el seu rang. El cabezal sol (CTI) NO és la referència (era erroni).
         // ═══════════════════════════════════════════════════════════════
-        _itemAtCti: async function (cti) {
+        /**
+         * _selectedClip: Clip de VÍDEO seleccionat al timeline (àtom Clips.getSelectedVideo).
+         * @returns {Promise<Object|null>} { track, index, name, start, end } o null
+         */
+        _selectedClip: async function () {
+            try {
+                var raw = await callJSX('Clips.getSelectedVideo()');
+                if (!raw || raw === 'null' || String(raw).indexOf('ERR') === 0) return null;
+                var s = JSON.parse(raw);
+                if (typeof s.start !== 'number' || typeof s.end !== 'number') return null;
+                return s;
+            } catch (e) {
+                L('⚠️ [MAPA] No puc llegir el clip seleccionat: ' + e.message, 'WARN');
+                return null;
+            }
+        },
+
+        /**
+         * _resolveRefClip: resol el CLIP DE REFERÈNCIA (el que el grafisme substitueix).
+         * (2026-09-22) Ordre de prioritat:
+         *   1. Clip SELECCIONAT a la pista MP4 (`tracks.video.mp4`, V1) — el cas habitual:
+         *      és el clip que l'operador té seleccionat a la posició del cabezal.
+         *   2. Clip de la pista MP4 (V1) que CONTÉ el cabezal (si la selecció s'ha perdut).
+         *   3. Qualsevol altre clip de vídeo seleccionat (altres pistes).
+         * @param {number} cti - Posició del cabezal (s)
+         * @returns {Promise<Object|null>} { track, index, name, start, end, src } o null
+         */
+        _resolveRefClip: async function (cti) {
+            var tMp4 = 1;
+            try { tMp4 = window.FASTPASS_UI.Config.get().tracks.video.mp4 || 1; } catch (eCfg) { }
+            var sel = await this._selectedClip();
+
+            // 1. Seleccionat a V1 (pista MP4)
+            if (sel && sel.track === tMp4) { sel.src = 'clip SELECCIONAT a V' + tMp4; return sel; }
+
+            // 2. Clip de V1 que conté el cabezal
+            try {
+                var clips = await getClipsLogic().getTrackClips(tMp4, 'video');
+                for (var i = 0; i < clips.length; i++) {
+                    var c = clips[i];
+                    if (cti >= c.start - 0.001 && cti < c.end - 0.001) {
+                        return {
+                            track: tMp4, index: c.index, name: c.name, start: c.start, end: c.end,
+                            src: 'V' + tMp4 + ' a la posició del cabezal (' + cti.toFixed(2) + 's)'
+                        };
+                    }
+                }
+                L('⚠️ [MAPA] Cap clip a V' + tMp4 + ' a la posició del cabezal (' + cti.toFixed(2) + 's)', 'WARN');
+            } catch (e) {
+                L('⚠️ [MAPA] No puc llegir V' + tMp4 + ': ' + e.message, 'WARN');
+            }
+
+            // 3. Qualsevol altra selecció de vídeo
+            if (sel) { sel.src = 'clip SELECCIONAT a V' + sel.track + ' (no V' + tMp4 + ')'; return sel; }
+
+            return null;
+        },
+
+        // ═══════════════════════════════════════════════════════════════
+        // ÍTEM D'ESCALETA A LA POSICIÓ DE REFERÈNCIA (marcador anterior o la posició)
+        // ═══════════════════════════════════════════════════════════════
+        _itemAtCti: async function (refSec) {
             var raw = await callJSX('Markers.get()');
             var markers = [];
             try { markers = raw ? JSON.parse(raw) : []; } catch (e) { }
@@ -172,7 +268,7 @@
                 if (idx <= 0) continue;                        // només "NN - Nom"
                 var prefix = cmt.substring(0, idx).replace(/^\s+|\s+$/g, '');
                 if (!/^\d/.test(prefix)) continue;
-                if (t > cti + 0.001) continue;                 // només anteriors o al CTI
+                if (t > refSec + 0.001) continue;              // només anteriors o a la posició de referència
                 if (!best || t > best.time) {
                     best = { num: prefix, nombre: cmt.substring(idx + 2).replace(/^\s+|\s+$/g, ''), time: t };
                 }
@@ -270,25 +366,26 @@
         },
 
         /**
-         * _freezeUnderCti: CONGELAT de sota el cabezal a V5 (el PNG/frame del tema-títol).
-         * Retorna { name, start, end } o null. S'ha de llegir ABANS d'insertar el gràfic a V5
-         * (després el clip que hi hauria sota el cabezal seria el gràfic inserit).
-         * El PNG de V6 s'ha d'estirar fins al FINAL D'AQUEST clip (no fins al final del
-         * gràfic ni del clip de V1).
+         * _freezeUnderCti: CONGELAT que hi ha sota el CLIP DE REFERÈNCIA (el PNG/frame del
+         * tema-títol de la pista de grafismes). Retorna { name, start, end } o null.
+         * S'ha de llegir ABANS d'insertar el gràfic (després el clip que hi hauria sota la
+         * referència seria el gràfic inserit).
+         * El PNG de congelat s'ha d'estirar fins al FINAL D'AQUEST clip (no fins al final del
+         * gràfic ni del clip del programa).
          */
-        _freezeUnderCti: async function (cti) {
+        _freezeUnderCti: async function (refSec) {
             try {
                 var clips = await getClipsLogic().getTrackClips(TRACK_GRAF, 'video');
                 for (var i = 0; i < clips.length; i++) {
                     var c = clips[i];
-                    if (cti >= c.start - 0.001 && cti < c.end - 0.001) {
+                    if (refSec >= c.start - 0.001 && refSec < c.end - 0.001) {
                         var nm = c.name || c.mediaName || stripExt(c.mediaPath || '');
                         L('🗺️ [MAPA] Congelat a V' + TRACK_GRAF + ': "' + nm + '" @ ' +
                             c.start.toFixed(2) + '-' + c.end.toFixed(2) + 's');
                         return { name: nm, start: c.start, end: c.end };
                     }
                 }
-                L('⚠️ [MAPA] Cap clip a V' + TRACK_GRAF + ' sota el cabezal → sense congelat a V' + TRACK_FREEZE, 'WARN');
+                L('⚠️ [MAPA] Cap clip a V' + TRACK_GRAF + ' sota el clip de referència → sense congelat a V' + TRACK_FREEZE, 'WARN');
             } catch (e) {
                 L('⚠️ [MAPA] No puc llegir V' + TRACK_GRAF + ': ' + e.message, 'WARN');
             }
@@ -383,16 +480,34 @@
             return null;
         },
 
-        _placeClips: async function (items, cti, freeze) {
-            // 1. Espai hàbil: fins al final del clip de V1 que conté el CTI
+        /**
+         * _placeClips: Insereix els grafismes a la pista GRAF des de la posició de referència.
+         * (2026-09-22) La referència és el CLIP SELECCIONAT (`sel`): el material s'insereix
+         * al seu IN i l'espai hàbil és el seu rang [start, end] (abans s'usava el cabezal
+         * i el final del clip de V1 sota el CTI).
+         *
+         * @param {Array}  items  - [{ name, dur }] grafismes importats
+         * @param {number} refSec - IN del clip de referència (s)
+         * @param {Object} freeze - congelat { name, start, end } o null
+         * @param {Object} ref    - clip de referència { track, index, name, start, end } o null
+         */
+        _placeClips: async function (items, refSec, freeze, ref) {
+            // 1. Espai hàbil: el rang del CLIP DE REFERÈNCIA (o, si no n'hi ha, del clip de la
+            //    pista MP4 que conté la posició de referència — comportament antic).
             var endLimit = null;
-            try {
-                var clips = await getClipsLogic().getTrackClips(1, 'video');
-                for (var c = 0; c < clips.length; c++) {
-                    if (cti >= clips[c].start - 0.001 && cti < clips[c].end - 0.001) { endLimit = clips[c].end; break; }
-                }
-            } catch (e) { }
-            var space = (endLimit !== null) ? Math.max(0, endLimit - cti) : null;
+            if (ref && typeof ref.end === 'number') {
+                endLimit = ref.end;
+                L('🗺️ [MAPA] Espai hàbil = clip de referència V' + ref.track + '[' + ref.index + '] → ' +
+                    refSec.toFixed(2) + 's→' + endLimit.toFixed(2) + 's');
+            } else {
+                try {
+                    var clips = await getClipsLogic().getTrackClips(1, 'video');
+                    for (var c = 0; c < clips.length; c++) {
+                        if (refSec >= clips[c].start - 0.001 && refSec < clips[c].end - 0.001) { endLimit = clips[c].end; break; }
+                    }
+                } catch (e) { }
+            }
+            var space = (endLimit !== null) ? Math.max(0, endLimit - refSec) : null;
             L('🗺️ [MAPA] Espai hàbil: ' + (space === null ? 'desconegut' : space.toFixed(2) + 's'));
 
             // 2. Netejar restes d'execucions anteriors: cada clic hi deixava un joc nou de
@@ -402,15 +517,17 @@
             await this._cleanupTrack(TRACK_GRAF, gNums);
             if (freeze && freeze.name) await this._cleanupTrack(TRACK_FREEZE, [freeze.name]);
 
-            // 3. Inserir en ordre des del CTI A DURADA NATURAL del media: NO forcem un endSec
-            //    calculat (estirar-lo més enllà de la durada real dona clips falsos). Es
-            //    mesura el clip inserit i, només si no cap a l'espai hàbil, es retalla.
-            var t = cti;
-            var grafEnd = cti;
+            // 3. Inserir en ordre des del IN DEL CLIP DE REFERÈNCIA A DURADA NATURAL del
+            //    media: NO forcem un endSec calculat (estirar-lo més enllà de la durada real
+            //    dona clips falsos). Es mesura el clip inserit i, només si no cap a l'espai
+            //    hàbil (el rang del clip seleccionat), es retalla.
+            var t = refSec;
+            var grafEnd = refSec;
             for (var p = 0; p < items.length; p++) {
-                var nmEsc = U().escape(items[p].name);
-                var res = await callJSX("Clips.insert('" + nmEsc + "', " + TRACK_GRAF + ", " +
-                    t.toFixed(4) + ", null, 'video')");
+                // (2026-09-22) insert NO-AUDIO: els grafismes (.mov/.mp4) porten pista
+                // d'àudio i Premiere la col·locava enllaçada → sonava damunt del programa.
+                var ins = await getClipsLogic().insertNoAudio(items[p].name, TRACK_GRAF, t, null);
+                var res = ins.res;
                 var realEnd = await this._clipEndAt(TRACK_GRAF, t);
                 if (realEnd === null) {
                     L('⚠️ [MAPA] No puc mesurar el clip inserit a V' + TRACK_GRAF + ' → aturo', 'WARN');
@@ -432,23 +549,24 @@
                 grafEnd = realEnd;
             }
 
-            if (grafEnd <= cti + 0.01) {
+            if (grafEnd <= refSec + 0.01) {
                 L('⚠️ [MAPA] No s\'ha pogut inserir cap gràfic → no col·loco congelat', 'WARN');
                 return;
             }
 
-            // 4. CONGELAT (PNG del tema-títol) a V6, entre l'inici i el final del GRÀFIC real
-            //    inserit a V5 (no fins al final del clip de V5 ni del clip de V1).
+            // 4. CONGELAT (PNG del tema-títol) a la pista de congelat, entre l'inici del clip
+            //    de referència i el final del GRÀFIC real inserit (no fins al final del clip
+            //    del gràfic ni del clip del programa).
             if (freeze && freeze.name) {
                 var fzEsc = U().escape(freeze.name);
                 var fzEnd = grafEnd;
                 var resF = await callJSX("Clips.insert('" + fzEsc + "', " + TRACK_FREEZE + ", " +
-                    cti.toFixed(4) + ", null, 'video')");
+                    refSec.toFixed(4) + ", null, 'video')");
                 // Clips.insert aplica l'endSec al darrer clip de la pista → fixar-lo per temps.
-                var resFE = await callJSX("Clips.endAt(" + TRACK_FREEZE + ", " + cti.toFixed(4) +
+                var resFE = await callJSX("Clips.endAt(" + TRACK_FREEZE + ", " + refSec.toFixed(4) +
                     ", " + fzEnd.toFixed(4) + ", 'video')");
                 L('🗺️ [MAPA] V' + TRACK_FREEZE + ' (congelat): "' + freeze.name + '" @ ' +
-                    cti.toFixed(2) + 's → ' + fzEnd.toFixed(2) + 's (final del gràfic de V' +
+                    refSec.toFixed(2) + 's → ' + fzEnd.toFixed(2) + 's (final del gràfic de V' +
                     TRACK_GRAF + ') [insert=' + resF + ' · endAt=' + resFE + ']');
             } else if (!freeze) {
                 L('⚠️ [MAPA] Sense congelat de referència → V' + TRACK_FREEZE + ' no es replica', 'WARN');
@@ -456,7 +574,7 @@
         }
     };
 
-    L('🗺️ [Mapa] Mòdul inicialitzat (importador GRAF → V6)');
+    L('🗺️ [Mapa] Mòdul inicialitzat (importador GRAF → pista de grafismes)');
 })();
 
 

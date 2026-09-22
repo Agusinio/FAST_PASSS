@@ -13,7 +13,8 @@
     var FASTPASS_UI = window.FASTPASS_UI || {};
 
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
-    // Tracks alineats amb Profile.json (v_mp4:1, v_fondos:2, v_graf:3, v_tema:5, v_chyrons:6, v_lloc:7)
+    // Tracks alineats amb Profile.json (2026-09-22, remapatge per evitar col·lisions):
+    //   v_mp4:1 · intocable:2 · v_fondos:3 · v_graf:4 · v_graficos:5 · v_tema:6 · v_chyrons:7 · v_lloc:8
     let _activeConfig = {
         general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 1.5, clipOutMarginSec: 0, clipExtraTailSec: 60 },
         // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
@@ -35,12 +36,15 @@
             "TNs": {
                 tracks: {
                     v_mp4:    1,
-                    v_fondos: 2,
+                    v_fondos: 3,
                     v_graf:   3,
-                    v_tema:   5,
-                    v_chyrons: 6,
-                    v_lloc:   7,
-                    v_trad:   9,
+                    v_graficos: 3,
+                    v_tema:   6,
+                    v_chyrons: 7,
+                    v_lloc:   8,
+                    v_trad:   4,
+                    v_video1: 4,
+                    v_video2: 5,
                     s_s1: 1,
                     s_s2: 2
                 },
@@ -52,7 +56,7 @@
             },
             "Sumari Matins": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, v_trad: 9,
+                    v_mp4: 1, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
                     s_s1: 1, s_s2: 2
                 },
                 programas: [
@@ -66,14 +70,14 @@
             },
             "Fotomató": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, v_trad: 9,
+                    v_mp4: 1, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
                     s_s1: 1, s_s2: 2
                 },
                 programas: []
             },
             "User Defined": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 2, v_graf: 3, v_tema: 5, v_chyrons: 6, v_lloc: 7, v_trad: 9,
+                    v_mp4: 1, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
                     s_s1: 1, s_s2: 2
                 },
                 programas: []
@@ -96,13 +100,19 @@
                 main:      raw.v_mp4,    // alias per flow_cut.js i flow_assembly.js
                 fondos:    raw.v_fondos,
                 graf:      raw.v_graf,
-                graficos:  raw.v_graf,   // alias
+                // (2026-09-22) GRAFISMOS: clau pròpia (v_graficos) perquè vagin a la seva pista
+                // (V5 al nou Profile.json) i no col·lideixin amb els chyrons (V7). Si no hi és,
+                // es manté el comportament antic (v_graf).
+                graficos:  (raw.v_graficos !== undefined) ? raw.v_graficos : raw.v_graf,
                 tema:      raw.v_tema,
                 tematitol: raw.v_tema,   // alias
                 chyrons:   raw.v_chyrons,
                 lloc:      raw.v_lloc,
                 llocdata:  raw.v_lloc,   // alias
-                trad:      raw.v_trad    // V8 per a traduccions (no solapar amb V6)
+                // (2026-09-22) Doble Finestra / Mapa: dues copies de video a les seves pistes.
+                video1:    (raw.v_video1 !== undefined) ? raw.v_video1 : raw.v_fondos,
+                video2:    (raw.v_video2 !== undefined) ? raw.v_video2 : raw.v_chyrons,
+                trad:      raw.v_trad    // V10 als TNs (no solapar amb els chyrons V7)
             };
 
             if (cfg.general.debug) {

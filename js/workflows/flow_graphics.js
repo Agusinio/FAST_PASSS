@@ -212,10 +212,31 @@
 
         resetDoblePantalla: async function () {
             this._dp = null;
-            const btn = document.getElementById('btnGrafDoblePantalla');
-            if (btn) btn.textContent = 'DblPant';
+            this._dpBtnReset();
             log("🔁 [DoblePantalla] Estat reiniciat.");
             getUtils().status("Doble Pantalla reset", "warn");
+        },
+
+        /**
+         * _dpBtn / _dpBtnSet / _dpBtnReset: Botó de Doble Pantalla amb la seva ETIQUETA
+         * ORIGINAL (la de l'HTML, "🪟🪟") capturada la primera vegada que es toca.
+         * El flux hi escriu text temporal mentre treballa ('DblPant…') i, en acabar (o si
+         * falla), l'ha de deixar EXACTAMENT com estava: abans quedava 'DblPant ✓' i el
+         * botó es veia canviat (queixa d'usuari 2026-09-21).
+         */
+        _dpBtn: function () {
+            const btn = document.getElementById('btnGrafDoblePantalla');
+            if (!btn) return null;
+            if (!btn.dataset.origLabel) btn.dataset.origLabel = btn.textContent;
+            return btn;
+        },
+        _dpBtnSet: function (txt) {
+            const btn = this._dpBtn();
+            if (btn) btn.textContent = txt;
+        },
+        _dpBtnReset: function () {
+            const btn = this._dpBtn();
+            if (btn) btn.textContent = btn.dataset.origLabel || 'DP';
         },
 
         _dpParseOk: function (res) {
@@ -333,14 +354,17 @@
         },
 
         /**
-         * Desbloqueja automàticament les pistes implicades (V1-V4, A1-A2).
+         * Desbloqueja automàticament les pistes implicades (V1..V5, A1-A2).
          * Una pista bloquejada fa que overwriteClip/remove fallin EN SILENCI.
+         * (2026-09-22) El límit de vídeo surt de la CONFIG: la DF fa servir `video2` (V5).
          */
         _dpUnlockTracks: async function () {
             try {
+                const _vid = FASTPASS_UI.Config.get().tracks.video;
+                const vMax = Math.max(4, _vid.video1 || 4, _vid.video2 || 5);
                 const vRaw = await callJSX("Tracks.count('video')");
                 const aRaw = await callJSX("Tracks.count('audio')");
-                const vN = Math.min(parseInt(vRaw) || 0, 4);
+                const vN = Math.min(parseInt(vRaw) || 0, vMax);
                 const aN = Math.min(parseInt(aRaw) || 0, 2);
                 let anyLocked = false;
                 for (let t = 1; t <= vN; t++) {
@@ -454,13 +478,12 @@
         runDoblePantalla: async function (event) {
             if (!(await getUtils().validateActiveSequence())) return;
             if (event && (event.ctrlKey || event.metaKey)) { await this.resetDoblePantalla(); return; }
-            const btn = document.getElementById('btnGrafDoblePantalla');
             if (this._dpBusy) { getUtils().status("Doble pantalla ja en curs…", "warn"); return; }
             try {
                 this._dpBusy = true;
                 this._dp = { step: 0, done: false, data: {} };
                 const dp = this._dp;
-                if (btn) btn.textContent = 'DblPant…';
+                this._dpBtnSet('DblPant…');   // text temporal mentre treballa (es restaura al final)
                 log("🔁 [DoblePantalla] Cicle complet PAS0→PAS4 en 1 clic (Ctrl+clic = reset).");
 
                 await this._dpUnlockTracks();
@@ -468,7 +491,7 @@
                 for (const fn of steps) {
                     const result = await fn.call(this, dp);
                     if (result === false) {
-                        if (btn) btn.textContent = 'DblPant';
+                        this._dpBtnReset();
                         log("❌ [DoblePantalla] Procés aturat per l'error anterior (mira el log).", "ERROR");
                         return;
                     }
@@ -479,10 +502,10 @@
                 if (dp.data && typeof dp.data.v1Start === 'number') {
                     await this._dpLogZona("DF FINAL", dp.data.v1Start);
                 }
-                if (btn) btn.textContent = 'DblPant ✓';
+                this._dpBtnReset();   // (2026-09-21) botó com a l'inici ('🪟🪟'), no 'DblPant ✓'
                 getUtils().status("Doble pantalla completa", "exito");
             } catch (e) {
-                if (btn) btn.textContent = 'DblPant';
+                this._dpBtnReset();
                 getUtils().handleError(e, "runDoblePantalla");
             } finally {
                 this._dpBusy = false;
@@ -494,7 +517,8 @@
          * (especialment si alguna està BLOQUEJADA, que fa fallar overwrite/remove).
          */
         _dpPaso0: async function (dp) {
-            const T_V1 = 1;
+            // (2026-09-22) Pistes des de la CONFIG (mapa final): el MP4 viu a `mp4` (V1).
+            const T_V1 = FASTPASS_UI.Config.get().tracks.video.mp4;
             const cti = parseFloat(await callJSX('Timeline.get()') || "0");
             const infoRaw = await callJSX(`Clips.at(${T_V1}, ${cti}, 'video')`);
             if (!infoRaw || infoRaw === "null") {
@@ -539,10 +563,13 @@
          */
 
         _dpPaso1: async function (dp) {
-            const T_V1 = 1, T_V2 = 2;
+            // (2026-09-22) MAPA FINAL de pistes: l'origen és el MP4 (`mp4`, V1) i la 1a
+            // finestra de la Doble Finestra va a `video1` (V4). El fons (PAS3) → `fondos` (V3).
+            const _vid = FASTPASS_UI.Config.get().tracks.video;
+            const T_V1 = _vid.mp4, T_V2 = _vid.video1;
             const { info, cti, v1Start, v1End, srcInPoint, srcOutPoint } = dp.data;
 
-            log(`🎬 [DoblePantalla] PAS1: moure V1[${info.index}] "${info.name}" → V2`);
+            log(`🎬 [DoblePantalla] PAS1: moure V${T_V1}[${info.index}] "${info.name}" → V${T_V2}`);
             // ⚠️ duplicate re-insereix el MP4 sencer i pisa el que hi hagi a V2. Per això
             // s'usa INSERT amb ripple (insertClipFrom): la cola de V2 es desplaça sola.
             const v2cola = await this._dpColaPosterior(T_V2, v1Start);
@@ -618,7 +645,9 @@
         },
 
         _dpPaso2: async function (dp) {
-            const T_V2 = 2, T_V3 = 3;
+            // (2026-09-22) 2a finestra de la DF → `video2` (V5); la 1a ve de `video1` (V4).
+            const _vid = FASTPASS_UI.Config.get().tracks.video;
+            const T_V2 = _vid.video1, T_V3 = _vid.video2;
             const { v1Start, v1End, cti, v2NewIdx, srcInPoint, srcOutPoint } = dp.data;
             if (v2NewIdx === null) { getUtils().status("PAS2 ERROR: falta índex V2", "error"); return false; }
 
@@ -682,18 +711,19 @@
         },
 
         _dpPaso3: async function (dp) {
-            const T_V1 = 1;
+            // (2026-09-22) El fons de la DF va a la pista de FONS/GRAF (`fondos`, V3).
+            const T_V1 = FASTPASS_UI.Config.get().tracks.video.fondos;
             const { v1Start, v1End } = dp.data;
             // Fons de la doble finestra (bin 3CatInfo/Grafisme/Background)
             const bgName = "3CatInfo_VERTICALITZACIO_Fons-per-videos.png";
-            log(`🎬 [DoblePantalla] PAS3: fons "${bgName}" a V1 [${v1Start.toFixed(2)}, ${v1End.toFixed(2)}]`);
+            log(`🎬 [DoblePantalla] PAS3: fons "${bgName}" a V${T_V1} [${v1Start.toFixed(2)}, ${v1End.toFixed(2)}]`);
 
             // ⚠️ El fons (PNG) s'insereix amb la durada natural que decideix Premiere: un
-            // overwrite directe al hueco pisa el clip posterior de V1. Si hi ha cola
-            // posterior s'usa INSERT amb ripple (insertClipItem): la cola de V1 es desplaça
+            // overwrite directe al hueco pisa el clip posterior de la pista de fons. Si hi ha
+            // cola posterior s'usa INSERT amb ripple (insertClipItem): la cola es desplaça
             // sola; després es retalla el fons a v1End i es retorna la cola al seu lloc.
             const v1cola = await this._dpColaPosterior(T_V1, v1End);
-            log(`🎬 [DoblePantalla]   clips posteriors a V1 → ${v1cola.length}`);
+            log(`🎬 [DoblePantalla]   clips posteriors a V${T_V1} → ${v1cola.length}`);
             await this._dpLogZona("PAS3 pre-fons", v1Start);
 
             // 1. Insertar el PNG a l'inici del rang.
@@ -715,7 +745,7 @@
             const bg = JSON.parse(bgRaw);
             log(`🎬 [DoblePantalla] PAS3: clip fons localitzat → ${bgRaw}`);
 
-            // Mesurar el desplaçament real de la cola de V1 (per retornar-la després).
+            // Mesurar el desplaçament real de la cola de la pista de fons (per retornar-la després).
             // ⚠️ El PNG s'insereix amb la durada per defecte curta (0.6s a 25fps): cap dins
             // el forat [v1Start, v1End], així que el ripple NO desplaça la cola → delta = 0
             // i no cal devoldre res. NO fer fallback amb la durada del clip: mouria clips
@@ -736,12 +766,14 @@
 
             // 4. Verificar
             const bgCheck = await callJSX(`Clips.at(${T_V1}, ${v1Start + 0.1}, 'video')`);
-            log(`🎬 [DoblePantalla] PAS3: V1 verificat → ${bgCheck}`);
+            log(`🎬 [DoblePantalla] PAS3: V${T_V1} verificat → ${bgCheck}`);
             return true;
         },
 
         _dpPaso4: async function (dp) {
-            const T_V2 = 2, T_V3 = 3;
+            // (2026-09-22) Motion de les dues finestres: `video1` (V4) i `video2` (V5).
+            const _vid = FASTPASS_UI.Config.get().tracks.video;
+            const T_V2 = _vid.video1, T_V3 = _vid.video2;
             const { v2NewIdx, v3NewIdx } = dp.data;
             if (v2NewIdx === null || v3NewIdx === null) { getUtils().status("PAS4 ERROR: falten índexs V2/V3", "error"); return false; }
             const comuns = { scale: 68 };
@@ -758,8 +790,10 @@
             const supVals = Object.assign({}, comuns, { position: [492, 451], cropRight: 64.5, cropTop: 14, cropBottom: 15.5 });
 
             // Guardar el preset DF al motor JSX: el slider l'usa per re-aplicar els
-            // recortes de V2/V3 si Premiere els ha perdut en seleccionar el clip.
-            const dfPresetJson = JSON.stringify({ v2: infVals, v3: supVals });
+            // recortes de les 2 finestres si Premiere els ha perdut en seleccionar el clip.
+            // (2026-09-22) Les claus són "v" + Nº DE PISTA (V4/V5): així el JSX les troba
+            // amb `_pKey = "v" + target.track` (abans estaven fixades com a v2/v3).
+            const dfPresetJson = JSON.stringify({ ['v' + T_V2]: infVals, ['v' + T_V3]: supVals });
             const presetRes = await callJSX(`Anim.setDfPreset('${dfPresetJson}')`);
             log(`🎬 [DoblePantalla] PAS4: preset DF guardat → ${presetRes}`);
 
@@ -800,6 +834,18 @@
                 };
                 log(`🎬 [DoblePantalla] PAS4: base reencuadre slider → V2x=${infVals.position[0]}px V3x=${supVals.position[0]}px ±${20}px`);
             } catch (eBase) {}
+
+            // 🎯 FOCUS + TARGETING V1 (2026-09-21): deixar V1/A1 com a ÚNIQUES pistes amb
+            // targeting i el clip de V1 seleccionat (clip objectiu del panell). Abans el
+            // targeting quedava en les pistes que havia tocat la DF (V2/V3) i el focus no
+            // tornava a V1 (queixa d'usuari).
+            await getUtils().targetOnlyV1("DoblePantalla");
+            await getUtils().focusV1("DoblePantalla", dp.data.v1Start);
+
+            // Diagnòstic: comprovar que el focus a V1 no ha fet perdre els crops de V3.
+            const postV3 = await callJSX(`Anim.getMotionValues(${T_V3}, ${v3NewIdx})`);
+            log(`🎬 [DoblePantalla] PAS4: V3 crops després del focus V1 → ${postV3}`);
+
             return true;
         },
 
@@ -897,7 +943,7 @@
          *      endavant COMENÇANT PEL DARRER (obrint espai sense trepitjar res),
          *   2) s'insereix el fons al hueco (ara no pisa res) i es retalla a sel.end,
          *   3) es torna la cola al seu lloc COMENÇANT PEL PRIMER.
-         * @param {number} T_V1 - Pista de vídeo 1 (1-based)
+         * @param {number} T_V1 - Pista de VÍDEO del fons (1-based; `tracks.video.fondos` = V3)
          * @param {object} sel - { start, end, track, index } del clip del mapa
          * @param {string} BG - Nom del PNG del fons
          * @returns {Promise<boolean>} true si el fons ha quedat col·locat al hueco
@@ -910,10 +956,10 @@
                     try {
                         const eb = JSON.parse(existBgRaw);
                         if (eb.name && String(eb.name).indexOf("Fons-per-videos") !== -1) {
-                            log(`🎬 [MAPA] ja hi ha el fons a V1 en aquest rang. S'omet la inserció.`);
+                            log(`🎬 [MAPA] ja hi ha el fons a V${T_V1} en aquest rang. S'omet la inserció.`);
                             return true;
                         }
-                        log(`⚠️ [MAPA] a V1 dins del rang hi ha "${eb.name}": el hueco no està buit. S'omet la inserció del fons per no pisar-lo.`, "WARN");
+                        log(`⚠️ [MAPA] a V${T_V1} dins del rang hi ha "${eb.name}": el hueco no està buit. S'omet la inserció del fons per no pisar-lo.`, "WARN");
                         return false;
                     } catch (eBg) {}
                 }
@@ -1028,13 +1074,16 @@
             }
         },
         /**
-         * runMapa (MAPA ZOOM): Puja el clip seleccionat a V2, col·loca a V1 el mateix
-         * fons de la doble finestra en el rang del clip, i aplica al clip (V2) escala
-         * 48% i posició Y=447 (la X no es toca; l'usuari la pot ajustar amb el slider).
+         * runMapa (MAPA ZOOM): Puja el clip seleccionat a la pista de VÍDEO 1 (`video1`, V4),
+         * col·loca a la pista de FONS (`fondos`, V3) el mateix fons de la doble finestra en
+         * el rang del clip, i aplica al clip (V4) escala 48% i posició Y=447 (la X no es
+         * toca; l'usuari la pot ajustar amb el slider).
+         * (2026-09-22) Pistes des de la CONFIG (abans fixades a V1/V2).
          */
         runMapa: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
-            const T_V1 = 1, T_V2 = 2;
+            const _vid = FASTPASS_UI.Config.get().tracks.video;
+            const T_V1 = _vid.mp4, T_V2 = _vid.video1, T_FONS = _vid.fondos;
             const BG = "3CatInfo_VERTICALITZACIO_Fons-per-videos.png";
             try {
                 const sel = await this._selectedVideoClip();
@@ -1161,8 +1210,8 @@
                     }
                 }
 
-                // 2. Fons a V1 dins del rang del clip (sense machacar el clip següent)
-                const fonsOk = await this._colocarFonsMapa(T_V1, sel, BG);
+                // 2. Fons a la pista de FONS (config) dins del rang del clip (sense machacar el clip següent)
+                const fonsOk = await this._colocarFonsMapa(T_FONS, sel, BG);
 
                 // 3. Motion al clip de V2: scale 48%, Y=447; la X es manté intacta
                 const vals = { scale: 48, positionY: 447 };
@@ -1172,8 +1221,12 @@
                 log(`🎬 [MAPA] Motion llegit → ${chkM}`);
 
                 getUtils().status(fonsOk
-                    ? "MAPA ZOOM: clip a V2 + fons + 48% / Y447"
-                    : "MAPA ZOOM: clip a V2 + Motion aplicat (fons no inserit, mira el log)", fonsOk ? "exito" : "warn");
+                    ? `MAPA ZOOM: clip a V${T_V2} + fons + 48% / Y447`
+                    : `MAPA ZOOM: clip a V${T_V2} + Motion aplicat (fons no inserit, mira el log)`, fonsOk ? "exito" : "warn");
+
+                // (2026-09-21) Tornar la auto-selecció a V1: targeting només V1/A1 + clip de V1.
+                await getUtils().targetOnlyV1("MAPA");
+                await getUtils().focusV1("MAPA", sel.start);
             } catch (e) { getUtils().handleError(e, "runMapa"); }
         },
         /**
@@ -1188,6 +1241,10 @@
                 log(`🎬 [TOTEM] clip seleccionat → V${sel.track}[${sel.index}] "${sel.name}" (${sel.start.toFixed(2)}s→${sel.end.toFixed(2)}s)`);
                 const ok = await this._aplicarMotionAClip("TOTEM", sel, { scaleWidth: 126 });
                 if (ok) getUtils().status("TOTEM aplicat: escala X 126%", "exito");
+
+                // (2026-09-21) Tornar la auto-selecció a V1: targeting només V1/A1 + clip de V1.
+                await getUtils().targetOnlyV1("TOTEM");
+                await getUtils().focusV1("TOTEM", sel.start);
             } catch (e) { getUtils().handleError(e, "runTotem"); }
         },
 
