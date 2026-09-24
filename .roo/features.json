@@ -3,7 +3,7 @@
   "version": "2.9.5",
   "codename": "LIPO-PRO",
   "description": "Extensión CEP para Adobe Premiere Pro — Automatización de producción de informativos y verticalización 9:16",
-  "updated": "2026-05-29",
+  "updated": "2026-09-24",
 
   "architecture": {
     "tiers": {
@@ -399,7 +399,80 @@
         "note": "Pausado por el usuario. Posible inconsistencia en los datos de playout. No implementar fix hasta confirmar.",
         "files": ["js/core/escaleta_items.js", "js/core/escaleta_bounds.js"],
         "date": "2026-05-28"
+      },
+      {
+        "id": "#55",
+        "desc": "Clip MP4 del bloc col·locat SENCER al timeline: tot el material ~12s a la dreta (12,04s = 10s de clipInOffset + 2,04s de desfase del fitxer extret)",
+        "root_cause": "Clips.trimBounds no existeix al global JSX: jsx/main.jsx mapeja els mètodes un a un i trimBounds no hi és -> «ERR:Clips.trimBounds is not a function». El recorte fallava en silenci i el clip entrava amb inPoint=0/outPoint=224.92 mentre els corchetes de seqüència es posaven segons el pla (10/134).",
+        "fix": "js/logic/3_Project_Logic.js: Clips.retrim (àtom exposat) + TRIM-CHECK (verificació de l'inPoint real) + composició Clips.inPoint/start/end com a pla B + corchetes derivats del clip real (clipInDelta) com a blindatge.",
+        "files": ["js/logic/3_Project_Logic.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#56",
+        "desc": "Desfase de 10s entre àudio i vídeo del clip del bloc",
+        "root_cause": "El recorte del clip de vídeo no mou el clip d'àudio (clips desenllaçats en aquesta inserció): A1 conservava el seu inPoint original mentre el vídeo saltava a l'inPoint del pla.",
+        "fix": "js/logic/3_Project_Logic.js: mateix in/out a A1 amb Clips.retrim + AUDIO-TRIM-CHECK i composició inPoint/start/end amb type='audio'. Auto-corrector si els clips vinguessin enllaçats.",
+        "files": ["js/logic/3_Project_Logic.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#57",
+        "desc": "Ancoratge de marcadors: el delta de correlació s'aplicava DUES vegades (F3 i F3.5) -> el marcador quedava 1,8s ABANS del seu corte",
+        "root_cause": "placeScheduledMarkers (F3) i correlationSnapMarkers (F3.5) criden tots dos _correlationSnap i apliquen el mateix Δ: -1,16s + -1,16s = -2,32s sobre el pla (07: 14.00 -> 12.84 -> 11.68 amb el tall real a 13.48).",
+        "fix": "flow_markers.js: F3 només INFORMA el Δ (snapDelta = 0) i l'aplica F3.5·CorrelationSnap, que és la fase dedicada.",
+        "files": ["js/workflows/flow_markers.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#58",
+        "desc": "F4·Faro no clavava el marcador al corte tot i que el fix B ja era al codi (ventana ±1,5s)",
+        "root_cause": "El valor efectiu de snapWindowFaroSec el posa Profile.json (\"snapWindowFaroSec\": 1.0) i sobreescriu els defaults del codi -> el Δ de 1,80s quedava fora de la finestra.",
+        "fix": "Profile.json (1.0 -> 2.5) + 11_Configuracio.js (2.5) + flow_markers.js (_snapWindowFaro 2,5) i log de les dues finestres a F4.",
+        "files": ["Profile.json", "js/core/11_Configuracio.js", "js/workflows/flow_markers.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#59",
+        "desc": "Marcador del vídeo desviat uns frames del seu corte per F6·Ordre",
+        "root_cause": "enforceMarkerOrder aplicava clamps de ±0,5s quan detectava una inversió d'ordre i pisava el corte al qual F4 acabava de clavar el marcador.",
+        "fix": "flow_markers.js: nou _isOnCut(t, clips) (±0,15s) i guarda a les 3 rames de F6 -> «⏭️ ja està en un tall (X.XXs) → NO es mou».",
+        "files": ["js/workflows/flow_markers.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#60",
+        "desc": "Marcadors VERMELLS (ítems no agrupats) col·locats al final del bloc",
+        "root_cause": "F7·Cobertura creava marcador per a QUALSEVOL ítem sense marcador (t = prev.time + 0.5 al final, next.time − 0.5 a l'inici). Els vermells també apareixien des de F1/F2/F5.",
+        "fix": "flow_markers.js: filtre global dins _safePlaceByPrefixes (punt comú de totes les fases): un marcador color 1 només es col·loca si queda ENTRE marcadors d'un altre color (lote + timeline); si el filtre deixaria el bloc sense marcadors es manté la llista. F7 porta la mateixa regla.",
+        "files": ["js/workflows/flow_markers.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#61",
+        "desc": "Creant el V1 del 23/09: el panel agafava l'escaleta V2 (més recent) i el guarda «escaleta d'un altre bloc» avortava la creació",
+        "root_cause": "findLatest s'ordenava per timestamp descendent i agafava el primer JSON VÀLID del programa IGNORANT el blockId (V1 14:16 quedava darrere de V2 14:25 i V3 14:40). A més, la copia local de l'escaleta s'escrivia FORA de la carpeta del bloc per un separador de ruta mal compost (fitxers «V1<json>» i «V2<json>» a la carpeta del dia).",
+        "fix": "escaleta_io.js: prioritat al bloc demanat (V2 queda com a 2a opció) + separador robust (replace(/[\\/]+$/,'') + '\\\\' + name) en 4 punts (escaleta_io 344/715, flow_mainButton 68/89). Basura eliminada del NAS.",
+        "files": ["js/core/escaleta_io.js", "js/workflows/flow_mainButton.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
+      },
+      {
+        "id": "#62",
+        "desc": "Ruta de treball única per BLOC: <prog>_PROJECTES/<data>/<V*> (abans tots els blocs barrejats a la carpeta del dia)",
+        "root_cause": "Les 17 composicions de ruta (9 fitxers) feien servir destinoBase + directorio + dateDir, sense el bloc -> impossible saber a quin bloc pertanyia cada fitxer.",
+        "fix": "utils.workFolder(ctx) com a font única + substitució als 9 fitxers (projecte, clip, manifest, escaleta local, SRT, renders, anàlisi) + assemblatge del context des del path del projecte (ctx.bloque i seqüència del bloc).",
+        "files": ["js/core/utils.js", "js/logic/3_Project_Logic.js", "js/logic/16_Analysis_Logic.js", "js/workflows/flow_mainButton.js", "js/workflows/flow_render.js", "js/core/4_Context.js", "js/core/assembly_context.js", "js/core/session_manifest.js", "js/main.js"],
+        "commit": "37676aa",
+        "date": "2026-09-24"
       }
+    
     ]
   },
 
@@ -422,7 +495,7 @@
     "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
     "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
-    "status": "Commits locales pendientes de push por problema de red"
+    "status": "Sincronizado con origin/main (37676aa, 2026-09-24)"
   },
 
   "paths": {
