@@ -979,6 +979,41 @@ FASTPASS.Clips = {
 
 
     /**
+     * getSelection: (2026-09-23) Llista TOTS els clips de VÍDEO seleccionats al timeline.
+     * JUSTIFICACIÓ (regla "JSX tancat"): cap àtom existent retorna la SELECCIÓ MÚLTIPLE
+     * (`getSelectedVideo` només en retorna el primer) i l'IPD+ treballa per INTERVAL
+     * (un o més clips seleccionats). Mateix criteri de detecció (`c.isSelected()`) que
+     * getSelectedVideo, recorrent totes les pistes de vídeo.
+     * @returns {string} JSON [{track (1-based), index, name, start, end}] (buit si res)
+     */
+    getSelection: function() {
+        try {
+            var seq = ($.global.FASTPASS && FASTPASS.Context) ? FASTPASS.Context.getWorkSequence() : app.project.activeSequence;
+            if (!seq) return "[]";
+            var out = [];
+            for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+                var track = seq.videoTracks[t];
+                if (!track || !track.clips) continue;
+                for (var i = 0; i < track.clips.numItems; i++) {
+                    var c = track.clips[i];
+                    try {
+                        if (c && c.isSelected()) {
+                            out.push({
+                                track: t + 1,
+                                index: i,
+                                name: c.name,
+                                start: c.start.seconds,
+                                end: c.end.seconds
+                            });
+                        }
+                    } catch(eI) {}
+                }
+            }
+            return JSON.stringify(out);
+        } catch(e) { return "ERR: " + e.message; }
+    },
+
+    /**
      * createCaptionFromProjectItem: Crea una nova caption track i hi col·loca un SRT.
      * És l'única API disponible per treballar amb subtítols des d'ExtendScript.
      * @param {string} itemName - Nom del .srt al projecte (URI-encoded)

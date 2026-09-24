@@ -204,7 +204,29 @@
             // ({"missatge":"Error","debugInfo":...}, 200 bytes). Abans s'agafava el
             // primer per data i, si era un error (cas real: TNC V3 del 16/09), l'extensio
             // es quedava sense escaleta tot i tenir el V2 valid al mateix directori.
-            var maxTry = Math.min(allProgFiles.length, 5);
+            // ── (2026-09-24) PRIORITAT AL BLOC DEMANAT ─────────────────────────
+            // ABANS: s'agafava sempre el JSON MÉS RECENT del programa IGNORANT el blockId.
+            // Cas real (2026-09-23, TN_COMARQUES): amb els fitxers V1 (14:16), V2 (14:25) i
+            // V3 (14:40) al mateix directori, demanant V1 s'agafava el V2 (primer "vàlid" per
+            // ordre descendent) → el projecte V1 queia al guarda "escaleta d'un altre bloc".
+            // ARA: primer es proven els JSON del BLOC demanat; si cap és vàlid, es manté el
+            // comportament anterior (el més recent del programa) com a SEGONA OPCIÓ.
+            var blkTok = blockId ? ('_' + String(blockId).toUpperCase() + '_') : '';
+            if (blkTok) {
+                var _sameBlk = [], _otherBlk = [];
+                for (var qi = 0; qi < allProgFiles.length; qi++) {
+                    if (String(allProgFiles[qi].name).toUpperCase().indexOf(blkTok) !== -1) _sameBlk.push(allProgFiles[qi]);
+                    else _otherBlk.push(allProgFiles[qi]);
+                }
+                if (_sameBlk.length > 0) {
+                    log('INFO [ER:IO] ' + _sameBlk.length + ' JSON del bloc ' + blockId + ' (prioritaris) - ' + _otherBlk.length + ' d altres blocs (2a opcio)');
+                    allProgFiles = _sameBlk.concat(_otherBlk);
+                } else {
+                    log('INFO [ER:IO] Cap JSON del bloc ' + blockId + ' - s usa el mes recent del programa (2a opcio, altres blocs)');
+                }
+            }
+
+            var maxTry = Math.min(allProgFiles.length, 8);
             for (var fi = 0; fi < maxTry; fi++) {
                 var cand = allProgFiles[fi];
                 var candData = null;
@@ -304,7 +326,7 @@
      */
     ER.ensureLocalCopy = async function (ctx, datePrefix) {
         if (!ctx || !ctx.config || !ctx.progData || !ctx.dateDir) return null;
-        var folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + '/' + ctx.dateDir;
+        var folderPath = window.FASTPASS_UI.Utils.workFolder(ctx);
 
         // 1. Intentar amb la còpia local
         var local = await this.findInFolder(folderPath, ctx.progData.archivo);
@@ -319,7 +341,7 @@
 
         // 3. Copiar al directori del projecte
         await callJSX("IO.createFolder('" + this._escapePath(folderPath) + "')");
-        var destPath = folderPath.replace(/[\\/]+$/, '\\') + remote.filename;
+        var destPath = folderPath.replace(/[\\/]+$/, '') + '\\' + remote.filename;
         var copyRes = await callJSX("IO.copyFile('" + this._escapePath(remote.path) + "', '" + this._escapePath(destPath) + "')");
         if (copyRes !== 'OK') {
             log('\u26A0\uFE0F [ER:IO] Error copiant escaleta al directori del projecte: ' + copyRes);
@@ -652,7 +674,7 @@
             return { found: false, ready: false };
         }
         try {
-            var folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + '/' + ctx.dateDir;
+            var folderPath = window.FASTPASS_UI.Utils.workFolder(ctx);
             var raw = await callJSX("IO.listFolder('" + this._escapePath(folderPath) + "')");
             if (!raw || raw === '[]' || raw.indexOf('ERR') === 0) {
                 return { found: false, ready: false };
@@ -690,7 +712,7 @@
             // foto/escaleta vàlida (igual que getStatus sobre el repositori central).
             for (var ci = 0; ci < candidates.length; ci++) {
                 var cand = candidates[ci];
-                var path = folderPath.replace(/[\\/]+$/, '\\') + cand.name;
+                var path = folderPath.replace(/[\\/]+$/, '') + '\\' + cand.name;
                 var data = await this.load(path);
                 if (!data) continue;
                 var block = this.getBlock(data, ctx.bloque);
@@ -761,7 +783,26 @@
 
         log('\uD83D\uDCD6 [ER:IO] Llegint JSON: ' + jsonPath);
         try {
-            var raw = await callJSX("IO.readTxt('" + this._escapePath(jsonPath) + "')");
+            // (2026-09-23) LLEGIR EN UTF-8 des del COSTAT JS (window.cep.fs.readFile).
+            // ExtendScript (IO.readTxt) llegeix el fitxer com a ANSI/Latin-1 → ELS CARÀCTERS
+            // CATALANS DEL JSON ES CORROMPIEN i el tema (i per tant el nom del projecte i de la
+            // seqüència) sortia tipus "TNC_COMENÃ‡A LA TARDOR…" (queixa d'usuari 2026-09-23).
+            // Es manté IO.readTxt com a RESPATLLER si cep.fs no estigués disponible.
+            var raw = null;
+            try {
+                var fRes = window.cep.fs.readFile(jsonPath);
+                if (fRes && fRes.err === 0 && fRes.data) {
+                    raw = fRes.data;
+                } else {
+                    log('\u26A0\uFE0F [ER:IO] cep.fs.readFile err=' + (fRes && fRes.err) + ' → respatller JSX');
+                }
+            } catch (eRf) {
+                log('\u26A0\uFE0F [ER:IO] cep.fs.readFile ha fallat (' + eRf.message + ') → respatller JSX');
+            }
+            if (!raw) {
+                log('\u26A0\uFE0F [ER:IO] Llegint amb ExtendScript: els accents d\'aquest JSON poden sortir malmesos');
+                raw = await callJSX("IO.readTxt('" + this._escapePath(jsonPath) + "')");
+            }
             if (!raw || raw === '' || raw.indexOf('ERR') === 0) {
                 log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llegir: ' + jsonPath);
                 return null;

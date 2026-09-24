@@ -137,7 +137,7 @@
 
             try {
                 let outputDir = await callJSX("Context.folder()");
-                if (!outputDir) outputDir = config.rutas.destinoBase || "C:\\Temp";
+                if (!outputDir) outputDir = utils.workFolder(window.FASTPASS_UI.State) || config.rutas.destinoBase || "C:\\Temp";
                 
                 getUtils().status("Processant nom...", "procesando");
 
@@ -471,7 +471,7 @@
                 const projFolder = await callJSX("Context.folder()");
                 let outDir = (projFolder && String(projFolder).indexOf('ERR') !== 0) ? projFolder : '';
                 if (!outDir) {
-                    outDir = config.rutas.destinoBase || "C:\\Temp";
+                    outDir = utils.workFolder(window.FASTPASS_UI.State) || config.rutas.destinoBase || "C:\\Temp";
                     log(`⚠️ [Portada] Context.folder() no vàlid ("${projFolder}") → destí alternatiu: ${outDir}`, "WARN");
                 }
                 // NOM del PNG: el MATEIX que el vídeo que JA és a la carpeta del projecte

@@ -200,6 +200,7 @@ button.btn-foto { height: var(--boto-std-sq); white-space: nowrap; padding: 0 8p
     display: flex; align-items: center; gap: var(--gap);
 }
 .video-row-top #btnOut,
+.video-row-top #btnScene,
 .video-row-top #btnKey {
     flex: 0 0 64px; width: 64px; box-sizing: border-box;
     height: var(--boto-std-sq); font-size: 10px !important;

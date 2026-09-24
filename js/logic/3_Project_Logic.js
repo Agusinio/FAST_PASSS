@@ -51,6 +51,22 @@
         * @param {string}      shortProg
         * @param {Object|null} cleanFeedData  - { mediaPath, mp4ProgramInPoint, mp4ExpandedOutPoint, mp4SweetInPoint, mp4SweetOutPoint, mp4Duration, escaletaLines[] } | null
         */
+        /**
+         * _logPistas: (2026-09-23) Diagnòstic. Logueja quants clips té cada pista de vídeo.
+         * Serveix per detectar QUIN pas del muntatge buida una pista (p. ex. V2).
+         */
+        _logPistas: async function (tag) {
+            try {
+                const nV = parseInt(await callJSX("Tracks.count('video')") || '0') || 0;
+                const parts = [];
+                for (let t = 1; t <= nV; t++) {
+                    const c = parseInt(await callJSX(`Clips.count(${t}, 'video')`) || '0') || 0;
+                    if (c > 0) parts.push('V' + t + '=' + c);
+                }
+                utils.log(`📊 [PISTES·${tag}] ${parts.length ? parts.join(' ') : 'cap clip'}`);
+            } catch (e) { utils.log(`⚠️ [PISTES·${tag}] ${e.message}`); }
+        },
+
         create: async function(ctx, wottData, media, paths, portadaList, shortProg, cleanFeedData) {
             const { plantillaPath, fullDestPath, folderPath, sanitizedTheme } = paths;
             const config = ctx.config;
@@ -92,11 +108,17 @@
                 const temaNet = (sanitizedTheme && sanitizedTheme.length > 2)
                     ? sanitizedTheme.toUpperCase()
                     : (wottData && wottData.tema ? wottData.tema.toUpperCase() : "TEMA");
-                const finalSeqName = `${shortProg}_${temaNet}`;
+                // (2026-09-23) El nom de la seqüència ha de COINCIDIR amb el del projecte:
+                // el projecte és `Pruebas_<prog>_<bloc>_<tema>.prproj` → la seqüència passa a ser
+                // `<prog>_<bloc>_<tema>` (abans li faltava el BLOC i no coincidien).
+                const finalSeqName = `${shortProg}_${ctx.bloque}_${temaNet}`;
                 
                 utils.log(`📝 Seqüència clonada [${resClone}]. Renombrant a: ${finalSeqName}`);
-                const safeResClone = encodeURIComponent(resClone).replace(/'/g, "\\'");
-                const safeFinalSeqName = encodeURIComponent(finalSeqName).replace(/'/g, "\\'");
+                // (2026-09-23) Els noms s'envien amb utils.escape() (no-ASCII → \uXXXX) en lloc
+                // d'encodeURIComponent: ExtendScript decodifica l'URL-encoding com a LATIN-1 i el
+                // nom quedava tipus "TNC_COMENÃ‡A LA TARDOR..." (queixa d'usuari 2026-09-23).
+                const safeResClone = utils.escape(resClone);
+                const safeFinalSeqName = utils.escape(finalSeqName);
                 await callJSX(`FASTPASS.Project.rename('${safeResClone}', '${safeFinalSeqName}')`);
             
                 // 4. INSERTAR VÍDEO AL TIMELINE
@@ -143,6 +165,19 @@
                     //     no interfereixi amb la col·locació i el zoom posterior)
                     await callJSX("Timeline.set(0)");
                     utils.log(`🎯 CTI mogut a 00:00 abans d'inserir el clip`);
+
+                    // (2026-09-23) Deixar el TARGET només a V1 abans d'inserir el MP4: si V2 (o
+                    // qualsevol altra pista) té el target actiu, l'`overwriteClip` del MP4 hi
+                    // escriu TAMBÉ i s'enduia el seu contingut (queixa d'usuari 2026-09-23:
+                    // "el proceso de carga del proyecto acaba borrando el contenido del track V2").
+                    try {
+                        await utils.targetOnlyV1('MP4→V1');
+                    } catch (eT) {
+                        utils.log(`⚠️ No s'ha pogut limitar el targeting a V1: ${eT.message}`);
+                    }
+                    // (2026-09-23) Diagnòstic: estat de les pistes ABANS i DESPRÉS d'inserir el
+                    // MP4, per saber si aquest pas és el que buida V2.
+                    await this._logPistas('ABANS-INSERT');
 
                     let clipDuration;
                     const escapedCfName = encodeURIComponent(cfName);
@@ -191,13 +226,99 @@
                         clipDuration = mp4OutPt - mp4InPt;
                         utils.log(`🎬 Col·locant cleanFeed a V1 amb bounds: IN=${mp4InPt.toFixed(2)}s OUT=${mp4OutPt.toFixed(2)}s (start=0) | duradaEsperada=${clipDuration.toFixed(2)}s`);
                         utils.log(`🔍 [LOG] cleanFeedData.mp4ExpandedInPoint (BASE, amb handle)=${(cleanFeedData.mp4ExpandedInPoint||0).toFixed(4)}s + globalOffset=${globalOffset}s = ${mp4InPt.toFixed(4)}s, mp4ExpandedOutPoint (BASE)=${(cleanFeedData.mp4ExpandedOutPoint||0).toFixed(4)}s + globalOffset=${globalOffset}s = ${mp4OutPt.toFixed(4)}s`);
-                        const insertRes = await callJSX(
-                            `Clips.insertWithBounds('${escapedCfName}', 1, 0, ${mp4InPt.toFixed(4)}, ${mp4OutPt.toFixed(4)}, 'video')`
+                        // (2026-09-23) INSERT + RIPPLE en lloc d'`insertWithBounds`: aquest fa
+                        // servir `overwriteClip` i, amb el MP4 acabat de re-extraure, s'enduia el
+                        // clip que hi hagués a V2 (comprovat al log: [PISTES·ABANS-INSERT] V2=1 →
+                        // [PISTES·DESPRES-INSERT] V2=0). Amb `Clips.insertClipItem` (= Track.insertClip
+                        // amb ripple) s'insereix desplaçant i NO es toca cap altra pista.
+                        const insRip = await callJSX(`Clips.insertClipItem('${escapedCfName}', 1, 0, 'video')`);
+                        utils.log(`🎬 Insert+RIPPLE a V1 → ${insRip}`);
+                        await utils.delay(400);
+                        // ═══ (2026-09-24) FIX CRÍTIC · RECORTE DEL CLIP ═══════════════════
+                        // `Clips.trimBounds` NO existeix al global JSX (jsx/main.jsx:425-560 no el
+                        // mapeja; sí que hi ha insertWithBounds/retrim/inPoint/start/end) → el
+                        // recorte fallava en SILENCI («ERR:Clips.trimBounds is not a function») i
+                        // el clip entrava SENCER (inPoint=0, outPoint=224.92s) mentre els corchetes
+                        // es posaven segons el pla → TOT el contingut ~12s a la dreta (10s de
+                        // clipInOffset que no s'aplicava + 2,04s de desfase del fitxer extret).
+                        // Queixa d'usuari 2026-09-24.
+                        // Àtoms emprats (TOTS exposats): Clips.retrim i, si no quadra, composició
+                        // Clips.inPoint + Clips.start + Clips.end.
+                        var clipInDelta = 0;                 // desviament real del inPoint vs el pla
+                        const endPlanned = mp4InPt + clipDuration;
+                        var tbRes = await callJSX(
+                            `Clips.retrim(1, 0, ${mp4InPt.toFixed(4)}, ${mp4OutPt.toFixed(4)}, ${endPlanned.toFixed(4)}, 'video')`
                         );
-                        if (insertRes && insertRes.indexOf('ERR') !== -1) {
-                            utils.log(`⚠️ Error insertant cleanFeed: ${insertRes}`);
+                        utils.log(`🎬 retrim V1 @0s IN=${mp4InPt.toFixed(2)}s OUT=${mp4OutPt.toFixed(2)}s → ${tbRes}`);
+                        await utils.delay(300);
+                        var trimOk = false;
+                        try {
+                            const chk = JSON.parse(await callJSX(`Clips.get(1, 0, 'video')`) || '{}');
+                            const inReal = Number(chk.inPoint);
+                            trimOk = isFinite(inReal) && Math.abs(inReal - mp4InPt) <= 0.25;
+                            utils.log(`📐 [TRIM-CHECK] inPoint real=${isFinite(inReal) ? inReal.toFixed(2) : '?'}s (pla=${mp4InPt.toFixed(2)}s) end=${Number(chk.end).toFixed(2)}s → ${trimOk ? 'OK' : 'MISMATCH'}`);
+                        } catch (eChk) {
+                            utils.log('⚠️ [TRIM-CHECK] No s\'ha pogut verificar el recorte: ' + eChk.message, 'WARN');
                         }
+                        if (!trimOk) {
+                            utils.log('⚠️ [TRIM-CHECK] retrim no ha quadrat → composició Clips.inPoint + Clips.start + Clips.end', 'WARN');
+                            await callJSX(`Clips.inPoint(1, 0, ${mp4InPt.toFixed(4)}, 'video')`);
+                            await utils.delay(150);
+                            await callJSX(`Clips.start(1, 0, 0, 'video')`);
+                            await utils.delay(150);
+                            await callJSX(`Clips.end(1, 0, ${endPlanned.toFixed(4)}, 'video')`);
+                            await utils.delay(200);
+                            try {
+                                const chk2 = JSON.parse(await callJSX(`Clips.get(1, 0, 'video')`) || '{}');
+                                const inReal2 = Number(chk2.inPoint);
+                                trimOk = isFinite(inReal2) && Math.abs(inReal2 - mp4InPt) <= 0.25;
+                                utils.log(`📐 [TRIM-CHECK·2] inPoint real=${isFinite(inReal2) ? inReal2.toFixed(2) : '?'}s → ${trimOk ? 'OK' : 'ENCARA MISMATCH'}`);
+                            } catch (eChk2) { }
+                        }
+                        try {
+                            const cur = JSON.parse(await callJSX(`Clips.get(1, 0, 'video')`) || '{}');
+                            if (isFinite(Number(cur.inPoint))) clipInDelta = Number(cur.inPoint) - mp4InPt;
+                        } catch (eD) { }
+                        if (Math.abs(clipInDelta) > 0.25) {
+                            utils.log('🔴 [TRIM-CHECK] El clip NO té el inPoint del pla (desviament ' + clipInDelta.toFixed(2) + 's) → els corchetes de seqüència es desplaçaran ' + (-clipInDelta).toFixed(2) + 's per mantenir la peça alineada.', 'ERROR');
+                            getUtils().status('⚠️ Recorte de clip incomplet: corchetes ajustats (' + clipInDelta.toFixed(1) + 's)', 'warn');
+                        }
+                        // (2026-09-24) ÀUDIO: el clip inserit porta el seu àudio a A1, però el
+                        // recorte del VÍDEO no mou l'àudio (clips desenllaçats) → quedava un
+                        // desfase de clipInOffset (10s) entre àudio i vídeo (queixa 2026-09-24).
+                        // S'aplica el MATEIX in/out a l'àudio amb els àtoms exposats.
+                        try {
+                            const aAt = await callJSX(`Clips.at(1, 0, 'audio')`);
+                            var aIdx = 0;
+                            try {
+                                const aObj = JSON.parse(aAt || '{}');
+                                if (aObj && aObj.index !== undefined && aObj.index !== null) aIdx = aObj.index;
+                            } catch (eA) { }
+                            const aRes = await callJSX(`Clips.retrim(1, ${aIdx}, ${mp4InPt.toFixed(4)}, ${mp4OutPt.toFixed(4)}, ${endPlanned.toFixed(4)}, 'audio')`);
+                            utils.log(`🎬 [AUDIO] retrim A1[${aIdx}] IN=${mp4InPt.toFixed(2)}s OUT=${mp4OutPt.toFixed(2)}s → ${aRes}`);
+                            await utils.delay(250);
+                            const aChk = JSON.parse(await callJSX(`Clips.get(1, ${aIdx}, 'audio')`) || '{}');
+                            const aIn = Number(aChk.inPoint), aEnd = Number(aChk.end);
+                            const aOk = isFinite(aIn) && Math.abs(aIn - mp4InPt) <= 0.25;
+                            utils.log(`📐 [AUDIO-TRIM-CHECK] A1[${aIdx}] inPoint=${isFinite(aIn) ? aIn.toFixed(2) : '?'}s (pla=${mp4InPt.toFixed(2)}s) end=${isFinite(aEnd) ? aEnd.toFixed(2) : '?'}s → ${aOk ? 'OK' : 'MISMATCH'}`);
+                            if (!aOk) {
+                                await callJSX(`Clips.inPoint(1, ${aIdx}, ${mp4InPt.toFixed(4)}, 'audio')`);
+                                await utils.delay(150);
+                                await callJSX(`Clips.start(1, ${aIdx}, 0, 'audio')`);
+                                await utils.delay(150);
+                                await callJSX(`Clips.end(1, ${aIdx}, ${endPlanned.toFixed(4)}, 'audio')`);
+                                await utils.delay(200);
+                                const aChk2 = JSON.parse(await callJSX(`Clips.get(1, ${aIdx}, 'audio')`) || '{}');
+                                utils.log(`📐 [AUDIO-TRIM-CHECK·2] A1[${aIdx}] inPoint=${Number(aChk2.inPoint).toFixed(2)}s end=${Number(aChk2.end).toFixed(2)}s`);
+                            }
+                        } catch (eAud) {
+                            utils.log('⚠️ [AUDIO] No s\'ha pogut recortar l\'àudio: ' + eAud.message, 'WARN');
+                        }
+                        const taRes = await callJSX('Clips.trimAudioA2()');
+                        utils.log(`🎬 trimAudioA2 → ${taRes}`);
                     }
+                    // (2026-09-23) Estat de les pistes JUST després d'inserir el MP4 del bloc.
+                    await this._logPistas('DESPRES-INSERT');
 
                     // 4d. Establir punts IN/OUT de la SEQÜÈNCIA als "sweet points"
                     // El clip té handleSecs de marge a cada extrem (3s per defecte).
@@ -210,8 +331,12 @@
                     // prop de l'inici real del bloc. Només en mode normal (no fallback).
                     // Config: Config.get().zonaInOffset.
                     const zonaInAdj = (isFallbackBlockMedia) ? 0 : (config.zonaInOffset || 0);
-                    const sweetSeqIn  = Math.max(0, h - zonaInAdj);
-                    const sweetSeqOut = clipDuration - h;
+                    // (2026-09-24) Blindatge: si el recorte del clip no s'ha pogut aplicar del tot
+                    // (clipInDelta = inPoint real − inPoint del pla), els corchetes es desplacen el
+                    // mateix valor perquè la peça segueixi alineada amb el material.
+                    const _deltaIn = (typeof clipInDelta === 'number' && isFinite(clipInDelta)) ? clipInDelta : 0;
+                    const sweetSeqIn  = Math.max(0, h - zonaInAdj - _deltaIn);
+                    const sweetSeqOut = clipDuration - h - _deltaIn;
                     utils.log(`📍 [DEBUG] IN/OUT de seqüència (sweet points): seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s (durada=${clipDuration.toFixed(2)}s, handleSecs=${h}s${isFallbackBlockMedia ? ', mode=fallback' : ''})`);
                     const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);
                     utils.log(`🔍 Timeline.range resultat=${rangeRes}`);
@@ -464,7 +589,7 @@
                 utils.log("🟡 [INGEST] Ja hi ha subtítols montats al projecte. No s'importa el SRT equivalent.", 'INFO');
             }
             if (media?.srt?.path && !(skipMedia && capaSrtPresent)) {
-                const destFolder = (ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir)
+                const destFolder = (window.FASTPASS_UI.Utils.workFolder(ctx))
                     .replace(/\\/g, "/").replace(/\/+$/, "");
                 const localSrt = destFolder + "/" + media.srt.name;
                 const copyResult = await this._copySrtToProjectFolder(media.srt.path, localSrt);

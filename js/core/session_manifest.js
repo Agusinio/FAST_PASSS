@@ -20,7 +20,8 @@
         getPath: function(ctx) {
             // El ctx conté config.rutas.destinoBase, progData.directorio i dateDir
             // ctx.progData.wott sol ser el progId (TNV, TNC...)
-            const folder = ctx.config.rutas.destinoBase + ctx.progData.directorio + '\\' + ctx.dateDir;
+            // (2026-09-24) El manifest viu a la carpeta del BLOC: <base><prog>_PROJECTES/<data>/<V*>
+            const folder = window.FASTPASS_UI.Utils.workFolder(ctx);
             const filename = (ctx.progData.wott || 'PROG') + '_' + ctx.bloque + '.fastpass.json';
             return folder + '\\' + filename;
         },
@@ -95,7 +96,7 @@
                     progId:        ctx.progData?.wott || '',
                     blockId:       ctx.bloque || '',
                     projectFile:   '', // s'omple al crear projecte
-                    projectFolder: ctx.config?.rutas?.destinoBase + (ctx.progData?.directorio || '') + '\\' + (ctx.dateDir || ''),
+                    projectFolder: window.FASTPASS_UI.Utils.workFolder(ctx),
                     escaletaFile:  ''  // s'omple al carregar JSON
                 },
                 cleanFeed: {},

@@ -65,7 +65,7 @@
             let files = [];
             try { files = JSON.parse(listing.raw) || []; } catch (eP) { return null; }
             const prog = String(ctx.progData.archivo || '').toUpperCase();
-            const base = String(listing.path || '').replace(/[\\/]+$/, '\\');
+            const base = String(listing.path || '').replace(/[\\/]+$/, '') + '\\';
             const cands = [];
             for (let i = 0; i < files.length; i++) {
                 const name = String(files[i].name || '');
@@ -84,9 +84,9 @@
             const best = cands[cands.length - 1];
             // Copiar al directori del projecte (la extensió treballa sempre amb la còpia local)
             try {
-                const folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + '/' + ctx.dateDir;
+                const folderPath = getUtils().workFolder(ctx);
                 await callJSX("IO.createFolder('" + reader._escapePath(folderPath) + "')");
-                const destPath = folderPath.replace(/[\\/]+$/, '\\') + best.name;
+                const destPath = folderPath.replace(/[\\/]+$/, '') + '\\' + best.name;
                 const copyRes = await callJSX("IO.copyFile('" + reader._escapePath(best.path) + "', '" + reader._escapePath(destPath) + "')");
                 if (copyRes !== 'OK') {
                     log('⚠️ [NOU] No s\'ha pogut copiar l\'escaleta del bloc ' + best.blockId + ': ' + copyRes, 'WARN');
@@ -116,7 +116,7 @@
             if (!ctx || !ctx.progData || !ctx.dateDir || !ctx.config) {
                 return { ok: false, filename: null, error: 'context incomplet' };
             }
-            const folderDest = ctx.config.rutas.destinoBase + ctx.progData.directorio + '/' + ctx.dateDir;
+            const folderDest = getUtils().workFolder(ctx);
             try {
                 getUtils().status('📷 Escaleta del bloc ' + ctx.bloque + ': fent FOTO…', 'procesando');
                 log("📷 [FOTO·auto] Petició a l'API d'escaletes: " + ctx.progData.archivo + ' / ' + ctx.bloque + ' / ' + ctx.dateDir);
@@ -459,7 +459,7 @@
                 const projSlug = `${shortProg}_${ctx.bloque}_${sanitizedTheme}`;
                 
                 const fileName = `Pruebas_${projSlug}.prproj`;
-                const folderPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
+                const folderPath = getUtils().workFolder(ctx);
                 const fullDestPath = (folderPath + "/" + fileName).replace(/\\/g, "/");
 
                 const paths = {
@@ -698,7 +698,7 @@
                                             // NOTA: no usem Context.folder() aquí perquè a _runNew el projecte nou
                                             // encara no existeix (retornaria la carpeta del projecte ANTERIOR).
                                             // ffmpeg/PowerShell necessiten backslashes; Premiere, forward slashes (després).
-                                            const projFolder = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir;
+                                            const projFolder = getUtils().workFolder(ctx);
                                             const clipPath = (projFolder + "\\" + clipName).replace(/\//g, "\\");
                                             log(`🎬 [EXTRACT] Clip del bloc → directori del projecte: ${clipPath}`);
 
@@ -1090,7 +1090,7 @@
 
                 const sanitizedTema = getUtils().sanitizeName(assets.wotts.tema);
                 const newProjectName = ctx.config.naming.getProjectName(ctx, sanitizedTema);
-                const newPath = ctx.config.rutas.destinoBase + ctx.progData.directorio + "\\" + ctx.dateDir + "\\" + "Pruebas_" + newProjectName + ".prproj";
+                const newPath = getUtils().workFolder(ctx) + "\\" + "Pruebas_" + newProjectName + ".prproj";
 
                 // INGESTA I SYNC
                 await this._completeSyncUI(ctx, assets);
@@ -1128,7 +1128,7 @@
             let setResult = await callJSX(`Context.set('${getUtils().escape(projName)}')`);
             
             // Construir ruta completa del proyecto
-            const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
+            const folderPath = getUtils().workFolder(data);
             const fullPath = (folderPath + "/" + projName).replace(/\\/g, "/");
             
             // Si Context.set falla, intentar con Project.open
@@ -1158,7 +1158,7 @@
             log("🚀 [FLOW-LOAD]");
             // Usar el proyecto existente pasado en data
             const projName = data.name; // Nombre completo del archivo .prproj
-            const folderPath = data.config.rutas.destinoBase + data.progData.directorio + "/" + data.dateDir;
+            const folderPath = getUtils().workFolder(data);
             const destPath = (folderPath + "/" + projName).replace(/\\/g, "/");
             log(`📂 Abriendo proyecto existente: ${destPath}`);
 
@@ -1261,7 +1261,7 @@
             }
             
             // 3. Verificació de projecte existent al destí
-            const folderDest = ctx.config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir;
+            const folderDest = getUtils().workFolder(ctx);
             const projectFiles = await getUtils().readFolder(folderDest);
             const existingProj = window.Scan.selectedProject(projectFiles, ctx.progData.wott, ctx.bloque);
             

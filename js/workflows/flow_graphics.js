@@ -512,6 +512,354 @@
             }
         },
 
+        // ═══════════════════════════════════════════════════════════════
+        // (2026-09-23) IPD+ · doble finestra VERTICAL per INTERVAL (TOGGLE)
+        //   APLICAR (interval seleccionat; el clip a transformar és a V2):
+        //     1. Es recorta el clip de V2 a l'interval i es mou a V3 (1 sol clip).
+        //     2. Es duplica V1 → V2 dins l'interval.
+        //     3. Motion: V1 = capa INFERIOR · V2 = capa SUPERIOR (SENSE recortes).
+        //   REVERTIR (si ja hi ha clips a V3 dins l'interval):
+        //     1. S'esborra V2 a l'interval · 2. V3 → V2 · 3. V1 torna a l'estat normal.
+        //   NO es posa cap fons PNG: el "fons" de la composició és el mateix clip
+        //   original aparcat a V3.
+        // ═══════════════════════════════════════════════════════════════
+        IPDPLUS: {
+            SRC: 2,        // pista del clip que es transforma (es recorta i s'aparca a V3)
+            PARK: 3,       // pista on s'aparca el clip original (sense atributs)
+            BASE: 1,       // pista del material base (es duplica a SRC i rep INFERIOR)
+            // Atributs: `position` en px del frame · `scale` en % · crops en %
+            // (2026-09-23) SUPERIOR: Y = 197 (dada per l'usuari) i retall inferior del 15,1%.
+            INFERIOR: { position: [1058, 812], scale: 110 },
+            SUPERIOR: { position: [161, 197], scale: 50, cropBottom: 15.1 }
+        },
+        // Estat "normal" del material de BASE en revertir (canvas vertical 608×1080)
+        _ipdPlusNormal: { scale: 100, scaleWidth: 100, position: [304, 540], cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0 },
+        // Estats previs guardats per revertir exacte (clau = rang de l'interval)
+        _ipdPlusStates: {},
+
+        /**
+         * runIpdPlus: TOGGLE de l'IPD+ per a l'INTERVAL seleccionat.
+         *  - Si a la pista PARK (V3) NO hi ha clips a l'interval → APLICAR.
+         *  - Si n'hi ha → REVERTIR (esborrar SRC, tornar PARK → SRC i treure els atributs).
+         */
+        runIpdPlus: async function (event) {
+            if (!(await getUtils().validateActiveSequence())) return;
+            try {
+                // (2026-09-23) SENSE desbloqueig de pistes: l'usuari les deixa desbloquejades al
+                // projecte plantilla (el desbloqueig des del panell no li funciona i no cal).
+                const rng = await this._ipdPlusRango();
+                if (!rng) {
+                    getUtils().status('IPD+: selecciona el clip(s) de V' + this.IPDPLUS.SRC, 'warn');
+                    return;
+                }
+                log(`🎬 [IPD+] interval ${rng.start.toFixed(2)}s → ${rng.end.toFixed(2)}s (${(rng.end - rng.start).toFixed(2)}s)`);
+                const park = await this._ipdPlusClipsEnRango(this.IPDPLUS.PARK, rng);
+                if (park.length > 0) {
+                    log(`🎬 [IPD+] ja hi ha ${park.length} clip(s) a V${this.IPDPLUS.PARK} a l'interval → REVERTIR`);
+                    await this._ipdPlusRevertir(rng);
+                    getUtils().status('IPD+ revertit', 'exito');
+                } else {
+                    log('🎬 [IPD+] APLICAR: V' + this.IPDPLUS.SRC + ' → V' + this.IPDPLUS.PARK + ' i duplicar V' + this.IPDPLUS.BASE + ' → V' + this.IPDPLUS.SRC);
+                    await this._ipdPlusAplicar(rng);
+                    getUtils().status('IPD+ aplicat', 'exito');
+                }
+                // (2026-09-23) NETJA FINAL d'àudio: les insercions d'IPD+ deixen clips d'àudio a
+                // A2+ dins l'interval (el vídeo va enllaçat amb el seu so). **A1 no es toca**.
+                await this._ipdPlusLimpiarAudio(rng);
+                try { await getUtils().targetOnlyV1('IPD+'); await getUtils().focusV1('IPD+', rng.start); } catch (eF) {}
+            } catch (e) { getUtils().handleError(e, 'runIpdPlus'); }
+        },
+
+        /**
+         * _ipdPlusPoner: (2026-09-23 v2) Copia un clip d'una pista a una altra amb
+         * **INSERT + RIPPLE** (`Clips.insertClipFrom` → `Track.insertClip`), que **NO pisa**:
+         * desplaça els clips posteriors de la pista destí i aquests es tornen al seu lloc.
+         * ABANS s'usava `Clips.insert` per nom: l'overwrite s'estenia la durada SENCERA del
+         * media (200 s) i s'enduia els altres talls d'IPD+ (queixa d'usuari).
+         * Després de l'insert: es lleva l'àudio enllaçat del clip nou (només el seu) i es retalla
+         * a [inPt, outPt, end] amb els in/out reals del clip font.
+         */
+        _ipdPlusPoner: async function (srcTrack, srcIdx, dstTrack, start, inPt, outPt, end) {
+            const cola = await this._dpColaPosterior(dstTrack, end);
+            const rI = await callJSX(`Clips.insertClipFrom(${srcTrack}, ${srcIdx}, ${dstTrack}, ${start.toFixed(4)}, 'video')`);
+            if (String(rI).indexOf('OK') !== 0) return { ok: false, res: rI, idx: null, audio: '-' };
+            await getUtils().delay(200);
+            const delta = await this._dpMesurarDelta(dstTrack, cola, end);
+            const raw = await callJSX(`Clips.at(${dstTrack}, ${(start + 0.05).toFixed(4)}, 'video')`);
+            if (!raw || raw === 'null') return { ok: false, res: 'NO_CLIP', idx: null, audio: '-' };
+            const idx = JSON.parse(raw).index;
+            const audio = await callJSX(`Clips.removeLinkedAudio(${dstTrack}, ${idx})`);
+            const rT = await callJSX(`Clips.retrim(${dstTrack}, ${idx}, ${inPt.toFixed(4)}, ${outPt.toFixed(4)}, ${end.toFixed(4)}, 'video')`);
+            if (delta > 0) await this._dpDevolverCola(dstTrack, cola, delta, 'IPD+');
+            return { ok: true, idx: idx, res: rT, audio: audio, delta: delta };
+        },
+
+        /**
+         * _ipdPlusLimpiarAudio: (2026-09-23) Esborra els clips d'ÀUDIO que les insercions
+         * d'IPD+ deixen a les pistes **A2 i següents** dins l'interval (el vídeo inserit hi
+         * arrossega el seu so). **A1 NO es toca mai** (és l'àudio del programa).
+         * Es crida al FINAL del procés (aplicar i revertir).
+         * @returns {Promise<number>} quants clips d'àudio s'han eliminat
+         */
+        _ipdPlusLimpiarAudio: async function (rng) {
+            let n = 0;
+            try {
+                const aN = parseInt(await callJSX("Tracks.count('audio')") || '0', 10) || 0;
+                for (let t = 2; t <= aN; t++) {
+                    const clips = await getClipsLogic().getTrackClips(t, 'audio');
+                    for (let i = clips.length - 1; i >= 0; i--) {
+                        const c = clips[i];
+                        if (c.end <= rng.start + 0.001 || c.start >= rng.end - 0.001) continue;
+                        const r = await callJSX(`Clips.removeAt(${t}, ${c.start.toFixed(4)}, 'audio')`);
+                        log(`🎬 [IPD+]   àudio netejat A${t} "${c.name}" @${c.start.toFixed(2)}s → ${r}`);
+                        n++;
+                    }
+                }
+            } catch (e) { log("⚠️ [IPD+] neteja d'àudio: " + e.message, 'WARN'); }
+            log(n === 0
+                ? '🎬 [IPD+]   cap àudio a A2+ per netejar'
+                : `🎬 [IPD+]   ${n} clip(s) d'àudio eliminat(s) a A2+`);
+            return n;
+        },
+
+        /**
+         * _ipdPlusRango: INTERVAL de treball a partir de la SELECCIÓ de clips (1 o més) de
+         * la pista SRC. Fallback: el clip de SRC sota el cabezal.
+         * @returns {Promise<Object|null>} { start, end } o null
+         */
+        _ipdPlusRango: async function () {
+            const P = this.IPDPLUS;
+            let sel = [];
+            try {
+                const raw = await callJSX('Clips.getSelection()');
+                if (raw && String(raw).indexOf('ERR') !== 0) sel = JSON.parse(raw || '[]');
+            } catch (eS) { log('⚠️ [IPD+] no puc llegir la selecció: ' + eS.message, 'WARN'); }
+            // (2026-09-23) La SELECCIÓ és SEMPRE de V1 (BASE) — és l'interval que mana: el
+            // retall de V2 (SRC) es fa respecte a aquest interval. Si hi ha selecció en
+            // altres pistes s'ignora (l'operador selecciona el tram a V1).
+            const p = this.IPDPLUS;
+            if (sel && sel.length) {
+                const baseSel = sel.filter(c => c && c.track === p.BASE);
+                if (baseSel.length !== sel.length) {
+                    log(`ℹ️ [IPD+] de ${sel.length} clip(s) seleccionat(s), només ${baseSel.length} són de V${p.BASE} (la resta s'ignoren)`);
+                }
+                if (baseSel.length) {
+                    const start = Math.min.apply(null, baseSel.map(c => c.start));
+                    const end = Math.max.apply(null, baseSel.map(c => c.end));
+                    log(`🎬 [IPD+] selecció V${p.BASE}: ${baseSel.length} clip(s) → interval ${start.toFixed(2)}s→${end.toFixed(2)}s (el retall de V${p.SRC} es farà respecte a això)`);
+                    return { start: start, end: end };
+                }
+            }
+            // Sense selecció a V1: clip de BASE (V1) sota el cabezal — és una peça trocejada
+            // i curta. ⚠️ ABANS s'agafava el clip de SRC (V2), que pot durar tot el bloc
+            // (cas real 2026-09-23: 200,28 s → 28 clips tractats sense voler).
+            const cti = parseFloat(await callJSX('Timeline.get()') || '0');
+            const raw2 = await callJSX(`Clips.at(${p.BASE}, ${cti}, 'video')`);
+            if (raw2 && raw2 !== 'null' && String(raw2).indexOf('ERR') !== 0) {
+                const c2 = JSON.parse(raw2);
+                log(`ℹ️ [IPD+] sense selecció a V${p.BASE} → ús el clip sota el cabezal (${c2.start.toFixed(2)}s→${c2.end.toFixed(2)}s)`);
+                return { start: c2.start, end: c2.end };
+            }
+            return null;
+        },
+
+        /**
+         * _ipdPlusClipsEnRango: clips d'una pista de vídeo que SOLAPEN l'interval.
+         */
+        _ipdPlusClipsEnRango: async function (track, rng) {
+            const out = [];
+            try {
+                const clips = await getClipsLogic().getTrackClips(track, 'video');
+                for (const c of clips) {
+                    if (c.end > rng.start + 0.001 && c.start < rng.end - 0.001) out.push(c);
+                }
+            } catch (e) { log(`⚠️ [IPD+] llegint V${track}: ${e.message}`, 'WARN'); }
+            return out;
+        },
+
+        /**
+         * _ipdPlusMotion: Aplica els atributs a TOTS els clips d'una pista dins l'interval,
+         * desant l'estat previ de cada clip (clau "pista:start") per poder revertir exacte.
+         */
+        _ipdPlusMotion: async function (track, vals, tag, rng) {
+            const clips = await this._ipdPlusClipsEnRango(track, rng);
+            for (const c of clips) {
+                const key = track + ':' + c.start.toFixed(3);
+                const cur = await callJSX(`Anim.getMotionValues(${track}, ${c.index})`);
+                try {
+                    if (cur && String(cur).indexOf('ERR') !== 0 && !this._ipdPlusStates[key]) {
+                        this._ipdPlusStates[key] = JSON.parse(cur);
+                    }
+                } catch (eS) {}
+                const res = await callJSX(`Anim.setMotionValues(${track}, ${c.index}, '${JSON.stringify(vals).replace(/'/g, "\\'")}')`);
+                log(`🎬 [IPD+]   V${track}[${c.index}] ${tag} ${JSON.stringify(vals)} → ${res}`);
+                // (2026-09-23) Lectura de control: el JSX normalitza la `position` dividint
+                // per `frameSize` (X per l'amplada, Y per l'alçada). Amb aquest log es veu
+                // QUÈ ha quedat realment i si el motor NewWorld espera una altra escala a la Y.
+                const chk = await callJSX(`Anim.getMotionValues(${track}, ${c.index})`);
+                log(`🎬 [IPD+]   V${track}[${c.index}] ${tag} llegit → ${chk}`);
+            }
+        },
+
+        /**
+         * _ipdPlusAplicar:
+         *  1. V2 (SRC): em quedo 1 sol clip, retallat a l'interval, i el moc a V3 (PARK).
+         *  2. V1 (BASE) → V2 (SRC): duplico els clips de l'interval.
+         *  3. Motion: V1 = INFERIOR · V2 = SUPERIOR.
+         */
+        _ipdPlusAplicar: async function (rng) {
+            const P = this.IPDPLUS;
+            const src = await this._ipdPlusClipsEnRango(P.SRC, rng);
+            if (!src.length) { getUtils().status("IPD+: no hi ha clip a V" + P.SRC + " a l'interval", 'error'); return; }
+            log(`🎬 [IPD+] V${P.SRC}: ${src.length} clip(s) a l'interval → em quedo 1 i el retallo a l'interval`);
+
+            // ── 1. V2 (SRC) → V3 (PARK): el fragment de l'interval, amb el CONTINGUT correcte ──
+            // (2026-09-23) ABANS es recortava el clip de V2 «in place» amb `Clips.retrim`, però
+            // Premiere no sempre accepta el nou inPoint en un clip JA existent → el clip pujava
+            // a V3 sense tallar-se pel davant (queixa d'usuari). Ara es fa igual que la còpia
+            // de V1: s'insereix el fragment per nom (insertNoAudio, sense àudio) i es retalla
+            // amb `retrim` amb els in/out desplaçats per l'inici de l'interval.
+            const first = src[0];
+            const ip0 = (first.inPoint != null) ? first.inPoint : 0;
+            const inPt = ip0 + Math.max(0, rng.start - first.start);
+            const outPt = ip0 + Math.max(0.04, rng.end - first.start);
+            // Estat del clip original de SRC (per poder-lo restaurar al revertir)
+            this._ipdPlusStates['src'] = {
+                name: first.name, inPoint: ip0,
+                outPoint: (first.outPoint != null) ? first.outPoint : (ip0 + (first.end - first.start)),
+                start: first.start, end: first.end
+            };
+            const put = await this._ipdPlusPoner(P.SRC, first.index, P.PARK, rng.start, inPt, outPt, rng.end);
+            if (!put.ok) {
+                getUtils().status("IPD+: no s'ha pogut pujar el clip a V" + P.PARK + " (" + put.res + ")", 'error');
+                return;
+            }
+            log(`🎬 [IPD+]   V${P.SRC}[${first.index}] → V${P.PARK}[${put.idx}] retallat [in=${inPt.toFixed(2)} out=${outPt.toFixed(2)} end=${rng.end.toFixed(2)}] → ${put.res} · àudio=${put.audio}`);
+            await getUtils().delay(250);
+
+            // ── 2. V2 (SRC): deixar-hi NOMÉS el tros ANTERIOR a l'interval ──
+            // (2026-09-23 v3) En lloc de borrar i reposar trossos amb `Clips.insert` (que pisa
+            // cap endavant), es RETALLA el clip original: si comença abans de l'interval es
+            // queda com a tros anterior; si no, s'elimina. El tros POSTERIOR es reposa al final.
+            for (const c of src) {
+                const cIn2 = (c.inPoint != null) ? c.inPoint : 0;
+                if (c.start < rng.start - 0.05) {
+                    const outA = cIn2 + (rng.start - c.start);
+                    const rT2 = await callJSX(`Clips.retrim(${P.SRC}, ${c.index}, ${cIn2.toFixed(4)}, ${outA.toFixed(4)}, ${rng.start.toFixed(4)}, 'video')`);
+                    log(`🎬 [IPD+]   V${P.SRC}[${c.index}] retallat al tros ANTERIOR ${c.start.toFixed(2)}s→${rng.start.toFixed(2)}s → ${rT2}`);
+                } else {
+                    const rR = await callJSX(`Clips.removeAt(${P.SRC}, ${c.start.toFixed(4)}, 'video')`);
+                    log(`🎬 [IPD+]   V${P.SRC}[${c.index}] eliminat (no té tros anterior) → ${rR}`);
+                }
+            }
+            await getUtils().delay(250);
+
+            // ── 2. Copiar V1 (BASE) → V2 (SRC) els fragments de l'interval, SENSE àudio ──
+            // (2026-09-23) `insertClipFrom`/`duplicate` copiaven el MEDIA SENCER i amb àudio
+            // vinculat → contingut equivocat i clips d'àudio bruts. Ara: `insertNoAudio`
+            // (insereix per nom i elimina l'àudio enllaçat) + `Clips.retrim` amb els in/out
+            // REALS del clip font, de manera que la còpia mostra exactament el mateix.
+            const base = await this._ipdPlusClipsEnRango(P.BASE, rng);
+            log(`🎬 [IPD+] V${P.BASE}: ${base.length} clip(s) a l'interval → copiant a V${P.SRC} (sense àudio)`);
+            for (const c of base) {
+                const cIn = (c.inPoint != null) ? c.inPoint : 0;
+                const cOut = (c.outPoint != null) ? c.outPoint : (cIn + (c.end - c.start));
+                const putC = await this._ipdPlusPoner(P.BASE, c.index, P.SRC, c.start, cIn, cOut, c.end);
+                if (!putC.ok) {
+                    log(`⚠️ [IPD+]   no s'ha pogut copiar V${P.BASE}[${c.index}] (${putC.res})`, 'WARN');
+                    continue;
+                }
+                log(`🎬 [IPD+]   copiat V${P.BASE}[${c.index}]@${c.start.toFixed(2)}s → V${P.SRC}[${putC.idx}] [in=${cIn.toFixed(2)} out=${cOut.toFixed(2)} end=${c.end.toFixed(2)}] → ${putC.res} · àudio=${putC.audio}`);
+            }
+            await getUtils().delay(250);
+
+            // ── 2b. Reposar el tros POSTERIOR dels clips originals de V2 (fora de l'interval) ──
+            // (2026-09-23) Es fa DESPRÉS de les còpies de V1: `Clips.insert` fa overwrite des del
+            // start, així que si es fes abans, les còpies s'endurien aquest tros. Sent l'últim
+            // material de la pista, aquí no destrueix res.
+            for (const c of src) {
+                if (!(c.end > rng.end + 0.05)) continue;
+                const cIn = (c.inPoint != null) ? c.inPoint : 0;
+                const cOut = (c.outPoint != null) ? c.outPoint : (cIn + (c.end - c.start));
+                const inB = cIn + (rng.end - c.start);
+                const escB = getUtils().escape(c.name);
+                const rIB = await callJSX(`Clips.insert('${escB}', ${P.SRC}, ${rng.end.toFixed(4)}, null, 'video')`);
+                if (String(rIB).indexOf('OK') !== 0) {
+                    log(`⚠️ [IPD+]   no s'ha pogut reposar el tros posterior de V${P.SRC} (${rIB})`, 'WARN');
+                    continue;
+                }
+                const rawB = await callJSX(`Clips.at(${P.SRC}, ${(rng.end + 0.05).toFixed(4)}, 'video')`);
+                if (!rawB || rawB === 'null') continue;
+                const idxB = JSON.parse(rawB).index;
+                await callJSX(`Clips.removeLinkedAudio(${P.SRC}, ${idxB})`);
+                const rB = await callJSX(`Clips.retrim(${P.SRC}, ${idxB}, ${inB.toFixed(4)}, ${cOut.toFixed(4)}, ${c.end.toFixed(4)}, 'video')`);
+                log(`🎬 [IPD+]   V${P.SRC} MANTINGUT tros posterior ${rng.end.toFixed(2)}s→${c.end.toFixed(2)}s → ${rB}`);
+            }
+            await getUtils().delay(200);
+
+            // ── 3. Motion: BASE = INFERIOR · SRC = SUPERIOR (es desen els estats previs) ──
+            await this._ipdPlusMotion(P.BASE, P.INFERIOR, 'INFERIOR', rng);
+            await this._ipdPlusMotion(P.SRC, P.SUPERIOR, 'SUPERIOR', rng);
+        },
+
+        /**
+         * _ipdPlusRevertir (toggle):
+         *  1. Esborrar els clips de SRC (V2) dins l'interval.
+         *  2. Tornar el clip de PARK (V3) a SRC (V2), al seu rang.
+         *  3. Treure els atributs de BASE (V1): estat previ guardat o estat normal.
+         */
+        _ipdPlusRevertir: async function (rng) {
+            const P = this.IPDPLUS;
+            // 1. Esborrar SRC (V2) i PARK (V3) dins l'interval (de darrere cap endavant)
+            const src = await this._ipdPlusClipsEnRango(P.SRC, rng);
+            for (let i = src.length - 1; i >= 0; i--) {
+                const r = await callJSX(`Clips.removeAt(${P.SRC}, ${src[i].start.toFixed(4)}, 'video')`);
+                log(`🎬 [IPD+]   esborrat V${P.SRC}@${src[i].start.toFixed(2)}s → ${r}`);
+            }
+            await getUtils().delay(200);
+            const park = await this._ipdPlusClipsEnRango(P.PARK, rng);
+            for (let i = park.length - 1; i >= 0; i--) {
+                const r = await callJSX(`Clips.removeAt(${P.PARK}, ${park[i].start.toFixed(4)}, 'video')`);
+                log(`🎬 [IPD+]   esborrat V${P.PARK}@${park[i].start.toFixed(2)}s → ${r}`);
+            }
+            await getUtils().delay(250);
+
+            // 2. Restaurar el clip ORIGINAL a SRC (V2) amb els seus in/out i rang d'abans
+            //    (2026-09-23) ABANS es movia el fragment de PARK a SRC, cosa que deixava V2
+            //    amb només l'interval. Ara es re-insereix l'original guardat a _ipdPlusStates.
+            const st = this._ipdPlusStates['src'];
+            if (st && st.name) {
+                const escR = getUtils().escape(st.name);
+                const rIR = await callJSX(`Clips.insert('${escR}', ${P.SRC}, ${st.start.toFixed(4)}, null, 'video')`);
+                if (String(rIR).indexOf('OK') === 0) {
+                    const rawR = await callJSX(`Clips.at(${P.SRC}, ${(st.start + 0.05).toFixed(4)}, 'video')`);
+                    if (rawR && rawR !== 'null') {
+                        const idxR = JSON.parse(rawR).index;
+                        await callJSX(`Clips.removeLinkedAudio(${P.SRC}, ${idxR})`);
+                        const rR = await callJSX(`Clips.retrim(${P.SRC}, ${idxR}, ${st.inPoint.toFixed(4)}, ${st.outPoint.toFixed(4)}, ${st.end.toFixed(4)}, 'video')`);
+                        log(`🎬 [IPD+]   V${P.SRC} restaurat "${st.name}" [in=${st.inPoint.toFixed(2)} out=${st.outPoint.toFixed(2)} end=${st.end.toFixed(2)}] → ${rR}`);
+                    }
+                } else {
+                    log(`⚠️ [IPD+]   no s'ha pogut restaurar "${st.name}" a V${P.SRC} (${rIR})`, 'WARN');
+                }
+                delete this._ipdPlusStates['src'];
+            } else {
+                log('ℹ️ [IPD+]   sense estat guardat de V' + P.SRC + " → V" + P.SRC + " queda buit a l'interval");
+            }
+            await getUtils().delay(250);
+
+            // 3. BASE (V1) → estat previ (o normal)
+            const base = await this._ipdPlusClipsEnRango(P.BASE, rng);
+            for (const c of base) {
+                const key = P.BASE + ':' + c.start.toFixed(3);
+                const prev = this._ipdPlusStates[key];
+                const vals = prev || this._ipdPlusNormal;
+                const res = await callJSX(`Anim.setMotionValues(${P.BASE}, ${c.index}, '${JSON.stringify(vals).replace(/'/g, "\\'")}')`);
+                log(`🎬 [IPD+]   V${P.BASE}[${c.index}] ${prev ? 'estat previ' : 'normal'} → ${res}`);
+                if (prev) delete this._ipdPlusStates[key];
+            }
+        },
+
         /**
          * PAS0: Detecta el clip 16:9 sota el CTI i fa diagnòstic de les pistes
          * (especialment si alguna està BLOQUEJADA, que fa fallar overwrite/remove).

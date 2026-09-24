@@ -3,7 +3,7 @@
         "autor": "AGUS",
         "guarda": 22,
         "snapWindowDeducedSec": 2.5,
-        "snapWindowFaroSec": 1.0,
+        "snapWindowFaroSec": 2.5,
         "debug": false
     },
     "rutas": {

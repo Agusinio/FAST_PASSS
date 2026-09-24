@@ -240,6 +240,54 @@
     ],
     "active": [
       {
+        "id": "OUTGO_TOTES_LES_PISTES",
+        "desc": "OUT&GO no recortaba en V9 (Mosa): las pistas a limpiar eran listas FIJAS [2..8] y [A1,A2]",
+        "status": "pending_validation",
+        "fix": "flow_cut.js::runCutOut: las listas se calculan de las pistas reales de la secuencia (Tracks.count('video')/('audio')): vídeo 2..N (V1 se recorta antes con rippleOut) y audio 1..N. rippleOut ya recortaba el clip en curso y borraba los posteriores; solo faltaba pedírselo a V9. Log: 'Limpiando pistas secundarias: video [2,…,9] (de 9), audio [1,2] (de 2)'.",
+        "files": ["js/workflows/flow_cut.js", "index.html"],
+        "date": "2026-09-23"
+      },
+      {
+        "id": "IPD_PLUS_DOBLE_FINESTRA_VERTICAL",
+        "desc": "Botó IPD+ = TOGGLE per INTERVAL: talla el clip de V2 a l'interval seleccionat i el mou a V3, duplica V1 → V2, i aplica els atributs de capa inferior a V1 ([1058,812] 110%) i de capa superior a V2 ([161,812] 50%), SENSE recortes ni fons PNG. Si es torna a clicar amb un interval ja tractat, reverteix (esborra V2, V3 → V2, treu atributs de V1). Inclou la reorganització del grup GRÀFICS en 2 files de 3 (IPD·IPD+·🪟🪟 / Grafic·Mapa·Tòtem)",
+        "status": "pending_validation",
+        "fix": "flow_graphics.js: config única `IPDPLUS` (SRC=2 pista del clip transformat, PARK=3 on s'aparca l'original i fa de fons, BASE=1 material que es copia a SRC, INFERIOR {position:[1058,812],scale:110}, SUPERIOR {position:[161,812],scale:50}). `runIpdPlus` = toggle (si hi ha clips a PARK dins l'interval → revertir). `_ipdPlusRango` (interval = unió dels clips SELECCIONATS de qualsevol pista via l'àtom JSX nou Clips.getSelection(); sense selecció → clip de BASE/V1 sota el cabezal), `_ipdPlusClipsEnRango`, `_ipdPlusMotion` (aplica i desa estat previ per pista:start), `_ipdPlusAplicar` (moveToRange+removeAt per deixar 1 sol clip a SRC → move a PARK → insertClipFrom BASE→SRC clip a clip + moveToRange → Motion), `_ipdPlusRevertir` (removeAt SRC → move PARK→SRC → BASE a estat previ/normal). Àtom JSX nou Clips.getSelection() a 6_Clips.jsx + alias a main.jsx (justificat: cap àtom retornava la selecció múltiple). La Doble Finestra 🪟🪟 queda igual (revertida la parametrització de perfils del FIX 40). index.html: 2 files de 3 + btnGrafIpdPlus. main.js: binding Graphics.runIpdPlus. FIX 42 (post-validació): (a) l'interval ja no s'agafa del clip de V2 sota el cabezal (podia durar tot el bloc: cas real 200,28 s → 28 clips) i la selecció es pren de qualsevol pista; (b) Clips.duplicate fallava (ERR_CLIP_NOT_FOUND_AFTER_DUP) → es fa servir Clips.insertClipFrom + moveToRange. PRECISIÓ DE L'USUARI: la SELECCIÓ és sempre de la pista BASE (V1) i el tall de V2 (SRC) es fa respecte a aquest interval → _ipdPlusRango filtra per BASE i ignora la resta de pistes. NOTA: `position` va en px del frame de la seqüència (el JSX normalitza dividint per frameSize) → si els valors venen d'un frame 1920×1080 i la seqüència és 608×1080 caldrà escalar-los.",
+        "files": ["js/workflows/flow_graphics.js", "js/main.js", "index.html", "jsx/modules/6_Clips.jsx", "jsx/main.jsx"],
+        "date": "2026-09-23"
+      },
+      {
+        "id": "ESCAPE_BARRES_INJECTIO_JSX",
+        "desc": "Error d'escapada a la ingesta de fitxers: utils.importList només escapava les cometes simples, així que les barres invertides de la ruta es perdien dins del literal ExtendScript (\\P, \\Z, \\S → P, Z, S) → importFiles fallava (ERR:MOVE_FAILED) i després ERR_ITEM_NOT_FOUND en col·locar el grafisme",
+        "status": "pending_validation",
+        "fix": "js/core/utils.js::importList: el payload passa a fer DOBLE escapada, `this.escape(JSON.stringify(rawPaths))` (JSON + escape), la mateixa tècnica que _freezeTemaTitol (flow_chyrons.js) i _freezeGrafEnd (flow_mapa.js). Compatible amb rutes amb '/' i amb '\\\\'. El flux de Project no es veia afectat perquè allà les rutes es passen amb '/' i escape() no toca les barres normals. Diagnòstic fet amb PROVES\\FASTPASS_audit.log (comparant la crida trencada amb la que funciona). Cache-buster: utils.js?v=16.",
+        "files": ["js/core/utils.js", "index.html"],
+        "date": "2026-09-23"
+      },
+      {
+        "id": "GRAFISMES_PER_MARCADOR",
+        "desc": "Automatitzar el botó 🎨 (MAPA) guiat pels marcadors grocs: (1) la referència del punt d'entrada passa del clip seleccionat al MARCADOR; (2) congelat de 3 s (o fins al següent clip de V1) al final del grafisme perquè l'usuari el pugui estirar; (3) al final de COLOCAR, repassar els marcadors GROCS (color 4) amb paraula clau (MAPA), col·locar el grafisme associat i, si no hi ha coincidència, obrir el navegador de fitxers",
+        "status": "pending_validation",
+        "fix": "flow_mapa.js: _flow fa mkRef=_itemAtCti(CTI) → refSec=mkRef.time (TC del marcador) + _refClipAt(refSec) per a l'espai hàbil (fallback al clip seleccionat si no hi ha marcadors). Nous mètodes: _refClipAt(sec), _applyTrackConfig(), _freezeGrafEnd(gName, grafEnd, endLimit) [mecànica de _freezeTemaTitol: grafisme temporal a TC 10:00 + Render.snapshot de l'últim frame + treure el temporal + IO.importFiles al bin GRAF amb emparellament del nom real + Clips.insert/endAt a V3 amb dur=min(3s, endLimit−grafEnd)], GRAF_KEYWORDS=['MAPA'] (ampliable), _keywordOf() (normalitzat), _grafCandidates() (color===4 + paraula clau), runFromMarkers() + _runCandidates() (_match per nom → _askFiles si no hi ha coincidència → _import → _refClipAt/_freezeUnderCti → _placeClips al TC del marcador). main.js::runPlaceAllChyrons afegeix la fase final Mapa.runFromMarkers() (després dels chyrons i de l'IPD). index.html: tooltip del 🎨 actualitzat. FIX 37 (post-validació): el COLOR dels marcadors NO és llegible en aquesta versió de Premiere (Markers.get() retorna color=-1 a tots, verificat al snapshot MARCADORS_*.json), així que el filtre real és la PARAULA CLAU i el color només s'informa; només es descarta si el color és conegut i ≠ 4. Comprovat amb el bloc V1 del TNC: 01p22@15.00s + fitxer 'APP P2 MAPA CENTRES DE DADES.mov' a ZZZ_GRAFISME\\22 SETEMBRE → match automàtic. FIX 39: _freezeGrafEnd desa el cabezal (Timeline.get()) i el restaura en un bloc finally (Timeline.set) perquè el snapshot l'havia de moure al TC temporal; cache flow_mapa.js?v=18.",
+        "files": ["js/workflows/flow_mapa.js", "js/main.js", "index.html"],
+        "date": "2026-09-23"
+      },
+      {
+        "id": "MARCADORS_GRAFICS_F6_DESCONNECTAT",
+        "desc": "Los marcadores amarillos/grocs (color 4) de los ítems gráficos (P2 foto, P2 MAPA, GF, TE…) nunca se generaban: F6·Gràfics (Workflows.Markers.placeGraphicMarkers) no se invocaba desde ningún sitio",
+        "status": "pending_validation",
+        "fix": "Diagnóstico verificado: el único productor de colorIdx:4 es flow_markers.js:1892 (placeGraphicMarkers); el botón 🎨 (btnMarksF6) fue reasignado el 2026-09-18 a Mapa.run y el grupo MARCADORS (TEST) solo llegaba a F5; el pipeline runFullPipelineOut (OUT&GO) incluía F1→F5 + Ordre(F6) pero NO Gràfics; flow_assembly.js solo tiene el alias. Con la escaleta real del TNC V1 (01p21/01p22 con horaEntradaPrevista 13:56:28, sufijos p21/p22 en _GRAPHIC_SUFFIXES) los ítems SÍ se clasifican como gráficos: solo faltaba ejecutar la fase. Fix: (1) nueva 10ª fase ['Gràfics (F6·GF)'] en runFullPipelineOut, DESPUÉS de 'Ordre (F6)' y antes del snapshot; (2) botón nuevo btnMarksF6GF 'GF' en el grupo MARCADORS (test-only) → Markers.placeGraphicMarkers; (3) title del 🎨 corregido (hace el MAPA) sin cambiar su función. Los grocs se anclan al marcador padre 01i con el criterio D13 (+10s / +15s). Colateral NO tocado: la fase/botón Correl (F3.5) llama a Assembly.correlationSnapMarkers, método INEXISTENTE (redundante: F3 ya ejecuta _correlationSnap internamente).",
+        "files": ["js/main.js", "index.html"],
+        "date": "2026-09-23"
+      },
+      {
+        "id": "CONDUCTOR_BLOC_AMB_GRAFISMES",
+        "desc": "El chyron de conductor se omitía porque el bloque abre con grafismos (P2 foto, P2 MAPA) y el ítem de plató (01i) es el 3º en la ESCALETA (aunque es el 1º del TIMELINE)",
+        "status": "pending_validation",
+        "fix": "flow_chyrons.js::placeChyronConductor: nueva regla (usuario): el conductor va al PRIMER MARCADOR DEL TIMELINE cuyo ítem sea de plató (intro/donapas/off/directe/conexión). Se leen los marcadores estructurales (resultado de F1-F7) y se decide 'es de plató' por el prefijo del marcador → ítem de la escaleta (lineByNum + _isPresenterLine) y, si no está, por el título del marcador (_isPresenterTitle). Eliminados el criterio 'plató = 1er ítem de la escaleta' y la ventana de 3 ítems del FIX 33. Respaldo: plató de la escaleta sin marcador propio (inicio del bloque). isFirstItem se mantiene (no hay marcador antes) para el CasA/CasB del Tema-Títol. Log: '🎙️ [Conductor] 1r marcador de PLATÓ al timeline: 01i @ Xs (OBRE el bloc) · plató de l'escaleta: 01i'. Repercusión indirecta: _blockStartTime lee el primer clip de V7 (conductor) → si está al inicio puede pasar a CasB (Tema-Títol tras el rótulo + titulillo con entrante a clipStart+0.40).",
+        "files": ["js/workflows/flow_chyrons.js", "index.html"],
+        "date": "2026-09-23"
+      },
+      {
         "id": "SLIDER_NO_ES_MOU_AMB_ESPAI",
         "desc": "Al pulsar ESPACIO (play), el slider de reencuadre se iba al centro / perdía su posición",
         "status": "pending_validation",

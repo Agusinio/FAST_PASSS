@@ -393,9 +393,10 @@
                     utils.log('[SCAN:srtFallback] Sense data de treball (dateDir) → NO es carrega cap .SRT (per seguretat).', 'WARN');
                     return null;
                 }
-                var prefix = String(ctx.progData.archivo || '').toUpperCase() + '_' +
-                    String(ctx.bloque || '').toUpperCase() + '_';
-                var hasPrefix = function (f) { return (f.name || '').toUpperCase().indexOf(prefix) !== -1; };
+                var progUp = String(ctx.progData.archivo || '').toUpperCase();
+                var bloqueUp = String(ctx.bloque || '').toUpperCase();
+                var prefix = progUp + '_' + bloqueUp + '_';
+                var hasPrefix = function (f) { return progUp && (f.name || '').toUpperCase().indexOf(prefix) !== -1; };
                 var ofDate = function (f) { return self._fileDateYYYYMMDD(f) === dateTarget; };
 
                 // (2026-09-22) FILTRE ESTRICTE DE DATA: només .SRT del dia de treball.
@@ -406,9 +407,12 @@
                     return null;
                 }
 
+                // (2026-09-23) NOMÉS N1: el .SRT ha de ser DEL PROGRAMA I DEL BLOC actuals i del dia
+                // de treball. L'antic N2 ("qualsevol .SRT del dia") s'ha ELIMINAT de soca-rel:
+                // si no hi ha el .SRT del bloc, NO es carrega res — s'avisa i prou (queixa de
+                // l'usuari: s'hi carregava un SRT de MATINS_V5 en un projecte TNC).
                 var levels = [
-                    { level: 1, reason: 'prefix + data de treball', list: delDia.filter(hasPrefix) },
-                    { level: 2, reason: 'data de treball', list: delDia }
+                    { level: 1, reason: 'prefix programa_bloc + data de treball', list: delDia.filter(hasPrefix) }
                 ];
                 for (var i = 0; i < levels.length; i++) {
                     var L = levels[i];

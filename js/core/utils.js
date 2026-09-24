@@ -633,10 +633,18 @@
             const rawPaths = pathList.map(item => item.path || item);
         
             try {
-                // 📍 BLINDAJE: Convertimos a JSON y escapamos comillas simples para que no rompan el callJSX
-                const payload = JSON.stringify(rawPaths).replace(/'/g, "\\'");
-                
-                //console.log("📤 Enviando Payload al JSX:", payload); // Veremos qué sale exactamente
+                // 📍 BLINDAJE: (2026-09-23) El payload viatja dins d'un LITERAL ExtendScript
+                // ('...'), així que cal una DOBLE escapada: JSON.stringify converteix cada \
+                // en \\ i utils.escape les torna a duplicar, de manera que el literal les
+                // retorni senceres (i de pas escapa les cometes simples).
+                // ABANS només s'escapaven les cometes simples → les barres invertides es
+                // perdien en arribar al JSX (\P, \Z, \S… → P, Z, S) i la ruta quedava
+                // trencada: la ingesta fallava amb ERR:MOVE_FAILED i després l'ítem no
+                // existia (ERR_ITEM_NOT_FOUND en col·locar-lo).
+                // No es notava al flux de Project perquè allà les rutes es passen amb "/"
+                // (f.path.replace(/\\/g, "/")) i escape() no toca les barres normals.
+                // Mateixa tècnica que _freezeTemaTitol (flow_chyrons.js).
+                const payload = this.escape(JSON.stringify(rawPaths));
                 
                 const res = await this.callJSX(`FASTPASS.IO.importFiles('${payload}', '${binName}')`);
                 
@@ -649,11 +657,36 @@
 
         sanitizeName: function(str) {
             if (!str) return "Unnamed_Item";
-            // 1. Treiem accents (normalize NFD + regex)
-            const normalized = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            // 2. Treiem caràcters prohibits de fitxers i limitem a 60 caràcters
-            var pattern = new RegExp('[<>:"/\\\\|?*#]', 'g'); 
-            return normalized.replace(pattern, "").trim().substring(0, 60);
+            // (2026-09-23) NOMS SEMPRE EN ASCII I IDÈNTICS entre bloc, projecte i seqüència.
+            // 1. NFD + treure diacrítics: Ç→C, à→a, è→e, í→i, ·→(res), ’→'…
+            var normalized = String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            // 2. QUALSEVOL resta de caràcter no-ASCII s'ELIMINA: així cap nom pot arrossegar
+            //    mojibake ("COMENA‡A", "Ã‡", "Â€") ni símbols estranys.
+            normalized = normalized.replace(/[^\x20-\x7E]/g, "");
+            // 3. Caràcters prohibits a Windows + espais col·lapsats + límit de 60 caràcters.
+            var pattern = new RegExp('[<>:"/\\\\|?*#]', 'g');
+            return normalized.replace(pattern, "").replace(/\s+/g, " ").trim().substring(0, 60);
+        },
+
+        /**
+         * workFolder(ctx): RUTA DE TREBALL ÚNICA de l'extensió (2026-09-24).
+         * Estructura: <destinoBase><prog>_PROJECTES/<YYYY_MM_DD>/<V*>
+         * TOTS els artefactes del bloc viuen aquí dins (projecte, escaleta local,
+         * MP4 del bloc, manifest, snapshots, anàlisi, SRT, renders) → cap bloc
+         * barreja fitxers amb un altre.
+         * @param {Object} ctx - {config, progData, dateDir, bloque} (State també val)
+         * @returns {string} Ruta sense barra final (separador "/" entre els segments nous)
+         */
+        workFolder: function(ctx) {
+            if (!ctx) return "";
+            var rutas = (ctx.config && ctx.config.rutas) ? ctx.config.rutas : {};
+            var progDir = (ctx.progData && ctx.progData.directorio) ? ctx.progData.directorio : "";
+            var date = ctx.dateDir ? String(ctx.dateDir) : "";
+            // El bloc ("V1", "V2"…) entra com a subdirectori de la carpeta de data.
+            var bloc = ctx.bloque ? this.sanitizeName(ctx.bloque).replace(/\s+/g, "") : "";
+            var out = String(rutas.destinoBase || "") + progDir + "/" + date;
+            if (bloc) out += "/" + bloc;
+            return out;
         },
 
         escape: function(str) {
@@ -662,12 +695,20 @@
             // Els caràcters de control (\n \r \t) es converteixen a seqüències d'escapada
             // per evitar que trenquin el literal de string dins d'evalScript().
             // Les barres invertides i comilles simples també s'escapen.
+            // (2026-09-23) NOMÉS ASCII: qualsevol caràcter no-ASCII (à, è, ç, ·, ’ …) s'envia
+            // com a \uXXXX perquè ExtendScript no el corrompi en creuar el pont evalScript
+            // (era la causa que el nom del projecte/seqüència perdés els caràcters catalans).
             return str
                 .replace(/\\/g, "\\\\")
                 .replace(/'/g, "\\'")
                 .replace(/\n/g, "\\n")
                 .replace(/\r/g, "\\r")
-                .replace(/\t/g, "\\t");
+                .replace(/\t/g, "\\t")
+                .replace(/[\u0080-\uFFFF]/g, function (ch) {
+                    var h = ch.charCodeAt(0).toString(16);
+                    while (h.length < 4) { h = "0" + h; }
+                    return "\\u" + h;
+                });
         },
 
         delay: function(ms) { 

@@ -18,11 +18,14 @@
 
         /**
          * Genera la ruta del archivo JSON de análisis.
-         * Formato: analisis_estructura/[DD_MM]_[PROG]_[BLOC].json
+         * Formato: <carpeta del BLOC>/analisis_estructura/[DD_MM]_[PROG]_[BLOC].json
+         * (2026-09-24) Ruta ABSOLUTA dins la carpeta del bloc: abans era relativa i
+         * el fitxer podia acabar en qualsevol directori de treball de Premiere.
          */
         _getPath: function (ctx) {
             const dd_mm = ctx.dateDir.substring(0, 5);
-            return 'analisis_estructura/' + dd_mm + '_' + ctx.progData.archivo + '_' + ctx.bloque + '.json';
+            const base  = window.FASTPASS_UI.Utils.workFolder(ctx);
+            return base + '/analisis_estructura/' + dd_mm + '_' + ctx.progData.archivo + '_' + ctx.bloque + '.json';
         },
 
         /**
@@ -40,6 +43,12 @@
         _save: async function (path, data) {
             const json    = JSON.stringify(data, null, 2);
             const escaped = json.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            // (2026-09-24) La carpeta del bloc (o la seva subcarpeta analisis_estructura)
+            // pot no existir encara al primer run → la creem ABANS d'escriure.
+            try {
+                const dir = path.substring(0, path.lastIndexOf('/'));
+                if (dir) await window.FASTPASS_UI.Utils.ensureFolders(dir);
+            } catch (eF) { /* noop */ }
             await callJSX("IO.writeTxt('" + path + "', '" + escaped + "')");
         },
 

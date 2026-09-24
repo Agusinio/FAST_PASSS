@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FAST >>> PASS (v2.9.5 - TACTICAL)</title>
-    <link rel="stylesheet" href="./style.css?v=56">
+    <link rel="stylesheet" href="./style.css?v=57">
 </head>
 <body>
     <div id="main-content">
@@ -77,9 +77,10 @@
             <div class="section-content">
                 <div class="video-tactical-layout">
                     <div class="video-row-top">
-                        <button id="btnIn" class="secondary btn-sq-std">IN</button>
-                        <button id="btnOut" class="secondary btn-wide-flex" title="OUT &amp; GO: tanca el bloc, trosseja els talls, col·loca els marcadors i els chyrons (tot el pipeline)">OUT &amp; GO</button>
-                        <button id="btnKey" class="secondary btn-sq-double-high">KEYFRAME</button>
+                        <button id="btnIn" class="secondary btn-sq-std btn-destructivo">IN</button>
+                        <button id="btnScene" class="secondary btn-wide-flex btn-destructivo test-only" title="TROSSEJA: divideix el clip de V1 als talls de contingut (Cut.runScene). És la fase 2 del pipeline OUT &amp; GO: aquest botó només surt a la pantalla de TEST per poder provar-la per separat">TROSSEJA</button>
+                        <button id="btnOut" class="secondary btn-wide-flex btn-destructivo" title="OUT &amp; GO: tanca el bloc, trosseja els talls, col·loca els marcadors i els chyrons (tot el pipeline)">OUT &amp; GO</button>
+                        <button id="btnKey" class="secondary btn-sq-double-high btn-destructivo">KEYFRAME</button>
                     </div>
                     <div class="video-row-bottom">
                         <button id="btnPrevClip" class="secondary btn-sq-std">◀</button>
@@ -118,9 +119,10 @@
             <div class="section-label" title="Gràfics"><span class="lbl-full">GRÀFICS</span><span class="lbl-short">GRF</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
-                    <button id="btnMarksF6" class="secondary icon-only" title="Gràfica: marcadors GF de l'escaleta al seu ancla">🎨</button>
                     <button id="btnGrafIpd" class="secondary" title="IPD (zoom 144% + posició) · Ctrl+clic: repassa els clips IPD dels marcadors">IPD</button>
-                    <button id="btnGrafDoblePantalla" class="secondary icon-only doble" title="Doble pantalla (V2/V3)">🪟🪟</button>
+                    <button id="btnGrafIpdPlus" class="secondary" title="IPD+ · Doble finestra VERTICAL: dues parts de la imatge (una a dalt i una a baix) amb fons a sota. Mateixa maquinària que la Doble Finestra (V4/V5 + fons V3) amb un altre perfil de Motion">IPD+</button>
+                    <button id="btnGrafDoblePantalla" class="secondary icon-only doble" title="Doble pantalla (horitzontal)">🪟🪟</button>
+                    <button id="btnMapaImport" class="secondary icon-only" title="Mapa: importa els grafismes del tema a la pista de grafismes, amb el PUNT D'ENTRADA del MARCADOR (posa el cabezal sobre el marcador de l'ítem) i un congelat de 3 s al final. Per als marcadors GF de l'escaleta: botó GF (TEST) o pipeline OUT &amp; GO">🎨</button>
                     <button id="btnGrafMapa" class="secondary icon-only" title="Mapa zoom">🗺️</button>
                     <button id="btnGrafTotem" class="secondary icon-only" title="Tòtem">🗿</button>
                  </div>
@@ -168,7 +170,9 @@
                     <button id="btnMarksF3" class="secondary" title="F3 · Marcadors previstos (coincidències)">Prev</button>
                     <button id="btnMarksF35" class="secondary" title="F3.5 · CorrelationSnap a corts de vídeo">Correl</button>
                     <button id="btnMarksF4" class="secondary" title="F4 · DensitySnap / faros">Dens</button>
-                    <button id="btnMarksF5" class="secondary" title="F5 · OrphanSnap (marcadors orfes a corts propers)">Orphan</button>
+                    <button id="btnMarksF5" class="secondary" title="F5 · Inferits (mateixa fase que el pipeline OUT &amp; GO): col·loca els ítems inferits de l'escaleta. Ctrl+clic = F5 antic OrphanSnap (marcadors orfes a corts propers)">Inferits</button>
+                    <button id="btnMarksF6" class="secondary" title="F6 · Ordre: garanteix que els marcadors dels ítems ESTRUCTURALS mantinguin l'ordre de l'escaleta (el faro no es mou mai; un ítem invertit va al tall anterior del faro). Mateixa fase que el pipeline OUT &amp; GO">Ordre</button>
+                    <button id="btnMarksF6GF" class="secondary" title="F6 · Marcadors gràfics (GF) de l'escaleta: P2 foto / P2 MAPA / GF / TE… ancorats al seu ítem pare. En TREBALL ho fa el pipeline OUT &amp; GO">GF</button>
                  </div>
             </div>
         </div>
@@ -211,24 +215,24 @@
 
     <!-- SCRIPTS with version cachebuster -->
     <script src="js/lib/CSInterface.js"></script>
-    <script src="js/core/utils.js?v=15"></script>
-    <script src="js/core/11_Configuracio.js?v=18"></script>
+    <script src="js/core/utils.js?v=21"></script>
+    <script src="js/core/11_Configuracio.js?v=19"></script>
     <script src="js/core/escaleta_timecode.js?v=5"></script>
     <script src="js/core/escaleta_config.js?v=7"></script>
-    <script src="js/core/escaleta_io.js?v=10"></script>
+    <script src="js/core/escaleta_io.js?v=15"></script>
     <script src="js/core/escaleta_items.js?v=6"></script>
     <script src="js/core/escaleta_bounds.js?v=14"></script>
     <script src="js/core/escaleta_fallback.js?v=6"></script>
     <script src="js/core/escaleta_fetch.js?v=11"></script>
     <script src="js/core/escaleta_reader.js?v=5"></script>
-    <script src="js/core/session_manifest.js?v=6"></script>
+    <script src="js/core/session_manifest.js?v=7"></script>
     <script src="js/core/state.js?v=5"></script>
     <script src="js/inspectors/1_SourceAssets.js?v=5"></script>
-    <script src="js/logic/Scanner.js?v=8"></script>
+    <script src="js/logic/Scanner.js?v=10"></script>
     <script src="js/inspectors/2_App.js?v=5"></script>
     <script src="js/inspectors/3_Session.js?v=5"></script>
-    <script src="js/core/4_Context.js?v=19"></script>
-    <script src="js/logic/3_Project_Logic.js?v=12"></script>
+    <script src="js/core/4_Context.js?v=20"></script>
+    <script src="js/logic/3_Project_Logic.js?v=21"></script>
     <script src="js/logic/5_Tracks_Logic.js?v=5"></script>
     <script src="js/logic/6_Clips_Logic.js?v=6"></script>
     <script src="js/logic/7_KF_Logic.js?v=5"></script>
@@ -237,23 +241,23 @@
     <script src="js/logic/13_Parse.js?v=5"></script>
     <script src="js/logic/14_Assembly_Logic.js?v=6"></script>
     <script src="js/logic/15_FFmpeg_Logic.js?v=7"></script>
-    <script src="js/logic/16_Analysis_Logic.js?v=5"></script>
-    <script src="js/core/assembly_context.js?v=7"></script>
+    <script src="js/logic/16_Analysis_Logic.js?v=6"></script>
+    <script src="js/core/assembly_context.js?v=9"></script>
     <script src="js/workflows/flow_mp4.js?v=5"></script>
-    <script src="js/workflows/flow_markers.js?v=25"></script>
-    <script src="js/workflows/flow_chyrons.js?v=39"></script>
-    <script src="js/workflows/flow_graphics.js?v=10"></script>
-    <script src="js/workflows/flow_mainButton.js?v=17"></script>
-    <script src="js/workflows/flow_cut.js?v=11"></script>
+    <script src="js/workflows/flow_markers.js?v=35"></script>
+    <script src="js/workflows/flow_chyrons.js?v=41"></script>
+    <script src="js/workflows/flow_graphics.js?v=22"></script>
+    <script src="js/workflows/flow_mainButton.js?v=19"></script>
+    <script src="js/workflows/flow_cut.js?v=15"></script>
     <script src="js/workflows/flow_retols.js?v=6"></script>
     <script src="js/workflows/flow_srt.js?v=8"></script>
-    <script src="js/workflows/flow_render.js?v=22"></script>
+    <script src="js/workflows/flow_render.js?v=23"></script>
     <script src="js/workflows/flow_KF.js?v=10"></script>
     <script src="js/workflows/flow_config.js?v=5"></script>
-    <script src="js/workflows/flow_assembly.js?v=7"></script>
-<script src="js/workflows/flow_mapa.js?v=15"></script>
+    <script src="js/workflows/flow_assembly.js?v=8"></script>
+<script src="js/workflows/flow_mapa.js?v=18"></script>
     <script src="js/core/project_registry.js?v=5"></script>
     <script src="js/editor/srt_editor.js?v=71"></script>
-    <script src="js/main.js?v=62"></script>
+    <script src="js/main.js?v=70"></script>
 </body>
 </html>

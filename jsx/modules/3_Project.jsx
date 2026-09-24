@@ -1,4 +1,20 @@
 /**
+ * _decNombre: (2026-09-23) Normalitza un nom que arriba del panell.
+ *  - Si ve '%' → ve URL-encoded → decodeURIComponent (compatibilitat amb cridadors antics;
+ *    OJO: ExtendScript el decodifica com a Latin-1, per això NO serveix per a textos amb
+ *    accents: %C3%87 acabava com "Ã‡", i el nom de la seqüència sortia corrupte).
+ *  - Si no → els caràcters ja són REALS (el panell els envia com \uXXXX i el literal els ha
+ *    resolt) → es retorna tal qual. Així el nom conserva els caràcters catalans
+ *    (COMENÇA, Alçada, Montsià…).
+ */
+function _decNombre(s) {
+    var t = String(s === null || s === undefined ? '' : s).replace(/^\s+|\s+$/g, '');
+    if (t.indexOf('%') === -1) return t;
+    try { return decodeURIComponent(t); } catch (e) { return t; }
+}
+
+
+/**
  * =================================================================================
  * 3_Project.jsx
  * Gestió de projectes, Bins i seqüències (v12 - SUPER-LITERAL DRY)
@@ -344,8 +360,8 @@ FASTPASS.Project = (function() {
         rename: function(nameEncoded, newNameEncoded) {
             $.writeln("🔍 [JSX-DEBUG] rename llamado: " + nameEncoded + " -> " + newNameEncoded);
             var p = _focus();
-            var name = decodeURIComponent(nameEncoded).replace(/^\s+|\s+$/g, '');
-            var newName = decodeURIComponent(newNameEncoded).replace(/^\s+|\s+$/g, '');
+            var name = _decNombre(nameEncoded);
+            var newName = _decNombre(newNameEncoded);
             $.writeln("   decode: '" + name + "' -> '" + newName + "'");
             
             // Buscar en secuencias primero

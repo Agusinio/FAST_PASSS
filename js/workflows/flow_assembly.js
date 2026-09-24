@@ -46,6 +46,9 @@
         placeScheduledMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.placeScheduledMarkers();
         },
+        correlationSnapMarkers: async function () {
+            return FASTPASS_UI.Workflows.Markers.correlationSnapMarkers();
+        },
         snapFaroMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.snapFaroMarkers();
         },
@@ -57,6 +60,9 @@
         },
         placeInferredItems: async function () {
             return FASTPASS_UI.Workflows.Markers.placeInferredItems();
+        },
+        enforceMarkerOrder: async function () {
+            return FASTPASS_UI.Workflows.Markers.enforceMarkerOrder();
         },
         _setupEstructural: async function () {
             return FASTPASS_UI.Workflows.Markers._setupEstructural();

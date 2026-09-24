@@ -158,10 +158,26 @@
                 const rippleResult = await getClipsLogic().rippleOut(T_MP4, val, 'video', false);
                 log(`🔍 [FLOW-CUT] Resultado rippleOut: ${rippleResult}`);
 
-                // Limpiar pistas de video secundarias (2-8) y audio (1-2)
-                const videoTracks = [2, 3, 4, 5, 6, 7, 8];
-                const audioTracks = [1, 2];
-                log(`🔍 [FLOW-CUT] Limpiando pistas secundarias: video ${videoTracks}, audio ${audioTracks}`);
+                // Limpiar les pistes de GRÀFICS i CHYRONS (V6 en amunt) més enllà de l'OUT.
+                // ── (2026-09-23) ABANS eren llistes FIXES [2..8] i [A1,A2]: amb la pista nova
+                // V9 (Mosa) el que hi hagués més enllà de l'OUT no es retallava ✗. Ara es
+                // calculen de les pistes reals de la seqüència (val per a qualsevol .prproj).
+                const nVid = parseInt(await callJSX("Tracks.count('video')") || '0') || 0;
+                const nAud = parseInt(await callJSX("Tracks.count('audio')") || '0') || 0;
+                // (2026-09-23) La neteja va de V3 EN AMUNT i **preserva V1 i V2**: l'operador té
+                // a V2 el material de composició (IPD+ / Doble Finestra). ABANS es netejava de
+                // V2 en amunt i, amb les pistes desbloquejades, el contingut de V2 desapareixia
+                // (queixa d'usuari 2026-09-23).
+                // (2026-09-24) V2 TAMBÉ es retalla a l'OUT: el material de composició
+                // (IPD+ / doble finestra) que sobrepassa el final de la peça ha de quedar
+                // tallat, si no el render arrossega el que hi ha més enllà de l'OUT.
+                // (Abans V2 es preservava sencer → queixa "OUT&GO no recorta el out de V2".)
+                const PRIMERA_A_NETEJAR = 2;   // V2+ = composició, grafismes, tema-títol, chyrons
+                const videoTracks = [];
+                for (let t = PRIMERA_A_NETEJAR; t <= nVid; t++) videoTracks.push(t);
+                const audioTracks = [];
+                for (let a = 1; a <= nAud; a++) audioTracks.push(a);
+                log(`🔍 [FLOW-CUT] Limpiando pistas secundarias: video ${JSON.stringify(videoTracks)} (de ${nVid}), audio ${JSON.stringify(audioTracks)} (de ${nAud})`);
                 const cleanupResult = await getClipsLogic().rippleAllOut(val, videoTracks, audioTracks, false);
                 log(`🔍 [FLOW-CUT] Resultado cleanup: ${cleanupResult}`);
 

@@ -82,8 +82,9 @@
                     const normPath = String(activePathRaw).replace(/\\/g, '/');
                     const partsPath = normPath.split('/');
                     let realDateDir = null;
+                    let dateIdx = -1;
                     for (let pi = 0; pi < partsPath.length; pi++) {
-                        if (/^\d{4}_\d{2}_\d{2}$/.test(partsPath[pi])) { realDateDir = partsPath[pi]; break; }
+                        if (/^\d{4}_\d{2}_\d{2}$/.test(partsPath[pi])) { realDateDir = partsPath[pi]; dateIdx = pi; break; }
                     }
                     const baseNorm = String(ctx.config.rutas.destinoBase).replace(/\\/g, '/').replace(/\/+$/, '');
                     const dirNorm = String(ctx.progData.directorio).replace(/\\/g, '/');
@@ -91,6 +92,15 @@
                         if (ctx.dateDir !== realDateDir) {
                             log(`📍 [AssemblyContext] Projecte obert de ${realDateDir} (State.dateDir era ${ctx.dateDir}). Alineant context.`, 'INFO');
                             ctx.dateDir = realDateDir;
+                        }
+                        // (2026-09-24) La carpeta del BLOC és el segment SEGÜENT a la data
+                        // (<data>/<V*>/projecte.prproj) → alineem també ctx.bloque perquè
+                        // l'usuari pot obrir el projecte d'un altre bloc dins la mateixa app.
+                        const realBloc = (dateIdx >= 0 && partsPath[dateIdx + 1] && /^V\d+$/i.test(partsPath[dateIdx + 1])) ? partsPath[dateIdx + 1].toUpperCase() : null;
+                        if (realBloc && ctx.bloque !== realBloc) {
+                            log(`📍 [AssemblyContext] Bloc del projecte obert: ${realBloc} (State.bloque era ${ctx.bloque}). Alineant context.`, 'INFO');
+                            ctx.bloque = realBloc;
+                            try { if (window.FASTPASS_UI.State) window.FASTPASS_UI.State.bloque = realBloc; } catch (eB) { /* noop */ }
                         }
                     }
                 }
@@ -147,7 +157,51 @@
             const refInPoint = refFromManifest.mp4ExpandedInPoint;
             log(`📐 Ref del manifest: inPoint=${refInPoint.toFixed(2)}s (tier=${refFromManifest.InTier})`);
 
+            // ═══════════════════════════════════════════════════════════════════
+            // (2026-09-24) ANCORATGE DE MARCADORS — bug "marcador a 28:02"
+            // Totes les fases F1-F7 ancoraven a `clips[0].start` de la seqüència
+            // ACTIVA. Si l'operador té oberta una altra seqüència (p. ex. la del
+            // cleanfeed sencer, on el bloc arrenca a 1682,96s = 28:02), els
+            // marcadors es col·loquen ~28 min a la DRETA del material i sembla que
+            // "no s'han creat" (queixa d'usuari 2026-09-24: "hay un marker a 28").
+            // En TREBALL no es veia perquè el botó principal ja deixava oberta la
+            // seqüència del bloc. Aquí es resol la seqüència DEL BLOC amb el MATEIX
+            // àtom que fa servir IN (`Context.findSequence` = findSequenceByTokens)
+            // i, si no és l'activa, s'obre amb `Project.openSeq` ABANS de llegir
+            // els clips (font de l'ancoratge).
+            // ═══════════════════════════════════════════════════════════════════
+            try {
+                var wottAnc = (ctx.progData && ctx.progData.wott) ? String(ctx.progData.wott) : '';
+                var blocAnc = ctx.bloque ? String(ctx.bloque) : '';
+                if (wottAnc && blocAnc) {
+                    var actAnc = String(await getUtils().callJSX('Context.activeSeq()') || '');
+                    var foundAnc = String(await getUtils().callJSX(`Context.findSequence('${wottAnc}', '${blocAnc}')`) || '');
+                    if (foundAnc && foundAnc.indexOf('ERR') !== 0 && foundAnc !== actAnc) {
+                        log(`📍 [AssemblyContext·ANCORATGE] La seqüència activa ("${actAnc}") NO és la del bloc ("${foundAnc}"). Obrint la del bloc...`, 'WARN');
+                        var openResAnc = await getUtils().callJSX(`$.global.Project.openSeq('${foundAnc.replace(/'/g, "\\'")}')`);
+                        log(`📍 [AssemblyContext·ANCORATGE] Project.openSeq("${foundAnc}") → ${openResAnc}`, 'INFO');
+                        await getUtils().delay(500);
+                        if (window.FASTPASS_UI.State) window.FASTPASS_UI.State.activeSequenceName = foundAnc;
+                    } else if (foundAnc && foundAnc.indexOf('ERR') !== 0) {
+                        log(`📍 [AssemblyContext·ANCORATGE] Seqüència del bloc activa: "${foundAnc}" ✓`, 'INFO');
+                    } else {
+                        log(`⚠️ [AssemblyContext·ANCORATGE] No s'ha pogut resoldre la seqüència del bloc (${wottAnc}/${blocAnc}) → ${foundAnc}`, 'WARN');
+                    }
+                }
+            } catch (eAnc) {
+                log(`⚠️ [AssemblyContext·ANCORATGE] Error resolent la seqüència del bloc: ${eAnc.message}`, 'WARN');
+            }
+
             const clips = await getClipsLogic().getTrackClips(1, "video");
+
+            // (2026-09-24) Log de l'ancoratge: si l'inici dels clips de V1 no és on
+            // toca, TOTS els marcadors cauen desplaçats. Amb aquesta línia es veu al
+            // primer cop d'ull (abans calia deduir-ho dels missatges de cada fase).
+            try {
+                var ancStart = (clips && clips.length && clips[0]) ? Number(clips[0].start) : null;
+                var ancEnd = (clips && clips.length) ? Number(clips[clips.length - 1].end) : null;
+                log(`⚓ [AssemblyContext·ANCORATGE] ${clips ? clips.length : 0} clips a V1 · inici=${ancStart !== null && isFinite(ancStart) ? ancStart.toFixed(2) + 's' : '?'} · final=${ancEnd !== null && isFinite(ancEnd) ? ancEnd.toFixed(2) + 's' : '?'} → les fases F1-F7 ancoraran aquí.`, 'INFO');
+            } catch (eAl) { /* noop */ }
 
             // Detectar primer ítem no agrupat (agrupacio:null) dins del rang del bloc
             var ungroupedItems = this._detectUngroupedItems(manifest, reader, lines, targetBlock);

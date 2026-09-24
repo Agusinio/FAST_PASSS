@@ -82,6 +82,50 @@
                         safePlacements[sp].comment = safePlacements[sp].comment.replace(/'/g, '');
                     }
                 }
+                // (2026-09-24) REGLA D'USUARI: un marcador VERMELL (ítem no agrupat, color 1)
+                // només s'ha de col·locar si queda ENTRE dos marcadors d'un altre color (blaus,
+                // etc.). Abans només ho filtrava F7 i els vermells seguien apareixent de F1/F2/F5
+                // (queixa d'usuari 2026-09-24). Aquí és el punt comú de TOTES les fases.
+                try {
+                    var mkRaw = await callJSX('Markers.get()');
+                    var mkExist = [];
+                    try { mkExist = mkRaw ? JSON.parse(mkRaw) : []; } catch (eP) { mkExist = []; }
+                    var tVermells = [];
+                    for (var vi = 0; vi < safePlacements.length; vi++) tVermells.push(Number(safePlacements[vi].colorIdx));
+                    if (tVermells.indexOf(1) !== -1) {
+                        var mantinguts = [], descartats = 0;
+                        for (var xi = 0; xi < safePlacements.length; xi++) {
+                            var px = safePlacements[xi];
+                            if (Number(px.colorIdx) !== 1) { mantinguts.push(px); continue; }
+                            var tx = Number(px.timeSec);
+                            var abans = false, despres = false;
+                            for (var xj = 0; xj < safePlacements.length; xj++) {
+                                if (xj === xi || Number(safePlacements[xj].colorIdx) === 1) continue;
+                                var tjx = Number(safePlacements[xj].timeSec);
+                                if (tjx < tx) abans = true;
+                                if (tjx > tx) despres = true;
+                            }
+                            for (var xk = 0; xk < mkExist.length; xk++) {
+                                var tkx = Number(mkExist[xk].time);
+                                if (!isFinite(tkx)) continue;
+                                if (tkx < tx) abans = true;
+                                if (tkx > tx) despres = true;
+                            }
+                            if (abans && despres) { mantinguts.push(px); }
+                            else {
+                                descartats++;
+                                log('   ⛔ [' + label + '] ' + px.prefix + ': marcador VERMELL (no agrupat) fora d\'un interval entre marcadors → no es col·loca (' + tx.toFixed(2) + 's)');
+                            }
+                        }
+                        if (mantinguts.length === 0 && safePlacements.length > 0) {
+                            log('   ⚠️ [' + label + '] El filtre de vermells deixaria el bloc sense marcadors → es manté tota la llista.', 'WARN');
+                        } else if (descartats > 0) {
+                            safePlacements = mantinguts;
+                        }
+                    }
+                } catch (eFv) {
+                    log('⚠️ [filtrarVermells] ' + eFv.message, 'WARN');
+                }
                 var raw = await callJSX('Markers.placeByPrefixes(\'' + JSON.stringify(safePlacements) + '\')');
                 if (!raw || raw === '[]' || raw === '{}') {
                     return { placed: 0, moved: 0, created: 0 };
@@ -230,11 +274,60 @@
         _calcTemporalAnchors: function (manifest, reader, structuralItems, clips) {
             var clipStart = 0;
             var clipInPoint = manifest.ref.tlBlockInPointSec || 0;
-            if (clips && clips.length > 0 && clips[0]) {
-                clipStart = (typeof clips[0].start === 'number') ? clips[0].start : 0;
-                if (clips[0].inPoint !== undefined && clips[0].inPoint !== null) {
-                    clipInPoint = clips[0].inPoint;
+            // (2026-09-24) FIX A: offset que fan servir les fórmules d'ancoratge. Pot ser el
+            // inPoint del clip real de V1 O la referència del bloc (si el clip és l'extret).
+            var offsetAnchor = clipInPoint;
+            var offsetAnchorFont = 'manifest.ref.tlBlockInPointSec (inicial)';
+            // (2026-09-24) ANCORATGE — s'agafa el clip MÉS ANTIC de V1, no `clips[0]`.
+            // `clips[0].start` s'assumia com l'inici del material, però si l'ordre del
+            // retorn de Clips.get no és temporal (o hi ha un clip d'una altra seqüència
+            // barrejat) l'ancoratge podia ser 1682,96s (=28:02) mentre el material
+            // començava a 0,00s → tots els marcadors anaven ~28 min a la dreta
+            // (queixa d'usuari 2026-09-24: "hay un marker a 28").
+            if (clips && clips.length > 0) {
+                var firstClip = clips[0];
+                for (var ci = 1; ci < clips.length; ci++) {
+                    var cs = Number(clips[ci] && clips[ci].start);
+                    var fs = Number(firstClip && firstClip.start);
+                    if (isFinite(cs) && (!isFinite(fs) || cs < fs)) firstClip = clips[ci];
                 }
+                if (firstClip) {
+                    clipStart = (typeof firstClip.start === 'number') ? firstClip.start : 0;
+                    if (firstClip.inPoint !== undefined && firstClip.inPoint !== null) {
+                        clipInPoint = firstClip.inPoint;
+                    }
+                    // (2026-09-24) FIX A — DETECCIÓ DEL CLIP EXTRET: si el clip de V1 és el clip
+                    // extret del bloc (<PROG>_<BLOC>_CLIP.mp4), el seu `inPoint` és temps DEL
+                    // FITXER extret i no es pot restar a `worldSecMediaStart` → l'ancoratge
+                    // sortia desviat (TNC 2026-09-24: inPoint=22,04s vs ref del bloc=20,00s →
+                    // TOTS els marcadors 2,04s abans del tall). En aquest cas mana la
+                    // referència del bloc (`manifest.ref.tlBlockInPointSec`).
+                    var _clipNameAnc = (firstClip.name !== undefined && firstClip.name !== null) ? String(firstClip.name) : '';
+                    var _isExtractedAnc = _clipNameAnc.toUpperCase().indexOf('_CLIP') !== -1;
+                    var _manifestInPointAnc = (manifest.ref && manifest.ref.tlBlockInPointSec !== undefined && manifest.ref.tlBlockInPointSec !== null) ? Number(manifest.ref.tlBlockInPointSec) : null;
+                    if (_isExtractedAnc && isFinite(_manifestInPointAnc) && _manifestInPointAnc > 0) {
+                        offsetAnchor = _manifestInPointAnc;
+                        offsetAnchorFont = 'ref del bloc (clip extret "' + _clipNameAnc + '")';
+                    } else {
+                        offsetAnchor = clipInPoint;
+                        offsetAnchorFont = 'inPoint del clip' + (_clipNameAnc ? ' ("' + _clipNameAnc + '")' : '');
+                    }
+                    log('⚓ [ANCORATGE·FIX-A] Offset emprat: ' + Number(offsetAnchor).toFixed(3) + 's ← ' + offsetAnchorFont + ' | clipInPoint=' + Number(clipInPoint).toFixed(3) + 's · refBloc=' + (_manifestInPointAnc !== null ? Number(_manifestInPointAnc).toFixed(3) + 's' : 'n/a') + ' · start=' + Number(clipStart).toFixed(3) + 's');
+                    log('⚓ [ANCORATGE] Clip V1 més antic: index=' + clips.indexOf(firstClip) + ' start=' + Number(clipStart).toFixed(3) + 's inPoint=' + Number(clipInPoint).toFixed(3) + 's (de ' + clips.length + ' clips)');
+                }
+                // (2026-09-24) GUARDA DE BASE: el ref del manifest ha d'estar expressat en la
+                // base del CLIP EXTRET. Invariant: worldSecMediaStart == worldBlockAnchorSec −
+                // tlBlockInPointSec (TNC: 51185 == 51205 − 20 ✓). Si no es compleix, el manifest
+                // encara és el del cleanfeed sencer → l'ancoratge no pot quadrar i els marcadors
+                // cauen fora del material (queixa "hi ha un marker a 28"). Cal prémer ACTUALITZAR.
+                try {
+                    var _wms = Number(manifest.ref.worldSecMediaStart);
+                    var _wba = (manifest.ref.worldBlockAnchorSec !== undefined && manifest.ref.worldBlockAnchorSec !== null) ? Number(manifest.ref.worldBlockAnchorSec) : null;
+                    var _tbp = Number(manifest.ref.tlBlockInPointSec);
+                    if (isFinite(_wms) && _wba !== null && isFinite(_wba) && isFinite(_tbp) && Math.abs(_wms - (_wba - _tbp)) > 1.0) {
+                        log('⚠️ [ANCORATGE] El manifest NO està en base del clip extret (worldSecMediaStart=' + _wms.toFixed(2) + 's ≠ worldBlockAnchorSec−tlBlockInPointSec=' + (_wba - _tbp).toFixed(2) + 's) → els marcadors cauran FORA del material. Prem ACTUALITZAR (botó principal) i torna-ho a provar.', 'ERROR');
+                    }
+                } catch (eGuard) { /* noop */ }
             }
 
             log('🔧 [BUG3·FIX] Clip V1 real: start=' + clipStart.toFixed(3) + 's, inPoint=' + clipInPoint.toFixed(3) + 's vs manifest tlBlockInPointSec=' + (manifest.ref.tlBlockInPointSec || 0).toFixed(3) + 's');
@@ -276,7 +369,7 @@
                 }
             }
 
-            var tlClipStartSec = clipStart + (refF1 - worldSecMediaStart) - clipInPoint;
+            var tlClipStartSec = clipStart + (refF1 - worldSecMediaStart) - offsetAnchor;
 
             var anchorEfectiva = anchorOnAirSec;
             var anchorEfOrigen = 'blockInSec (fallback)';
@@ -302,8 +395,19 @@
                 }
             }
 
-            var anchorEfTimelineSec = clipStart + (anchorEfectiva - worldSecMediaStart) - clipInPoint;
+            var anchorEfTimelineSec = clipStart + (anchorEfectiva - worldSecMediaStart) - offsetAnchor;
 
+            // (2026-09-24) DIAGNÒSTIC D'ANCORATGE (bug "marker a 28"): es calculen les DUES
+            // variants per poder comparar al log d'una sola ullada:
+            //   · amb `clipInPoint` (inPoint del clip REAL de V1; pot ser el del fitxer
+            //     extret — 22,04s a TNC — i llavors el càlcul queda esbiaixat)
+            //   · amb `manifest.ref.tlBlockInPointSec` (referència del material del bloc)
+            // En TREBALL/OUT&GO el resultat bo és el segon; en TEST el primer donava 1682,96s.
+            var manifestInPoint = (manifest.ref && manifest.ref.tlBlockInPointSec) ? manifest.ref.tlBlockInPointSec : 0;
+            var tlClipStartManifest = clipStart + (refF1 - worldSecMediaStart) - manifestInPoint;
+            var anchorEfTLManifest = clipStart + (anchorEfectiva - worldSecMediaStart) - manifestInPoint;
+            log('📍 [ANCORATGE·DUAL] clipStart=' + clipStart.toFixed(3) + 's · clipInPoint=' + clipInPoint.toFixed(3) + 's · manifest.tlBlockInPointSec=' + manifestInPoint.toFixed(3) + 's');
+            log('📍 [ANCORATGE·DUAL] amb clip.inPoint → tlClipStart=' + tlClipStartSec.toFixed(3) + 's anchorEfTL=' + anchorEfTimelineSec.toFixed(3) + 's  ||  amb manifest → tlClipStart=' + tlClipStartManifest.toFixed(3) + 's anchorEfTL=' + anchorEfTLManifest.toFixed(3) + 's');
             log('📍 [ESTRUCTURAL] Àncora OnAir: ' + anchorOnAirSec.toFixed(3) + 's (font: ' + anchorSource + '), tlClipStart: ' + tlClipStartSec.toFixed(3) + 's, anchorEfTL: ' + anchorEfTimelineSec.toFixed(3) + 's');
             log('📍 [F1·PURA] Referència F1: ' + (refF1 !== null ? refF1.toFixed(1) + 's (' + refF1Origen + ')' : 'CAP') + '  |  efectiva (1r): ' + anchorEfectiva.toFixed(1) + 's (' + anchorEfOrigen + ')');
 
@@ -496,8 +600,94 @@
         // ═══════════════════════════════════════════════════════════════
         // 🟢 F1: placeOnAirMarkers — Marcadors amb TC exacte d'emissió (OnAir)
         // ═══════════════════════════════════════════════════════════════
+        /**
+         * ensureExtractedRef: PREPARACIÓ D'ANCORATGE (2026-09-24) — s'invoca al PRINCIPI de
+         * F1·OnAir perquè prémer les fases en ordre equivalgui a OUT&GO.
+         *
+         * Fa la part "de preparació de sessió" que a TREBALL fa el botó principal
+         * (CREAR/ACTUALITZAR → EXTRACT): assegurar que `manifest.ref` estigui expressat en la
+         * base del CLIP EXTRET del bloc. Si el manifest ve del cleanfeed sencer
+         * (worldSecMediaStart=49500, tlBlockInPointSec=1685) mentre el timeline ja té el clip
+         * extret, l'ancoratge queda 28 min fora i els marcadors cauen FORA del material.
+         *
+         * NO extreu res amb ffmpeg: només recalcula el ref si el clip del bloc ja existeix a la
+         * carpeta de treball. Si no hi és, avisa clarament que cal CREAR/ACTUALITZAR.
+         */
+        ensureExtractedRef: async function (ctx) {
+            try {
+                if (!ctx || !ctx.config || !ctx.progData || !ctx.dateDir || !ctx.bloque) {
+                    log('⚠️ [PREP-ANCORATGE] Sense context complet: no es pot verificar la base del manifest.', 'WARN');
+                    return false;
+                }
+                const MF = window.FASTPASS_UI.SessionManifest;
+                if (!MF || !MF.load) return false;
+                const manifest = await MF.load(ctx);
+                if (!manifest || !manifest.ref) return false;
+                const ref = manifest.ref;
+
+                const wms = Number(ref.worldSecMediaStart);
+                const anchorRef = (ref.worldBlockAnchorSec !== undefined && ref.worldBlockAnchorSec !== null)
+                    ? Number(ref.worldBlockAnchorSec) : Number(ref.worldBlockStartSec);
+                const tbp = Number(ref.tlBlockInPointSec);
+
+                // Invariant del manifest bo: worldSecMediaStart == worldBlockAnchorSec − tlBlockInPointSec
+                if (isFinite(wms) && isFinite(anchorRef) && isFinite(tbp) && Math.abs(wms - (anchorRef - tbp)) <= 1.0) {
+                    log('🧭 [PREP-ANCORATGE] Manifest ja en base del CLIP EXTRET (worldSecMediaStart=' + wms.toFixed(2) + 's) ✓');
+                    return true;
+                }
+
+                // Cal el clip extret del bloc a la carpeta de treball: <WOTT>_<BLOC>_CLIP.mp4
+                const expectedPrefix = (String(ctx.progData.wott || '') + '_' + String(ctx.bloque) + '_CLIP').toUpperCase();
+                const folder = getUtils().workFolder(ctx);
+                let files = [];
+                try { files = await getUtils().readFolder(folder); } catch (eR) { files = []; }
+                const names = (files || []).map(function (f) { return String((f && f.name) ? f.name : f).toUpperCase(); });
+                var foundClip = null;
+                for (var fi = 0; fi < names.length; fi++) {
+                    if (names[fi].indexOf(expectedPrefix) === 0 && names[fi].indexOf('.MP4') !== -1) { foundClip = names[fi]; break; }
+                }
+                if (!foundClip) {
+                    log('⚠️ [PREP-ANCORATGE] El manifest NO està en base del clip extret i no trobo el clip del bloc (' + expectedPrefix + '*.mp4) a ' + folder + ' → prem CREAR/ACTUALITZAR (fase EXTRACT) abans de col·locar marcadors, si no cauran fora del material.', 'ERROR');
+                    return false;
+                }
+
+                // Recalcular el ref en la base del clip extret (mateixa fórmula que flow_mainButton → EXTRACT)
+                const h = (ctx.config.general && isFinite(Number(ctx.config.general.handles))) ? Number(ctx.config.general.handles) : 20;
+                const endRef = Number(ref.worldBlockEndSec);
+                const span = (isFinite(anchorRef) && isFinite(endRef) && (endRef - anchorRef) > 0) ? (endRef - anchorRef) : null;
+                const newRef = {
+                    worldSecMediaStart: anchorRef - h,
+                    mp4ExpandedInPoint: h,
+                    tlBlockInPointSec: h,
+                    mp4SweetInPointRaw: h
+                };
+                if (span !== null) {
+                    newRef.mp4ExpandedOutPoint = span + 2 * h;
+                    newRef.mp4Duration = span + 2 * h;
+                }
+                await MF.save(ctx, {
+                    ref: newRef,
+                    extractedClip: {
+                        name: foundClip,
+                        isExtracted: true,
+                        extractedWorldSecMediaStart: anchorRef - h
+                    }
+                });
+                log('🧭 [PREP-ANCORATGE] manifest.ref recalculat en base del CLIP EXTRET: worldSecMediaStart=' + newRef.worldSecMediaStart.toFixed(2) + 's · tlBlockInPointSec=' + h.toFixed(2) + 's · handle=' + h + 's · clip=' + foundClip);
+                return true;
+            } catch (ePrep) {
+                log('⚠️ [PREP-ANCORATGE] ' + ePrep.message, 'WARN');
+                return false;
+            }
+        },
+
         placeOnAirMarkers: async function () {
             log('🟢 [F1·OnAir] Iniciant col·locació independent...');
+
+            // (2026-09-24) PREPARACIÓ D'ANCORATGE al principi de F1: amb això, prémer les fases
+            // en ordre (F1 → F2 → …) té la MATEIXA funcionalitat que OUT&GO a la finestra de
+            // treball, sense haver de prémer abans el botó principal (CREAR/ACTUALITZAR).
+            try { await this.ensureExtractedRef(window.FASTPASS_UI.State); } catch (ePrepCall) { /* noop */ }
 
             const ctxData = await getAssemblyContext().loadAssemblyContext();
             if (!ctxData) { log('⚠️ [F1·OnAir] loadAssemblyContext ha fallat. Abortant.'); return; }
@@ -833,8 +1023,15 @@
 
             var densityData = this._calcDensityFootprint(clips);
             var snapResult = this._correlationSnap(existingMarkers, clips, densityData, manifest.escaletaItems, reader);
-            var snapDelta = (snapResult && snapResult.delta !== null) ? snapResult.delta : 0;
-            log('   🟢 [F3·Coinc] Δ snap: ' + snapDelta.toFixed(3) + 's (confiança=' + (snapResult.confidence * 100).toFixed(0) + '%)');
+            var snapDeltaReal = (snapResult && snapResult.delta !== null) ? snapResult.delta : 0;
+            // (2026-09-24) FIX · DOBLE APLICACIÓ DEL Δ: la fase dedicada al Δ de correlació és
+            // F3.5·CorrelationSnap (té la seva pròpia confiança/log i s'executa a continuació).
+            // ABANS F3 també l'aplicava → el mateix Δ s'aplicava DUES vegades
+            // (F3 −1,16s + F3.5 −1,16s = −2,32s) i el marcador quedava ~1,8s ABANS del seu corte
+            // (queixa d'usuari 2026-09-24: "el marcador del vídeo … se mueve a unos frames antes").
+            // Ara F3 només l'INFORMA; qui l'aplica és F3.5.
+            var snapDelta = 0;
+            log('   🟢 [F3·Coinc] Δ snap (informatiu: l\'aplica F3.5·CorrelationSnap) = ' + snapDeltaReal.toFixed(3) + 's (confiança=' + (snapResult.confidence * 100).toFixed(0) + '%)');
 
             var placements = [];
 
@@ -879,6 +1076,121 @@
         },
 
         /**
+         * correlationSnapMarkers: F3.5·CorrelationSnap — Entry point del botó F3.5 i de la
+         * fase 6 del pipeline OUT&GO.
+         * Aplica el Δ de consens NOMÉS a OnAir i Deducits (no toca Previstos ni 'definitiu').
+         *
+         * (2026-09-24) AQUESTA FASE S'HAVIA PERDUT: el refactor que va dividir flow_assembly en
+         * 4 dominis (commit 2542aa8) no la va portar a flow_markers, i tant el botó F3.5 (TEST)
+         * com el pipeline OUT&GO cridaven `Assembly.correlationSnapMarkers`, que no existia →
+         * callWorkflow fallava EN SILENCI (console.error "no existe"). Restaurada des de git
+         * (2542aa8^:js/workflows/flow_assembly.js) amb els noms actuals.
+         */
+        correlationSnapMarkers: async function () {
+            log('🟠 [F3.5·CorrelationSnap] Iniciant snapeig per correlació (OnAir+Deducit)...');
+
+            // ── Pas 1: Context ──
+            const ctxData = await getAssemblyContext().loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [F3.5·CorrelationSnap] loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, clips } = ctxData;
+
+            // ── Pas 2: Petjada de densitat ──
+            const densityData = this._calcDensityFootprint(clips);
+            log('   🔸 [F3.5] DensityFootprint: ' + (densityData && densityData.breaks ? densityData.breaks.length : 0) + ' breaks.');
+
+            // ── Pas 3: Marcadors actuals del timeline ──
+            var markersRaw = await callJSX('Markers.get()');
+            var allMarkers = [];
+            try { allMarkers = JSON.parse(markersRaw); } catch (e) { allMarkers = []; }
+            log('   🔸 [F3.5] Marcadors al timeline: ' + allMarkers.length);
+
+            // ── Pas 4: Només OnAir + Deducits (els Previstos els tracta F4) ──
+            var manifestItems = manifest.escaletaItems || [];
+            var prefixToItem = {};
+            for (var ii = 0; ii < manifestItems.length; ii++) {
+                var mItem = manifestItems[ii];
+                if (mItem.num) prefixToItem[String(mItem.num)] = mItem;
+            }
+            var _extractPrefix35 = function (comment) {
+                if (!comment) return '';
+                var idx = comment.indexOf(' -');
+                if (idx <= 0) return '';
+                return comment.substring(0, idx).replace(/^\s+|\s+$/g, '');
+            };
+            var _isOnAirOrDeduced = function (prefix) {
+                if (!prefix || !prefixToItem[prefix]) return false;
+                var item = prefixToItem[prefix];
+                var onAir = item.horaEntradaOnAir;
+                if (onAir && onAir !== '00:00:00' && String(onAir).trim() !== '') return true;
+                var deduced = reader._deduceOnAirEntrada(item, manifestItems, null);
+                return deduced !== null;
+            };
+            var candidateMarkers = [];
+            var skippedPrevistos = 0;
+            for (var i = 0; i < allMarkers.length; i++) {
+                var mk = allMarkers[i];
+                if (mk.name === 'definitiu') continue;
+                var prefix = _extractPrefix35(mk.comments || '');
+                if (_isOnAirOrDeduced(prefix)) candidateMarkers.push(mk);
+                else skippedPrevistos++;
+            }
+            log('   🔸 [F3.5] OnAir+Deducit: ' + candidateMarkers.length + ' | Previstos saltats: ' + skippedPrevistos);
+            if (candidateMarkers.length === 0) {
+                log('🟠 [F3.5·CorrelationSnap] Cap marcador OnAir/Deducit no-definitiu. ✓ FINALITZAT.');
+                return;
+            }
+
+            // ── Pas 5: Δ consensuat ──
+            var snapResult = this._correlationSnap(candidateMarkers, clips, densityData, manifest.escaletaItems, reader);
+            if (!snapResult || snapResult.delta === null) {
+                log('🟠 [F3.5·CorrelationSnap] Sense Δ fiable (confiança=' + (((snapResult && snapResult.confidence) || 0) * 100).toFixed(0) + '%). ✓ FINALITZAT.');
+                return;
+            }
+
+            // ── Pas 6: Aplicar el Δ als candidats ──
+            var delta = snapResult.delta;
+            log('   🔸 [F3.5] Aplicant Δ=' + delta.toFixed(3) + 's a ' + candidateMarkers.length + ' marcadors...');
+
+            var placements = [];
+            for (var j = 0; j < candidateMarkers.length; j++) {
+                var cmk = candidateMarkers[j];
+                var cmkTime = (typeof cmk.time === 'number' ? cmk.time : parseFloat(cmk.time));
+                // El marcador a ~0.00s NO rep Δ (l'histograma de _correlationSnap ja l'exclou).
+                var correctedTime = (cmkTime < 0.01) ? 0 : (cmkTime + delta);
+                if (correctedTime < 0) correctedTime = 0;
+
+                var comment = cmk.comments || '';
+                var pfx35 = _extractPrefix35(comment);
+                if (!pfx35) {
+                    log('   ⚠️ [F3.5] Marcador sense prefix detectable a ' + cmk.time + 's. Saltant.');
+                    continue;
+                }
+
+                // Si el marcador existent no té color vàlid, derivar-lo de l'ítem d'escaleta.
+                var colorIdx = (typeof cmk.color === 'number' && cmk.color >= 0) ? cmk.color : null;
+                if (colorIdx === null && prefixToItem[pfx35]) colorIdx = this._getColorIdx(prefixToItem[pfx35]);
+
+                placements.push({
+                    prefix: pfx35,
+                    timeSec: correctedTime,
+                    comment: comment,
+                    name: 'definitiu',
+                    colorIdx: colorIdx
+                });
+
+                log('   🔸 [F3.5] ' + pfx35 + ': ' + cmkTime.toFixed(2) + 's → ' + correctedTime.toFixed(2) + 's [Δ=' + delta.toFixed(3) + 's]');
+            }
+
+            if (placements.length === 0) {
+                log('🟠 [F3.5·CorrelationSnap] Cap placement construït. ✓ FINALITZAT.');
+                return;
+            }
+
+            var result = await this._safePlaceByPrefixes(placements, 'F3.5·CorrelationSnap');
+            log('🟠 [F3.5·CorrelationSnap] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + ' | Δ=' + delta.toFixed(3) + 's | confiança=' + (snapResult.confidence * 100).toFixed(0) + '%. ✓ FINALITZAT.');
+        },
+
+        /**
          * _buildOnAirMap: Mapa num → true si ALGUNA línia d'escaleta amb aquell num té
          * OnAir real. Ha de ser un OR: a l'escaleta hi ha nums repetits (01, 02…) en
          * agrupacions diferents i, si ens quedéssim amb l'última línia llegida, un faro
@@ -916,7 +1228,13 @@
             // 2026-09-17: pujat de 1,0 -> 1,5 s. La deriva entre l'hora d'emissio i el
             // tall real dels faros era 1,04-1,28 s, aixi que amb 1,0 s no s'ajustaven mai
             // i quedaven FORA del tall.
-            return (isFinite(w) && w > 0) ? w : 1.5;
+            // 2026-09-24 (FIX B): pujat de 1,5 -> 2,5 s. Amb el clip extret, l'error
+            // residual d'ancoratge pot arribar a ~2 s (TNC: el marcador de l'ítem 11
+            // quedava a 12,96s i el tall que obre la seva peça és a 15,12s → Δ=2,16s >
+            // 1,5s → F4 no el tocava i deia "Cap marcador per ajustar"). Amb 2,5 s el
+            // faro salta al TALL D'OBERTURA (inici real de la seva peça), que és el punt
+            // correcte. Configurable a Profile.json → general.snapWindowFaroSec.
+            return (isFinite(w) && w > 0) ? w : 2.5;
         },
 
         /**
@@ -954,6 +1272,22 @@
          * @param {Array} clips - clips de V1 [{start,end}]
          * @returns {number} temps del tall anterior (< tSec)
          */
+        /**
+         * _isOnCut: Retorna el temps del tall (start o end d'un clip de V1) si `tSec` coincideix
+         * amb un tall (±0,15s), o null si no.
+         * (2026-09-24) S'usa a F6·Ordre per NO moure un marcador que ja està clavat al seu corte:
+         * els clamps de ±0,5s el tornaven a desviar uns frames (queixa d'usuari 2026-09-24).
+         */
+        _isOnCut: function (tSec, clips) {
+            var arr = clips || [];
+            for (var i = 0; i < arr.length; i++) {
+                var cs = Number(arr[i] && arr[i].start), ce = Number(arr[i] && arr[i].end);
+                if (isFinite(cs) && Math.abs(cs - tSec) <= 0.15) return cs;
+                if (isFinite(ce) && Math.abs(ce - tSec) <= 0.15) return ce;
+            }
+            return null;
+        },
+
         _prevCutBefore: function (tSec, clips) {
             var arr = clips || [];
             var best = null;
@@ -1090,6 +1424,7 @@
             // Finestra per a faros: configurable (per defecte 1,0 s) per absorbir
             // l'error del Δ de correlació de F3 (cas real: 01 a 0,72 s del seu tall).
             var SEARCH_WINDOW = this._snapWindowFaro();
+            log('   🟠 [F4·Faro] Finestra de snap: faros ±' + SEARCH_WINDOW.toFixed(1) + 's · deduïts ±' + this._snapWindowDeduced().toFixed(1) + 's (Profile.json → general.snapWindowFaroSec / snapWindowDeducedSec)');
             var MIN_MOVE = 0.02;
 
             // ── Tipus de marcador: FARO (ítem amb OnAir real) o DEDUÏT (sense OnAir) ──
@@ -1492,27 +1827,45 @@
             for (var li = 0; li < list.length; li++) {
                 var cur = list[li];
                 if (prev && cur.time < prev.time - 0.02) {
+                    // (2026-09-24) GUARDA D'USUARI: si el marcador que s'hauria de moure JA està
+                    // clavat en un tall real de V1 (±0,15s), NO es mou. Els clamps de ±0,5s el
+                    // tornaven a desviar uns frames del seu corte (queixa d'usuari 2026-09-24:
+                    // "el marcador del vídeo … luego se mueve a unos frames antes de su corte").
+                    var prevOnCut = this._isOnCut(prev.time, clips);
+                    var curOnCut = this._isOnCut(cur.time, clips);
                     if (cur.hasOnAir && !prev.hasOnAir) {
-                        // El faro mana: el deduït previ s'ha d'avançar (tall anterior).
-                        var novaPrev = Math.min(this._prevCutBefore(cur.time, clips), cur.time - 0.5);
-                        if (novaPrev < 0) novaPrev = 0;
-                        log('   🔧 [F6·Ordre] Inversio: ' + prev.num + ' (' + prev.time.toFixed(2) + 's) va DESPRES de ' + cur.num +
-                            ' (' + cur.time.toFixed(2) + 's) a la llista, pero l\'escaleta el situa ABANS. El faro ' + cur.num +
-                            ' no es toca -> ' + prev.num + ' al tall anterior: ' + novaPrev.toFixed(2) + 's');
-                        prev.time = novaPrev;
-                        placements.push({ prefix: prev.num, timeSec: novaPrev, comment: prev.comment, colorIdx: prev.color });
+                        if (prevOnCut !== null) {
+                            log('   ⏭️ [F6·Ordre] ' + prev.num + ' ja està en un tall (' + prevOnCut.toFixed(2) + 's) → NO es mou (inversió amb ' + cur.num + ')');
+                        } else {
+                            // El faro mana: el deduït previ s'ha d'avançar (tall anterior).
+                            var novaPrev = Math.min(this._prevCutBefore(cur.time, clips), cur.time - 0.5);
+                            if (novaPrev < 0) novaPrev = 0;
+                            log('   🔧 [F6·Ordre] Inversio: ' + prev.num + ' (' + prev.time.toFixed(2) + 's) va DESPRES de ' + cur.num +
+                                ' (' + cur.time.toFixed(2) + 's) a la llista, pero l\'escaleta el situa ABANS. El faro ' + cur.num +
+                                ' no es toca -> ' + prev.num + ' al tall anterior: ' + novaPrev.toFixed(2) + 's');
+                            prev.time = novaPrev;
+                            placements.push({ prefix: prev.num, timeSec: novaPrev, comment: prev.comment, colorIdx: prev.color });
+                        }
                     } else if (!cur.hasOnAir && prev.hasOnAir) {
-                        var novaCur = Math.max(prev.time + 0.5, this._prevCutBefore(cur.time, clips));
-                        if (novaCur >= cur.time) novaCur = cur.time;
-                        log('   🔧 [F6·Ordre] Inversio: ' + cur.num + ' (' + cur.time.toFixed(2) + 's) va ABANS de ' + prev.num +
-                            ' (' + prev.time.toFixed(2) + 's), pero l\'escaleta el situa DESPRES -> ' + novaCur.toFixed(2) + 's');
-                        cur.time = novaCur;
-                        placements.push({ prefix: cur.num, timeSec: novaCur, comment: cur.comment, colorIdx: cur.color });
+                        if (curOnCut !== null) {
+                            log('   ⏭️ [F6·Ordre] ' + cur.num + ' ja està en un tall (' + curOnCut.toFixed(2) + 's) → NO es mou');
+                        } else {
+                            var novaCur = Math.max(prev.time + 0.5, this._prevCutBefore(cur.time, clips));
+                            if (novaCur >= cur.time) novaCur = cur.time;
+                            log('   🔧 [F6·Ordre] Inversio: ' + cur.num + ' (' + cur.time.toFixed(2) + 's) va ABANS de ' + prev.num +
+                                ' (' + prev.time.toFixed(2) + 's), pero l\'escaleta el situa DESPRES -> ' + novaCur.toFixed(2) + 's');
+                            cur.time = novaCur;
+                            placements.push({ prefix: cur.num, timeSec: novaCur, comment: cur.comment, colorIdx: cur.color });
+                        }
                     } else if (!cur.hasOnAir && !prev.hasOnAir) {
-                        var novaCur2 = prev.time + 0.5;
-                        log('   🔧 [F6·Ordre] Inversio entre deduits: ' + cur.num + ' passa a ' + novaCur2.toFixed(2) + 's (ordre relatiu)');
-                        cur.time = novaCur2;
-                        placements.push({ prefix: cur.num, timeSec: novaCur2, comment: cur.comment, colorIdx: cur.color });
+                        if (curOnCut !== null) {
+                            log('   ⏭️ [F6·Ordre] ' + cur.num + ' ja està en un tall (' + curOnCut.toFixed(2) + 's) → NO es mou (inversió entre deduïts)');
+                        } else {
+                            var novaCur2 = prev.time + 0.5;
+                            log('   🔧 [F6·Ordre] Inversio entre deduits: ' + cur.num + ' passa a ' + novaCur2.toFixed(2) + 's (ordre relatiu)');
+                            cur.time = novaCur2;
+                            placements.push({ prefix: cur.num, timeSec: novaCur2, comment: cur.comment, colorIdx: cur.color });
+                        }
                     } else {
                         log('   ⚠️ [F6·Ordre] Inversio entre DOS faros (' + prev.num + ' / ' + cur.num + '): no es toca res (OnAir = veritat).');
                     }
@@ -1607,11 +1960,27 @@
                     if (t < 0) t = 0;
 
                     const line = lines[it.i] || {};
+                    // (2026-09-24) REGLA D'USUARI: un marcador VERMELL (ítem NO agrupat, color 1)
+                    // només s'ha de crear si queda ENTRE dos marcadors existents, i que almenys
+                    // un dels veïns no sigui vermell. ABANS F7 en creava també al FINAL del bloc
+                    // (t = prev.time + 0.5) i a l'inici (next.time − 0.5) → "es col·loquen
+                    // marcadors vermells al final" (queixa d'usuari 2026-09-24).
+                    const colorIdxCov = this._getColorIdx(line);
+                    if (colorIdxCov === 1) {
+                        const prevColor = prev ? this._getColorIdx(lines[prev.i] || {}) : null;
+                        const nextColor = next ? this._getColorIdx(lines[next.i] || {}) : null;
+                        const veiNoVermell = ((prevColor !== null && prevColor !== 1) || (nextColor !== null && nextColor !== 1));
+                        if (!prev || !next || !veiNoVermell) {
+                            log('   ⛔ [F7·Cobertura] ' + it.num + ': ítem VERMELL (no agrupat) fora d\'un interval entre marcadors (prev=' + (prev ? prev.num : '-') + ', next=' + (next ? next.num : '-') + ') → NO es crea.');
+                            saltats.push(it.num);
+                            continue;
+                        }
+                    }
                     placements.push({
                         prefix: it.num,
                         timeSec: parseFloat(t.toFixed(2)),
                         comment: it.num + ' - ' + String(line.titol || '').substring(0, 60),
-                        colorIdx: this._getColorIdx(line)
+                        colorIdx: colorIdxCov
                     });
                 }
 

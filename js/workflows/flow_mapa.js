@@ -58,6 +58,165 @@
             await this._flow();
         },
 
+        // ═══════════════════════════════════════════════════════════════
+        // (2026-09-23) ENTRADA AUTOMÀTICA PER MARCADORS GROCS (F6·GF)
+        // Repassa els marcadors GRÀFICS (color 4) del timeline, tria els que porten
+        // GRAFISME ASSOCIAT (paraula clau al títol) i col·loca el fitxer corresponent de
+        // la carpeta del dia AL TC DEL MATEIX MARCADOR (mateix criteri que el botó 🎨).
+        // Si no hi ha coincidència de nom, obre el navegador de fitxers.
+        // S'executa al FINAL del botó COLOCAR (després dels chyrons i de l'IPD).
+        // ═══════════════════════════════════════════════════════════════
+
+        /**
+         * GRAF_KEYWORDS: paraules clau del títol del marcador que indiquen que aquell
+         * marcador GROC porta un GRAFISME associat a la carpeta ZZZ_GRAFISME del dia.
+         * (2026-09-23) Ampliable: afegir aquí els casos nous (p. ex. 'GF', 'INFOGRAFIA',
+         * 'EVOLUCIO', 'PANORAMICA'…). La comparació és sense accents i en majúscules.
+         */
+        GRAF_KEYWORDS: ['MAPA'],
+
+        runFromMarkers: async function () {
+            try {
+                if (U() && U().validateActiveSequence && !(await U().validateActiveSequence())) return;
+            } catch (e) { }
+
+            var cand = await this._grafCandidates();
+            if (!cand.length) {
+                L('➖ [MAPA·MARKS] Cap marcador amb grafisme associat (paraula clau: ' +
+                    this.GRAF_KEYWORDS.join(', ') + ') → res a fer.');
+                return;
+            }
+            L('🎨 [MAPA·MARKS] ' + cand.length + ' marcador(s) amb grafisme associat: ' +
+                cand.map(function (c) { return c.num + '@' + c.time.toFixed(2) + 's'; }).join(', '));
+
+            var folder = this._folderForDate(this._resolveDateDir());
+            if (!folder) {
+                L('⚠️ [MAPA·MARKS] No puc resoldre la carpeta del dia', 'WARN');
+                U().status('MAPA: carpeta del dia no resolta', 'error');
+                return;
+            }
+            this._applyTrackConfig();
+            var files = await this._filesIn(folder);
+            L('🎨 [MAPA·MARKS] Carpeta: ' + folder + ' · ' + files.length + ' fitxer(s) de vídeo');
+            await this._runCandidates(cand, folder, files);
+        },
+
+        /**
+         * _runCandidates: bucle de col·locació per a cada marcador candidat.
+         * @param {Array}  cand   - [{ num, nombre, time, kw }]
+         * @param {string} folder - carpeta del dia
+         * @param {Array}  files  - fitxers de vídeo de la carpeta del dia
+         */
+        _runCandidates: async function (cand, folder, files) {
+            var ok = 0, ko = 0;
+            for (var i = 0; i < cand.length; i++) {
+                var c = cand[i];
+                try {
+                    L('🎨 [MAPA·MARKS] ' + (i + 1) + '/' + cand.length + ' · ' + c.num + ' @ ' +
+                        c.time.toFixed(2) + 's · "' + c.nombre + '" (clau ' + c.kw + ')');
+                    var picked = this._match({ num: c.num, nombre: c.nombre }, files);
+                    if (picked.length) {
+                        L('   🎨 [MAPA·MARKS] Coincidències (' + picked.length + '): ' +
+                            picked.map(function (f) { return f.name; }).join(', '));
+                    } else {
+                        L('   ⚠️ [MAPA·MARKS] Cap coincidència de nom → navegador de fitxers', 'WARN');
+                        U().status('MAPA: tria el grafisme de ' + c.num, 'warn');
+                        picked = await this._askFiles(folder);
+                    }
+                    if (!picked.length) { L('   ⏭️ [MAPA·MARKS] ' + c.num + ': sense fitxer → saltat', 'WARN'); ko++; continue; }
+
+                    var items = await this._import(picked);
+                    if (!items.length) { L('   ⏭️ [MAPA·MARKS] ' + c.num + ': importació fallida', 'ERROR'); ko++; continue; }
+
+                    var ref = await this._refClipAt(c.time);
+                    var freeze = await this._freezeUnderCti(c.time);
+                    await this._placeClips(items, c.time, freeze, ref);
+                    ok++;
+                } catch (eC) {
+                    L('   ⚠️ [MAPA·MARKS] ' + c.num + ' ha llançat: ' + eC.message, 'ERROR');
+                    ko++;
+                }
+                await U().delay(200);
+            }
+            U().status('MAPA: ' + ok + ' grafisme(s) col·locat(s)' + (ko ? ' · ' + ko + ' sense fitxer' : ''),
+                ok ? 'exito' : 'warn');
+            try { await U().targetOnlyV1('MAPA·MARKS'); await U().focusV1('MAPA·MARKS'); } catch (eF) { }
+        },
+
+        /**
+         * _grafCandidates: marcadors GROCS (color 4) amb paraula clau de grafisme al títol.
+         * @returns {Promise<Array>} [{ num, nombre, time, kw, comments }]
+         */
+        _grafCandidates: async function () {
+            var out = [];
+            var mk = [];
+            try {
+                var raw = await callJSX('Markers.get()');
+                mk = raw ? JSON.parse(raw) : [];
+            } catch (eM) {
+                L('⚠️ [MAPA·MARKS] No puc llegir els marcadors: ' + eM.message, 'WARN');
+                return out;
+            }
+            for (var i = 0; i < mk.length; i++) {
+                var m = mk[i];
+                var cmt = String(m.comments || m.comment || '');
+                var idx = cmt.indexOf(' -');
+                if (idx <= 0) continue;                       // només "NN - Nom"
+                var kw = this._keywordOf(cmt);
+                if (!kw) continue;                            // sense paraula clau → no porta grafisme
+                var t = (typeof m.time === 'number') ? m.time : parseFloat(m.time);
+                if (!isFinite(t)) continue;
+                // (2026-09-23) El COLOR NO és fiable al llegir-lo: en aquesta versió de
+                // Premiere, Markers.get() retorna color = -1 (v. 8_Markers.jsx: `current.color`
+                // peta i queda -1) tot i que el marcador s'hagi creat amb color=4. Per això el
+                // filtre REAL és la PARAULA CLAU; el color només s'informa al log. Només es
+                // descarta si el color és CONEGUT i no és el groc (4).
+                if (m.color !== 4 && m.color !== -1 && m.color !== undefined && m.color !== null) {
+                    L('   ⏭️ [MAPA·MARKS] "' + cmt.substring(0, 60) + '": clau ' + kw +
+                        ' però color=' + m.color + ' (no GROC) → saltat', 'WARN');
+                    continue;
+                }
+                if (m.color !== 4) {
+                    L('   ℹ️ [MAPA·MARKS] "' + cmt.substring(0, 60) + '": color no disponible (' +
+                        m.color + ') → es fa servir la paraula clau ' + kw);
+                }
+                out.push({
+                    num: cmt.substring(0, idx).replace(/^\s+|\s+$/g, ''),
+                    nombre: stripExt(cmt.substring(idx + 2).replace(/^\s+|\s+$/g, '')),
+                    time: t, kw: kw, comments: cmt
+                });
+            }
+            return out;
+        },
+
+        /**
+         * _keywordOf: primera paraula clau de GRAF_KEYWORDS present al text (normalitzat).
+         * @returns {string|null}
+         */
+        _keywordOf: function (text) {
+            var norm = this._norm(text);
+            for (var k = 0; k < this.GRAF_KEYWORDS.length; k++) {
+                if (norm.indexOf(this.GRAF_KEYWORDS[k]) !== -1) return this.GRAF_KEYWORDS[k];
+            }
+            return null;
+        },
+
+        /**
+         * _applyTrackConfig: llegeix de la CONFIG les pistes de grafismes i de congelat
+         * i actualitza les variables del mòdul (TRACK_GRAF / TRACK_FREEZE).
+         */
+        _applyTrackConfig: function () {
+            try {
+                var cv = window.FASTPASS_UI.Config.get().tracks.video;
+                if (cv && cv.graficos) TRACK_GRAF = cv.graficos;
+                else if (cv && cv.graf) TRACK_GRAF = cv.graf;
+                if (cv && cv.tematitol) TRACK_FREEZE = cv.tematitol;
+                L('🗺️ [MAPA] Pistes de la config → GRAF=V' + TRACK_GRAF + ' · congelat=V' + TRACK_FREEZE);
+            } catch (eCfg) {
+                L('⚠️ [MAPA] no s\'ha pogut llegir la config de pistes: ' + eCfg.message, 'WARN');
+            }
+        },
+
 
         // (2026-09-18) _menu eliminat: comportament únic = OPCIÓ 3 (automàtic → navegador).
 
@@ -69,18 +228,31 @@
                 var cti = parseFloat(await callJSX('Timeline.get()') || '0');
                 L('🗺️ [MAPA] Inici · CTI=' + cti.toFixed(2) + 's');
 
-                // (2026-09-22) REFERÈNCIA = el CLIP A SUBSTITUIR pel grafisme (el de V1 que hi
-                // ha a la posició del cabezal / el clip seleccionat). El CTI sol era erroni:
-                // el material comença a l'IN del clip i ocupa tot el seu rang.
-                var ref = await this._resolveRefClip(cti);
-                if (!ref) {
-                    L('⚠️ [MAPA] Sense clip de referència → no es col·loca res. Selecciona el clip a substituir (V1) o posa-hi el cabezal.', 'WARN');
-                    U().status('MAPA: selecciona el clip a substituir', 'warn');
-                    return;
+                // (2026-09-23) REFERÈNCIA = el MARCADOR: el seu TC és el PUNT D'ENTRADA del
+                // grafisme. ABANS era el clip seleccionat (el material entrava al seu IN), cosa
+                // que desalineava el grafisme respecte al marcador de l'ítem (petició d'usuari).
+                // Marcador triat: l'últim amb time <= CTI (mateix criteri que _itemAtCti); si el
+                // cabezal està damunt del marcador, és aquell. Fallback: sense marcadors es
+                // manté el comportament antic (clip seleccionat).
+                var mkRef = await this._itemAtCti(cti);
+                var ref = null, refSec = null;
+                if (mkRef) {
+                    refSec = mkRef.time;
+                    ref = await this._refClipAt(refSec);
+                    L('🗺️ [MAPA] Referència = MARCADOR ' + mkRef.num + ' @ ' + refSec.toFixed(2) +
+                        's ("' + mkRef.nombre + '")' +
+                        (ref ? ' · espai hàbil fins ' + ref.end.toFixed(2) + 's (clip V' + ref.track + '[' + ref.index + '])' : ' · cap clip a V1 en aquest TC → espai hàbil desconegut'));
+                } else {
+                    ref = await this._resolveRefClip(cti);
+                    if (!ref) {
+                        L('⚠️ [MAPA] Ni marcador proper ni clip de referència → no es col·loca res. Posa el cabezal sobre un marcador o selecciona el clip a substituir.', 'WARN');
+                        U().status('MAPA: posa el cabezal en un marcador', 'warn');
+                        return;
+                    }
+                    refSec = ref.start;
+                    L('🗺️ [MAPA] Cap marcador: referència = ' + ref.src + ' V' + ref.track + '[' + ref.index +
+                        '] "' + ref.name + '" ' + ref.start.toFixed(2) + 's→' + ref.end.toFixed(2) + 's', 'WARN');
                 }
-                var refSec = ref.start;
-                L('🗺️ [MAPA] Referència (' + ref.src + '): V' + ref.track + '[' + ref.index + '] "' + ref.name +
-                    '" ' + ref.start.toFixed(2) + 's→' + ref.end.toFixed(2) + 's (dur ' + (ref.end - ref.start).toFixed(2) + 's)');
 
                 var dateDir = this._resolveDateDir();
                 var folder = this._folderForDate(dateDir);
@@ -91,21 +263,17 @@
                 }
                 L('🗺️ [MAPA] Carpeta: ' + folder);
 
-                // (2026-09-22) Pistes segons la CONFIG activa (mapa final de pistes):
+                // (2026-09-23) Pistes segons la CONFIG activa (mapa final de pistes):
                 // grafismes → tracks.video.graficos (V3) · congelat → tracks.video.tematitol (V6).
-                try {
-                    var cv = window.FASTPASS_UI.Config.get().tracks.video;
-                    if (cv && cv.graficos) TRACK_GRAF = cv.graficos;
-                    else if (cv && cv.graf) TRACK_GRAF = cv.graf;
-                    if (cv && cv.tematitol) TRACK_FREEZE = cv.tematitol;
-                    L('🗺️ [MAPA] Pistes de la config → GRAF=V' + TRACK_GRAF + ' · congelat=V' + TRACK_FREEZE);
-                } catch (eCfg) { L('⚠️ [MAPA] no s\'ha pogut llegir la config de pistes: ' + eCfg.message, 'WARN'); }
+                this._applyTrackConfig();
 
-                var item = await this._itemAtCti(refSec);
+                // Ítem d'escaleta = el DEL MARCADOR de referència (ja resolt a mkRef); sense
+                // marcador es fa servir l'ítem del marcador anterior a la posició de referència.
+                var item = mkRef || await this._itemAtCti(refSec);
                 if (!item || !item.nombre) {
-                    L('⚠️ [MAPA] Cap ítem d\'escaleta al clip de referència (ni marcador anterior)', 'WARN');
+                    L('⚠️ [MAPA] Cap ítem d\'escaleta associat al punt de referència', 'WARN');
                 } else {
-                    L('🗺️ [MAPA] Ítem al clip de referència: "' + item.num + ' - ' + item.nombre + '"');
+                    L('🗺️ [MAPA] Ítem de referència: "' + item.num + ' - ' + item.nombre + '"');
                 }
 
                 var files = await this._filesIn(folder);
@@ -248,6 +416,34 @@
             // 3. Qualsevol altra selecció de vídeo
             if (sel) { sel.src = 'clip SELECCIONAT a V' + sel.track + ' (no V' + tMp4 + ')'; return sel; }
 
+            return null;
+        },
+
+        /**
+         * _refClipAt: Clip de V1 (pista MP4) que CONTÉ la posició donada. Serveix per saber
+         * el final de l'espai disponible del grafisme (no ha d'invair el clip següent) i
+         * per limitar el congelat final.
+         * @param {number} sec - posició al timeline (s)
+         * @returns {Promise<Object|null>} { track, index, name, start, end, src } o null
+         */
+        _refClipAt: async function (sec) {
+            var tMp4 = 1;
+            try { tMp4 = window.FASTPASS_UI.Config.get().tracks.video.mp4 || 1; } catch (eCfg) { }
+            try {
+                var clips = await getClipsLogic().getTrackClips(tMp4, 'video');
+                for (var i = 0; i < clips.length; i++) {
+                    var c = clips[i];
+                    if (sec >= c.start - 0.001 && sec < c.end - 0.001) {
+                        return {
+                            track: tMp4, index: c.index, name: c.name, start: c.start, end: c.end,
+                            src: 'V' + tMp4 + ' a ' + sec.toFixed(2) + 's'
+                        };
+                    }
+                }
+                L('⚠️ [MAPA] Cap clip a V' + tMp4 + ' a ' + sec.toFixed(2) + 's', 'WARN');
+            } catch (e) {
+                L('⚠️ [MAPA] No puc llegir V' + tMp4 + ': ' + e.message, 'WARN');
+            }
             return null;
         },
 
@@ -395,6 +591,118 @@
         // ═══════════════════════════════════════════════════════════════
         // IMPORTAR AL BIN "GRAF"
         // ═══════════════════════════════════════════════════════════════
+        /**
+         * _freezeGrafEnd: (2026-09-23) CONGELAT al final del clip de grafisme, amb la
+         * mateixa mecànica que el congelat del Tema-Títol (_freezeTemaTitol, flow_chyrons.js):
+         *   1. Insereix el grafisme en un TC temporal buit (10:00) per fer un snapshot NET.
+         *   2. Mesura la seva durada i captura el SEU ÚLTIM FRAME (Render.snapshot).
+         *   3. Esborra el clip temporal, importa el PNG al bin GRAF i l'insereix estirat des
+         *      del final del grafisme: 3 s com a màxim, o menys si el clip de V1 acaba abans.
+         * Així l'usuari pot estirar/retallar el congelat còmodament al timeline.
+         * @param {string} gName - Nom del media del grafisme (al projecte)
+         * @param {number} grafEnd - Final real del grafisme col·locat (s)
+         * @param {number|null} endLimit - Final de l'espai hàbil (final del clip de V1) o null
+         * @returns {Promise<Object>} { success, duration }
+         */
+        _freezeGrafEnd: async function (gName, grafEnd, endLimit) {
+            var TEMP_TC = 600;        // 10:00:00 (mateixa tècnica que _freezeTemaTitol)
+            var MAX_DUR = 3.0;        // (2026-09-23) congelat de 3 s per defecte
+            var FRAME = 1 / 25;
+            var utils = U();
+            // (2026-09-23) Cabezal original: el snapshot del frame l'ha de moure al TC temporal
+            // del grafisme, i al final s'ha de tornar exactament on era (petició d'usuari).
+            var ctiOriginal = null;
+            try {
+                ctiOriginal = parseFloat(await callJSX('Timeline.get()') || '0');
+            } catch (eCti) { L('⚠️ [MAPA·freeze] No puc llegir el cabezal: ' + eCti.message, 'WARN'); }
+            try {
+                // Durada: 3 s, o menys si el clip de V1 s'acaba abans.
+                var dur = MAX_DUR;
+                if (endLimit !== null && endLimit !== undefined) dur = Math.min(dur, endLimit - grafEnd);
+                if (dur < 0.5) {
+                    L('🗺️ [MAPA·freeze] Sense espai per al congelat (' + grafEnd.toFixed(2) + 's → ' +
+                        (endLimit === null || endLimit === undefined ? '?' : endLimit.toFixed(2)) + 's) → no es col·loca');
+                    return { success: false, duration: 0 };
+                }
+
+                // 1. Grafisme temporal a TC 10:00 (zona buida) per fer el snapshot net
+                await callJSX("Clips.insert('" + utils.escape(gName) + "', " + TRACK_GRAF + ", " + TEMP_TC + ", null, 'video')");
+                await utils.delay(300);
+
+                // 2. Últim frame del grafisme (final real del clip temporal − 1 frame)
+                var tmpEnd = await this._clipEndAt(TRACK_GRAF, TEMP_TC);
+                if (tmpEnd === null) {
+                    L('⚠️ [MAPA·freeze] No puc mesurar el grafisme temporal → sense congelat', 'WARN');
+                    return { success: false, duration: 0 };
+                }
+                var snapTC = Math.max(TEMP_TC, tmpEnd - FRAME);
+                await callJSX('Timeline.set(' + snapTC.toFixed(4) + ')');
+                await utils.delay(400);
+
+                var folder = await callJSX('Context.folder()');
+                var snapPath = folder + '\\Snapshots\\freeze_graf_' + Date.now() + '.png';
+                var snapRes = await callJSX("Render.snapshot('" + utils.escape(snapPath.replace(/\.png$/i, '')) + "', " + snapTC.toFixed(4) + ")");
+                L('   📸 [MAPA·freeze] Render.snapshot → ' + snapRes);
+
+                // 3. Treure el clip temporal de la pista de grafismes
+                try {
+                    var clipsT = await getClipsLogic().getTrackClips(TRACK_GRAF, 'video');
+                    for (var i = 0; i < clipsT.length; i++) {
+                        if (Math.abs(clipsT[i].start - TEMP_TC) < 0.5) {
+                            await callJSX("Clips.removeAt(" + TRACK_GRAF + ", " + clipsT[i].start.toFixed(4) + ", 'video')");
+                            L('   🗑️ [MAPA·freeze] Grafisme temporal eliminat (start=' + clipsT[i].start.toFixed(2) + 's)');
+                            break;
+                        }
+                    }
+                } catch (eRT) {
+                    L('   ⚠️ [MAPA·freeze] No he pogut treure el temporal: ' + eRT.message, 'WARN');
+                }
+
+                if (!snapRes || String(snapRes).indexOf('OK') !== 0) {
+                    L('   ❌ [MAPA·freeze] Snapshot fallit: ' + snapRes, 'ERROR');
+                    return { success: false, duration: 0 };
+                }
+
+                // 4. Importar el PNG (al bin GRAF) i inserir-lo estirat des del final del grafisme.
+                //    Premiere pot conservar o canviar l'extensió al nom de l'ítem → s'empareja
+                //    pel nom normalitzat a la raïl del bin (mateix criteri que _import).
+                var fileName = snapPath.split('\\').pop();
+                await callJSX("IO.importFiles('" + utils.escape(JSON.stringify([snapPath])) + "', '" + GRAF_BIN + "')");
+                var pngName = fileName;
+                try {
+                    var rawG = await callJSX("FASTPASS.Project.items('" + GRAF_BIN + "')");
+                    var listG = rawG ? JSON.parse(rawG) : [];
+                    var wantN = this._norm(stripExt(fileName));
+                    for (var g2 = 0; g2 < listG.length; g2++) {
+                        if (this._norm(listG[g2].name) === wantN) { pngName = listG[g2].name; break; }
+                    }
+                } catch (eG2) { }
+                L('   📥 [MAPA·freeze] PNG al bin ' + GRAF_BIN + ': "' + pngName + '"');
+                var fzEsc = utils.escape(pngName);
+                await callJSX("Clips.insert('" + fzEsc + "', " + TRACK_GRAF + ", " + grafEnd.toFixed(4) + ", " + (grafEnd + dur).toFixed(4) + ", 'video')");
+                // Clips.insert aplica l'endSec al darrer clip de la pista → fixar-lo per temps.
+                await callJSX("Clips.endAt(" + TRACK_GRAF + ", " + grafEnd.toFixed(4) + ", " + (grafEnd + dur).toFixed(4) + ", 'video')");
+                L('   🧊 [MAPA·freeze] Congelat "' + pngName + '" a V' + TRACK_GRAF + ' @ ' + grafEnd.toFixed(2) +
+                    's → ' + (grafEnd + dur).toFixed(2) + 's (dur ' + dur.toFixed(2) + 's' +
+                    (dur < MAX_DUR ? ' · limitat pel clip de V1' : '') + ')');
+                return { success: true, duration: dur };
+            } catch (eFz) {
+                L('⚠️ [MAPA·freeze] ' + eFz.message, 'WARN');
+                return { success: false, duration: 0 };
+            } finally {
+                // (2026-09-23) Retornar el cabezal a la seua posició ORIGINAL: el snapshot l'ha
+                // hagut de moure al TC temporal del grafisme (10:00). Es fa sempre, també si el
+                // congelat ha fallat, perquè l'usuari no perdi la vista on treballava.
+                if (ctiOriginal !== null && isFinite(ctiOriginal)) {
+                    try {
+                        await callJSX('Timeline.set(' + ctiOriginal.toFixed(4) + ')');
+                        L('   📍 [MAPA·freeze] Cabezal retornat a ' + ctiOriginal.toFixed(2) + 's');
+                    } catch (eRC) {
+                        L('   ⚠️ [MAPA·freeze] No he pogut tornar el cabezal: ' + eRC.message, 'WARN');
+                    }
+                }
+            }
+        },
         _import: async function (picked) {
             var out = [];   // [{ name: nom real al projecte, dur: segons (0 = desconegut) }]
             try {
@@ -570,6 +878,19 @@
                     TRACK_GRAF + ') [insert=' + resF + ' · endAt=' + resFE + ']');
             } else if (!freeze) {
                 L('⚠️ [MAPA] Sense congelat de referència → V' + TRACK_FREEZE + ' no es replica', 'WARN');
+            }
+
+            // 5. (2026-09-23) CONGELAT AL FINAL DEL GRAFISME: PNG de l'últim frame del
+            //    grafisme (màxim 3 s, o menys si el clip de V1 acaba abans) perquè l'usuari
+            //    el pugui estirar/retallar còmodament. Mateixa mecànica que el congelat del
+            //    Tema-Títol (_freezeTemaTitol a flow_chyrons.js).
+            try {
+                var lastItem = items[items.length - 1];
+                if (lastItem && lastItem.name) {
+                    await this._freezeGrafEnd(lastItem.name, grafEnd, endLimit);
+                }
+            } catch (eFz) {
+                L('⚠️ [MAPA] Congelat final del grafisme: ' + eFz.message, 'WARN');
             }
         }
     };

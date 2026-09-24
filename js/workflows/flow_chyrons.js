@@ -1591,11 +1591,11 @@
                 const structuralMarkers = allMarkers.filter(m => STRUCTURAL_RE.test((m.comments || "").trim()));
                 structuralMarkers.sort((a, b) => a.time - b.time);
 
-                // ── Trobar l'ítem de PLATÓ on col·locar el conductor ─────────────
-                // El conductor va sobre el PRIMER ítem de plató/presentació del bloc
-                // (donapas/off/intro/directe...), que pot NO tenir marcador propi
-                // (p. ex. el 05dp d'un donapas que obra el bloc). Per això es llegeix
-                // l'escaleta del bloc (AssemblyContext), no només els marcadors.
+                // ── Trobar el MARCADOR de PLATÓ on col·locar el conductor ─────────
+                // (2026-09-23) Regla actual: el primer MARCADOR del timeline que sigui d'un
+                // ítem de plató (intro/donapas/off/directe/connexió…). L'escaleta del bloc
+                // (AssemblyContext) es fa servir només per identificar quin ítem és de plató
+                // i com a respatller quan el plató no té marcador propi.
                 const assembly = window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.AssemblyContext;
                 let linesEsc = null;
                 let clipsV1 = [];
@@ -1611,72 +1611,68 @@
                     }
                 }
 
-                const findMarkerByPrefix = function (num) {
-                    if (!num) return null;
-                    const key = String(num).toLowerCase();
-                    return structuralMarkers.find(function (mk) {
-                        const pre = (mk.comments || "").split("-")[0].trim().toLowerCase();
-                        return pre === key;
-                    }) || null;
-                };
-
                 let itemPlato = null;
                 let isFirstItem = false;
                 let targetId = null;
                 let targetTime = null;
 
                 if (linesEsc && linesEsc.length > 0) {
-                    // 1) Primer ítem de plató de l'escaleta del bloc.
+                    // ── (2026-09-23) REGLA (indicada per l'usuari): el conductor va al PRIMER
+                    // MARCADOR DEL TIMELINE que sigui d'un ítem de PLATÓ (intro / donapas / off /
+                    // directe / connexió…). Es mira EL QUE HI HA AL TIMELINE (els marcadors, que
+                    // són el resultat del processat F1-F7) i NO la posició de l'ítem a l'escaleta:
+                    // els grafismes inicials (P2 foto / P2 MAPA / GF…) acaben generant marcador
+                    // DINS de l'ítem intro, de manera que al timeline la intro ÉS el 1r ítem del
+                    // bloc. Cobreix també el cas donapas i altres conductors de plató que no obren
+                    // l'escaleta. (Abans s'exigia que el plató fos el 1r ítem de l'escaleta ✗.)
                     for (let li = 0; li < linesEsc.length; li++) {
-                        if (this._isPresenterLine(linesEsc[li])) {
-                            itemPlato = linesEsc[li];
-                            break;
-                        }
+                        if (this._isPresenterLine(linesEsc[li])) { itemPlato = linesEsc[li]; break; }
                     }
-                    if (!itemPlato) {
-                        log('⏭️ [Conductor] Cap ítem de plató (donapas/off/intro/directe...) a l\'escaleta del bloc. Ometent conductor.', 'WARN');
-                        getUtils().status('Bloc sense presentador: conductor omès', 'warn');
-                        return;
+                    // Mapa num → línia de l'escaleta: per saber si l'ítem d'un marcador és de plató.
+                    const lineByNum = {};
+                    for (let li2 = 0; li2 < linesEsc.length; li2++) {
+                        const ln = linesEsc[li2];
+                        const k = String((ln && ln.num) || '').trim().toLowerCase();
+                        if (k && !lineByNum[k]) lineByNum[k] = ln;
                     }
-                    // ── (2026-09-22) FIX: el conductor NOMÉS va si el bloc OBRE amb plató ──
-                    // Abans s'agafava el PRIMER ítem de plató on fos dins del bloc (p. ex. un
-                    // 02dp "DONA PAS …" a mig bloc) i, com que no era el primer ítem, el codi
-                    // queia a la rama "posterior" i l'hi col·locava igualment (a 0.40 s!), tot
-                    // i que el bloc no té intro/presentació al principi.
-                    // Regla: el ítem de plató ha de ser el PRIMER ítem REAL de l'escaleta del
-                    // bloc (el primer amb num i títol; s'ignoren files de capçalera).
-                    var primerItemReal = null;
-                    for (var pi = 0; pi < linesEsc.length; pi++) {
-                        var lp = linesEsc[pi];
-                        if (lp && String(lp.num || '').trim() && String(lp.titol || '').trim()) { primerItemReal = lp; break; }
+                    const esPlatoMarker = (mk) => {
+                        const pre = String((mk.comments || '')).split('-')[0].trim();
+                        if (!pre) return false;
+                        const l = lineByNum[pre.toLowerCase()];
+                        if (l && this._isPresenterLine(l)) return true;
+                        // Guarda pel TÍTOL del marcador (intro / DONA PAS / OFF / DIRECTE / CONN…)
+                        return this._isPresenterTitle(this._extractMarkerTitle(mk.comments || ''));
+                    };
+                    let mkPlato = null;
+                    for (let mi = 0; mi < structuralMarkers.length; mi++) {
+                        if (esPlatoMarker(structuralMarkers[mi])) { mkPlato = structuralMarkers[mi]; break; }
                     }
-                    if (primerItemReal && itemPlato !== primerItemReal) {
-                        var titolPrimer = String((primerItemReal.titol || '') || primerItemReal.num || '').substring(0, 60);
-                        log('⏭️ [Conductor] El bloc NO obre amb plató (1r ítem: "' + titolPrimer + '"; plató detectat: ' +
-                            String(itemPlato.num || '?') + '). Ometent conductor.', 'WARN');
-                        getUtils().status('Bloc sense intro al principi: conductor omès', 'warn');
-                        return;
-                    }
-                    targetId = String(itemPlato.num || '').trim();
-                    const mkPlato = findMarkerByPrefix(targetId);
-                    const primerMarcadorTime = (structuralMarkers.length > 0) ? structuralMarkers[0].time : null;
                     if (mkPlato) {
+                        targetId = String((mkPlato.comments || '').split('-')[0]).trim();
                         targetTime = mkPlato.time;
                         // És l'ítem que OBRE el bloc si no hi ha cap marcador estructural anterior.
                         isFirstItem = !structuralMarkers.some(function (sm) { return sm.time < mkPlato.time - 0.05; });
-                        log(`[Conductor] ítem de plató: ${targetId} @ marcador ${targetTime.toFixed(2)}s${isFirstItem ? ' (OBRE el bloc)' : ''}`);
-                    } else if (primerMarcadorTime === null || primerMarcadorTime >= 2.0) {
-                        // Plató sense marcador propi i sense cap ítem marcat a l'inici
-                        // (p. ex. el 05dp d'un donapas que OBRE el bloc) → va a l'inici
-                        // del clip del bloc, on surt la presentadora.
-                        isFirstItem = true;
-                        targetTime = (clipsV1.length > 0) ? clipsV1[0].start : 0;
-                        log(`🎙️ [Conductor] ítem de plató ${targetId} sense marcador propi i sense ítems previs marcats → OBRE el bloc (inici ${targetTime.toFixed(2)}s).`);
+                        log(`🎙️ [Conductor] 1r marcador de PLATÓ al timeline: ${targetId} @ ${targetTime.toFixed(2)}s` +
+                            (isFirstItem ? ' (OBRE el bloc)' : '') +
+                            (itemPlato ? ' · plató de l\'escaleta: ' + String(itemPlato.num || '?') : ' · cap plató a l\'escaleta'));
+                    } else if (itemPlato) {
+                        // Cap marcador de plató al timeline → respatller: ítem de plató de l'escaleta
+                        // sense marcador propi (p. ex. el 05dp d'un donapas que OBRE el bloc).
+                        targetId = String(itemPlato.num || '').trim();
+                        const primerMarcadorTime = (structuralMarkers.length > 0) ? structuralMarkers[0].time : null;
+                        if (primerMarcadorTime === null || primerMarcadorTime >= 2.0) {
+                            isFirstItem = true;
+                            targetTime = (clipsV1.length > 0) ? clipsV1[0].start : 0;
+                            log(`🎙️ [Conductor] Cap marcador de plató; l'ítem ${targetId} no en té i no hi ha res marcat abans → OBRE el bloc (inici ${targetTime.toFixed(2)}s).`);
+                        } else {
+                            isFirstItem = false;
+                            targetTime = primerMarcadorTime;
+                            log('⚠️ [Conductor] Cap marcador de plató; base = primer marcador ' + targetTime.toFixed(2) + 's. Verifica la posició.', 'WARN');
+                        }
                     } else {
-                        // Plató posterior sense marcador propi: cas poc habitual; base = primer marcador.
-                        isFirstItem = false;
-                        targetTime = primerMarcadorTime;
-                        log('⚠️ [Conductor] ítem de plató posterior sense marcador propi; base ' + targetTime.toFixed(2) + 's. Verifica la posició.', 'WARN');
+                        log('⏭️ [Conductor] Cap ítem de plató (intro/donapas/off/directe...) ni als marcadors ni a l\'escaleta. Ometent conductor.', 'WARN');
+                        getUtils().status('Bloc sense presentador: conductor omès', 'warn');
+                        return;
                     }
                 } else {
                     // ── Fallback: només marcadors (guarda per títol) ──

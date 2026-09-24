@@ -184,9 +184,13 @@
                 //   clipExtraTailSec).
                 // - snapWindowDeducedSec: finestra de snap (F4) per als marcadors DEDUÏTS
                 //   (ítems sense OnAir, tipus "02i - Intro") — per defecte 2,5 s.
+                // - snapWindowFaroSec (2026-09-24, FIX B): finestra de snap per als marcadors
+                //   FARO (ítems amb OnAir real). Pujada d'1,5 → 2,5 s: amb el clip extret
+                //   l'error residual d'ancoratge pot arribar a ~2 s i amb 1,5 s el faro no
+                //   saltava mai al tall d'obertura de la seva peça (TNC: 12,96s vs tall 15,12s).
                 srtEmergencyTailSec: (cfg.general.srtEmergencyTailSec != null) ? cfg.general.srtEmergencyTailSec : 120,
                 snapWindowDeducedSec: (cfg.general.snapWindowDeducedSec != null) ? cfg.general.snapWindowDeducedSec : 2.5,
-                snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 1.5
+                snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 2.5
             };
         },
 

@@ -367,18 +367,68 @@ function applySliderLimits() {
         FASTPASS_UI.Utils.log("🚀 Vinculando botones...");
 
         // --- WORKFLOW: CUT ---
+        // ═══════════════════════════════════════════════════════════════════
+        // (2026-09-23) FILTRE ANTI-CLICK FANTASMA per als botons DESTRUCTIUS
+        // (classe `.btn-destructivo`: IN · OUT&GO · KEYFRAME).
+        //
+        // BUG que arregla: al deixar anar el ratolí a la REGLA de l'editor de subtítols,
+        // el navegador del panell podia entregar el `click` a un altre botó (el primer de
+        // la botonera de tall = IN) i això feia un `ripple trim in` a V1 i movia l'OUT de
+        // la seqüència (queixa d'usuari 2026-09-23). També cobreix el cas de tecles
+        // sintètiques (VBS) que activaven el botó que tingués el focus.
+        //
+        // Guardes:
+        //   (B) cap clic en aquests botons dins dels 350 ms següents a un `mouseup` fet
+        //       FORA d'ells (p. ex. a la regla de l'editor);
+        //   (A) cal que hi hagi hagut un `mouseup` DINS del propi botó fa menys de 2,5 s
+        //       (clic real) i que `event.isTrusted !== false`.
+        // El filtre va en fase de CAPTURA, així s'executa ABANS dels listeners dels
+        // botons: no cal tocar-los.
+        // ═══════════════════════════════════════════════════════════════════
+        let _ultimoMouseUpFuera = 0;
+        let _ultimoMouseUpDentro = 0;
+        document.addEventListener('mouseup', function (ev) {
+            let dentro = false;
+            try { dentro = !!(ev && ev.target && ev.target.closest && ev.target.closest('.btn-destructivo')); } catch (e) { }
+            if (dentro) _ultimoMouseUpDentro = Date.now(); else _ultimoMouseUpFuera = Date.now();
+        }, true);
+        document.addEventListener('click', function (ev) {
+            let btn = null;
+            try { btn = (ev && ev.target && ev.target.closest) ? ev.target.closest('.btn-destructivo') : null; } catch (e) { }
+            if (!btn) return;
+            const ahora = Date.now();
+            const trasMouseUpFuera = (ahora - _ultimoMouseUpFuera) < 350;
+            const huboDownDentro = (ahora - _ultimoMouseUpDentro) < 2500;
+            if (ev.isTrusted === false || trasMouseUpFuera || !huboDownDentro) {
+                ev.stopPropagation();
+                ev.preventDefault();
+                try {
+                    FASTPASS_UI.Utils.log('🛡️ [BLINDATGE] Click ignorat a "' + (btn.id || btn.textContent) +
+                        '" (fantasma: ' + (ev.isTrusted === false ? 'sintètic' : (trasMouseUpFuera ? 'mouseup de fora' : 'sense down propi')) + ')', 'WARN');
+                } catch (e) { }
+                return;
+            }
+        }, true);
+
         const btnIn = document.getElementById('btnIn');
         console.log('🔍 btnIn:', btnIn);
         if (!btnIn) alert('❌ btnIn no encontrado en el DOM');
+        const btnScene = document.getElementById('btnScene');
         const btnOut = document.getElementById('btnOut');
         // (2026-09-16) TROSSEJA i REFRAME: botons eliminats del panell d'usuari.
         //  - TROSSEJA es fa dins del pipeline d'OUT & GO (Cut.runScene).
         //  - REFRAME (KF.runAutoReframe) no permet col·locar l'efecte de reencuadre.
+        // (2026-09-24) TROSSEJA RECUPERAT com a botó TEST-ONLY (id btnScene, grup VÍDEO):
+        // l'usuari necessita provar cada fase del pipeline OUT & GO per separat. És
+        // exactament la fase 2 (`CallWorkflow('Cut','runScene')`), no una variant.
         const btnPrevClip = document.getElementById('btnPrevClip');
         const btnNextClip = document.getElementById('btnNextClip');
         const btnKey = document.getElementById('btnKey');
 
         if (btnIn) btnIn.addEventListener('click', function () { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
+        // (2026-09-24) TROSSEJA: fase 2 del pipeline OUT & GO (Cut.runScene), recuperada com a
+        // botó TEST-ONLY per poder-la provar per separat.
+        if (btnScene) btnScene.addEventListener('click', function () { console.log('🔘 Botón TROSSEJA clickeado'); callWorkflow('Cut', 'runScene'); });
         if (btnOut) btnOut.addEventListener("click", function () { runOutHandler(); });
         if (btnPrevClip) btnPrevClip.addEventListener('click', function () { callWorkflow('Cut', 'runPrevClip'); });
         if (btnNextClip) btnNextClip.addEventListener('click', function () { callWorkflow('Cut', 'runNextClip'); });
@@ -508,16 +558,42 @@ function applySliderLimits() {
         const btnMarksF4 = document.getElementById('btnMarksF4');
         const btnMarksF5 = document.getElementById('btnMarksF5');
         const btnMarksF6 = document.getElementById('btnMarksF6');
+        const btnMarksF6GF = document.getElementById('btnMarksF6GF');
+        const btnMapaImport = document.getElementById('btnMapaImport');
 
+        // (2026-09-24) GRUP MARCADORS (TEST) = EXACTAMENT les 8 fases que el pipeline OUT&GO
+        // executa automàticament (runFullPipelineOut). Si una fase canvia al pipeline, cal
+        // canviar-la aquí també: són el mateix callWorkflow(module, method).
+        //   F1   OnAir      → Markers.placeOnAirMarkers
+        //   F2   Deducit    → Markers.placeDeducedOnAirMarkers
+        //   F3   Previst    → Markers.placeScheduledMarkers
+        //   F3.5 Correlació → Markers.correlationSnapMarkers
+        //   F4   Densitat   → Assembly.snapFaroMarkers
+        //   F5   Inferits   → Markers.placeInferredItems  (Ctrl+clic = antic OrphanSnap)
+        //   F6   Ordre      → Markers.enforceMarkerOrder
+        //   F6·GF Gràfics   → Markers.placeGraphicMarkers
         if (btnMarksF1) btnMarksF1.addEventListener('click', () => callWorkflow('Markers', 'placeOnAirMarkers'));
         if (btnMarksF2) btnMarksF2.addEventListener('click', () => callWorkflow('Markers', 'placeDeducedOnAirMarkers'));
         if (btnMarksF3) btnMarksF3.addEventListener('click', () => callWorkflow('Markers', 'placeScheduledMarkers'));
         if (btnMarksF35) btnMarksF35.addEventListener('click', () => callWorkflow('Assembly', 'correlationSnapMarkers'));
         if (btnMarksF4) btnMarksF4.addEventListener('click', () => callWorkflow('Assembly', 'snapFaroMarkers'));
-        if (btnMarksF5) btnMarksF5.addEventListener('click', () => callWorkflow('Markers', 'snapOrphanMarkers'));
+        if (btnMarksF5) btnMarksF5.addEventListener('click', (ev) => {
+            // El pipeline OUT&GO fa placeInferredItems (Inferits). L'antic OrphanSnap queda
+            // accessible amb Ctrl+clic per poder comparar els dos algorismes.
+            if (ev && (ev.ctrlKey || ev.metaKey)) return callWorkflow('Markers', 'snapOrphanMarkers', ev);
+            return callWorkflow('Markers', 'placeInferredItems', ev);
+        });
+        // (2026-09-23) Botó GF = F6·Gràfics de l'escaleta (marcadors GROCS dels ítems gràfics:
+        // P2 foto, P2 MAPA, GF, TE…). Viu al grup MARCADORS (TEST) perquè en TREBALL aquesta
+        // fase ja s'executa dins del pipeline OUT&GO (runFullPipelineOut).
+        if (btnMarksF6GF) btnMarksF6GF.addEventListener('click', () => callWorkflow('Markers', 'placeGraphicMarkers'));
+        // (2026-09-24) F6·Ordre: fase 9 del pipeline (Markers.enforceMarkerOrder). ABANS no
+        // existia cap botó per a aquesta fase al grup MARCADORS: no es podia testejar a mà.
+        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Markers', 'enforceMarkerOrder'));
         // (2026-09-18) Botó 🎨 "Gráfica" → importador MAPA (ZZZ_GRAFISME → bin GRAF → V6).
-        // ABANS: callWorkflow('Markers','placeGraphicMarkers') (F6·Gràfics de l'escaleta).
-        if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Mapa', 'run'));
+        // (2026-09-24) Canvi d'id (btnMarksF6 → btnMapaImport): el seu antic id xocava amb la
+        // fase F6·Ordre del grup MARCADORS.
+        if (btnMapaImport) btnMapaImport.addEventListener('click', () => callWorkflow('Mapa', 'run'));
 
         // Botons ocults de moment (preservats per a ús futur):
         // const btnResetGrafs = document.getElementById('btnResetGrafs');
@@ -565,8 +641,9 @@ function applySliderLimits() {
         const btnChyronColocar = document.getElementById('btnChyronColocar');
         if (btnChyronColocar) btnChyronColocar.addEventListener('click', () => runPlaceAllChyrons());
 
-        // --- BOTONS GRÀFICS (IPD, Doble Pantalla, MAPA, TOTEM, GRÀFICA/MAPA-GRAF) ---
+        // --- BOTONS GRÀFICS (IPD, IPD+, Doble Pantalla, MAPA, TOTEM, GRÀFICA/MAPA-GRAF) ---
         const btnGrafIpd = document.getElementById('btnGrafIpd');
+        const btnGrafIpdPlus = document.getElementById('btnGrafIpdPlus');
         const btnGrafDoblePantalla = document.getElementById('btnGrafDoblePantalla');
         const btnGrafMapa = document.getElementById('btnGrafMapa');
         const btnGrafTotem = document.getElementById('btnGrafTotem');
@@ -577,6 +654,9 @@ function applySliderLimits() {
                 callWorkflow("Graphics", "runIpd");
             }
         });
+        // (2026-09-23) IPD+ = doble finestra VERTICAL (mateixa maquinària que la DF amb el
+        // perfil de Motion 'ipdplus'). Ctrl+clic = reset de l'estat del flux (com a la DF).
+        if (btnGrafIpdPlus) btnGrafIpdPlus.addEventListener('click', (e) => callWorkflow('Graphics', 'runIpdPlus', e));
         if (btnGrafDoblePantalla) btnGrafDoblePantalla.addEventListener('click', (e) => callWorkflow('Graphics', 'runDoblePantalla', e));
         if (btnGrafMapa) btnGrafMapa.addEventListener('click', () => callWorkflow('Graphics', 'runMapa'));
         if (btnGrafTotem) btnGrafTotem.addEventListener('click', () => callWorkflow('Graphics', 'runTotem'));
@@ -691,7 +771,8 @@ function applySliderLimits() {
                         window.FASTPASS_UI.State.dateDir = fotoDateDir;
                     }
                     const stateDateDir = fotoDateDir;
-                    const folderDest = config.rutas.destinoBase + progData.directorio + '/' + stateDateDir;
+                    // (2026-09-24) Carpeta del BLOC: <base><prog>_PROJECTES/<data>/<V*>
+                    const folderDest = utils.workFolder({ config: config, progData: progData, dateDir: stateDateDir, bloque: blocId });
 
                     utils.log(`📷 [Fetch] Programa: ${progId}, Bloc: ${blocId}`, 'INFO');
                     // Guarda de temps: si l'API d'escaletes o el motor JSX no responen
@@ -813,9 +894,10 @@ function applySliderLimits() {
 
     /**
      * runFullPipelineOut: Marcadors del botó OUT en mode TREBALL.
-     * Ordre: OUT (recorte i neteja), TROSSEJA, OnAir, Deduc, Prev, Correl,
-     * Density. Els chyrons es col·loquen després (botó COLOCAR), un cop
-     * l'usuari ha verificat els marcadors.
+     * Ordre: OUT (recorte i neteja), TROSSEJA, OnAir (F1), Deduc (F2), Prev (F3),
+     * Correl (F3.5), Density (F4), Inferits (F5), Ordre (F6) i Gràfics (F6·GF:
+     * marcadors grocs dels ítems gràfics de l'escaleta). Els chyrons es col·loquen
+     * després (botó COLOCAR), un cop l'usuari ha verificat els marcadors.
      */
     async function runFullPipelineOut() {
         const utils = FASTPASS_UI.Utils;
@@ -828,7 +910,8 @@ function applySliderLimits() {
             ['Correl (F3.5)',          () => callWorkflow('Assembly', 'correlationSnapMarkers')],
             ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],
             ['Inferits (F5)',          () => callWorkflow('Markers', 'placeInferredItems')],
-            ['Ordre (F6)',             () => callWorkflow('Markers', 'enforceMarkerOrder')]
+            ['Ordre (F6)',             () => callWorkflow('Markers', 'enforceMarkerOrder')],
+            ['Gràfics (F6·GF)',        () => callWorkflow('Markers', 'placeGraphicMarkers')]
         ];
         utils.log('🚀 [PIPE] Marcadors post-OUT: ' + phases.map(p => p[0]).join(' → ') + '. Verifica els marcadors i usa COLOCAR per als chyrons.', 'INFO');
         // [2026-09-17] NOMES MARCADORS: si la V1 ja esta trocejada (>=2 clips) no tornem a
@@ -923,6 +1006,17 @@ function applySliderLimits() {
             }
         } else {
             utils.log('➖ [CHY] Sense marcadors IPD (turquesa o títol amb IPD): no cal revisar IPD.', 'INFO');
+        }
+
+        // ── GRAFISMES ASSOCIATS (2026-09-23): repassar els marcadors GROCS (F6·GF) i
+        //    col·locar el grafisme de la carpeta del dia al TC de cada marcador quan el
+        //    títol porta una paraula clau (MAPA…). Si no es troba el fitxer, s'obre el
+        //    navegador de fitxers. És la mateixa maquinària que el botó 🎨, però guiada
+        //    pels marcadors (GRAF_KEYWORDS a flow_mapa.js, ampliable).
+        try {
+            await callWorkflow('Mapa', 'runFromMarkers');
+        } catch (eG) {
+            utils.log('⚠️ [CHY] La revisió de grafismes (MAPA) ha llançat: ' + eG.message, 'ERROR');
         }
 
         // ── FOCUS FINAL (2026-09-21): deixar el targeting NOMÉS a V1/A1 i el clip de V1

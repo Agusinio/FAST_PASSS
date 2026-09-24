@@ -245,8 +245,8 @@
                     Object.assign(window.FASTPASS_UI.State, ctx);
                 }
             
-                // 1. RUTA DE RECERCA
-                let folderPath = config.rutas.destinoBase + ctx.progData.directorio + "/" + ctx.dateDir + "/";
+                // 1. RUTA DE RECERCA — (2026-09-24) carpeta del BLOC: <base><prog>_PROJECTES/<data>/<V*>
+                let folderPath = getUtils().workFolder(ctx) + "/";
                 
                 // 2. ESCANEIG GENÈRIC (Usant Utils.readFolder a través de Scanner)
                 let projectFiles = await getUtils().readFolder(folderPath);
