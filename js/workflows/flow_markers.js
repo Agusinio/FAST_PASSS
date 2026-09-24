@@ -1043,6 +1043,23 @@
                 // F3·Coinc: només afina faros (OnAir real). Saltar deduïts i previstos.
                 if (!hasOnAir) continue;
 
+                // (2026-09-24) NO TOCAR EL MARCADOR D'INICI DEL BLOC: F2 col·loca el marcador del
+                // 1r ítem del bloc a 00:00 ("Marcador d'inici"). F3 no el pot tornar a la seva
+                // OnAir, si no el 00:00 desapareix (queixa d'usuari 2026-09-24: "per què no
+                // apareix el marker de 00:00?"). Es detecta pel prefix del comentari.
+                var _mkActualF3 = null;
+                for (var mf3 = 0; mf3 < existingMarkers.length; mf3++) {
+                    var _pf3 = this._extractPrefixFromComment(existingMarkers[mf3].comments || '');
+                    if (_pf3 && String(_pf3).toLowerCase() === String(line.num || '').toLowerCase()) {
+                        _mkActualF3 = Number(existingMarkers[mf3].time);
+                        break;
+                    }
+                }
+                if (_mkActualF3 !== null && isFinite(_mkActualF3) && _mkActualF3 <= 0.15) {
+                    log('   ⏭️ [F3·Coinc] ' + (line.num || '?') + ': marcador d\'inici a 00:00 → no es mou (el protegeix F2)');
+                    continue;
+                }
+
                 var targetSec = reader.tcToSeconds(onAir);
                 if (targetSec === null || targetSec === undefined) continue;
 
@@ -1339,6 +1356,218 @@
         },
 
         /**
+         * _ordenarISeparar: (2026-09-24) PAS 1 del nou ordre de treball (a petició d'usuari):
+         * ABANS de calcular els breaks de densitat, els marcadors queden ORDENATS i SEPARATS al
+         * timeline segons l'ordre d'escaleta (`sequencia`). Sense això, els clamps de ±0,5s de
+         * F2/F6 deixaven marcadors superposats (conexió + IPD al mateix segon) i F4 intentava
+         * imantar sobre un timeline desordenat.
+         * - Recorre els marcadors en ordre d'escaleta.
+         * - Si l'actual cau a menys de GAP del predecessor: si NO està protegit (inici de bloc
+         *   ≤0,15s o clavat en un corte real) s'empeny a `anterior + GAP`; si està protegit,
+         *   s'aparta el PREDECESSOR a `actual − GAP` (respectant sempre el corte del protegit).
+         * - Mai s'avança un marcador per davant del seu predecessor.
+         * @returns {Object} { revisats, moguts, gap }
+         */
+        _ordenarISeparar: async function (manifest, clips, gap) {
+            // (2026-09-24) GAP per defecte 3,0s (a petició d'usuari: "el gap ha de ser de al
+            // menys 3 segons entre marcadors"). Els marcadors del bloc (conexió, IPD, donapas)
+            // necessiten aire: amb 0,5s F2/F6 els deixaven massa junts o superposats.
+            var GAP = (isFinite(Number(gap)) && Number(gap) > 0) ? Number(gap) : 3.0;
+            var raw = null;
+            try { raw = await callJSX('Markers.get()'); } catch (eG) { raw = null; }
+            var mks = [];
+            try { mks = raw ? JSON.parse(raw) : []; } catch (eP) { mks = []; }
+            if (!mks || mks.length < 2) return { revisats: (mks ? mks.length : 0), moguts: 0, gap: GAP };
+
+            var seqByNum = {}, onAirByNum = {};
+            var all = (manifest && manifest.escaletaItems) ? manifest.escaletaItems : [];
+            for (var i = 0; i < all.length; i++) {
+                var it = all[i];
+                if (!it || !it.num) continue;
+                var nk = String(it.num);
+                if (seqByNum[nk] == null) seqByNum[nk] = (it.sequencia != null && isFinite(Number(it.sequencia))) ? Number(it.sequencia) : i;
+                var oa = it.horaEntradaOnAir;
+                onAirByNum[nk] = !!onAirByNum[nk] || !!(oa && oa !== '00:00:00' && String(oa).trim() !== '');
+            }
+            var list = [];
+            for (var m = 0; m < mks.length; m++) {
+                var pfx = this._extractPrefixFromComment(mks[m].comments || '');
+                var t = Number(mks[m].time);
+                if (!pfx || !isFinite(t)) continue;
+                list.push({ prefix: pfx, time: t, comment: mks[m].comments || '', seq: (seqByNum[pfx] != null ? seqByNum[pfx] : 9999) });
+            }
+            if (list.length < 2) return { revisats: list.length, moguts: 0, gap: GAP };
+            list.sort(function (a, b) { return a.seq - b.seq; });
+
+            var placements = [], moguts = 0, anterior = null;
+            for (var k = 0; k < list.length; k++) {
+                var cur = list[k];
+                // (2026-09-24) PROTECCIÓ CONDICIONAL (correcció del cas "markers apilotonats"):
+                // un marcador sobre un corte NOMÉS està protegit si NO comparteix el punt amb un
+                // altre marcador. Si dos ítems cauen al MATEIX corte (o a <0,20s), el corte està
+                // ocupat per dos ítems → NO es protegeix cap i cal separar-los: el primer es queda
+                // al seu corte (p.ex. la CONEXIÓ al corte que tanca el donapas = 29,20s) i els
+                // següents (IPD) passen als cortes següents amb GAP≥3s.
+                // (2026-09-24b) PRIORITAT OnAir (petició d'usuari): un ítem AMB OnAir (el vídeo)
+                // NO es mou MAI per la separació: el seu imant al corte és sagrat (encertar el
+                // frame des del TC és impossible). Si xoca amb un altre, es mou l'ALTRE.
+                var esOnAir = onAirByNum[cur.prefix] === true;
+                var comparteix = (anterior !== null) && (Math.abs(cur.time - anterior.time) <= 0.20);
+                var protegit = esOnAir || (!comparteix && ((cur.time <= 0.15) || (this._isOnCut(cur.time, clips) !== null)));
+                if (anterior !== null && cur.time < anterior.time + GAP) {
+                    if (!protegit) {
+                        var minT = anterior.time + GAP;
+                        var nou = minT;
+                        // (2026-09-24) ANTI-ACUMULACIÓ (petició d'usuari): en lloc d'empènyer
+                        // sempre +GAP (que amb diversos marcadors junts arrossega l'error), es
+                        // prefereix el SEGÜENT CORT REAL ≥ anterior+GAP (dins de GAP+6s) que NO
+                        // estigui ja ocupat per un altre marcador.
+                        var ocupatPer = function (t2) {
+                            for (var mk2 = 0; mk2 < list.length; mk2++) {
+                                if (list[mk2] === cur) continue;
+                                if (Math.abs(Number(list[mk2].time) - t2) <= 0.25) return true;
+                            }
+                            return false;
+                        };
+                        var cutTrobat = null;
+                        for (var ci2 = 0; ci2 < (clips || []).length; ci2++) {
+                            var cs2 = Number(clips[ci2] && clips[ci2].start);
+                            var ce2 = Number(clips[ci2] && clips[ci2].end);
+                            if (isFinite(cs2) && cs2 >= minT - 0.05 && cs2 <= minT + 8.0 && !ocupatPer(cs2) && (cutTrobat === null || cs2 < cutTrobat)) cutTrobat = cs2;
+                            if (isFinite(ce2) && ce2 >= minT - 0.05 && ce2 <= minT + 8.0 && !ocupatPer(ce2) && (cutTrobat === null || ce2 < cutTrobat)) cutTrobat = ce2;
+                        }
+                        if (cutTrobat !== null) nou = cutTrobat;
+                        log('   🔧 [SEP] ' + cur.prefix + ': ' + cur.time.toFixed(2) + 's → ' + nou.toFixed(2) + 's (GAP ' + GAP + 's després de ' + anterior.prefix + (cutTrobat !== null ? ', corte ' + cutTrobat.toFixed(2) + 's' : ', sense corte lliure a prop') + (comparteix ? ' [corte compartit]' : '') + ') [Δ ' + (nou - cur.time).toFixed(2) + 's]');
+                        placements.push({ prefix: cur.prefix, timeSec: parseFloat(nou.toFixed(2)), comment: cur.comment });
+                        cur.time = nou;
+                        moguts++;
+                    } else {
+                        var antProtegit = (anterior.time <= 0.15) || (onAirByNum[anterior.prefix] === true) || (this._isOnCut(anterior.time, clips) !== null);
+                        if (!antProtegit) {
+                            // (2026-09-24) No es pot apartar el predecessor si xocaria amb l'inici
+                            // de bloc (00:00): es deixa i s'avisa (PAS 2 el re-ancorarà).
+                            var nouAnt = cur.time - GAP;
+                            if (nouAnt < 0.5) {
+                                log('   ⚠️ [SEP] ' + anterior.prefix + ' no es pot apartar sense xocar amb l\'inici de bloc → es deixa (ho resol PAS 2)');
+                            } else {
+                                log('   🔧 [SEP] ' + anterior.prefix + ': ' + anterior.time.toFixed(2) + 's → ' + nouAnt.toFixed(2) + 's (' + cur.prefix + ' està protegit a ' + cur.time.toFixed(2) + 's)');
+                                placements.push({ prefix: anterior.prefix, timeSec: parseFloat(nouAnt.toFixed(2)), comment: anterior.comment });
+                                anterior.time = nouAnt;
+                                moguts++;
+                            }
+                        } else {
+                            log('   ⚠️ [SEP] ' + anterior.prefix + ' i ' + cur.prefix + ' estan a ' + (cur.time - anterior.time).toFixed(2) + 's però tots dos estan protegits → no es mou cap');
+                        }
+                    }
+                }
+                anterior = cur;
+            }
+            if (placements.length > 0) {
+                var res = await this._safePlaceByPrefixes(placements, 'SEP·Ordre-GAP');
+                log('   🔧 [SEP·Ordre-GAP] aplicat → ' + JSON.stringify(res));
+            }
+            log('🔧 [SEP·Ordre-GAP] Revisats ' + list.length + ' marcadors · ajustats ' + moguts + ' (GAP=' + GAP + 's)');
+            return { revisats: list.length, moguts: moguts, gap: GAP };
+        },
+
+        /**
+         * _asignarAnclasPorDuracion: (2026-09-24) PAS 2 (petició d'usuari): els ítems SENSE OnAir
+         * (conexió, IPD…) no es poden situar per prevista+durada (dóna posicions errònies i
+         * apilades: 01dir a 60.28s i IPD Zelensky a 60.32s). S'ancoren als CORTES que tanquen els
+         * clips LLARGS (els breaks de densitat, que hi coincideixen 1:1) i, si se n'acaben, als
+         * cortes dels plans MEDIOS (3–12s), sempre en ORDRE d'escaleta i amb GAP≥gap entre
+         * marcadors. Els ítems amb OnAir (el vídeo) NO es toquen i els CORTS (<3s) no anclen.
+         * @returns {Object} { assignats, ancles, gap }
+         */
+        _asignarAnclasPorDuracion: async function (manifest, clips, gap) {
+            var GAP = (isFinite(Number(gap)) && Number(gap) > 0) ? Number(gap) : 3.0;
+            var raw = null, mks = [];
+            try { raw = await callJSX('Markers.get()'); } catch (e0) { raw = null; }
+            try { mks = raw ? JSON.parse(raw) : []; } catch (e1) { mks = []; }
+            if (!mks || mks.length === 0) return { assignats: 0, ancles: 0, gap: GAP };
+
+            var seqByNum = {}, onAirByNum = {};
+            var all = (manifest && manifest.escaletaItems) ? manifest.escaletaItems : [];
+            for (var i = 0; i < all.length; i++) {
+                var it = all[i];
+                if (!it || !it.num) continue;
+                var nk = String(it.num);
+                if (seqByNum[nk] == null) seqByNum[nk] = (it.sequencia != null && isFinite(Number(it.sequencia))) ? Number(it.sequencia) : i;
+                var oa = it.horaEntradaOnAir;
+                onAirByNum[nk] = !!onAirByNum[nk] || !!(oa && oa !== '00:00:00' && String(oa).trim() !== '');
+            }
+
+            // Ancles: breaks de densitat (= cortes de clips LLARGS) + cortes de plans MEDIOS
+            var ancles = [], seen = {};
+            var dens = null;
+            try { dens = this._calcDensityFootprint(clips); } catch (eD) { dens = null; }
+            if (dens && dens.breaks) {
+                for (var b = 0; b < dens.breaks.length; b++) {
+                    var tb = Number(dens.breaks[b].time);
+                    if (isFinite(tb) && !seen[tb.toFixed(2)]) { seen[tb.toFixed(2)] = true; ancles.push({ t: tb, tipus: 'break·clip-llarg' }); }
+                }
+            }
+            for (var c2 = 0; c2 < (clips || []).length; c2++) {
+                var cs = Number(clips[c2] && clips[c2].start), ce = Number(clips[c2] && clips[c2].end);
+                var dur = (isFinite(cs) && isFinite(ce)) ? (ce - cs) : 0;
+                if (!(dur >= 3.0 && dur <= 12.0)) continue;   // MEDIOS 3-12s (CORTS <3s no anclen)
+                if (isFinite(cs) && !seen[cs.toFixed(2)]) { seen[cs.toFixed(2)] = true; ancles.push({ t: cs, tipus: 'corte·medi' }); }
+            }
+            ancles.sort(function (a, b2) { return a.t - b2.t; });
+            if (ancles.length === 0) return { assignats: 0, ancles: 0, gap: GAP };
+
+            var ocup = {};
+            for (var m = 0; m < mks.length; m++) { var t2 = Number(mks[m].time); if (isFinite(t2)) ocup[t2.toFixed(2)] = true; }
+
+            // Objectiu: ítems sense OnAir (els que depenen de l'estructura del vídeo)
+            var objectiu = [];
+            for (var k = 0; k < mks.length; k++) {
+                var pfx = this._extractPrefixFromComment(mks[k].comments || '');
+                if (!pfx) continue;
+                if (onAirByNum[pfx]) continue;                 // el vídeo mana, no es toca
+                var tk = Number(mks[k].time);
+                if (!isFinite(tk)) continue;
+                // (2026-09-24) EL MARCADOR D'INICI (00:00) ÉS IMMUTABLE — "el FARO DE LOS FAROS":
+                // l'usuari ja ha col·locat el corte d'IN a mà i TOTES les posicions es calculen
+                // respecte a ell. Cap fase (ni aquesta) no el pot moure: si entrava a la llista
+                // d'objectius, PAS 2 el re-ancorava (p.ex. a 27,32s) i arrossegava la resta
+                // (conexió, IPD, grafismes) fora de lloc.
+                if (tk <= 0.15) {
+                    log('   ⏭️ [ASIG] ' + pfx + ': marcador d\'inici a 00:00 → IMMUTABLE (faro de faros)');
+                    continue;
+                }
+                objectiu.push({ prefix: pfx, time: tk, comment: mks[k].comments || '', seq: (seqByNum[pfx] != null ? seqByNum[pfx] : 9999) });
+            }
+            objectiu.sort(function (a, b3) { return a.seq - b3.seq; });
+
+            var placements = [], anterior = 0, assignats = 0, idxA = 0;
+            for (var o = 0; o < objectiu.length; o++) {
+                var cur = objectiu[o];
+                var triat = null;
+                for (var a2 = idxA; a2 < ancles.length; a2++) {
+                    var ta = ancles[a2].t;
+                    if (ta < anterior + GAP) continue;
+                    if (ocup[ta.toFixed(2)] && Math.abs(ta - cur.time) > 0.25) continue;
+                    triat = ancles[a2]; idxA = a2 + 1; break;
+                }
+                if (!triat) continue;
+                if (Math.abs(triat.t - cur.time) <= 0.25) { anterior = Math.max(anterior, triat.t); continue; }
+                placements.push({ prefix: cur.prefix, timeSec: parseFloat(triat.t.toFixed(2)), comment: cur.comment });
+                log('   🔧 [ASIG] ' + cur.prefix + ': ' + cur.time.toFixed(2) + 's → ' + triat.t.toFixed(2) + 's (' + triat.tipus + ')');
+                ocup[cur.time.toFixed(2)] = false;
+                ocup[triat.t.toFixed(2)] = true;
+                anterior = triat.t;
+                assignats++;
+            }
+            if (placements.length > 0) {
+                var res = await this._safePlaceByPrefixes(placements, 'ASIG·Ancles');
+                log('   🔧 [ASIG·Ancles] aplicat → ' + JSON.stringify(res));
+            }
+            log('🔧 [ASIG·Ancles] Ítems sense OnAir: ' + objectiu.length + ' · assignats ' + assignats + ' · ancles=' + ancles.length + ' (GAP=' + GAP + 's)');
+            return { assignats: assignats, ancles: ancles.length, gap: GAP };
+        },
+
+        /**
          * _chooseSnapTarget: Tria a quin punt s'ha d'ancorar un marcador.
          *  - FARO (ítem amb OnAir real): ruptura de densitat (prioritària) o tall real
          *    més proper, dins de la finestra curta (±0,6 s).
@@ -1403,6 +1632,28 @@
             log('🟠 [F4·Faro] Iniciant snap dels marcadors al tall real més proper...');
 
             const clips = await getClipsLogic().getTrackClips(1, 'video');
+
+            // (2026-09-24) PAS 1 (ordre de treball acordat amb l'usuari): ABANS de calcular els
+            // breaks de densitat, els marcadors queden ORDENATS i SEPARATS segons l'ordre
+            // d'escaleta. Amb el timeline ordenat, el matching amb els breaks (PAS 2) és intuïtiu
+            // i no hi ha superposicions (conexió + IPD al mateix segon).
+            // (2026-09-24) ORDRE CORRECTE: PRIMER ancorar (PAS 2: els ítems sense OnAir al seu
+            // corte, p.ex. la CONEXIÓ al break del clip llarg) i DESPRÉS separar (PAS 1). ABANS
+            // anaven al revés i PAS 1 separava sobre les posicions VELLES (01dir encara a 62.36s)
+            // → movia el vídeo 01 a 65.56s per no res i tot quedava desplaçat (queixa 2026-09-24).
+            try {
+                const ctxAsig = await getAssemblyContext().loadAssemblyContext();
+                await this._asignarAnclasPorDuracion(ctxAsig ? ctxAsig.manifest : null, clips, 3.0);
+            } catch (eAsig) {
+                log('⚠️ [ASIG·Ancles] ' + eAsig.message, 'WARN');
+            }
+
+            try {
+                const ctxOrd = await getAssemblyContext().loadAssemblyContext();
+                await this._ordenarISeparar(ctxOrd ? ctxOrd.manifest : null, clips, 3.0);
+            } catch (eOrd) {
+                log('⚠️ [SEP·Ordre-GAP] ' + eOrd.message, 'WARN');
+            }
             if (!clips || clips.length === 0) {
                 log('⚠️ [F4·Faro] No hi ha clips a V1.');
                 return;
@@ -2163,7 +2414,12 @@
                     }
                     if (structuralTimes.length > 0) {
                         structuralTimes.sort(function(a,b) { return a - b; });
-                        parentMarkerByPrefix[bn] = structuralTimes[0];
+                        // (2026-09-24) PRIORITAT AL MARCADOR DEL VÍDEO (prefix EXACTE = baseNum):
+                        // ABANS s'agafava el més aviat dels "estructurals" i amb `01dp`@0.00 +
+                        // `01`@63.00 els gràfics s'ancoraven al 0.00 (dins del donapas) → 10s/15s/20s
+                        // fora de lloc (queixa d'usuari 2026-09-24: "los grafismos estan fuera de lugar").
+                        var exacte = markersByExactPrefix[bn];
+                        parentMarkerByPrefix[bn] = (exacte !== undefined && exacte !== null && exacte > 0) ? exacte : structuralTimes[0];
                     }
                 }
             }
