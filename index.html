@@ -165,17 +165,20 @@
             <div class="section-label" title="Marcadors"><span class="lbl-full">MARCADORS</span><span class="lbl-short">MAR</span></div>
             <div class="section-content">
                  <div class="graphics-strip cols-3">
-                    <button id="btnMarksF1" class="secondary" title="F1 · Marcadors OnAir (TC real d'emissió)">OnAir</button>
-                    <button id="btnMarksF2" class="secondary" title="F2 · Marcadors OnAir deduïts">Dedu</button>
-                    <button id="btnMarksF3" class="secondary" title="F3 · Marcadors previstos (coincidències)">Prev</button>
-                    <button id="btnMarksF35" class="secondary" title="F3.5 · CorrelationSnap a corts de vídeo">Correl</button>
-                    <button id="btnMarksF4" class="secondary" title="F4 · DensitySnap / faros">Dens</button>
-                    <button id="btnMarksF5" class="secondary" title="F5 · Inferits (mateixa fase que el pipeline OUT &amp; GO): col·loca els ítems inferits de l'escaleta. Ctrl+clic = F5 antic OrphanSnap (marcadors orfes a corts propers)">Inferits</button>
-                    <button id="btnMarksF6" class="secondary" title="F6 · Ordre: garanteix que els marcadors dels ítems ESTRUCTURALS mantinguin l'ordre de l'escaleta (el faro no es mou mai; un ítem invertit va al tall anterior del faro). Mateixa fase que el pipeline OUT &amp; GO">Ordre</button>
-                    <button id="btnMarksF6GF" class="secondary" title="F6 · Marcadors gràfics (GF) de l'escaleta: P2 foto / P2 MAPA / GF / TE… ancorats al seu ítem pare. En TREBALL ho fa el pipeline OUT &amp; GO">GF</button>
-<button id="btnMarksSIL" class="secondary" title="SIL (TEST, només lectura) · Bolca al log el mapa de SILENCIS d'àudio del bloc (llegit del .bin de referència a 480Hz). Serveix per ajustar llindar/durada mínima amb dades reals">SIL</button>
-<button id="btnMarksC0" class="secondary" title="C0 · CAPA 0 (TEST) · Setup: referència del clip + context d'assembly + classificació d'ítems + col·loca el MARCADOR D'INICI a 00:00 (immutable per a totes les capes)">C0</button>
-<button id="btnMarksC1" class="secondary" title="C1 · CAPA 1 (TEST) · OnAir DURO: calcula densitat de corts + mapa de silencis, resol cada ítem amb OnAir real per consens (SILENCI → CORTE a prop → OnAir), valida contra el material real de V1, publica el Δ i CONGELA aquests marcadors per a les capes següents">C1</button>
+                    <!-- ═══ ORDRE DE PULSACIÓ DEL SISTEMA PER CAPES (2026-09-25) ═══ -->
+                    <!-- 1) SIL (diagnòstic, només lectura) · 2) C0 (setup+00:00) · 3) C1 (OnAir dur) -->
+                    <button id="btnMarksSIL" class="secondary" title="PAS 1 (opcional, només lectura) · SIL · Bolca al log el mapa de SILENCIS d'àudio del bloc (llegit del .bin de referència a 480Hz). Serveix per ajustar llindar/durada mínima amb dades reals. El silenci NOMÉS confirma: no mou res">1·SIL</button>
+                    <button id="btnMarksC0" class="secondary" title="PAS 2 · CAPA 0 · Setup: referència del clip + context d'assembly + classificació d'ítems + col·loca el MARCADOR D'INICI a 00:00 (immutable per a totes les capes)">2·C0</button>
+                    <button id="btnMarksC1" class="secondary" title="PAS 3 · CAPA 1 · OnAir DURO: calcula densitat de corts + mapa de silencis, resol cada ítem amb OnAir real per consens (SILENCI → CORTE a prop → OnAir), valida contra el material real de V1, publica el Δ i CONGELA aquests marcadors per a les capes següents">3·C1</button>
+                    <!-- ─── Fases antigues (pipeline OUT &amp; GO): es mantenen per comparar ─── -->
+                    <button id="btnMarksF1" class="secondary" title="F1 (antic) · Marcadors OnAir (TC real d'emissió)">F1 OnAir</button>
+                    <button id="btnMarksF2" class="secondary" title="F2 (antic) · Marcadors OnAir deduïts">F2 Dedu</button>
+                    <button id="btnMarksF3" class="secondary" title="F3 (antic) · Marcadors previstos (coincidències)">F3 Prev</button>
+                    <button id="btnMarksF35" class="secondary" title="F3.5 (antic) · CorrelationSnap a corts de vídeo">F3.5 Correl</button>
+                    <button id="btnMarksF4" class="secondary" title="F4 (antic) · DensitySnap / faros">F4 Dens</button>
+                    <button id="btnMarksF5" class="secondary" title="F5 (antic) · Inferits: col·loca els ítems inferits de l'escaleta. Ctrl+clic = F5 antic OrphanSnap (marcadors orfes a corts propers)">F5 Inferits</button>
+                    <button id="btnMarksF6" class="secondary" title="F6 (antic) · Ordre: garanteix que els marcadors dels ítems ESTRUCTURALS mantinguin l'ordre de l'escaleta (el faro no es mou mai; un ítem invertit va al tall anterior del faro)">F6 Ordre</button>
+                    <button id="btnMarksF6GF" class="secondary" title="F6·GF (antic) · Marcadors gràfics (GF) de l'escaleta: P2 foto / P2 MAPA / GF / TE… ancorats al seu ítem pare">F6 GF</button>
                  </div>
             </div>
         </div>
@@ -240,14 +243,14 @@
     <script src="js/logic/6_Clips_Logic.js?v=6"></script>
     <script src="js/logic/7_KF_Logic.js?v=5"></script>
     <script src="js/logic/9_Render_Logic.js?v=5"></script>
-    <script src="js/logic/10_Srt_Logic.js?v=12"></script>
+    <script src="js/logic/10_Srt_Logic.js?v=13"></script>
     <script src="js/logic/13_Parse.js?v=5"></script>
     <script src="js/logic/14_Assembly_Logic.js?v=6"></script>
     <script src="js/logic/15_FFmpeg_Logic.js?v=7"></script>
     <script src="js/logic/16_Analysis_Logic.js?v=6"></script>
     <script src="js/core/assembly_context.js?v=9"></script>
     <script src="js/workflows/flow_mp4.js?v=5"></script>
-    <script src="js/workflows/flow_markers.js?v=51"></script>
+    <script src="js/workflows/flow_markers.js?v=56"></script>
     <script src="js/workflows/flow_chyrons.js?v=41"></script>
     <script src="js/workflows/flow_graphics.js?v=22"></script>
     <script src="js/workflows/flow_mainButton.js?v=24"></script>

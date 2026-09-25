@@ -338,6 +338,11 @@
                         var _tolInAnc = 1.0;
                         if (isFinite(clipInPoint) && Math.abs(clipInPoint - _manifestInPointAnc) > _tolInAnc) {
                             offsetAnchor = clipInPoint;
+                            // (2026-09-25) FIX C: si el manifest està en coords d'ORIGEN (refBloc
+                            // lluny del inPoint real del clip), la BASE REAL del fitxer extret és
+                            // wsms + refBloc (TNC: 49500 + 953 = 50453). Sense això l'ancoratge
+                            // sortia 853 s a la dreta (973.28 en lloc de 20.28 ✓).
+                            _wsmsAdjust = _manifestInPointAnc;
                             offsetAnchorFont = 'inPoint REAL del clip (' + Number(clipInPoint).toFixed(3) + 's) ≠ refBloc ' + Number(_manifestInPointAnc).toFixed(3) + 's';
                             log('🚨 [ANCORATGE·FIX-B] L\'insert NO ha respectat el bounds: inPoint real=' + Number(clipInPoint).toFixed(3) + 's vs esperat=' + Number(_manifestInPointAnc).toFixed(3) + 's (Δ=' + (clipInPoint - _manifestInPointAnc).toFixed(2) + 's) → manen les dades REALS del clip; els marcadors s\'alineen amb el material que hi ha a la timeline. Revisa l\'insert/OUT.', 'WARN');
                         } else {
@@ -368,7 +373,16 @@
 
             log('🔧 [BUG3·FIX] Clip V1 real: start=' + clipStart.toFixed(3) + 's, inPoint=' + clipInPoint.toFixed(3) + 's vs manifest tlBlockInPointSec=' + (manifest.ref.tlBlockInPointSec || 0).toFixed(3) + 's');
 
+            var _wsmsAdjust = 0;   // (2026-09-25) correcció de base si el manifest està en coords d'origen
             var worldSecMediaStart = manifest.ref.worldSecMediaStart || 0;
+            // (2026-09-25) FIX C: el manifest en coords d'ORIGEN (refBloc=953) fa que la base del
+            // fitxer extret sigui wsms+refBloc (49500+953=50453) → sense això tots els marcadors
+            // cauen 853 s a la dreta (973.28 en lloc de 20.28 ✓).
+            if (_wsmsAdjust) {
+                var _wsmsOrig = worldSecMediaStart;
+                worldSecMediaStart = worldSecMediaStart + _wsmsAdjust;
+                log('⚓ [ANCORATGE·FIX-C] Manifest en coords d\'ORIGEN: base del clip extret ' + _wsmsOrig.toFixed(2) + 's + refBloc ' + Number(_wsmsAdjust).toFixed(2) + 's → ' + worldSecMediaStart.toFixed(2) + 's');
+            }
 
             var anchorOnAirSec = null;
             var anchorSource = '';
@@ -390,13 +404,19 @@
             var refF1 = anchorOnAirSec;
             var refF1Origen = 'blockInSec (fallback)';
             if (structuralItems.length > 0) {
-                var refLine = structuralItems[0];
-                var rfOnAir = refLine.horaEntradaOnAir;
-                var rfHasOnAir = rfOnAir && rfOnAir !== '00:00:00' && rfOnAir.trim() !== '';
-                if (rfHasOnAir) {
-                    refF1 = reader.tcToSeconds(rfOnAir);
-                    refF1Origen = 'OnAir (1r: ' + (refLine.num || '?') + ')';
+                // (2026-09-25) REFERÈNCIA = primer ítem amb OnAir REAL. Un ítem sense OnAir i amb
+                // hora deduïda/prevista enverinada (04 P2-2: durada 0:00 → 14:00:48) arrossegava
+                // TOT l'ancoratge (~103 s) i deixava els marcadors fora del material.
+                var refLine = null;
+                for (var _ri = 0; _ri < structuralItems.length; _ri++) {
+                    var _oaR = structuralItems[_ri].horaEntradaOnAir;
+                    if (_oaR && String(_oaR).trim() !== '' && String(_oaR) !== '00:00:00') { refLine = structuralItems[_ri]; break; }
+                }
+                if (refLine) {
+                    refF1 = reader.tcToSeconds(refLine.horaEntradaOnAir);
+                    refF1Origen = 'OnAir (1r EMÈS: ' + (refLine.num || '?') + ')';
                 } else {
+                    refLine = structuralItems[0];
                     var rfDeduced = reader._deduceOnAirEntrada(refLine, manifest.escaletaItems, null);
                     if (rfDeduced !== null) {
                         refF1 = rfDeduced;
@@ -410,7 +430,13 @@
             var anchorEfectiva = anchorOnAirSec;
             var anchorEfOrigen = 'blockInSec (fallback)';
             if (structuralItems.length > 0) {
+                // (2026-09-25) Igual que refF1: l'àncora EFECTIVA també ha de sortir del primer
+                // ítem amb OnAir REAL (no d'un ítem amb hora deduïda enverinada).
                 var firstLine = structuralItems[0];
+                for (var _ai = 0; _ai < structuralItems.length; _ai++) {
+                    var _oaA = structuralItems[_ai].horaEntradaOnAir;
+                    if (_oaA && String(_oaA).trim() !== '' && String(_oaA) !== '00:00:00') { firstLine = structuralItems[_ai]; break; }
+                }
                 var fOnAir = firstLine.horaEntradaOnAir;
                 var fPrevista = firstLine.horaEntradaPrevista;
                 var fHasOnAir = fOnAir && fOnAir !== '00:00:00' && fOnAir.trim() !== '';
@@ -1647,14 +1673,38 @@
                 if (tc === null || tc === undefined) continue;
                 const nail = anchors.anchorEfTimelineSec + (tc - anchors.anchorEfectiva);
                 let pos = nail, motiu = 'OnAir';
+                // ═══ JERARQUIA DE FONTS (regla d'usuari 2026-09-25) ═══════════════════════════
+                // 1r OnAir (emissió real) — el silenci NOMÉS CONFIRMA. Consens = silenci + CORTE
+                // real a prop: el corte és la dada dura → es pren (confirmat pel silenci ✓).
+                // Si no hi ha corte a prop → NO es mou el marcador al silenci ✗ (el silenci no
+                // decideix mai sol). I sense silenci a prop → es queda l'OnAir.
                 const silCerca = this._silencioMasCercano(sil, pos, 3.0);
                 if (silCerca) {
                     const corte = this._corteCercaDe(clips, silCerca.end, 1.0);
                     if (corte !== null) { pos = corte; motiu = 'silenci+corte'; }
-                    else { pos = silCerca.end; motiu = 'silenci'; }
+                    else { motiu = 'OnAir (silenci a prop sense corte → el silenci només confirma)'; }
+                } else {
+                    motiu = 'OnAir (sense silenci a prop)';
                 }
+                // ═══ (2026-09-25) IMANT AL CORTE REAL ═══════════════════════════════════════
+                // L'OnAir marca la ZONA, el CORTE la CONCRETA. Sense això el marcador queda a mig
+                // pla (TNC V2: posició 20.28s amb el corte real a 22.44s → "fora del corte" ✗).
+                // Només si NO està ja sobre un corte, i dins la finestra configurada (2,5 s).
+                let _snapWinIn = 2.5;
+                try {
+                    const _cfgIn = window.FASTPASS_UI.Config && FASTPASS_UI.Config.get ? FASTPASS_UI.Config.get() : null;
+                    if (_cfgIn && _cfgIn.general && isFinite(Number(_cfgIn.general.snapWindowFaroSec))) _snapWinIn = Number(_cfgIn.general.snapWindowFaroSec);
+                } catch (eCfgIn) { }
+                try {
+                    if (this._isOnCut(pos, clips) === null) {
+                        const _cutSnap = this._corteCercaDe(clips, pos, _snapWinIn);
+                        if (_cutSnap !== null) { pos = _cutSnap; motiu += ' + imant corte (finestra ' + _snapWinIn + 's)'; }
+                        else { motiu += ' (cap corte dins ' + _snapWinIn + 's)'; }
+                    }
+                } catch (eCutIn) { }
                 if (matEnd > 0 && (pos < matStart - 0.05 || pos > matEnd + 0.05)) {
-                    log('⚠️ [CAPA1] ' + (line.num || '?') + ': ' + pos.toFixed(2) + 's FORA del material (' + matStart.toFixed(2) + '→' + matEnd.toFixed(2) + 's) → revisa OUT/bounds', 'WARN');
+                    log('⚠️ [CAPA1] ' + (line.num || '?') + ': ' + pos.toFixed(2) + 's FORA del material (' + matStart.toFixed(2) + '→' + matEnd.toFixed(2) + 's) → NO es col·loca. El manifest/anchor sembla d\'una altra base: prem ACTUALITZAR o munta el bloc i torna-ho a provar.', 'WARN');
+                    continue;
                 }
                 const d = pos - nail;
                 this._deltaCapa1 = (this._deltaCapa1 * this._deltaN + d) / (this._deltaN + 1); this._deltaN++;
@@ -1729,7 +1779,22 @@
             const classData = this._classifyItems(lines);
             log('🟦 [CAPA0] Items: ' + ((classData.structuralItems || []).length) + ' estructurals · ' +
                 ((classData.graphicItems || []).length) + ' gràfics · ' + ((classData.farosItems || []).length) + ' amb OnAir');
-            const first = (classData.structuralItems && classData.structuralItems[0]) ? classData.structuralItems[0] : null;
+            // (2026-09-25) El marcador d'INICI NO pot ser un ítem GRÀFIC (P2/GF/MAPA/TE…):
+            // als gràfics els toca la seva pròpia capa (al final). TNC V2: "04 P2-2" sortia com
+            // a estructural i s'enduia el 🔒 d'inici ✗ (queixa d'usuari 2026-09-25).
+            const _grafNums = {};
+            (classData.graphicItems || []).forEach(function (g) { _grafNums[String(g.num || '').trim().toLowerCase()] = true; });
+            let first = null;
+            for (let _fi = 0; _fi < (classData.structuralItems || []).length; _fi++) {
+                const _cand = classData.structuralItems[_fi];
+                const _candNum = String(_cand.num || '').trim();
+                if (_grafNums[_candNum.toLowerCase()] === true || _candNum.toUpperCase().indexOf('P2') !== -1) {
+                    log('🟦 [CAPA0] S\'omet "' + _candNum + '": és GRÀFIC → anirà a la capa de gràfics (al final)');
+                    continue;
+                }
+                first = _cand;
+                break;
+            }
             if (first) {
                 const pfx = String(first.num || '').trim();
                 const comment = (first.num ? first.num + ' - ' : '') + String(first.titol || '').substring(0, 60);

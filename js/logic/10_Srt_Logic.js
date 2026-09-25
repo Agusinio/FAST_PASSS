@@ -278,6 +278,9 @@
                 U.log('🤫 [SILENCI] .bin sense peaks llegibles: ' + bin);
                 return [];
             }
+            // (2026-09-25) DIAGNÒSTIC: el detector de l'app trobava 7 trams i un mini-detector
+            // extern (mateixa lògica) en troba 153 → cal veure QUÈ carrega realment.
+            U.log('🤫 [SILENCI·DBG] bin=' + bin + ' · peaks=' + wf.peaks.length + ' · pps=' + wf.peaksPerSec + ' · dur=' + (wf.durSec !== undefined ? Number(wf.durSec).toFixed(2) : '?') + 's · demanat pps=' + ppsWanted);
             var pps = wf.peaksPerSec || ppsWanted;
             var winN = Math.max(1, Math.round(pps * winSec));
             var out = [], curStart = null;
