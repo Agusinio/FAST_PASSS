@@ -246,6 +246,65 @@
         },
 
         /**
+         * silences: (2026-09-24) Detecta els SILENCIS d'àudio del bloc a partir del .bin de
+         * referència (<PROG>_<BLOC>_CLIP_AUDIO_REF.bin, 480Hz, 1 byte = 1 peak).
+         * DAT TRANSVERSAL del pla de marcadors per capes: les fronteres de silenci són molt més
+         * definitòries que els cortes (n'hi ha molts menys) i serveixen per:
+         *   - CAPA 1 (OnAir): primer silenci, i després un corte a prop del silenci.
+         *   - CAPES 1.5 / 2 / 3: ancla de posicionament.
+         *   - BOUNDS: final real del contingut anterior (IN del bloc).
+         * Els temps retornats són de MEDIA (la base del .bin = el clip del bloc).
+         * @param {Object} [opts] { threshold=0.05, minDur=0.4, winSec=0.1, pps=240 }
+         * @returns {Promise<Array<{start:number,end:number,dur:number}>>}
+         */
+        silences: async function (opts) {
+            var U = window.FASTPASS_UI.Utils;
+            var o = opts || {};
+            var thr = (typeof o.threshold === 'number') ? o.threshold : 0.05;
+            var minDur = (typeof o.minDur === 'number') ? o.minDur : 0.4;
+            var winSec = (typeof o.winSec === 'number') ? o.winSec : 0.1;
+            var ppsWanted = (typeof o.pps === 'number') ? o.pps : 240;
+
+            var folder = '';
+            try { folder = U.workFolder(window.FASTPASS_UI.State) || ''; } catch (e0) { folder = ''; }
+            var bin = '';
+            try { bin = await this.getBinPath(folder); } catch (eB) { bin = ''; }
+            if (!bin) {
+                U.log('🤫 [SILENCI] Sense .bin de referència del bloc → no es poden detectar silencis');
+                return [];
+            }
+            var wf = await this.loadPeaksFromBin(bin, ppsWanted);
+            if (!wf || !wf.peaks || wf.peaks.length === 0) {
+                U.log('🤫 [SILENCI] .bin sense peaks llegibles: ' + bin);
+                return [];
+            }
+            var pps = wf.peaksPerSec || ppsWanted;
+            var winN = Math.max(1, Math.round(pps * winSec));
+            var out = [], curStart = null;
+            for (var i = 0; i < wf.peaks.length; i += winN) {
+                var mx = 0;
+                for (var j = i; j < Math.min(wf.peaks.length, i + winN); j++) {
+                    if (wf.peaks[j] > mx) mx = wf.peaks[j];
+                }
+                var t0 = i / pps;
+                if (mx <= thr) {
+                    if (curStart === null) curStart = t0;
+                } else if (curStart !== null) {
+                    var dur = t0 - curStart;
+                    if (dur >= minDur) out.push({ start: curStart, end: t0, dur: dur });
+                    curStart = null;
+                }
+            }
+            if (curStart !== null) {
+                var tEnd = wf.peaks.length / pps;
+                if ((tEnd - curStart) >= minDur) out.push({ start: curStart, end: tEnd, dur: tEnd - curStart });
+            }
+            U.log('🤫 [SILENCI] ' + out.length + ' trams · umbral=' + thr + ' · min=' + minDur + 's · ' +
+                (out.length ? out.map(function (s) { return s.start.toFixed(2) + '→' + s.end.toFixed(2) + '(' + s.dur.toFixed(2) + 's)'; }).join(', ') : '(cap)'));
+            return out;
+        },
+
+        /**
          * Llegeix fitxer .bin (WAV PCM 8-bit unsigned, mono, 480Hz) i retorna peaks 0..1
          * Lectura robusta:
          *   1) Demana Base64 (cep.encoding.Base64) + atob → bytes exactes (evita corrupció UTF-8)

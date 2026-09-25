@@ -173,6 +173,9 @@
                     <button id="btnMarksF5" class="secondary" title="F5 · Inferits (mateixa fase que el pipeline OUT &amp; GO): col·loca els ítems inferits de l'escaleta. Ctrl+clic = F5 antic OrphanSnap (marcadors orfes a corts propers)">Inferits</button>
                     <button id="btnMarksF6" class="secondary" title="F6 · Ordre: garanteix que els marcadors dels ítems ESTRUCTURALS mantinguin l'ordre de l'escaleta (el faro no es mou mai; un ítem invertit va al tall anterior del faro). Mateixa fase que el pipeline OUT &amp; GO">Ordre</button>
                     <button id="btnMarksF6GF" class="secondary" title="F6 · Marcadors gràfics (GF) de l'escaleta: P2 foto / P2 MAPA / GF / TE… ancorats al seu ítem pare. En TREBALL ho fa el pipeline OUT &amp; GO">GF</button>
+<button id="btnMarksSIL" class="secondary" title="SIL (TEST, només lectura) · Bolca al log el mapa de SILENCIS d'àudio del bloc (llegit del .bin de referència a 480Hz). Serveix per ajustar llindar/durada mínima amb dades reals">SIL</button>
+<button id="btnMarksC0" class="secondary" title="C0 · CAPA 0 (TEST) · Setup: referència del clip + context d'assembly + classificació d'ítems + col·loca el MARCADOR D'INICI a 00:00 (immutable per a totes les capes)">C0</button>
+<button id="btnMarksC1" class="secondary" title="C1 · CAPA 1 (TEST) · OnAir DURO: calcula densitat de corts + mapa de silencis, resol cada ítem amb OnAir real per consens (SILENCI → CORTE a prop → OnAir), valida contra el material real de V1, publica el Δ i CONGELA aquests marcadors per a les capes següents">C1</button>
                  </div>
             </div>
         </div>
@@ -221,7 +224,7 @@
     <script src="js/core/escaleta_config.js?v=7"></script>
     <script src="js/core/escaleta_io.js?v=15"></script>
     <script src="js/core/escaleta_items.js?v=6"></script>
-    <script src="js/core/escaleta_bounds.js?v=14"></script>
+    <script src="js/core/escaleta_bounds.js?v=17"></script>
     <script src="js/core/escaleta_fallback.js?v=6"></script>
     <script src="js/core/escaleta_fetch.js?v=11"></script>
     <script src="js/core/escaleta_reader.js?v=5"></script>
@@ -231,24 +234,24 @@
     <script src="js/logic/Scanner.js?v=10"></script>
     <script src="js/inspectors/2_App.js?v=5"></script>
     <script src="js/inspectors/3_Session.js?v=5"></script>
-    <script src="js/core/4_Context.js?v=20"></script>
-    <script src="js/logic/3_Project_Logic.js?v=21"></script>
+    <script src="js/core/4_Context.js?v=21"></script>
+    <script src="js/logic/3_Project_Logic.js?v=24"></script>
     <script src="js/logic/5_Tracks_Logic.js?v=5"></script>
     <script src="js/logic/6_Clips_Logic.js?v=6"></script>
     <script src="js/logic/7_KF_Logic.js?v=5"></script>
     <script src="js/logic/9_Render_Logic.js?v=5"></script>
-    <script src="js/logic/10_Srt_Logic.js?v=11"></script>
+    <script src="js/logic/10_Srt_Logic.js?v=12"></script>
     <script src="js/logic/13_Parse.js?v=5"></script>
     <script src="js/logic/14_Assembly_Logic.js?v=6"></script>
     <script src="js/logic/15_FFmpeg_Logic.js?v=7"></script>
     <script src="js/logic/16_Analysis_Logic.js?v=6"></script>
     <script src="js/core/assembly_context.js?v=9"></script>
     <script src="js/workflows/flow_mp4.js?v=5"></script>
-    <script src="js/workflows/flow_markers.js?v=45"></script>
+    <script src="js/workflows/flow_markers.js?v=51"></script>
     <script src="js/workflows/flow_chyrons.js?v=41"></script>
     <script src="js/workflows/flow_graphics.js?v=22"></script>
-    <script src="js/workflows/flow_mainButton.js?v=19"></script>
-    <script src="js/workflows/flow_cut.js?v=15"></script>
+    <script src="js/workflows/flow_mainButton.js?v=24"></script>
+    <script src="js/workflows/flow_cut.js?v=18"></script>
     <script src="js/workflows/flow_retols.js?v=6"></script>
     <script src="js/workflows/flow_srt.js?v=8"></script>
     <script src="js/workflows/flow_render.js?v=23"></script>
@@ -258,6 +261,6 @@
 <script src="js/workflows/flow_mapa.js?v=18"></script>
     <script src="js/core/project_registry.js?v=5"></script>
     <script src="js/editor/srt_editor.js?v=71"></script>
-    <script src="js/main.js?v=70"></script>
+    <script src="js/main.js?v=72"></script>
 </body>
 </html>

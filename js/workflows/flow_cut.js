@@ -28,8 +28,10 @@
          *   - OUT es re-aplica: newOut = oldOut - diff
          *   - Els marcadors es recol·loquen via get/clear/set existents
          */
-        runCutIn: async function () {
+        runCutIn: async function (ev) {
             try {
+                // (2026-09-25) Ctrl+clic = forçar (per si l'operador vol tallar molta capçalera a posta)
+                const force = !!(ev && (ev.ctrlKey || ev.metaKey));
                 const config = FASTPASS_UI.Config.get();
                 const elProg = document.getElementById('programa').value;
                 const elBloc = document.getElementById('bloc').value;
@@ -57,12 +59,31 @@
                     return;
                 }
                 log(`📐 [FLOW-CUT] Punt de tall (CTI): ${cutTime.toFixed(2)}s`);
+                const _tIN = Date.now();
 
                 const clip = await getClipsLogic().at(T_MP4, cutTime, "video");
                 if (!clip) {
                     getUtils().status("No hi ha clip al punt de tall", "error");
                     return;
                 }
+
+                // ═══ (2026-09-25) GUARDA ANTI-DESASTRE ═══════════════════════════════════
+                // Aquest workflow retalla la CAPÇALERA del bloc fins al CTI. Si el cabezal no
+                // és on l'operador creu, es menjava el bloc en SILENCI: TNC V2 2026-09-25 amb
+                // CTI=113.52s → inPoint 10s→123.52s i el material de 254s→120.92s, deixant tots
+                // els marcadors OnAir fora de lloc (04 a 125.00s amb material fins a 120.92s).
+                // Ara: si el retall de capçalera és gran, S'AVISA i NO es retalla (Ctrl = forçar).
+                const _inPtAbans = (clip && isFinite(Number(clip.inPoint))) ? Number(clip.inPoint) : null;
+                const MAX_HEAD_TRIM_SEC = 30;
+                const _headTrim = cutTime - (clip.start || 0);
+                if (_headTrim > MAX_HEAD_TRIM_SEC) {
+                    // (2026-09-25b) AVÍS, NO BLOCATGE: l'operador mana. Es registra ben fort
+                    // quanta capçalera es retalla i es deixa fer (abans es cancel·lava i el botó
+                    // IN semblava espatllat ✗).
+                    log('⚠️ [IN·AVÍS] Es retallaran ' + _headTrim.toFixed(2) + 's de capçalera del bloc (inPoint ' + (_inPtAbans !== null ? _inPtAbans.toFixed(2) : '?') + 's). Comprova que el cabezal és on vols: si no, desfés (Ctrl+Z) i mou-lo.', 'WARN');
+                    getUtils().status('⚠️ IN: retalla ' + _headTrim.toFixed(0) + 's de capçalera', 'warn');
+                }
+                log('✂️ [IN·CHECK] inPoint abans=' + (_inPtAbans !== null ? _inPtAbans.toFixed(2) : '?') + 's · es retallaran ' + _headTrim.toFixed(2) + 's de capçalera del bloc');
 
                 // ── 2. Capturar marcadors ABANS del ripple ──
                 var markersBefore = [];
@@ -93,7 +114,13 @@
 
                 // ── 3. Ripple trim: retalla el clip (vídeo + àudio) al CTI i ho desplaça tot a zero ──
                 log(`✂️ Aplicant Ripple Trim In a V${T_MP4} (CTI: ${cutTime.toFixed(2)}s)`);
+                // (2026-09-25) CRONÒMETRES: el ripple fa 6 crides al pont (inPoint+start+end de
+                // vídeo i d'àudio) i Premiere re-sincronitza el clip enllaçat → aquí es veurà
+                // on es van els segons (queixa d'usuari: "per què triga tant a aplicar l'IN?").
+                var _tRip = Date.now();
+                var _tPre = _tRip - _tIN;
                 await getClipsLogic().rippleIn(T_MP4, clip.index, cutTime, clip);
+                log(`⏱️ [IN·TIME] context previ=${_tPre}ms · rippleIn=${(Date.now() - _tRip)}ms`);
 
                 // ── 5. Re-aplicar OUT DESPRÉS del tall (Premiere pot re-anclar-lo al final del clip) ──
                 var rPost = await callJSX(`Timeline.range(0, ${newOut.toFixed(3)})`);

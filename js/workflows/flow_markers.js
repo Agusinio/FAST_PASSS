@@ -77,6 +77,23 @@
         _safePlaceByPrefixes: async function (placements, label) {
             try {
                 var safePlacements = JSON.parse(JSON.stringify(placements));
+                // (2026-09-25) CAPES: un marcador CONGELAT per una capa anterior no es toca mai
+                // (ni es mou ni es reescriu). Les capes posteriors l'han de fer servir de guia.
+                try {
+                    if (this._frozen && Object.keys(this._frozen).length) {
+                        var restants = [];
+                        for (var fz = 0; fz < safePlacements.length; fz++) {
+                            var keyFz = String(safePlacements[fz].prefix || '').toLowerCase();
+                            if (this._frozen[keyFz] === true) {
+                                log('   🔒 ' + safePlacements[fz].prefix + ': congelat per una capa anterior → no es mou');
+                            } else { restants.push(safePlacements[fz]); }
+                        }
+                        if (restants.length !== safePlacements.length) {
+                            log('   🔒 [' + label + '] ' + (safePlacements.length - restants.length) + ' marcador(s) congelat(s) omesos');
+                        }
+                        safePlacements = restants;
+                    }
+                } catch (eFz) { }
                 for (var sp = 0; sp < safePlacements.length; sp++) {
                     if (safePlacements[sp].comment) {
                         safePlacements[sp].comment = safePlacements[sp].comment.replace(/'/g, '');
@@ -149,6 +166,11 @@
         // ═══════════════════════════════════════════════════════════════
         _getColorIdx: function (line) {
             if (line.agrupacio) return 6;
+            // (2026-09-24) ELS ÍTEMS GRÀFICS (P2, GF, TE, ft…) SÓN SEMPRE GROCS (4): són gràfics
+            // de l'escaleta, no "no agrupats". ABANS, si portaven durada > 0 queien al color 1
+            // (VERMELL) i podien ser descartats pel filtre de vermells (queixa d'usuari
+            // 2026-09-24: "Google hauria de ser marker groc (gràfic)").
+            if (line.num && this._isGraphicByNum(line.num)) return 4;
             var dStr = line.durada || line.duradaOnAir || '0:00';
             var parts = dStr.split(':').map(Number);
             var dSec = 0;
@@ -306,8 +328,22 @@
                     var _isExtractedAnc = _clipNameAnc.toUpperCase().indexOf('_CLIP') !== -1;
                     var _manifestInPointAnc = (manifest.ref && manifest.ref.tlBlockInPointSec !== undefined && manifest.ref.tlBlockInPointSec !== null) ? Number(manifest.ref.tlBlockInPointSec) : null;
                     if (_isExtractedAnc && isFinite(_manifestInPointAnc) && _manifestInPointAnc > 0) {
-                        offsetAnchor = _manifestInPointAnc;
-                        offsetAnchorFont = 'ref del bloc (clip extret "' + _clipNameAnc + '")';
+                        // (2026-09-25) FIX B — IN REAL vs IN ESPERAT. FIX A (2026-09-24) assumia que
+                        // si el clip de V1 és l'extret, el seu inPoint és soroll (±2s) i mana el
+                        // manifest. Però si l'insert NO ha respectat el bounds (TNC V2 2026-09-25:
+                        // inPoint real=123.52s vs refBloc=20.00s → Δ=103.52s), el material del
+                        // timeline és un altre i TOTS els marcadors OnAir cauen 103s a la dreta
+                        // (04 → 125.00s amb material fins a 120.92s). Regla: si la diferència és
+                        // gran, MANA EL CLIP REAL i s'avisa fort.
+                        var _tolInAnc = 1.0;
+                        if (isFinite(clipInPoint) && Math.abs(clipInPoint - _manifestInPointAnc) > _tolInAnc) {
+                            offsetAnchor = clipInPoint;
+                            offsetAnchorFont = 'inPoint REAL del clip (' + Number(clipInPoint).toFixed(3) + 's) ≠ refBloc ' + Number(_manifestInPointAnc).toFixed(3) + 's';
+                            log('🚨 [ANCORATGE·FIX-B] L\'insert NO ha respectat el bounds: inPoint real=' + Number(clipInPoint).toFixed(3) + 's vs esperat=' + Number(_manifestInPointAnc).toFixed(3) + 's (Δ=' + (clipInPoint - _manifestInPointAnc).toFixed(2) + 's) → manen les dades REALS del clip; els marcadors s\'alineen amb el material que hi ha a la timeline. Revisa l\'insert/OUT.', 'WARN');
+                        } else {
+                            offsetAnchor = _manifestInPointAnc;
+                            offsetAnchorFont = 'ref del bloc (clip extret "' + _clipNameAnc + '")';
+                        }
                     } else {
                         offsetAnchor = clipInPoint;
                         offsetAnchorFont = 'inPoint del clip' + (_clipNameAnc ? ' ("' + _clipNameAnc + '")' : '');
@@ -646,35 +682,17 @@
                 for (var fi = 0; fi < names.length; fi++) {
                     if (names[fi].indexOf(expectedPrefix) === 0 && names[fi].indexOf('.MP4') !== -1) { foundClip = names[fi]; break; }
                 }
+                // (2026-09-24d) SEPARACIÓ DE CAPES (petició d'usuari): la capa de MARCADORS no
+                // ha d'ESCRIURE mai el manifest (ref/IN/OUT) — això és territori dels BOUNDS i del
+                // flux de creació (EXTRACT). ABANS aquesta funció reescrivia ref.worldSecMediaStart
+                // / tlBlockInPointSec / mp4ExpandedInPoint / mp4Duration i, de retruc, desvirtuava
+                // el recorte i l'extracció del clip. ARA només LLEGEIX i AVISA.
                 if (!foundClip) {
-                    log('⚠️ [PREP-ANCORATGE] El manifest NO està en base del clip extret i no trobo el clip del bloc (' + expectedPrefix + '*.mp4) a ' + folder + ' → prem CREAR/ACTUALITZAR (fase EXTRACT) abans de col·locar marcadors, si no cauran fora del material.', 'ERROR');
+                    log('⚠️ [PREP-ANCORATGE] El manifest NO està en base del clip extret i no trobo el clip del bloc (' + expectedPrefix + '*.mp4) a ' + folder + ' → prem CREAR/ACTUALITZAR (fase EXTRACT) abans de col·locar marcadors.', 'ERROR');
                     return false;
                 }
-
-                // Recalcular el ref en la base del clip extret (mateixa fórmula que flow_mainButton → EXTRACT)
-                const h = (ctx.config.general && isFinite(Number(ctx.config.general.handles))) ? Number(ctx.config.general.handles) : 20;
-                const endRef = Number(ref.worldBlockEndSec);
-                const span = (isFinite(anchorRef) && isFinite(endRef) && (endRef - anchorRef) > 0) ? (endRef - anchorRef) : null;
-                const newRef = {
-                    worldSecMediaStart: anchorRef - h,
-                    mp4ExpandedInPoint: h,
-                    tlBlockInPointSec: h,
-                    mp4SweetInPointRaw: h
-                };
-                if (span !== null) {
-                    newRef.mp4ExpandedOutPoint = span + 2 * h;
-                    newRef.mp4Duration = span + 2 * h;
-                }
-                await MF.save(ctx, {
-                    ref: newRef,
-                    extractedClip: {
-                        name: foundClip,
-                        isExtracted: true,
-                        extractedWorldSecMediaStart: anchorRef - h
-                    }
-                });
-                log('🧭 [PREP-ANCORATGE] manifest.ref recalculat en base del CLIP EXTRET: worldSecMediaStart=' + newRef.worldSecMediaStart.toFixed(2) + 's · tlBlockInPointSec=' + h.toFixed(2) + 's · handle=' + h + 's · clip=' + foundClip);
-                return true;
+                log('⚠️ [PREP-ANCORATGE] El manifest no està en base del clip extret (worldSecMediaStart=' + wms.toFixed(2) + 's vs refBloc=' + tbp.toFixed(2) + 's) i el clip del bloc ja existeix (' + foundClip + '). Els MARCADORS no el modifiquen: passa per CREAR/ACTUALITZAR (EXTRACT) perquè els BOUNDS el refacin. Continuant amb l\'ancoratge que hi hagi.', 'WARN');
+                return false;
             } catch (ePrep) {
                 log('⚠️ [PREP-ANCORATGE] ' + ePrep.message, 'WARN');
                 return false;
@@ -1413,7 +1431,12 @@
                 // frame des del TC és impossible). Si xoca amb un altre, es mou l'ALTRE.
                 var esOnAir = onAirByNum[cur.prefix] === true;
                 var comparteix = (anterior !== null) && (Math.abs(cur.time - anterior.time) <= 0.20);
-                var protegit = esOnAir || (!comparteix && ((cur.time <= 0.15) || (this._isOnCut(cur.time, clips) !== null)));
+                // (2026-09-25) FIX 00:00: el marcador d'inici de bloc és IMMUTABLE SEMPRE, també
+                // quan comparteix punt amb un altre (cas 04 P2-2 + 04i: la passa de separació movia
+                // el d'inici ✗). També són intocables els marcadors CONGELATS per una capa anterior.
+                var esInici = (cur.time <= 0.15) || (cur.prefix === this._iniciPrefix) ||
+                    (this._frozen && this._frozen[String(cur.prefix).toLowerCase()] === true);
+                var protegit = esOnAir || esInici || (!comparteix && (this._isOnCut(cur.time, clips) !== null));
                 if (anterior !== null && cur.time < anterior.time + GAP) {
                     if (!protegit) {
                         var minT = anterior.time + GAP;
@@ -1527,6 +1550,17 @@
                 if (onAirByNum[pfx]) continue;                 // el vídeo mana, no es toca
                 var tk = Number(mks[k].time);
                 if (!isFinite(tk)) continue;
+                // (2026-09-24c) NO RE-ANCORAR ELS DONAPAS: el seu lloc NO és una deducció dèbil —
+                // ve de la CADENA DURA (OnAir de l'ítem anterior + durada, "Tier0-IN
+                // cross-agrupació") i és correcte. PAS 2 els movia a un break qualsevol i quedaven
+                // lluny del seu lloc real (queixa d'usuari 2026-09-24). Es detecta pel sufix del
+                // num ("dp" → 01dp) i pel títol ("donapas"/"dona pas").
+                var numLow = String(pfx).toLowerCase();
+                var titolLow = String(mks[k].comments || '').toLowerCase();
+                if (numLow.indexOf('dp') === numLow.length - 2 || titolLow.indexOf('donapas') !== -1 || titolLow.indexOf('dona pas') !== -1) {
+                    log('   ⏭️ [ASIG] ' + pfx + ': DONAPAS (cadena dura amb l\'OnAir anterior) → no es re-ancora');
+                    continue;
+                }
                 // (2026-09-24) EL MARCADOR D'INICI (00:00) ÉS IMMUTABLE — "el FARO DE LOS FAROS":
                 // l'usuari ja ha col·locat el corte d'IN a mà i TOTES les posicions es calculen
                 // respecte a ell. Cap fase (ni aquesta) no el pot moure: si entrava a la llista
@@ -1568,7 +1602,148 @@
         },
 
         /**
-         * _chooseSnapTarget: Tria a quin punt s'ha d'ancorar un marcador.
+         * capa1_onAir: CAPA 1 — OnAir DURO.
+         * - Calcula la DENSITAT de cortes (aquí, una vegada per passada → transversal).
+         * - Calcula el mapa de SILENCIS (transversal).
+         * - Per a cada ítem amb OnAir REAL: clau = OnAir → consens SILENCI → CORTE a prop del silenci.
+         * - Valida contra el material real de V1 (avisa si cau fora).
+         * - Publica el Δ de la capa 1 (definitiva − OnAir) i CONGELA els seus marcadors.
+         */
+        capa1_onAir: async function () {
+            log('🟩 [CAPA1] OnAir DURO (silenci → corte → OnAir)');
+            this._frozen = {};   // (re)execució neta de la capa 1
+            const ctxData = await getAssemblyContext().loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [CAPA1] loadAssemblyContext ha fallat.', 'ERROR'); return; }
+            const { manifest, reader, lines, clips } = ctxData;
+            const classData = this._classifyItems(lines);
+            const structural = classData.structuralItems || [];
+
+            // 1) DENSITAT (transversal)
+            try {
+                this._densityCache = this._calcDensityFootprint(clips);
+                const br = (this._densityCache && this._densityCache.breaks) ? this._densityCache.breaks : [];
+                log('🟩 [CAPA1] Densitat: ' + br.length + ' ruptures' + (br.length ? ' → ' + br.map(function (b) { return b.time.toFixed(2) + 's'; }).join(', ') : ''));
+            } catch (eD) { log('⚠️ [CAPA1] densitat: ' + eD.message, 'WARN'); }
+
+            // 2) SILENCIS (transversal)
+            let sil = [];
+            try {
+                const wg = window.FASTPASS_UI.Logic.WaveformGenerator;
+                if (wg && wg.silences) sil = (await wg.silences()) || [];
+            } catch (eS) { log('⚠️ [CAPA1] silencis: ' + eS.message, 'WARN'); }
+
+            // 3) ANCORATGE + consens
+            const anchors = this._calcTemporalAnchors(manifest, reader, structural, clips);
+            if (!anchors) { log('⚠️ [CAPA1] ancoratge ha fallat.', 'ERROR'); return; }
+            const matStart = (clips && clips.length) ? Number(clips[0].start) : 0;
+            const matEnd = (clips && clips.length) ? Number(clips[clips.length - 1].end) : 0;
+            const placements = [];
+            this._deltaCapa1 = 0; this._deltaN = 0;
+            for (let i = 0; i < structural.length; i++) {
+                const line = structural[i];
+                const oa = line.horaEntradaOnAir;
+                if (!oa || oa === '00:00:00' || String(oa).trim() === '') continue;   // només OnAir DUR
+                const tc = reader.tcToSeconds(oa);
+                if (tc === null || tc === undefined) continue;
+                const nail = anchors.anchorEfTimelineSec + (tc - anchors.anchorEfectiva);
+                let pos = nail, motiu = 'OnAir';
+                const silCerca = this._silencioMasCercano(sil, pos, 3.0);
+                if (silCerca) {
+                    const corte = this._corteCercaDe(clips, silCerca.end, 1.0);
+                    if (corte !== null) { pos = corte; motiu = 'silenci+corte'; }
+                    else { pos = silCerca.end; motiu = 'silenci'; }
+                }
+                if (matEnd > 0 && (pos < matStart - 0.05 || pos > matEnd + 0.05)) {
+                    log('⚠️ [CAPA1] ' + (line.num || '?') + ': ' + pos.toFixed(2) + 's FORA del material (' + matStart.toFixed(2) + '→' + matEnd.toFixed(2) + 's) → revisa OUT/bounds', 'WARN');
+                }
+                const d = pos - nail;
+                this._deltaCapa1 = (this._deltaCapa1 * this._deltaN + d) / (this._deltaN + 1); this._deltaN++;
+                log('🟩 [CAPA1] ' + (line.num || '?') + ': OnAir=' + nail.toFixed(2) + 's → ' + pos.toFixed(2) + 's (' + motiu + ')');
+                placements.push({
+                    prefix: String(line.num || '').trim(), timeSec: parseFloat(pos.toFixed(2)),
+                    comment: (line.num ? line.num + ' - ' : '') + String(line.titol || '').substring(0, 60),
+                    colorIdx: this._getColorIdx(line)
+                });
+            }
+            if (placements.length) {
+                const res = await this._safePlaceByPrefixes(placements, 'CAPA1·OnAir');
+                log('🟩 [CAPA1] aplicat → ' + JSON.stringify(res));
+            }
+            this._frozen = {};
+            for (let f = 0; f < placements.length; f++) this._frozen[placements[f].prefix.toLowerCase()] = true;
+            if (this._iniciPrefix) this._frozen[String(this._iniciPrefix).toLowerCase()] = true;
+            log('🟩 [CAPA1] Δ capa1 = ' + this._deltaCapa1.toFixed(3) + 's (' + this._deltaN + ' marcadors) · 🔒 congelats: ' + Object.keys(this._frozen).join(', '));
+        },
+
+        /**
+         * _silencioMasCercano: silenci més proper a `t` (segons de timeline) dins `maxDist`.
+         * @returns {Object|null} {start,end,dur} o null
+         */
+        _silencioMasCercano: function (sil, t, maxDist) {
+            var arr = sil || [], best = null, bd = 1e9;
+            for (var i = 0; i < arr.length; i++) {
+                var s = arr[i];
+                if (!s || !isFinite(s.start) || !isFinite(s.end)) continue;
+                var d = Math.min(Math.abs(s.start - t), Math.abs(s.end - t));
+                if (d <= maxDist && d < bd) { bd = d; best = s; }
+            }
+            return best;
+        },
+
+        /**
+         * _corteCercaDe: corte real (start/end d'un clip de V1) més proper a `t` dins `maxDist`.
+         * @returns {number|null} segons de timeline
+         */
+        _corteCercaDe: function (clips, t, maxDist) {
+            var arr = clips || [], best = null, bd = 1e9;
+            for (var i = 0; i < arr.length; i++) {
+                var cs = Number(arr[i] && arr[i].start), ce = Number(arr[i] && arr[i].end);
+                if (isFinite(cs) && Math.abs(cs - t) <= maxDist && Math.abs(cs - t) < bd) { bd = Math.abs(cs - t); best = cs; }
+                if (isFinite(ce) && Math.abs(ce - t) <= maxDist && Math.abs(ce - t) < bd) { bd = Math.abs(ce - t); best = ce; }
+            }
+            return best;
+        },
+
+        /**
+         * sil_dump: Botó TEST «SIL». Només bolca el mapa de SILENCIS del bloc al log
+         * (no col·loca res). Serveix per ajustar llindar/durada mínima amb dades reals.
+         */
+        sil_dump: async function () {
+            var wg = window.FASTPASS_UI.Logic.WaveformGenerator;
+            if (!wg || !wg.silences) { log('⚠️ [SIL] WaveformGenerator.silences no disponible', 'WARN'); return; }
+            var list = await wg.silences();
+            log('🤫 [SIL] ' + (list ? list.length : 0) + ' trams de silenci (base media del clip del bloc)');
+        },
+
+        /**
+         * capa0_prep: CAPA 0 del pla de marcadors per capes.
+         * Setup (ensureExtractedRef —només lectura— + loadAssemblyContext + _classifyItems) i
+         * col·locació del MARCADOR D'INICI (00:00) IMMUTABLE («faro de faros»).
+         */
+        capa0_prep: async function () {
+            log('🟦 [CAPA0] Setup + classificació + marcador d\'inici (00:00)');
+            try { await this.ensureExtractedRef(window.FASTPASS_UI.State); } catch (e0) { }
+            const ctxData = await getAssemblyContext().loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [CAPA0] loadAssemblyContext ha fallat.', 'ERROR'); return null; }
+            const { lines } = ctxData;
+            const classData = this._classifyItems(lines);
+            log('🟦 [CAPA0] Items: ' + ((classData.structuralItems || []).length) + ' estructurals · ' +
+                ((classData.graphicItems || []).length) + ' gràfics · ' + ((classData.farosItems || []).length) + ' amb OnAir');
+            const first = (classData.structuralItems && classData.structuralItems[0]) ? classData.structuralItems[0] : null;
+            if (first) {
+                const pfx = String(first.num || '').trim();
+                const comment = (first.num ? first.num + ' - ' : '') + String(first.titol || '').substring(0, 60);
+                await this._safePlaceByPrefixes([{ prefix: pfx, timeSec: 0, comment: comment, colorIdx: this._getColorIdx(first) }], 'CAPA0·inici');
+                this._iniciPrefix = pfx;
+                log('🟦 [CAPA0] 🔒 Marcador d\'inici: ' + pfx + ' a 00:00 (IMMUTABLE)');
+            } else {
+                log('⚠️ [CAPA0] Sense ítem estructural per fer de marcador d\'inici', 'WARN');
+            }
+            return ctxData;
+        },
+
+        /**
+         * chooseSnapTarget: Tria a quin punt s'ha d'ancorar un marcador.
          *  - FARO (ítem amb OnAir real): ruptura de densitat (prioritària) o tall real
          *    més proper, dins de la finestra curta (±0,6 s).
          *  - DEDUÏT (ítem sense OnAir → F2): s'ancora al TALL QUE OBRE el seu ítem

@@ -858,8 +858,19 @@
         // El IN ha de ser el punt més aviat fiable → guanya el mínim.
         var structuralItemsInBlock = [];
         for (var si = 0; si < blockLines.length; si++) {
-            if (this.isItemEstructural(blockLines[si])) {
+            if (!this.isItemEstructural(blockLines[si])) continue;
+            // (2026-09-25) Un ítem amb durada 0:00 NO aporta temps al bloc → la seva hora no
+            // pot definir l'IN. TNC V2 2026-09-25: "04 P2-2" (durada 0:00, hora basura 14:00:xx)
+            // guanyava el candidat i arrossegava el bloc 103 s enrere, mentre la INTRO "04i"
+            // (durada 0:20, hora prevista 14:02:31 ✓ = final del tema anterior 14:01:02+1:29 ✓)
+            // quedava descartada.
+            var _durItem = this.parseDurada(blockLines[si].durada || blockLines[si].duradaOnAir);
+            var _teHora = (blockLines[si].horaEntradaOnAir && String(blockLines[si].horaEntradaOnAir).trim() !== '' && String(blockLines[si].horaEntradaOnAir) !== '00:00:00') ||
+                          (blockLines[si].horaEntradaPrevista && String(blockLines[si].horaEntradaPrevista).trim() !== '');
+            if (_durItem > 0.5 || !_teHora) {
                 structuralItemsInBlock.push(blockLines[si]);
+            } else {
+                log('   \u2139\uFE0F Tier1-IN: s\'omet "' + blockLines[si].num + '" (durada ' + (_durItem || 0).toFixed(2) + 's, sense hora real) → no pot definir l\'inici del bloc');
             }
         }
 
@@ -868,19 +879,39 @@
 
         if (structuralItemsInBlock.length > 0) {
             var firstItem = structuralItemsInBlock[0];
-            tier1InCandidate = this.getItemEntradaSec(firstItem, allLines, data);
-            if (tier1InCandidate !== null) {
-                tier1InLabel = 'primer estructural "' + firstItem.num + '" entrada';
-            } else {
-                var lastResort = structuralItemsInBlock[structuralItemsInBlock.length - 1];
-                tier1InCandidate = this.getItemEntradaSec(lastResort, allLines, data);
+            // ═══ (2026-09-25) REGLA D'USUARI: el IN del bloc surt de l'OnAir del PRIMER ÍTEM
+            // EMÈS (dada REAL d'emissió), no del primer estructural si aquest no té hora.
+            // TNC V2 2026-09-25: el primer estructural era "04 P2-2" (intro, SENSE OnAir) → el
+            // candidat sortia de la prevista/deducció = 14:00:48 i el clip s'extreia amb ~103s
+            // del tema anterior a la capçalera (error primigeni). El primer EMÈS era "04"
+            // (14:02:53) → IN real = 14:02:53 − handle.
+            // (2026-09-25) REVERTIT: el candidat Tier1 torna a ser el PRIMER ÍTEM ESTRUCTURAL,
+            // incloent-hi la INTRO (és part del bloc: el seu inici ha de quedar dins del clip i
+            // coincidir amb el corchete). El que calia no era saltar-se la intro, sinó que el seu
+            // inici no vingués d'una PREVISTA errònia → això ho garanteix el PISO del final de
+            // l'ítem anterior (IN·FLOOR, amb el seu OnAir + duradaOnAir, mecanisme ja existent).
+            var emittedItem = null;
+            if (tier1InCandidate === null) {
+                // Fallback (comportament històric): primer estructural → si no té hora, el darrer.
+                tier1InCandidate = this.getItemEntradaSec(firstItem, allLines, data);
                 if (tier1InCandidate !== null) {
-                    tier1InLabel = 'last-resort "' + lastResort.num + '" entrada';
+                    tier1InLabel = 'primer estructural "' + firstItem.num + '" entrada';
+                } else {
+                    var lastResort = structuralItemsInBlock[structuralItemsInBlock.length - 1];
+                    tier1InCandidate = this.getItemEntradaSec(lastResort, allLines, data);
+                    if (tier1InCandidate !== null) {
+                        tier1InLabel = 'last-resort "' + lastResort.num + '" entrada';
+                    }
                 }
             }
         }
 
         // COMPETÈNCIA Tier0 ↔ Tier1: guanya el mínim (IN més aviat)
+        // (2026-09-25) EXCEPCIÓ CLAU: si el candidat Tier1 ve d'un OnAir REAL d'emissió
+        // (`emittedItem`), MANA SEMPRE, encara que sigui MÉS TARD que Tier0. El criteri
+        // "guanya el més aviat" premiava precisament les previstes/deduccions errònies:
+        // TNC V2 2026-09-25 → prevista 14:00:48 vs OnAir real de "04" 14:02:53 = 103s de
+        // tema anterior a la capçalera del clip (error primigeni).
         if (InTier === 0 && tier1InCandidate !== null) {
             // Sense Tier0 → Tier1 guanya per defecte
             worldBlockStartSec = tier1InCandidate;
@@ -888,7 +919,7 @@
             worldBlockAnchorSec = tier1InCandidate;
             log('   \u2705 Tier1-IN: ' + tier1InLabel + ' -> ' + worldBlockStartSec.toFixed(2) + 's');
         } else if (tier1InCandidate !== null && worldBlockStartSec !== null) {
-            if (tier1InCandidate < worldBlockStartSec) {
+            if (tier1InCandidate !== null && worldBlockStartSec !== null && tier1InCandidate < worldBlockStartSec) {
                 log('   \uD83D\uDFE1 Tier1-COMPETE: ' + tier1InLabel + '=' + tier1InCandidate.toFixed(2) + 's < Tier0-IN=' + worldBlockStartSec.toFixed(2) + 's. Guanya Tier1 (més aviat).');
                 worldBlockStartSec = tier1InCandidate;
                 InTier = 1;
@@ -914,6 +945,30 @@
                 return null;
             }
         }
+
+        // ═══ (2026-09-25) PISO DEL FINAL DE L'ÍTEM ANTERIOR (mecanisme duradaOnAir) ═══════════
+        // L'inici del bloc NO pot ser ANTERIOR a l'acabament de l'ítem emès anterior
+        // (horaEntradaOnAir + duradaOnAir, dada que ja existeix a l'escaleta). Abans, si la
+        // prevista de la INTRO era vella, el bloc s'endarreria ~2 min i el clip s'extreia amb el
+        // tema anterior a la capçalera (TNC V2 2026-09-25: prevista 14:00:48 vs final real del
+        // tema previ 14:02:31 → 103 s). Aquest piso fa que la intro quedi DINS del clip i que el
+        // corchete IN de la seqüència coincideixi amb el seu inici.
+        try {
+            var _prevEndSec = null, _prevEndNum = '';
+            for (var pv = 0; pv < allOnAirVideos.length; pv++) {
+                var _pv = allOnAirVideos[pv];
+                if (!_pv || !_pv.item) continue;
+                var _pvEnd = Number(_pv.endSec);
+                if (!isFinite(_pvEnd)) continue;
+                if (_pvEnd <= worldBlockStartSec + 0.5) continue;          // només els que acaben DESPRÉS de l'inici calculat
+                if (_prevEndSec === null || _pvEnd < _prevEndSec) { _prevEndSec = _pvEnd; _prevEndNum = String(_pv.item.num || ''); }
+            }
+            if (_prevEndSec !== null && _prevEndSec > worldBlockStartSec + 1.0 && (_prevEndSec - worldBlockStartSec) < 600) {
+                log('   \u26A0\uFE0F [IN\u00B7FLOOR] Inici calculat ' + worldBlockStartSec.toFixed(2) + 's és ANTERIOR al final de l\'ítem anterior "' + _prevEndNum + '" (' + _prevEndSec.toFixed(2) + 's = OnAir + duradaOnAir) → s\'ajusta a ' + _prevEndSec.toFixed(2) + 's (la intro queda dins del bloc)');
+                worldBlockStartSec = _prevEndSec;
+                worldBlockAnchorSec = _prevEndSec;
+            }
+        } catch (eFloor) { /* noop */ }
 
         // (2026-09-17c) PISO de columna base: si el sanejat ha anul·lat hores del bloc,
         // l'inici pot quedar massa enrere. El forat de la columna base marca el tema.

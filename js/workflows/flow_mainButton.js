@@ -823,6 +823,84 @@
                                                         }
                                                     });
                                                     log(`✅ [EXTRACT] Manifest actualitzat amb ref del clip extret: worldSecMediaStart=${fbWorldSecMediaStart.toFixed(2)}s, mp4ExpandedInPoint=${clipExpandedInPoint.toFixed(2)}s`);
+
+                                                    // ═══ (2026-09-25) SILENCIS A LA IMPORTACIÓ ═══════════════════
+                                                    // Dada TRANSVERSAL: els silencis són l'única evidència FÍSICA del
+                                                    // contingut (la escaleta pot anar 2 min desviada, com s'ha vist).
+                                                    // Es calculen AQUÍ, una sola vegada, sobre l'àudio del CLIP EXTRET
+                                                    // (.bin 480Hz) i es guarden al manifest perquè els facin servir:
+                                                    //   · el punt de tall IN i OUT (validar/ajustar a fronteres reals)
+                                                    //   · totes les capes de marcadors (CAPA 1 i següents)
+                                                    // Temps en MEDIA del clip extret (base = clipPath extret).
+                                                    try {
+                                                        const _wg = window.FASTPASS_UI.Logic.WaveformGenerator;
+                                                        if (_wg && _wg.silences) {
+                                                            const _sil = (await _wg.silences()) || [];
+                                                            if (_sil.length) {
+                                                                await FASTPASS_UI.SessionManifest.save(ctx, {
+                                                                    ref: {
+                                                                        silencesCount: _sil.length,
+                                                                        silencesJson: JSON.stringify(_sil),
+                                                                        silencesSource: 'extractedClip',
+                                                                        silencesThreshold: 0.05,
+                                                                        silencesMinDur: 0.4
+                                                                    }
+                                                                });
+                                                                log(`🤫 [SILENCI·IMPORT] ${_sil.length} trams guardats al manifest: ` + _sil.map(function (s) { return s.start.toFixed(2) + '→' + s.end.toFixed(2) + '(' + s.dur.toFixed(2) + 's)'; }).join(', '));
+                                                            } else {
+                                                                log('🤫 [SILENCI·IMPORT] Sense trams (o .bin encara no generat) → es calcularà més tard.');
+                                                            }
+                                                        }
+                                                    } catch (eSil) {
+                                                        log(`⚠️ [SILENCI·IMPORT] No s'han pogut calcular els silencis: ${eSil.message}`);
+                                                    }
+
+                                                    // ═══ (2026-09-25) ANCLA D'AUDIO DEL INICI DEL BLOC ═══════════════
+                                                    // La escaleta NO pot dir on comença el bloc (no té el tema anterior:
+                                                    // prevista 14:00:48 vs real 14:02:31 = 103 s d'error). L'ÀUDIO sí:
+                                                    // la junta entre el tema anterior i la intro és el PRIMER silenci
+                                                    // (≥0,4s) amb un burst previ ≥30 s (TNC V2 2026-09-25: 124.10→124.60
+                                                    // amb burst de 124 s ✓ vs el 2n silenci a 127.00 amb burst de 2,4 s ✗).
+                                                    // Regla: IN del bloc = silenci.start − 0,5 s (VALIDADA amb el tall
+                                                    // manual de l'operador: 123,5 ✓).
+                                                    try {
+                                                        const _wg2 = window.FASTPASS_UI.Logic.WaveformGenerator;
+                                                        const _ref2 = manifest && manifest.ref ? manifest.ref : null;
+                                                        const _base2 = _ref2 ? Number(_ref2.worldSecMediaStart) : NaN;
+                                                        if (_wg2 && _wg2.silences && isFinite(_base2)) {
+                                                            const _sil2 = (await _wg2.silences()) || [];
+                                                            const _estSec = (bounds && bounds.ref && isFinite(Number(bounds.ref.worldBlockStartSec)))
+                                                                ? Number(bounds.ref.worldBlockStartSec)
+                                                                : NaN;
+                                                            const _estFile = isFinite(_estSec) ? (_estSec - _base2) : clipExpandedInPoint;
+                                                            let _junc = null;
+                                                            for (let _i = 0; _i < _sil2.length; _i++) {
+                                                                const _s = _sil2[_i];
+                                                                if (!_s || !(_s.dur >= 0.4)) continue;
+                                                                if (isFinite(_estFile) && Math.abs(_s.start - _estFile) > 300) continue;
+                                                                const _prevEnd = (_i > 0) ? Number(_sil2[_i - 1].end) : 0;
+                                                                if ((_s.start - _prevEnd) < 30) continue;   // burst previ suficient
+                                                                _junc = _s; break;
+                                                            }
+                                                            if (_junc) {
+                                                                const _newFileIn = Math.max(0, Number(_junc.start) - 0.5);
+                                                                log(`🎯 [IN·AUDIO] Junta tema anterior → intro: silenci ${Number(_junc.start).toFixed(2)}→${Number(_junc.end).toFixed(2)}s (dur ${Number(_junc.dur).toFixed(2)}s, burst previ ≥30s) · IN del bloc ${_estFile.toFixed(2)} → ${_newFileIn.toFixed(2)}s (dins el clip) · Δ=${(_newFileIn - _estFile).toFixed(2)}s`);
+                                                                // ═══ (2026-09-25) JERARQUIA DE FONTS (regla d'usuari) ═══════════════
+                                                                // 1r OnAir (emissió real) — 2n hora de l'ítem (prevista) — el SILENCI
+                                                                // només CONFIRMA bounds i markers: dins ±3 s → ✅ confirma; fora o
+                                                                // sense silenci → NEUTRE (no decideix mai). Mai al revés.
+                                                                if (Math.abs(_newFileIn - _estFile) <= 3.0) {
+                                                                    log(`✅ [IN·AUDIO] CONFIRMA l'IN de la escaleta (${_estFile.toFixed(2)}s): hi ha un tall d'àudio a ${_newFileIn.toFixed(2)}s (Δ=${(_newFileIn - _estFile).toFixed(2)}s).`);
+                                                                } else {
+                                                                    log(`ℹ️ [IN·AUDIO] Neutre: la junta d'àudio (${_newFileIn.toFixed(2)}s) no és a prop de l'IN (${_estFile.toFixed(2)}s, Δ=${(_newFileIn - _estFile).toFixed(2)}s). El silenci NO decideix (la INTRO no té silenci: música/sting continu) → mana l'hora de l'escaleta/OnAir. Dada desada per als marcadors (CAPA 1).`);
+                                                                }
+                                                            } else {
+                                                                log('⚠️ [IN·AUDIO] Sense junta d\'àudio fiable al .bin → es manté l\'IN de la escaleta (revisa el tall a mà).');
+                                                            }
+                                                        }
+                                                    } catch (eInAud) {
+                                                        log(`⚠️ [IN·AUDIO] ${eInAud.message}`);
+                                                    }
                                                 } catch(eManifest) {
                                                     log(`⚠️ [EXTRACT] Error guardant dades del clip al manifest: ${eManifest.message}`);
                                                 }
@@ -1013,9 +1091,13 @@
                     // Usem start.seconds (posició al timeline), NO inPoint.seconds (relatiu al source)
                     const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
                     let tlClipStartSec = NaN;
+                    let _clipInPtReal = null;   // (2026-09-25) inPoint REAL del clip inserit
                     try {
                         const clipData = JSON.parse(clipDataRaw);
                         tlClipStartSec = clipData.start;
+                        if (clipData.inPoint !== undefined && clipData.inPoint !== null && isFinite(Number(clipData.inPoint))) {
+                            _clipInPtReal = Number(clipData.inPoint);
+                        }
                         log(`🔍 [LOG] Clips.get(1,0): start=${clipData.start}, inPoint=${clipData.inPoint}, end=${clipData.end}`);
                     } catch(e) {
                         log(`⚠️ Error parsejant clipData: ${clipDataRaw}`);
@@ -1031,7 +1113,18 @@
                         // offsetSec = tlClipStartSec - tlBlockInPointSec = 0 - mp4SweetInPointRaw
                         // ja reflecteix correctament la conversió source→timeline incloent l'offset
                         // (les marques de posicionament de Premiere es cancel·len amb l'offset aplicat al source).
-                        const tlBlockInPointSec = (manifest.ref?.tlBlockInPointSec ?? cleanFeedData.mp4SweetInPointRaw) + (ctx.config.tcOffset || 0);
+                        // ═══ (2026-09-25) FIX ARREL: el manifest ha de dir la VERITAT del clip ═══
+                        // `clipInOffset` (config) fa que el clip s'insereixi amb MENYS IN del
+                        // previst (TNC V2: IN real=10.00s vs manifest=20.00s) → 10s d'error
+                        // sistemàtic a TOTS els marcadors. Si el clip té un inPoint llegible,
+                        // mana AQUEST (és el que hi ha de debò a la línia de temps).
+                        const _tlBlockInPtPrevist = (manifest.ref?.tlBlockInPointSec ?? cleanFeedData.mp4SweetInPointRaw) + (ctx.config.tcOffset || 0);
+                        const tlBlockInPointSec = (_clipInPtReal !== null && Math.abs(_clipInPtReal - _tlBlockInPtPrevist) > 0.5)
+                            ? _clipInPtReal
+                            : _tlBlockInPtPrevist;
+                        if (_clipInPtReal !== null && Math.abs(_clipInPtReal - _tlBlockInPtPrevist) > 0.5) {
+                            log(`⚠️ [REF] IN del clip (${_clipInPtReal.toFixed(3)}s) ≠ previst (${_tlBlockInPtPrevist.toFixed(3)}s) → el manifest s'actualitza amb el REAL (clipInOffset=${(ctx.config.clipInOffset||0)}s). Els marcadors s'alinearan amb el material de la timeline.`);
+                        }
                         const offsetSec = tlClipStartSec - tlBlockInPointSec;
                         
                         log(`🔍 [LOG] CÀLCUL ref: tlClipStartSec=${tlClipStartSec.toFixed(4)}s - tlBlockInPointSec=${tlBlockInPointSec.toFixed(4)}s (inclou offset=${(ctx.config.tcOffset||0).toFixed(4)}s) = offsetSec=${offsetSec.toFixed(4)}s (mp4SweetInPoint=${cleanFeedData.mp4SweetInPoint.toFixed(4)}s, raw=${cleanFeedData.mp4SweetInPointRaw.toFixed(4)}s)`);

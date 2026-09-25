@@ -425,7 +425,7 @@ function applySliderLimits() {
         const btnNextClip = document.getElementById('btnNextClip');
         const btnKey = document.getElementById('btnKey');
 
-        if (btnIn) btnIn.addEventListener('click', function () { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn'); });
+        if (btnIn) btnIn.addEventListener('click', function (ev) { console.log('🔘 Botón IN clickeado'); callWorkflow('Cut', 'runCutIn', ev); });
         // (2026-09-24) TROSSEJA: fase 2 del pipeline OUT & GO (Cut.runScene), recuperada com a
         // botó TEST-ONLY per poder-la provar per separat.
         if (btnScene) btnScene.addEventListener('click', function () { console.log('🔘 Botón TROSSEJA clickeado'); callWorkflow('Cut', 'runScene'); });
@@ -587,6 +587,15 @@ function applySliderLimits() {
         // P2 foto, P2 MAPA, GF, TE…). Viu al grup MARCADORS (TEST) perquè en TREBALL aquesta
         // fase ja s'executa dins del pipeline OUT&GO (runFullPipelineOut).
         if (btnMarksF6GF) btnMarksF6GF.addEventListener('click', () => callWorkflow('Markers', 'placeGraphicMarkers'));
+
+// (2026-09-25) SISTEMA PER CAPES (TEST): SIL = mapa de silencis (només lectura) ·
+// C0 = capa 0 (setup + marcador d'inici immutable) · C1 = capa 1 (OnAir dur + densitat + Δ + congelat)
+const btnMarksSIL = document.getElementById('btnMarksSIL');
+const btnMarksC0 = document.getElementById('btnMarksC0');
+const btnMarksC1 = document.getElementById('btnMarksC1');
+if (btnMarksSIL) btnMarksSIL.addEventListener('click', () => callWorkflow('Markers', 'sil_dump'));
+if (btnMarksC0) btnMarksC0.addEventListener('click', () => callWorkflow('Markers', 'capa0_prep'));
+if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers', 'capa1_onAir'));
         // (2026-09-24) F6·Ordre: fase 9 del pipeline (Markers.enforceMarkerOrder). ABANS no
         // existia cap botó per a aquesta fase al grup MARCADORS: no es podia testejar a mà.
         if (btnMarksF6) btnMarksF6.addEventListener('click', () => callWorkflow('Markers', 'enforceMarkerOrder'));

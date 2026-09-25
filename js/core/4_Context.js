@@ -674,7 +674,17 @@
             };
             const sync = () => apply(ctrlDown && hovering);
 
-            btn.addEventListener('mouseenter', () => { hovering = true; sync(); });
+            btn.addEventListener('mouseenter', () => {
+                hovering = true;
+                // (2026-09-24) DEMANAR FOCUS al panell en entrar al botó MAIN: així els
+                // keydown/keyup de CONTROL arriben a la pàgina i el canvi a "AHIR" és IMMEDIAT,
+                // sense haver de moure el ratolí (queixa d'usuari 2026-09-24). Si Premiere té el
+                // focus i la petició no prospera, es manté el workaround del mousemove.
+                try { window.focus(); } catch (eF) { }
+                try { if (document.body && document.body.focus) document.body.focus(); } catch (eB) { }
+                try { getUtils().log('🖱 [FOCUS] mouseenter MAIN → hasFocus=' + (document.hasFocus ? document.hasFocus() : '?'), 'DEBUG'); } catch (eL) { }
+                sync();
+            });
             btn.addEventListener('mouseleave', () => { hovering = false; sync(); });
             // mousemove: detecta Ctrl encara que el focus no sigui al panell CEP
             btn.addEventListener('mousemove', (e) => { ctrlDown = !!e.ctrlKey || !!e.metaKey; sync(); });

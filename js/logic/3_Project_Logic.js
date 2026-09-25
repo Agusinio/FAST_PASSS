@@ -221,9 +221,43 @@
                         // el sistema calcula, així el clip s'insereix amb més marge per
                         // davant. Només MODE NORMAL. Config: Config.get().clipInOffset.
                         const clipInOffset = config.clipInOffset || 0;
-                        const mp4InPt  = (cleanFeedData.mp4ExpandedInPoint || 0) + globalOffset - clipInOffset;  // expanded (amb handle), AMB offset i ajust IN
-                        const mp4OutPt = (cleanFeedData.mp4ExpandedOutPoint || 0) + globalOffset;  // expanded (amb handle), AMB offset
+                        const zonaInOffset = config.zonaInOffset || 0;
+                        const handleSecs   = (config.general && config.general.handles) || config.handles || 20;
+                        // ═══ (2026-09-25) INVARIANT IN: clip.inPoint == corchete IN de la seqüència ═══
+                        // (queixa 2026-09-25: "el IN del clip està a 00:00 en lloc del corchete").
+                        // Amb el CLIP EXTRET, el contingut del bloc comença a file=handleSecs
+                        // (clipExpandedInPoint) → el clip ha de començar `handleSecs` MENYS el marge
+                        // que vulgui l'operador (zonaInOffset) DESPRÉS de l'inici del fitxer, i MAI
+                        // negatiu (clipInOffset restant-lo donava un IN negatiu → Premiere el
+                        // clampava a 00:00 i es perdia el handle de capçalera).
+                        const _fileIn  = (cleanFeedData.mp4ExpandedInPoint || 0);
+                        const _refIn   = (_fileIn > 0.5) ? _fileIn : handleSecs;
+                        const _rawInPt = _refIn + globalOffset - Math.max(clipInOffset, zonaInOffset);
+                        const mp4InPt  = Math.max(0.05, _rawInPt);
+                        let mp4OutPt = (cleanFeedData.mp4ExpandedOutPoint || 0) + globalOffset;  // expanded (amb handle), AMB offset
+                        // ═══ (2026-09-25) MAI MÉS ENLLÀ DE LA MEDIA REAL ══════════════════════════
+                        // El clip s'estirava fins a un OUT "planificat" que pot superar la durada
+                        // REAL del fitxer importat → cua amb ratlles (no hi ha media origen) i,
+                        // a més, el retrim fallava i l'IN quedava a 00:00. Es llegeix la durada
+                        // real de la media del clip (outPoint) i es clampa l'OUT.
+                        try {
+                            const _cRaw = await callJSX(`Clips.get(1, 0, 'video')`);
+                            const _c = JSON.parse(_cRaw || '{}');
+                            const _mediaDur = isFinite(Number(_c.outPoint)) ? Number(_c.outPoint) : null;
+                            if (_mediaDur !== null && _mediaDur > 0.5) {
+                                if (mp4OutPt > _mediaDur + 0.05) {
+                                    utils.log(`⚠️ [OUT·CLAMP] OUT planificat ${mp4OutPt.toFixed(2)}s > media real del clip ${_mediaDur.toFixed(2)}s → s'ajusta a ${_mediaDur.toFixed(2)}s (evita la cua sense media)`);
+                                    mp4OutPt = _mediaDur;
+                                }
+                                if (mp4InPt >= _mediaDur - 0.5) {
+                                    utils.log(`⚠️ [OUT·CLAMP] IN ${mp4InPt.toFixed(2)}s queda FORA de la media real (${_mediaDur.toFixed(2)}s) → el clip importat és massa curt (potser és d'una extracció vella): comprova el .bin/extracció`);
+                                }
+                            }
+                        } catch (eClamp) { /* noop */ }
                         clipDuration = mp4OutPt - mp4InPt;
+                        if (_rawInPt < 0.05) {
+                            utils.log(`⚠️ [IN·CLAMP] IN calculat ${_rawInPt.toFixed(2)}s (negatiu) → CLAMPAT a ${mp4InPt.toFixed(2)}s. Revisa clipInOffset (${clipInOffset}s) / zonaInOffset (${zonaInOffset}s) / handle (${handleSecs}s).`);
+                        }
                         utils.log(`🎬 Col·locant cleanFeed a V1 amb bounds: IN=${mp4InPt.toFixed(2)}s OUT=${mp4OutPt.toFixed(2)}s (start=0) | duradaEsperada=${clipDuration.toFixed(2)}s`);
                         utils.log(`🔍 [LOG] cleanFeedData.mp4ExpandedInPoint (BASE, amb handle)=${(cleanFeedData.mp4ExpandedInPoint||0).toFixed(4)}s + globalOffset=${globalOffset}s = ${mp4InPt.toFixed(4)}s, mp4ExpandedOutPoint (BASE)=${(cleanFeedData.mp4ExpandedOutPoint||0).toFixed(4)}s + globalOffset=${globalOffset}s = ${mp4OutPt.toFixed(4)}s`);
                         // (2026-09-23) INSERT + RIPPLE en lloc d'`insertWithBounds`: aquest fa
@@ -335,7 +369,7 @@
                     // (clipInDelta = inPoint real − inPoint del pla), els corchetes es desplacen el
                     // mateix valor perquè la peça segueixi alineada amb el material.
                     const _deltaIn = (typeof clipInDelta === 'number' && isFinite(clipInDelta)) ? clipInDelta : 0;
-                    const sweetSeqIn  = Math.max(0, h - zonaInAdj - _deltaIn);
+                    const sweetSeqIn  = Math.max(0, zonaInAdj - _deltaIn);   // (2026-09-25) el contingut (junta d'àudio/intro) comença a zonaInOffset dins del clip → el corchete hi ha de coincidir, no a h−zonaInOffset
                     const sweetSeqOut = clipDuration - h - _deltaIn;
                     utils.log(`📍 [DEBUG] IN/OUT de seqüència (sweet points): seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s (durada=${clipDuration.toFixed(2)}s, handleSecs=${h}s${isFallbackBlockMedia ? ', mode=fallback' : ''})`);
                     const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);
