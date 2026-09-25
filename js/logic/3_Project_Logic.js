@@ -369,8 +369,12 @@
                     // (clipInDelta = inPoint real − inPoint del pla), els corchetes es desplacen el
                     // mateix valor perquè la peça segueixi alineada amb el material.
                     const _deltaIn = (typeof clipInDelta === 'number' && isFinite(clipInDelta)) ? clipInDelta : 0;
-                    const sweetSeqIn  = Math.max(0, zonaInAdj - _deltaIn);   // (2026-09-25) el contingut (junta d'àudio/intro) comença a zonaInOffset dins del clip → el corchete hi ha de coincidir, no a h−zonaInOffset
-                    const sweetSeqOut = clipDuration - h - _deltaIn;
+                    // (2026-09-25b) MAI usar _deltaIn (diagnòstic del clip) aquí: en projectes amb
+                    // escales absolutes valia milers de segons i el corchete IN saltava a TC
+                    // 1:31:17 ✗ (!!). El corchete és GEOMETRIA PURA: zonaInOffset, fitada al clip.
+                    const sweetSeqIn = Math.max(0, Math.min(zonaInOffset, Math.max(0, clipDuration - 1)));
+                    // (2026-09-25b) Igual que l'IN: sense _deltaIn (només geometria del clip).
+                    const sweetSeqOut = Math.max(sweetSeqIn + 1, clipDuration - h);
                     utils.log(`📍 [DEBUG] IN/OUT de seqüència (sweet points): seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s (durada=${clipDuration.toFixed(2)}s, handleSecs=${h}s${isFallbackBlockMedia ? ', mode=fallback' : ''})`);
                     const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);
                     utils.log(`🔍 Timeline.range resultat=${rangeRes}`);

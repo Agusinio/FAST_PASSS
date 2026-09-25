@@ -263,7 +263,11 @@
             var thr = (typeof o.threshold === 'number') ? o.threshold : 0.05;
             var minDur = (typeof o.minDur === 'number') ? o.minDur : 0.4;
             var winSec = (typeof o.winSec === 'number') ? o.winSec : 0.1;
-            var ppsWanted = (typeof o.pps === 'number') ? o.pps : 240;
+            // (2026-09-25) pps NATIU (480 Hz): el .bin és 480Hz i demanar 240 fa que el lector
+            // re-mostregi → els pics s'inflen i amb llindar 5% només sobreviuen 7 valls dels 153
+            // reals (i troceats: app 124.10→124.60 vs real 124.00→125.10). Amb 480 les finestres
+            // de 0,1s (=48 mostres) i el llindar 5% donen el mapa verificat (153 trams).
+            var ppsWanted = (typeof o.pps === 'number') ? o.pps : 480;
 
             var folder = '';
             try { folder = U.workFolder(window.FASTPASS_UI.State) || ''; } catch (e0) { folder = ''; }
@@ -283,6 +287,31 @@
             U.log('🤫 [SILENCI·DBG] bin=' + bin + ' · peaks=' + wf.peaks.length + ' · pps=' + wf.peaksPerSec + ' · dur=' + (wf.durSec !== undefined ? Number(wf.durSec).toFixed(2) : '?') + 's · demanat pps=' + ppsWanted);
             var pps = wf.peaksPerSec || ppsWanted;
             var winN = Math.max(1, Math.round(pps * winSec));
+            // ═══ (2026-09-25) LLINDAR ADAPTATIU ═════════════════════════════════════════════
+            // Un llindar FIX del 5% només veu silenci digital. El tall real (TNC V2 121-122s) té
+            // un MÀXIM de 0,10-0,16 amb el parlant del voltant a 0,42-0,53 → és un valle clar
+            // però mai baixa del 5% ✗. Criteri: silenci si la finestra ≤ 40% del nivell LOCAL
+            // (màxim dels buckets de 5s a ±15s), amb el llindar absolut com a terra (5%) per no
+            // perdre els silencis de debò. El silenci només CONFIRMA (cap decisió sola).
+            var BUCKET_SEC = 5;
+            var bucketN = Math.max(1, Math.round(pps * BUCKET_SEC));
+            var buckets = [];
+            for (var b0 = 0; b0 < wf.peaks.length; b0 += bucketN) {
+                var bMax0 = 0;
+                for (var b1 = b0; b1 < Math.min(wf.peaks.length, b0 + bucketN); b1++) {
+                    if (wf.peaks[b1] > bMax0) bMax0 = wf.peaks[b1];
+                }
+                buckets.push(bMax0);
+            }
+            var ratioRel = (typeof o.ratio === 'number') ? o.ratio : 0.40;
+            var _thrAt = function (tSec) {
+                var bc = Math.floor(tSec / BUCKET_SEC);
+                var i0 = Math.max(0, bc - 3), i1 = Math.min(buckets.length - 1, bc + 3);
+                var ref = 0;
+                for (var bi = i0; bi <= i1; bi++) { if (buckets[bi] > ref) ref = buckets[bi]; }
+                return Math.max(thr, ratioRel * ref);
+            };
+            var _adaptius = 0;
             var out = [], curStart = null;
             for (var i = 0; i < wf.peaks.length; i += winN) {
                 var mx = 0;
@@ -290,7 +319,9 @@
                     if (wf.peaks[j] > mx) mx = wf.peaks[j];
                 }
                 var t0 = i / pps;
-                if (mx <= thr) {
+                var _lim = _thrAt(t0);
+                if (_lim > thr) _adaptius++;
+                if (mx <= _lim) {
                     if (curStart === null) curStart = t0;
                 } else if (curStart !== null) {
                     var dur = t0 - curStart;
@@ -302,7 +333,7 @@
                 var tEnd = wf.peaks.length / pps;
                 if ((tEnd - curStart) >= minDur) out.push({ start: curStart, end: tEnd, dur: tEnd - curStart });
             }
-            U.log('🤫 [SILENCI] ' + out.length + ' trams · umbral=' + thr + ' · min=' + minDur + 's · ' +
+            U.log('🤫 [SILENCI] ' + out.length + ' trams · umbral=' + thr + ' (adaptatiu ' + ratioRel + ' del nivell local a ' + _adaptius + ' finestres) · min=' + minDur + 's · ' +
                 (out.length ? out.map(function (s) { return s.start.toFixed(2) + '→' + s.end.toFixed(2) + '(' + s.dur.toFixed(2) + 's)'; }).join(', ') : '(cap)'));
             return out;
         },

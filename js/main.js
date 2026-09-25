@@ -572,7 +572,8 @@ function applySliderLimits() {
         //   F5   Inferits   → Markers.placeInferredItems  (Ctrl+clic = antic OrphanSnap)
         //   F6   Ordre      → Markers.enforceMarkerOrder
         //   F6·GF Gràfics   → Markers.placeGraphicMarkers
-        if (btnMarksF1) btnMarksF1.addEventListener('click', () => callWorkflow('Markers', 'placeOnAirMarkers'));
+        // (2026-09-25) Botó "F1 OnAir" ELIMINAT: la seva feina la fa la CAPA 1 (3·C1).
+        // La fase interna placeOnAirMarkers segueix existint per al pipeline OUT & GO.
         if (btnMarksF2) btnMarksF2.addEventListener('click', () => callWorkflow('Markers', 'placeDeducedOnAirMarkers'));
         if (btnMarksF3) btnMarksF3.addEventListener('click', () => callWorkflow('Markers', 'placeScheduledMarkers'));
         if (btnMarksF35) btnMarksF35.addEventListener('click', () => callWorkflow('Assembly', 'correlationSnapMarkers'));
@@ -913,8 +914,7 @@ if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers
         const phases = [
             ['OUT · recorte i neteja', () => callWorkflow('Cut', 'runCutOut')],
             ['TROSSEJA',               () => callWorkflow('Cut', 'runScene')],
-            ['OnAir (F1)',             () => callWorkflow('Markers', 'placeOnAirMarkers')],
-            ['Deduc (F2)',             () => callWorkflow('Markers', 'placeDeducedOnAirMarkers')],
+            ['Dedu (F2)',             () => callWorkflow('Markers', 'placeDeducedOnAirMarkers')],
             ['Prev (F3)',              () => callWorkflow('Markers', 'placeScheduledMarkers')],
             ['Correl (F3.5)',          () => callWorkflow('Assembly', 'correlationSnapMarkers')],
             ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],

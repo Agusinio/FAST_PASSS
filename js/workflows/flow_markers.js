@@ -296,6 +296,8 @@
         _calcTemporalAnchors: function (manifest, reader, structuralItems, clips) {
             var clipStart = 0;
             var clipInPoint = manifest.ref.tlBlockInPointSec || 0;
+            var _wsmsAdjust = 0;   // (2026-09-25) FIX C: declarat ABANS de la branca que l'assigna
+                                   // (si es declara després, l'inicialitzador reseteja el valor ✗)
             // (2026-09-24) FIX A: offset que fan servir les fórmules d'ancoratge. Pot ser el
             // inPoint del clip real de V1 O la referència del bloc (si el clip és l'extret).
             var offsetAnchor = clipInPoint;
@@ -373,11 +375,9 @@
 
             log('🔧 [BUG3·FIX] Clip V1 real: start=' + clipStart.toFixed(3) + 's, inPoint=' + clipInPoint.toFixed(3) + 's vs manifest tlBlockInPointSec=' + (manifest.ref.tlBlockInPointSec || 0).toFixed(3) + 's');
 
-            var _wsmsAdjust = 0;   // (2026-09-25) correcció de base si el manifest està en coords d'origen
+            // (2026-09-25) FIX C (l'assignació es fa a la branca FIX-B, més amunt): si el manifest
+            // està en coords d'ORIGEN (refBloc=953), la base del fitxer extret és wsms+refBloc.
             var worldSecMediaStart = manifest.ref.worldSecMediaStart || 0;
-            // (2026-09-25) FIX C: el manifest en coords d'ORIGEN (refBloc=953) fa que la base del
-            // fitxer extret sigui wsms+refBloc (49500+953=50453) → sense això tots els marcadors
-            // cauen 853 s a la dreta (973.28 en lloc de 20.28 ✓).
             if (_wsmsAdjust) {
                 var _wsmsOrig = worldSecMediaStart;
                 worldSecMediaStart = worldSecMediaStart + _wsmsAdjust;
@@ -1657,6 +1657,16 @@
                 const wg = window.FASTPASS_UI.Logic.WaveformGenerator;
                 if (wg && wg.silences) sil = (await wg.silences()) || [];
             } catch (eS) { log('⚠️ [CAPA1] silencis: ' + eS.message, 'WARN'); }
+            // ═══ (2026-09-25) CONVERSIÓ A TIMELINE (crític) ═════════════════════════════════
+            // Els temps del .bin són del FITXER EXTRET (comença a 0). El clip a la timeline
+            // comença a clip.inPoint (TNC V2: 99.72s) → sense restar-ho, el consens comparava
+            // 20.28s (timeline) amb 121s (fitxer) i mai enganxava el corte ✗.
+            const _clipIn0 = (clips && clips.length && isFinite(Number(clips[0].inPoint))) ? Number(clips[0].inPoint) : 0;
+            if (sil.length && Math.abs(_clipIn0) > 0.01) {
+                sil = sil.map(function (s) { return { start: s.start - _clipIn0, end: s.end - _clipIn0, dur: s.dur }; })
+                         .filter(function (s) { return s.end > 0; });
+                log('🤫 [CAPA1] Silencis → timeline (inPoint del clip ' + _clipIn0.toFixed(2) + 's restat): ' + sil.length + ' trams vàlids');
+            }
 
             // 3) ANCORATGE + consens
             const anchors = this._calcTemporalAnchors(manifest, reader, structural, clips);
@@ -1763,6 +1773,25 @@
             if (!wg || !wg.silences) { log('⚠️ [SIL] WaveformGenerator.silences no disponible', 'WARN'); return; }
             var list = await wg.silences();
             log('🤫 [SIL] ' + (list ? list.length : 0) + ' trams de silenci (base media del clip del bloc)');
+            // (2026-09-25) DIAGNÒSTIC 2: escala real dels pics i valors al voltant del tall
+            // (118-126s), on l'oïda diu que hi ha un silenci de ~2-4s que el detector no veu.
+            try {
+                var _folder2 = window.FASTPASS_UI.Utils.workFolder(window.FASTPASS_UI.State) || '';
+                var _bin2 = await wg.getBinPath(_folder2);
+                var _wf2 = await wg.loadPeaksFromBin(_bin2, 480);
+                if (_wf2 && _wf2.peaks && _wf2.peaks.length) {
+                    var _mx2 = -1e9, _mn2 = 1e9;
+                    for (var _i = 0; _i < _wf2.peaks.length; _i++) { if (_wf2.peaks[_i] > _mx2) _mx2 = _wf2.peaks[_i]; if (_wf2.peaks[_i] < _mn2) _mn2 = _wf2.peaks[_i]; }
+                    log('🤫 [SILENCI·DBG2] escala: min=' + Number(_mn2).toFixed(4) + ' max=' + Number(_mx2).toFixed(4) + ' · n=' + _wf2.peaks.length + ' · pps=' + _wf2.peaksPerSec);
+                    var _pps2 = _wf2.peaksPerSec || 480, _lin = [];
+                    for (var _t = 118; _t <= 126; _t += 1) {
+                        var _s2 = Math.round(_t * _pps2), _e2 = Math.min(_wf2.peaks.length, _s2 + Math.round(_pps2)), _mxw = 0;
+                        for (var _k = _s2; _k < _e2; _k++) { if (_wf2.peaks[_k] > _mxw) _mxw = _wf2.peaks[_k]; }
+                        _lin.push(_t + 's:' + Number(_mxw).toFixed(4));
+                    }
+                    log('🤫 [SILENCI·DBG2] max per segon 118→126s: ' + _lin.join(' | '));
+                }
+            } catch (eDbg2) { }
         },
 
         /**
