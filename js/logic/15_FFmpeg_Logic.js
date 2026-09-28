@@ -45,6 +45,26 @@
         } catch(e) {}
         return candidates[0] || "";
     }
+
+    /**
+     * _parseKeyframePts: extreu el PTS del darrer keyframe de VÍDEO <= sec d'una sortida
+     * ffprobe en format csv (`pts_time,flags`, p.ex. "782.240000,K__"). Retorna null si
+     * no n'hi ha cap.
+     */
+    function _parseKeyframePts(raw, sec) {
+        var limit = Number(sec) + 0.02;
+        var best = null;
+        var lines = String(raw || '').split(/\r?\n/);
+        for (var i = 0; i < lines.length; i++) {
+            var parts = lines[i].split(',');
+            if (parts.length < 2) continue;
+            if (parts[1].indexOf('K') === -1) continue;
+            var t = parseFloat(parts[0]);
+            if (!isFinite(t)) continue;
+            if (t <= limit && (best === null || t > best)) best = t;
+        }
+        return best;
+    }
     /**
      * getFfmpeg / getFfprobe: resolen el binari preferentment des de la carpeta
      * de l'extensió (bin\ffmpeg\bin\... → no es pusheja, ve amb la instal·lació)
@@ -235,6 +255,79 @@
             }
 
             return { ok: ok, wait: wait, duration: duration, error: null };
+        },
+
+        /**
+         * keyframeAtOrBefore: Retorna el PTS del darrer keyframe de VÍDEO <= sec del fitxer
+         * FONT, mesurat amb ffprobe. Fa EXPLÍCITA la conversió source→fitxer de l'extracció:
+         *
+         *   `ffmpeg -ss X -i src -c copy` NO pot tallar fora de keyframe: arrenca al keyframe
+         *   ANTERIOR i, com que amb -c copy no es descarta el pre-roll, el 0 del fitxer extret
+         *   ≠ X. MESURAT a TNC V3 (2026-09-25, cleanfeed Dalet, GOP 1 s):
+         *     -ss 783  →  el fitxer arrenca a 782.187 s del source (keyframe 782.24)
+         *     → 0,81 s d'error sistemàtic a TOTS els marcadors (el manifest creia 50283 i la
+         *       base real era 50282.19).
+         *
+         * Per això l'extracció usa AQUEST valor com a -ss: llavors sí que "0 del fitxer == -ss"
+         * i el pre-roll (X − kf) es compta explícitament (fileIn = handle + preRoll).
+         *
+         * @param {string} sourcePath  - Ruta del MP4 font
+         * @param {number} sec         - Posició desitjada (segons)
+         * @param {number} [fallbackSec] - Valor a retornar si ffprobe falla (per defecte: sec)
+         * @returns {Promise<{kf:number, requested:number, preRoll:number, ok:boolean}>}
+         */
+        keyframeAtOrBefore: async function(sourcePath, sec, fallbackSec) {
+            const requested = Number(sec);
+            const fb = (fallbackSec !== undefined && fallbackSec !== null && isFinite(Number(fallbackSec)))
+                ? Number(fallbackSec) : requested;
+            const fail = { kf: fb, requested: requested, preRoll: 0, ok: false };
+            if (!sourcePath || !isFinite(requested) || requested <= 0.5) return fail;
+
+            try {
+                const ffprobeBin = await getFfprobe();
+                const from = Math.max(0, requested - 6);
+                const tempOut = `C:\\temp\\ffprobe_kf_${Date.now()}.txt`;
+                const safeTemp = tempOut.replace(/\\/g, '\\\\');
+                // Només 12 s de paquets al voltant de la posició → lectura ràpida fins i tot en UNC.
+                const cmd = `"${ffprobeBin}" -v error -select_streams v:0 -show_entries packet=pts_time,flags -of csv=p=0 -read_intervals "${from}%+12" "${sourcePath}" > "${tempOut}" 2>&1`;
+                utils.log(`🔑 [keyframe] ffprobe: ${from.toFixed(2)}s..${(from + 12).toFixed(2)}s de ${String(sourcePath).split(/[\\/]/).pop()}`);
+                await utils.callJSX(`IO.executeShell(${JSON.stringify(cmd)})`);
+
+                // ⚠️ (2026-09-25d) El redirect crea el fitxer BUID de seguida: esperar IO.exists i
+                // llegir 400 ms després donava contingut incomplet → "Sense keyframe <= 783s" i
+                // extracció SENSE snap (log TNC V3 15:42:21 ✗). Ara es fa polling del CONTINGUT
+                // fins que apareix una línia de keyframe (o ~12 s), quedant-se sempre amb la
+                // lectura MÉS LLARGA. Un keyframe més antic del demanat també és vàlid (el
+                // pre-roll augmenta i la geometria continua exacta).
+                let raw = '';
+                let kf = null;
+                let _stable = 0;
+                let _prevLen = -1;
+                for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 400));
+                    let chunk = '';
+                    try { chunk = await utils.callJSX(`IO.readTxt('${safeTemp}')`); } catch (eR) { chunk = ''; }
+                    if (chunk && chunk.length > raw.length) raw = chunk;
+                    kf = _parseKeyframePts(raw, requested);
+                    // Sortida: (a) keyframe prou a prop del demanat (≤2 s abans), o (b) l'eixida
+                    // ha deixat de créixer (ffprobe ha acabat) i ja tenim algun keyframe.
+                    if (kf !== null && (requested - kf) <= 2.0) break;
+                    if (raw.length === _prevLen) { _stable++; } else { _stable = 0; }
+                    _prevLen = raw.length;
+                    if (kf !== null && _stable >= 2) break;
+                }
+                try { await utils.callJSX(`IO.remove('${safeTemp}')`); } catch (eRm) { }
+                if (kf === null) {
+                    utils.log(`⚠️ [keyframe] Sense keyframe <= ${requested.toFixed(3)}s a la finestra → es manté -ss=${fb.toFixed(3)}s`);
+                    return fail;
+                }
+                const preRoll = Math.max(0, requested - kf);
+                utils.log(`🔑 [keyframe] -ss demanat=${requested.toFixed(3)}s → keyframe=${kf.toFixed(3)}s (pre-roll=${preRoll.toFixed(3)}s) OK`);
+                return { kf: kf, requested: requested, preRoll: preRoll, ok: true };
+            } catch (e) {
+                utils.log(`⚠️ [keyframe] ffprobe ha fallat (${e.message}) → es manté -ss=${fb.toFixed(3)}s (sense snap)`);
+                return fail;
+            }
         },
 
         /**

@@ -713,19 +713,46 @@
                                             // El clip insertat NO canvia (clipExpandedOutPoint = mp4Duration).
                                             const extraTailSec = (ctx.config && ctx.config.clipExtraTailSec != null)
                                                 ? Number(ctx.config.clipExtraTailSec) : 60;
-                                            const extractDuration = mp4Duration +
+                                            let extractDuration = mp4Duration +
                                                 ((isFinite(extraTailSec) && extraTailSec > 0) ? extraTailSec : 0);
                                             let useExtractedClip = false;
+
+                                            // ═══ (2026-09-25c) SNAP A KEYFRAME: conversió source→fitxer ═══════
+                                            // `ffmpeg -ss X -i src -c copy` NO pot arrencar fora de keyframe: ho fa
+                                            // al keyframe ANTERIOR i, com que amb -c copy no es descarta el pre-roll,
+                                            // el 0 del fitxer extret ≠ X. MESURAT (TNC V3 2026-09-25, GOP 1 s):
+                                            // -ss 783 → el fitxer arrenca a 782.187 s del source.
+                                            // → es mesura el keyframe amb ffprobe i s'extreu DES D'ALLÀ: així
+                                            // "0 del fitxer == -ss" és cert per construcció i el pre-roll es compta
+                                            // explícitament (fileIn = handleSecs + preRoll).
+                                            let extractStartSec = bounds.mp4ExpandedInPoint;
+                                            let preRollSec = 0;
+                                            let kfOk = false;
+                                            try {
+                                                const _kf = await ffmpeg.keyframeAtOrBefore(effectiveMediaPath, bounds.mp4ExpandedInPoint, bounds.mp4ExpandedInPoint);
+                                                if (_kf && _kf.ok) {
+                                                    extractStartSec = _kf.kf;
+                                                    preRollSec = _kf.preRoll;
+                                                    kfOk = true;
+                                                    extractDuration = extractDuration + preRollSec;   // mateix FINAL al source
+                                                }
+                                            } catch (eKf) {
+                                                log(`⚠️ [EXTRACT] keyframeAtOrBefore: ${eKf.message} → extracció sense snap`);
+                                            }
+                                            cleanFeedData._ffmpeg = {
+                                                ss: extractStartSec, t: extractDuration,
+                                                requestedIn: bounds.mp4ExpandedInPoint, preRoll: preRollSec, kfOk: kfOk
+                                            };
 
                                             // Estratègia: EXTREURE SEMPRE. Si el clip ja existeix, ffmpeg -y el sobreescriu.
                                             // Si el cleanFeed és massa petit, l'extracció fallarà (timeout a waitForFile).
                                             // Evitem checkSourceDuration perquè IO.executeShell amb pipes/fitxers temporals
                                             // no funciona correctament a ExtendScript (afegeix cometes extra als paths).
-                                            log(`🎬 [EXTRACT] Extraient clip: input=${effectiveMediaPath}, start=${bounds.mp4ExpandedInPoint.toFixed(2)}s, dur=${extractDuration.toFixed(2)}s (bloc ${mp4Duration.toFixed(2)}s + cola extra ${(extractDuration - mp4Duration).toFixed(0)}s), output=${clipPath}`);
+                                            log(`🎬 [EXTRACT] Extraient clip: input=${effectiveMediaPath}, start=${extractStartSec.toFixed(2)}s${kfOk ? ` (= keyframe; demanat ${bounds.mp4ExpandedInPoint.toFixed(2)}s + pre-roll ${preRollSec.toFixed(2)}s)` : ' (sense snap keyframe ✗)'}, dur=${extractDuration.toFixed(2)}s (bloc ${mp4Duration.toFixed(2)}s + cola extra ${(extractDuration - mp4Duration - preRollSec).toFixed(0)}s + pre-roll ${preRollSec.toFixed(2)}s), output=${clipPath}`);
                                             getUtils().status("🎬 Extraient clip via ffmpeg...", "info");
                                             const extractResult = await ffmpeg.extractClip(
                                                 effectiveMediaPath,
-                                                bounds.mp4ExpandedInPoint,
+                                                extractStartSec,
                                                 extractDuration,
                                                 clipPath
                                             );
@@ -748,17 +775,21 @@
                                                 //   clipExpandedOutPoint = mp4Duration - handleSecs
                                                 //   clipDuration         = mp4Duration (el segment extret té exactament mp4Duration)
                                                 const h = ctx.config.handles || 0;
-                                                const clipExpandedInPoint  = h;
-                                                const clipExpandedOutPoint = mp4Duration;
+                                                // (2026-09-25c) TOTS els temps del FITXER porten el pre-roll del snap
+                                                // de keyframe: el contingut del bloc comença a (h + preRoll) del fitxer
+                                                // extret, no a h. Sense això el clip queda desplaçat el pre-roll (~1 s).
+                                                const clipExpandedInPoint  = h + preRollSec;
+                                                const clipExpandedOutPoint = mp4Duration + preRollSec;
                                                 const clipDuration         = mp4Duration;
 
                                                 // worldSecMediaStart s'ajusta per al clip extret:
-                                                // El clip extret comença a mp4ExpandedInPoint del cleanFeed.
-                                                // worldBlockStartSec - handleSecs = punt d'inici del clip al món real.
-                                                // Com que el clip comença a 0, worldSecMediaStart = worldBlockStartSec - handleSecs.
-                                                const fbWorldSecMediaStart = (bounds.ref.worldBlockStartSec != null)
-                                                    ? bounds.ref.worldBlockStartSec - h
-                                                    : bounds.ref.worldSecMediaStart;
+                                                // base REAL = worldSecMediaStart(cleanfeed) + extractStartSec (-ss efectiu).
+                                                // Invariant: worldBlockStartSec − fbWorldSecMediaStart == clipExpandedInPoint.
+                                                const fbWorldSecMediaStart = (isFinite(Number(worldSecMediaStart)) && isFinite(Number(extractStartSec)))
+                                                    ? (Number(worldSecMediaStart) + Number(extractStartSec))
+                                                    : ((bounds.ref.worldBlockStartSec != null)
+                                                        ? bounds.ref.worldBlockStartSec - h
+                                                        : bounds.ref.worldSecMediaStart);
 
                                                 log(`📐 [EXTRACT] Bounds recalculats per al clip extret: IN=${clipExpandedInPoint.toFixed(1)}s OUT=${clipExpandedOutPoint.toFixed(1)}s dur=${clipDuration.toFixed(1)}s | worldSecMediaStart ajustat a ${fbWorldSecMediaStart.toFixed(1)}s | handleSecs=${h}s`);
                                                 log(`🔍 [EXTRACT] cleanFeedData PRE-extracció: mediaPath=${cleanFeedData.mediaPath}, mp4ExpandedInPoint=${cleanFeedData.mp4ExpandedInPoint.toFixed(1)}s, mp4ExpandedOutPoint=${cleanFeedData.mp4ExpandedOutPoint.toFixed(1)}s`);
@@ -780,8 +811,17 @@
                                                 // El clip extret comença a 0, per tant el "sweet point" sense offset = handleSecs.
                                                 // Això és necessari perquè la fórmula offsetSec = tlClipStartSec - tlBlockInPointSec
                                                 // faci servir el valor correcte (handleSecs) en lloc del valor original del cleanFeed.
-                                                cleanFeedData.mp4SweetInPointRaw = h;
-                                                log(`📐 [EXTRACT] mp4SweetInPointRaw actualitzat a ${h.toFixed(2)}s (handleSecs) per al clip extret`);
+                                                cleanFeedData.mp4SweetInPointRaw = h + preRollSec;
+                                                log(`📐 [EXTRACT] mp4SweetInPointRaw actualitzat a ${(h + preRollSec).toFixed(2)}s (handleSecs ${h.toFixed(2)} + pre-roll ${preRollSec.toFixed(2)}) per al clip extret`);
+                                                // (2026-09-25c) [DOMAINS] Dades de DOMINI per al dump d'una sola línia
+                                                // de la fase [EXTRACT] (veure _domainsDump).
+                                                cleanFeedData._wsmsCleanfeed   = Number(worldSecMediaStart);
+                                                cleanFeedData._fileBase        = Number(fbWorldSecMediaStart);
+                                                cleanFeedData._srcIn           = Number(bounds.mp4ExpandedInPoint);
+                                                cleanFeedData._srcOut          = Number(bounds.mp4ExpandedOutPoint);
+                                                cleanFeedData._mediaBlockStart = (bounds.ref && bounds.ref.worldBlockStartSec != null) ? Number(bounds.ref.worldBlockStartSec) : null;
+                                                cleanFeedData._mediaBlockEnd   = (bounds.ref && bounds.ref.worldBlockEndSec != null) ? Number(bounds.ref.worldBlockEndSec) : null;
+                                                cleanFeedData._clipPath        = clipPath;
 
                                                 // Actualitzar també les referències del manifest (en memòria)
                                                 if (manifest && manifest.ref) {
@@ -1102,6 +1142,9 @@
                     } catch(e) {
                         log(`⚠️ Error parsejant clipData: ${clipDataRaw}`);
                     }
+                    // (2026-09-25c) 🔎 DUMP ÚNIC DE DOMINIS (fase [EXTRACT]): totes les escales de cop
+                    // (media · fitxer · timeline) + verificació de les invariants en una sola línia.
+                    this._domainsDump(cleanFeedData);
                     
                     if (!isNaN(tlClipStartSec)) {
                         // Usar tlBlockInPointSec (inici del bloc en source MP4, SENSE offset global)
@@ -1387,6 +1430,71 @@
         },
 
         /**
+         * _domainsDump: 🔎 DUMP ÚNIC DE DOMINIS (fase [EXTRACT]).
+         *
+         * Els 3 dominis que NO es poden barrejar:
+         *   (a) MEDIA/món      → wsms (inici del cleanfeed en segons del dia), bloc(media)
+         *   (b) FITXER extret  → base-fitxer (= wsms + -ss), fileIn/fileOut del contingut
+         *   (c) TIMELINE V1    → clip.inPoint/outPoint reals, corchete IN/OUT (seq)
+         *
+         * Invariants que s'imprimeixen amb OK/MISMATCH:
+         *   1) 0-fitxer == -ss        : la base del fitxer ha de ser el -ss efectiu
+         *   2) contingut == fileIn     : (inici del bloc − base) == fileIn del pla (handle+preRoll)
+         *   3) clip.inPoint == pla     : el recorte real ha de ser el planejat
+         *   4) corchete on contingut   : (inici bloc − base) − clip.inPoint == seqIN
+         *
+         * Amb aquesta línia es veu en 5 segons a quin domini deixa de quadrar.
+         *
+         * @param {Object} cfd - cleanFeedData (amb _ffmpeg/_plan/_clipReal/_fileBase...)
+         */
+        _domainsDump: function (cfd) {
+            try {
+                if (!cfd) { log('🔎 [DOMAINS] sense cleanFeedData (fase EXTRACT no executada)'); return; }
+                const nf = (n) => { const v = Number(n); return isFinite(v) ? v.toFixed(2) : '?'; };
+                const ff = cfd._ffmpeg || {};
+                const pl = cfd._plan || {};
+                const rl = cfd._clipReal || {};
+                const base = Number(cfd._fileBase);
+                const bStart = Number(cfd._mediaBlockStart);
+                const bEnd = Number(cfd._mediaBlockEnd);
+                const wsmsC = Number(cfd._wsmsCleanfeed);
+                const fileIn = Number(pl.fileIn);
+                const realIn = Number(rl.inPoint);
+                const seqIn = Number(pl.sweetSeqIn);
+                const chk = [];
+                if (isFinite(base) && isFinite(wsmsC) && isFinite(Number(ff.ss))) {
+                    const d = (base - wsmsC) - Number(ff.ss);
+                    chk.push('0-fitxer==-ss ' + (Math.abs(d) <= 0.25 ? 'OK' : 'MISMATCH(' + nf(d) + ')'));
+                }
+                if (isFinite(bStart) && isFinite(base) && isFinite(fileIn)) {
+                    const d = (bStart - base) - fileIn;
+                    chk.push('contingut==fileIn ' + (Math.abs(d) <= 0.25 ? 'OK' : 'MISMATCH(' + nf(d) + ')'));
+                }
+                if (isFinite(realIn) && isFinite(fileIn)) {
+                    const d = realIn - fileIn;
+                    chk.push('clip.inPoint==pla ' + (Math.abs(d) <= 0.25 ? 'OK' : 'MISMATCH(' + nf(d) + ')'));
+                }
+                if (isFinite(bStart) && isFinite(base) && isFinite(realIn) && isFinite(seqIn)) {
+                    const tlContent = (bStart - base) - realIn;
+                    const d = tlContent - seqIn;
+                    chk.push('corchete-on-contingut ' + (Math.abs(d) <= 0.5 ? 'OK' : 'MISMATCH(' + nf(d) + ')'));
+                }
+                log('🔎 [DOMAINS] fase=EXTRACT domini=' + (cfd._isExtractedClip ? 'fitxer-extret' : 'source/bloc') +
+                    ' | wsms(cleanfeed)=' + nf(cfd._wsmsCleanfeed) + ' base-fitxer=' + nf(cfd._fileBase) +
+                    ' | bloc(media)=' + nf(cfd._mediaBlockStart) + '→' + nf(cfd._mediaBlockEnd) +
+                    ' | handles=' + nf(cfd.handleSecs) +
+                    ' | in/out(source)=' + nf(cfd._srcIn) + '/' + nf(cfd._srcOut) +
+                    ' | ffmpeg -ss ' + nf(ff.ss) + ' -t ' + nf(ff.t) + ' (demanat ' + nf(ff.requestedIn) + ', pre-roll ' + nf(ff.preRoll) + ', keyframe=' + (ff.kfOk ? 'OK' : 'NO') + ')' +
+                    ' | in/out(fitxer·pla)=' + nf(pl.fileIn) + '/' + nf(pl.fileOut) + ' dur=' + nf(pl.clipDur) +
+                    ' | clip V1 in/out(real)=' + nf(rl.inPoint) + '/' + nf(rl.outPoint) + ' start=' + nf(rl.start) +
+                    ' | seq IN/OUT=' + nf(pl.sweetSeqIn) + '/' + nf(pl.sweetSeqOut) +
+                    ' | ' + (chk.length ? chk.join(' · ') : 'sense dades'));
+            } catch (eDump) {
+                log('⚠️ [DOMAINS] ' + eDump.message);
+            }
+        },
+
+        /**
          * _rebuildManifestFromLocal: Regenera el manifest de sessió a partir de
          * l'última còpia local de l'escaleta al directori del projecte.
          * S'usa al botó FOTO (després de generar una nova escaleta) i a LOAD.
@@ -1419,14 +1527,23 @@
                     return null;
                 }
                 const allItems = jsonData.escaleta ? (jsonData.escaleta.liniesEscaleta || []) : [];
-                await FASTPASS_UI.SessionManifest.save(ctx, {
+                // ═══ (2026-09-25c) NO TREPITJAR LA REF DEL CLIP EXTRET ═══════════════════════════
+                // Aquest és un dels 3 escriptors del manifest i l'ÚNIC que tornava a escriure la
+                // ref en coords d'ORIGEN (wsms=cleanfeed, tlBlockInPointSec=source) DESPRÉS de
+                // l'extracció. Conseqüència mesurada (TNC V1 2026-09-25, manifest final):
+                //   wsms=49500 + tlBlockInPointSec=1978 (source) mentre el clip de V1 tenia base
+                //   51478 → l'ancoratge depenia del pedaç FIX-C i el material quedava desplaçat.
+                // Si el manifest ja ve del clip extret, la ref es CONSERVA i només s'actualitzen
+                // blockBounds/escaletaItems.
+                const _prevManifest = await FASTPASS_UI.SessionManifest.load(ctx);
+                const _keepExtractedRef = !!(_prevManifest && _prevManifest.extractedClip &&
+                    _prevManifest.extractedClip.isExtracted === true &&
+                    _prevManifest.ref && _prevManifest.ref.worldSecMediaStart != null &&
+                    _prevManifest.ref.tlBlockInPointSec != null);
+                const _manPatch = {
                     program: { escaletaFile: jsonMeta.filename },
                     cleanFeed: jsonData.cleanFeed,
                     blockBounds: bounds,
-                    ref: {
-                        ...bounds.ref,
-                        tlBlockInPointSec: bounds.mp4ExpandedInPoint
-                    },
                     escaletaItems: allItems.map(l => ({
                         sequencia: l.sequencia,
                         num: l.num,
@@ -1441,7 +1558,17 @@
                         flotant: l.flotant || false
                     })),
                     phases: { boundsCalculated: true }
-                });
+                };
+                if (!_keepExtractedRef) {
+                    // Manifest sense clip extret (projecte nou / primera passada) → coords d'ORIGEN,
+                    // com fins ara. (Pendent: unificar els 3 escriptors en coords de FITXER.)
+                    _manPatch.ref = { ...bounds.ref, tlBlockInPointSec: bounds.mp4ExpandedInPoint };
+                } else {
+                    log('🧭 [Manifest] Ref del CLIP EXTRET conservada (no es reescriu en coords d\'ORIGEN): wsms=' +
+                        Number(_prevManifest.ref.worldSecMediaStart).toFixed(2) + 's, tlBlockInPointSec=' +
+                        Number(_prevManifest.ref.tlBlockInPointSec).toFixed(2) + 's');
+                }
+                await FASTPASS_UI.SessionManifest.save(ctx, _manPatch);
                 log(`✅ [Manifest] Manifest regenerat des de: ${jsonMeta.filename}`);
                 return { jsonMeta, jsonData, bounds };
             } catch (e) {

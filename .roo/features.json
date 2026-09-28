@@ -3,7 +3,7 @@
   "version": "2.9.5",
   "codename": "LIPO-PRO",
   "description": "Extensión CEP para Adobe Premiere Pro — Automatización de producción de informativos y verticalización 9:16",
-  "updated": "2026-09-24",
+  "updated": "2026-09-25",
 
   "architecture": {
     "tiers": {
@@ -471,6 +471,60 @@
         "files": ["js/core/utils.js", "js/logic/3_Project_Logic.js", "js/logic/16_Analysis_Logic.js", "js/workflows/flow_mainButton.js", "js/workflows/flow_render.js", "js/core/4_Context.js", "js/core/assembly_context.js", "js/core/session_manifest.js", "js/main.js"],
         "commit": "37676aa",
         "date": "2026-09-24"
+      },
+      {
+        "id": "#93",
+        "desc": "ffmpeg -ss NO és el 0 del fitxer extret: el tall arrenca al KEYFRAME ANTERIOR (pre-roll) → 0,81 s d'error sistemàtic a tots els marcadors",
+        "root_cause": "`ffmpeg -ss X -i src -c copy` no pot tallar fora de keyframe i, amb -c copy, el pre-roll es conserva. MESURAT a TNC V3 2026-09-25 (cleanfeed Dalet, GOP 1 s, keyframes 782.24/783.24): -ss 783 → el fitxer arrenca a 782.187 s (verificat creuant dues juntes de silenci idèntiques font/clip). El manifest creia base-fitxer=50283 i la real era 50282.19.",
+        "fix": "15_FFmpeg_Logic.js: nou keyframeAtOrBefore(src, sec) (ffprobe -read_intervals 'sec-6%+12', només paquets K, fallback segur) + flow_mainButton: -ss = keyframe, -t = dur + preRoll (mateix final al source), base-fitxer = wsms + -ss efectiu, clipExpandedInPoint = handle + preRoll, mp4SweetInPointRaw = handle + preRoll. Log '🔑 [keyframe]'.",
+        "files": ["js/logic/15_FFmpeg_Logic.js", "js/workflows/flow_mainButton.js"],
+        "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
+        "date": "2026-09-25"
+      },
+      {
+        "id": "#94",
+        "desc": "Crash 'zonaInOffset is not defined' JUST després del trim: corchetes de seqüència sense fixar i ref del manifest sense finalitzar",
+        "root_cause": "3_Project_Logic.js:375 usava el BARE `zonaInOffset`, declarat només dins la branca MODE NORMAL (línia 224) → ReferenceError a la fase de sweet points. Log TNC V3 2026-09-25 15:20:35: '[PISTES·DESPRES-INSERT] V1=1' → 'Error crític a runNew: zonaInOffset is not defined' (el corchete i tot el que ve després no s'executava mai).",
+        "fix": "S'usa `zonaInAdj` (ja definit a línia 367, val 0 en mode fallback). A més: eliminada la declaració muerta `_deltaIn`.",
+        "files": ["js/logic/3_Project_Logic.js"],
+        "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
+        "date": "2026-09-25"
+      },
+      {
+        "id": "#95",
+        "desc": "IN·FLOOR incloïa ítems del MATEIX bloc → bloc buit (IN>=OUT) → IN/OUT-GUARD baixava l'IN minuts enrere",
+        "root_cause": "El piso del final de l'ítem anterior recorria TOTS els vídeos amb OnAir, incloent els del bloc actual. TNC V3 2026-09-25: l'ítem '05' (dins del bloc, OnAir 14:00:02 + 1:50 = 50512) arrossegava l'IN de 50383 → 50512; com que l'OUT també era 50512, el guard [IN/OUT-GUARD] aplicava IN = block.in − durada(intro) = 50303 → el clip s'extreia amb 129 s del tema anterior a la capçalera.",
+        "fix": "escaleta_bounds.js (IN·FLOOR): es descarten els ítems del bloc actual (_blockIdxSet des de blockLines/allLines.indexOf → skip per _pv.idx).",
+        "files": ["js/core/escaleta_bounds.js"],
+        "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
+        "date": "2026-09-25"
+      },
+      {
+        "id": "#96",
+        "desc": "Ancoratge: l'offset de conversió fitxer→timeline usava la ref del manifest (FIX-A/B) en lloc del clip.inPoint REAL → biaix igual a clipInOffset/zonaInOffset (10 s a TNC)",
+        "root_cause": "flow_markers._calcTemporalAnchors substituïa l'inPoint real del clip pel manifest.ref.tlBlockInPointSec quan el clip era l'extret, i a més hi enganxava l'ajust _wsmsAdjust (FIX-C) dins la mateixa branca. Amb el manifest ja en base del fitxer, afegir refBloc desplaçava l'ancoratge ~20 s i el biaix pla↔recorte (10 s) entrava sencer.",
+        "fix": "FIX D: offsetAnchor = SEMPRE el clip.inPoint real del clip més antic de V1 (timelinePos = mediaSec − (wsms + clip.inPoint)). FIX-C mogut a la GUARDA d'invariant (només si wsms ≠ àncora−refBloc, és a dir manifest en coords d'ORIGEN). Logs FIX-D i FIX-C explícits.",
+        "files": ["js/workflows/flow_markers.js"],
+        "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
+        "date": "2026-09-25"
+      },
+      {
+        "id": "#97",
+        "desc": "_rebuildManifestFromLocal reescrivia la ref en coords d'ORIGEN després de l'extracció (3r escriptor del manifest)",
+        "root_cause": "MANIFEST MESURAT (TNC V1 2026-09-25): ref final wsms=49500 + tlBlockInPointSec=1978 (source) mentre extractedClip.extractedWorldSecMediaStart=50760 → l'ancoratge depenia del pedaç FIX-C.",
+        "fix": "flow_mainButton._rebuildManifestFromLocal: si el manifest ja ve del clip extret (extractedClip.isExtracted + ref completa) es CONSERVA la ref i només s'actualitzen blockBounds/escaletaItems (log '🧭 [Manifest] Ref del CLIP EXTRET conservada').",
+        "files": ["js/workflows/flow_mainButton.js"],
+        "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
+        "date": "2026-09-25"
+      },
+      {
+        "id": "#98",
+        "desc": "Clips.trimAudioA2 no està exposat pel bridge JSX: ERROR vermell a cada execució (no-op)",
+        "root_cause": "jsx/modules/6_Clips.jsx defineix trimAudioA2, però jsx/main.jsx no el mapeja → 'ERR:Clips.trimAudioA2 is not a function' (log TNC V3 2026-09-25).",
+        "fix": "3_Project_Logic.js: eliminada la crida (JSX està tancat). Si mai cal A2, caldrà exposar l'àtom al bridge.",
+        "files": ["js/logic/3_Project_Logic.js"],
+        "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
+        "date": "2026-09-25"
       }
     
     ]
@@ -488,6 +542,12 @@
       "handoff": null,
       "summary": "BUGs #14, #15, #16 resueltos. Inicio reestructuración Harness Engineering: .roo/ como centro de control, agents.md, features.json, init.ps1.",
       "bugs_resolved": ["#14", "#15", "#16"]
+    },
+    {
+      "date": "2026-09-25",
+      "handoff": "plans/HANDOFF_2026-09-25.md",
+      "summary": "Auditoria i arreglada del pipeline IN/OUT de punta a punta (ffmpeg → bounds → clip V1 → corchete → ancoratge). Mesurat amb dades reals (log + manifests + ffprobe/ffmpeg sobre el cleanfeed): el -ss no era el 0 del fitxer (keyframe pre-roll, 0,81 s), crash zonaInOffset, IN·FLOOR contaminat, ancoratge amb la ref del manifest. Nou dump 🔎 [DOMAINS] amb les 4 invariants. Test OK a Premiere.",
+      "bugs_resolved": ["#93", "#94", "#95", "#96", "#97", "#98"]
     }
   ],
 
@@ -495,7 +555,7 @@
     "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
     "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
-    "status": "Sincronizado con origin/main (37676aa, 2026-09-24)"
+    "status": "BUGs #93-#98 pipeline IN/OUT (snap keyframe, corchetes, ancoratge) — 2026-09-25, test OK a Premiere"
   },
 
   "paths": {

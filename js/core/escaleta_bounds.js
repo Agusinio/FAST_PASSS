@@ -955,10 +955,43 @@
         // corchete IN de la seqüència coincideixi amb el seu inici.
         try {
             var _prevEndSec = null, _prevEndNum = '';
+            // (2026-09-25c) 🐞 FIX ARREL: el piso només pot mirar ítems FORA del bloc. Un ítem del
+            // MATEIX bloc no és "l'ítem anterior": si s'inclou, el piso mou l'IN fins al SEU final
+            // → bloc buit (IN >= OUT) → l'IN/OUT-GUARD el baixa a block.in − durada(intro) i el clip
+            // s'extreu minuts enrere. Cas mesurat TNC V3 2026-09-25: ítem "05" (dins del bloc,
+            // OnAir 14:00:02 + 1:50 = 50512) arrossegava l'IN de 50383 → 50512 → guard → 50303 ✗
+            // (129 s de tema anterior a la capçalera del clip).
+            var _blockIdxSet = {};
+            for (var _bi = 0; _bi < blockLines.length; _bi++) {
+                var _kbi = allLines.indexOf(blockLines[_bi]);
+                if (_kbi >= 0) _blockIdxSet[_kbi] = true;
+            }
+            // (2026-09-25d) 🐞 SOSTRE DEL PISO: només poden comptar ítems que ACABIN ABANS que
+            // comenci el bloc. Sense això un ítem POSTERIOR del mateix agrupacio (TNC V3 25/09:
+            // "09" acaba a 50550, després de l'OUT 50512) actuava de "piso", l'IN pujava a 50550,
+            // el bloc quedava invertit (IN>=OUT) i el guard el baixava a 50303 ✗ (80 s de tema
+            // anterior a la capçalera). Referència = hora del PRIMER ítem del bloc (OnAir real;
+            // si no, prevista) amb 15 s de tolerància per durades OnAir sobreestimades.
+            var _refFloorSec = null;
+            try {
+                var _fb0 = blockLines[0];
+                if (_fb0) {
+                    var _oa0 = _fb0.horaEntradaOnAir;
+                    var _pv0 = _fb0.horaEntradaPrevista;
+                    if (_oa0 && String(_oa0).trim() !== '' && String(_oa0) !== '00:00:00') {
+                        _refFloorSec = this.tcToSeconds(_oa0);
+                    } else if (_pv0 && String(_pv0).trim() !== '' && String(_pv0) !== '00:00:00') {
+                        _refFloorSec = this.tcToSeconds(_pv0);
+                    }
+                }
+            } catch (eRefFloor) { /* noop */ }
             for (var pv = 0; pv < allOnAirVideos.length; pv++) {
                 var _pv = allOnAirVideos[pv];
                 if (!_pv || !_pv.item) continue;
+                if (_blockIdxSet[_pv.idx] === true) continue;               // ítem del bloc actual → no és "anterior"
                 var _pvEnd = Number(_pv.endSec);
+                if (!isFinite(_pvEnd)) continue;
+                if (_refFloorSec !== null && isFinite(_refFloorSec) && _pvEnd > _refFloorSec + 15) continue;  // posterior al bloc → no és "anterior"
                 if (!isFinite(_pvEnd)) continue;
                 if (_pvEnd <= worldBlockStartSec + 0.5) continue;          // només els que acaben DESPRÉS de l'inici calculat
                 if (_prevEndSec === null || _pvEnd < _prevEndSec) { _prevEndSec = _pvEnd; _prevEndNum = String(_pv.item.num || ''); }

@@ -208,6 +208,13 @@
                             clipDuration = cleanFeedData.mp4Duration || 60;
                             utils.log(`⚠️ [FALLBACK] No s'ha pogut llegir duració real del clip. Usant estimació: ${clipDuration.toFixed(2)}s`);
                         }
+                        // (2026-09-25d) [DOMAINS] El MP4 del bloc s'insereix SENCER: el contingut
+                        // comença a 0 del fitxer i no hi ha handles → fileIn=0.
+                        cleanFeedData._plan = {
+                            domain: 'source/bloc-media',
+                            fileIn: 0, fileOut: clipDuration, clipDur: clipDuration,
+                            endPlanned: clipDuration, handle: 0
+                        };
                     } else {
                         // ─── MODE NORMAL: cleanFeed amb bounds calculats ──────────────
                         // 4c. Insertar el MP4 a V1 amb insertWithBounds (recortat amb marges + handles)
@@ -312,6 +319,12 @@
                         try {
                             const cur = JSON.parse(await callJSX(`Clips.get(1, 0, 'video')`) || '{}');
                             if (isFinite(Number(cur.inPoint))) clipInDelta = Number(cur.inPoint) - mp4InPt;
+                            // (2026-09-25c) [DOMAINS] Dades REALS del clip a V1 (base de l'ancoratge:
+                            // timelinePos = mediaSec − (wsms + clip.inPoint)).
+                            cleanFeedData._clipReal = {
+                                start: Number(cur.start), inPoint: Number(cur.inPoint),
+                                outPoint: Number(cur.outPoint), end: Number(cur.end)
+                            };
                         } catch (eD) { }
                         if (Math.abs(clipInDelta) > 0.25) {
                             utils.log('🔴 [TRIM-CHECK] El clip NO té el inPoint del pla (desviament ' + clipInDelta.toFixed(2) + 's) → els corchetes de seqüència es desplaçaran ' + (-clipInDelta).toFixed(2) + 's per mantenir la peça alineada.', 'ERROR');
@@ -348,8 +361,18 @@
                         } catch (eAud) {
                             utils.log('⚠️ [AUDIO] No s\'ha pogut recortar l\'àudio: ' + eAud.message, 'WARN');
                         }
-                        const taRes = await callJSX('Clips.trimAudioA2()');
-                        utils.log(`🎬 trimAudioA2 → ${taRes}`);
+                        // (2026-09-25c) 🗑️ `Clips.trimAudioA2` NO està exposat pel bridge JSX (log:
+                        // "ERR:Clips.trimAudioA2 is not a function" ✗ a cada execució). Com que la
+                        // capa JSX està TANCADA, s'elimina la crida: era un no-op que embrutava el
+                        // log amb un ERROR vermell i falsejava el diagnòstic.
+                        // (2026-09-25d) [DOMAINS] PLA en domini FITXER: es declara AQUÍ perquè
+                        // mp4InPt/mp4OutPt/endPlanned viuen en aquesta branca (fer-ho a fora donava
+                        // "mp4InPt is not defined" i trencava el flux ABANS del corchete ✗).
+                        cleanFeedData._plan = {
+                            domain: 'fitxer-extret',
+                            fileIn: mp4InPt, fileOut: mp4OutPt, clipDur: clipDuration,
+                            endPlanned: endPlanned, handle: handleSecs
+                        };
                     }
                     // (2026-09-23) Estat de les pistes JUST després d'inserir el MP4 del bloc.
                     await this._logPistas('DESPRES-INSERT');
@@ -368,13 +391,24 @@
                     // (2026-09-24) Blindatge: si el recorte del clip no s'ha pogut aplicar del tot
                     // (clipInDelta = inPoint real − inPoint del pla), els corchetes es desplacen el
                     // mateix valor perquè la peça segueixi alineada amb el material.
-                    const _deltaIn = (typeof clipInDelta === 'number' && isFinite(clipInDelta)) ? clipInDelta : 0;
-                    // (2026-09-25b) MAI usar _deltaIn (diagnòstic del clip) aquí: en projectes amb
-                    // escales absolutes valia milers de segons i el corchete IN saltava a TC
-                    // 1:31:17 ✗ (!!). El corchete és GEOMETRIA PURA: zonaInOffset, fitada al clip.
-                    const sweetSeqIn = Math.max(0, Math.min(zonaInOffset, Math.max(0, clipDuration - 1)));
+                    // (2026-09-25c) 🗑️ DECLARACIÓ MUERTA ELIMINADA: `_deltaIn` ja no s'usa enlloc
+                    // (el corchete és geometria pura del clip, no diagnòstic del recorte).
+                    // (2026-09-25c) 🐞 FIX CRÍTIC: aquí s'usava el BARE `zonaInOffset`, declarat
+                    // NOMÉS dins la branca MODE NORMAL (línia ~224) → ReferenceError
+                    // "zonaInOffset is not defined" ✗ que trencava el flux JUST després del trim:
+                    // corchetes de seqüència sense fixar, ref del manifest sense finalitzar i cap
+                    // ancoratge (log TNC V3 2026-09-25 15:20:35). El valor correcte ja existia:
+                    // `zonaInAdj` (que val 0 en mode fallback → corchete IN a 0).
+                    const sweetSeqIn = Math.max(0, Math.min(zonaInAdj, Math.max(0, clipDuration - 1)));
                     // (2026-09-25b) Igual que l'IN: sense _deltaIn (només geometria del clip).
                     const sweetSeqOut = Math.max(sweetSeqIn + 1, clipDuration - h);
+                    // (2026-09-25d) [DOMAINS] Completeu el PLA amb la geometria del corchete (aquest
+                    // àmbit). El domini FITXER (fileIn/fileOut) s'omple dins la branca MODE NORMAL /
+                    // FALLBACK, que és on existeixen aquestes variables.
+                    cleanFeedData._plan = Object.assign(
+                        cleanFeedData._plan || { domain: isFallbackBlockMedia ? 'source/bloc-media' : 'fitxer-extret' },
+                        { sweetSeqIn: sweetSeqIn, sweetSeqOut: sweetSeqOut, handle: h, clipDur: clipDuration }
+                    );
                     utils.log(`📍 [DEBUG] IN/OUT de seqüència (sweet points): seqIN=${sweetSeqIn.toFixed(2)}s seqOUT=${sweetSeqOut.toFixed(2)}s (durada=${clipDuration.toFixed(2)}s, handleSecs=${h}s${isFallbackBlockMedia ? ', mode=fallback' : ''})`);
                     const rangeRes = await callJSX(`Timeline.range(${sweetSeqIn.toFixed(4)}, ${sweetSeqOut.toFixed(4)})`);
                     utils.log(`🔍 Timeline.range resultat=${rangeRes}`);

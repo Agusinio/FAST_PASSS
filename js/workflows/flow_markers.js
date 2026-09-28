@@ -340,16 +340,19 @@
                         var _tolInAnc = 1.0;
                         if (isFinite(clipInPoint) && Math.abs(clipInPoint - _manifestInPointAnc) > _tolInAnc) {
                             offsetAnchor = clipInPoint;
-                            // (2026-09-25) FIX C: si el manifest està en coords d'ORIGEN (refBloc
-                            // lluny del inPoint real del clip), la BASE REAL del fitxer extret és
-                            // wsms + refBloc (TNC: 49500 + 953 = 50453). Sense això l'ancoratge
-                            // sortia 853 s a la dreta (973.28 en lloc de 20.28 ✓).
-                            _wsmsAdjust = _manifestInPointAnc;
+                            // (2026-09-25c) FIX D — l'offset de l'ancoratge és SEMPRE el inPoint REAL
+                            // del clip. L'ajust de base (_wsmsAdjust) s'ha mogut a la GUARDA
+                            // d'invariant de sota: només s'aplica si el manifest està en coords
+                            // d'ORIGEN (si no, afegir-lo desplaçava l'ancoratge 20 s ✓→✗).
                             offsetAnchorFont = 'inPoint REAL del clip (' + Number(clipInPoint).toFixed(3) + 's) ≠ refBloc ' + Number(_manifestInPointAnc).toFixed(3) + 's';
-                            log('🚨 [ANCORATGE·FIX-B] L\'insert NO ha respectat el bounds: inPoint real=' + Number(clipInPoint).toFixed(3) + 's vs esperat=' + Number(_manifestInPointAnc).toFixed(3) + 's (Δ=' + (clipInPoint - _manifestInPointAnc).toFixed(2) + 's) → manen les dades REALS del clip; els marcadors s\'alineen amb el material que hi ha a la timeline. Revisa l\'insert/OUT.', 'WARN');
+                            log('ℹ️ [ANCORATGE·FIX-D] Recorte REAL del clip (' + Number(clipInPoint).toFixed(3) + 's) ≠ refBloc del manifest (' + Number(_manifestInPointAnc).toFixed(3) + 's, Δ=' + (clipInPoint - _manifestInPointAnc).toFixed(2) + 's) → mana el CLIP (timelinePos = mediaSec − (wsms + clip.inPoint)). El ref del manifest només serveix per detectar manifests vells.');
                         } else {
-                            offsetAnchor = _manifestInPointAnc;
-                            offsetAnchorFont = 'ref del bloc (clip extret "' + _clipNameAnc + '")';
+                            // (2026-09-25c) FIX D: el recorte real del clip ÉS la conversió
+                            // fitxer→timeline. Usar el ref del manifest com a offset introduïa un
+                            // biaix exactament igual a la diferència pla↔recorte (clipInOffset /
+                            // zonaInOffset = 10 s a TNC → tots els marcadors 10 s tard).
+                            offsetAnchor = clipInPoint;
+                            offsetAnchorFont = 'inPoint REAL del clip ("' + _clipNameAnc + '")';
                         }
                     } else {
                         offsetAnchor = clipInPoint;
@@ -368,7 +371,17 @@
                     var _wba = (manifest.ref.worldBlockAnchorSec !== undefined && manifest.ref.worldBlockAnchorSec !== null) ? Number(manifest.ref.worldBlockAnchorSec) : null;
                     var _tbp = Number(manifest.ref.tlBlockInPointSec);
                     if (isFinite(_wms) && _wba !== null && isFinite(_wba) && isFinite(_tbp) && Math.abs(_wms - (_wba - _tbp)) > 1.0) {
-                        log('⚠️ [ANCORATGE] El manifest NO està en base del clip extret (worldSecMediaStart=' + _wms.toFixed(2) + 's ≠ worldBlockAnchorSec−tlBlockInPointSec=' + (_wba - _tbp).toFixed(2) + 's) → els marcadors cauran FORA del material. Prem ACTUALITZAR (botó principal) i torna-ho a provar.', 'ERROR');
+                        // (2026-09-25c) FIX C (mogut aquí, fora de la branca FIX-B): un manifest en
+                        // coords d'ORIGEN (wsms = inici del cleanfeed, tlBlockInPointSec = in-point al
+                        // SOURCE) no compleix l'invariant del clip extret. La base REAL del fitxer és
+                        // wsms + tlBlockInPointSec (TNC: 49500 + 953 = 50453 ✓). NOMÉS en aquest cas:
+                        // si el manifest ja és en base del fitxer, afegir-ho desplaçava l'ancoratge.
+                        if (_tbp > 1.0) {
+                            _wsmsAdjust = _tbp;
+                            log('⚓ [ANCORATGE·FIX-C] Manifest en coords d\'ORIGEN (wsms=' + _wms.toFixed(2) + 's ≠ àncora−refBloc=' + (_wba - _tbp).toFixed(2) + 's) → base REAL del fitxer extret = wsms + refBloc = ' + (_wms + _tbp).toFixed(2) + 's. Prem ACTUALITZAR perquè el manifest quedi en base del clip.');
+                        } else {
+                            log('⚠️ [ANCORATGE] Manifest sense base fiable (worldSecMediaStart=' + _wms.toFixed(2) + 's, tlBlockInPointSec=' + _tbp + ') → els marcadors poden caure FORA del material. Prem ACTUALITZAR (botó principal).', 'ERROR');
+                        }
                     }
                 } catch (eGuard) { /* noop */ }
             }
