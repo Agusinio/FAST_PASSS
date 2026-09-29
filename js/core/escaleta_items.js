@@ -110,6 +110,23 @@
             if (!ignoreAgrupacio && item.agrupacio && prevItem.agrupacio !== item.agrupacio) {
                 var prevOnAirCheck = prevItem.horaEntradaOnAir;
                 if (!prevOnAirCheck || prevOnAirCheck === "00:00:00" || prevOnAirCheck.trim() === '') {
+                    // (2026-09-28 · BUG #104) ABANS: aquest `continue` descartava l'ítem SENSE
+                    // acumular la seva DURADA → la deducció quedava clavada a l'OnAir de l'últim
+                    // ítem de l'altra agrupació. Cas MESURAT TNM V1 27/09 ("DIRECTE PUERTA DEL
+                    // SOL"): el bloc v1 "03dp" deduïa 14:30:52 (= OUT de "SM3", l'últim ítem del
+                    // sumari amb OnAir) perquè SM4-SM7 + CARETA + "01" (sense OnAir, agrupacio
+                    // null) es saltaven sense sumar els seus 91 s → el clip arrencava 84 s dins
+                    // del sumari anterior (mp4In=212 s en lloc de 296 s, editant 2 min de tema
+                    // aliè a la capçalera). Sumant-los (com ja fa la ruta ignoreAgrupacio=true)
+                    // la deducció avança per la CADENA REAL d'emissió; la regla BUG #21 continua
+                    // limitant-la per la Prevista de l'ítem objectiu.
+                    if (this.isItemEstructural(prevItem)) {
+                        if (data && prevItem.titol && this._isCareta(prevItem.titol)) {
+                            accumulatedDur += this._getCorrectedDuration(prevItem, data);
+                        } else {
+                            accumulatedDur += this.getItemDuradaSec(prevItem);
+                        }
+                    }
                     continue;  // Saltar items no agrupats sense OnAir (logo final)
                 }
                 // Si té OnAir real, usar-lo com a àncora (faros)

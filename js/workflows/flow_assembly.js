@@ -40,6 +40,9 @@
         placeOnAirMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.placeOnAirMarkers();
         },
+        placeUngroupedMarkers: async function () {
+            return FASTPASS_UI.Workflows.Markers.placeUngroupedMarkers();
+        },
         placeDeducedOnAirMarkers: async function () {
             return FASTPASS_UI.Workflows.Markers.placeDeducedOnAirMarkers();
         },

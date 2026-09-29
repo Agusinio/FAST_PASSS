@@ -61,6 +61,44 @@ git merge fix/047-descripcio-del-bug
 
 ---
 
+## ⏱️ DIAGNÒSTIC D'ARRENCADA LENTA (2026-09-29)
+
+La càrrega inicial del panell (`Context.init` → `checkContext`) pot trigar molt. Per
+saber **on** es va el temps hi ha un log de fites: `_boot_timing.log`.
+
+| Què | Com |
+|-----|-----|
+| Fitxer (carpeta de l'extensió) | `<extensió>\_boot_timing.log` |
+| Còpia de seguretat | `C:\temp\_boot_timing.log` |
+| Ruta des de JS | `FASTPASS_UI.Boot.logPath()` |
+| Obrir el log | `FASTPASS_UI.Boot.openLog()` (ShellExecute; fallback Notepad via `IO.executeShell`) |
+| Marcar una fita nova | `FASTPASS_UI.Boot.mark('[ElMeuModul] fase X')` |
+
+**Format**: `+<ms des de l'inici> ms  (Δ<ms des de la marca anterior>)  <etiqueta>`.
+`Δ` gran = la fase anterior és la culpable.
+
+**Auto-obertura**: si l'arrencada supera el llindar (per defecte 15 s) el log s'obre
+tot sol en acabar (una sola vegada per sessió). Es canvia amb:
+
+```js
+FASTPASS_UI.Boot.setAutoOpen(0)      // desactivat
+FASTPASS_UI.Boot.setAutoOpen(30000)  // només si passa de 30 s (es guarda a localStorage)
+```
+
+**Fites ja instrumentades** (`4_Context.js`): `init · selectors`, `readFolder NAS`,
+`escaleta getStatus`, `escaleta local/FOTO`, `scan media+wotts`, `projecte obert+lock (JSX)`,
+`semàfor assets (4 crides)`, `semàfor NEW`, `TOTAL`, `syncConductorUI · NAS conductors`.
+
+> Un cop escrit `ARRENCADA COMPLETA`, les marques posteriors (auto-refresc de 60 s) ja no
+> s'escriuen al fitxer per no embrutar-lo; només a consola.
+
+**Test de humo** (V8/Edge headless, executa el bloc real amb stubs):
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\temp\fp_boot_test.ps1
+```
+
+---
+
 ## 📊 BASELINE I VERSIONS
 - **V7.0.1 (Jan 2026)**: Establiment del baseline de seguretat (Fixes crítics de debugger, JSON i rutes).
 - **V9.0.0 (Jan 2026)**: Estabilització de la base de producció.

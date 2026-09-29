@@ -130,7 +130,7 @@ El remoto eliminó estos bloques. Nosotros los conservamos porque son valiosos:
 
 ```bash
 # Estrategia: merge con "ours" para resolución automática de conflictos
-E:\PortableGit\bin\git.exe -C "c:/Users/..." \
+F:\PortableGit\bin\git.exe -C "c:/Users/..." \
   -c http.proxy=http://172.20.0.152:8088 \
   merge origin/main \
   -s recursive -X ours \

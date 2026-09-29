@@ -70,7 +70,7 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 - Adobe Premiere Pro (versió compatible amb CEP).
 - Extensió instal·lada i activada (veure [`CSXS/manifest.xml`](CSXS/manifest.xml)).
 - Accés al NAS amb l'estructura esperada de fitxers.
-- Git portable a `E:\PortableGit` (per desenvolupament).
+- Git portable a `F:\PortableGit` (per desenvolupament; la lletra d'unitat del USB pot variar).
 
 ### 2. **Execució**
 1. Obre Premiere Pro.

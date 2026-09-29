@@ -279,12 +279,30 @@
                 if (cands.length === 0) return out;
                 cands.sort(function (a, b) { return a.timeSec - b.timeSec; });
 
-                // Excloure l'últim si NO té OnAir (és el final trimeat per l'usuari)
+                // (2026-09-29) BUG #109: abans s'excloïa l'ÚLTIM candidat si no tenia OnAir
+                // (perquè "és el final trimeat per l'usuari"). Amb el bloc V2 del TN_VESPRE
+                // del 28/09 això s'empassava `02dir` (LIN DIRECTE PUERTA DEL SOL,
+                // agrupacio:null, prevista 21:05:34) — era l'últim candidat no agrupat del
+                // rang i es quedava SENSE marcador vermell. Ara l'últim només s'exclou si cau
+                // DESPRÉS de l'últim ítem orgànic del bloc (això sí que és la cua trimeada).
                 var last = cands[cands.length - 1].item;
                 var lastOnAir = last && last.horaEntradaOnAir && last.horaEntradaOnAir !== '00:00:00' && String(last.horaEntradaOnAir).trim() !== '';
+                var lastLineSec = null;
+                try {
+                    var lastLine = lines[lines.length - 1];
+                    var lastLineTc = lastLine && (lastLine.horaEntradaOnAir || lastLine.horaEntradaPrevista);
+                    if (lastLineTc) lastLineSec = reader.tcToSeconds(lastLineTc);
+                } catch (eLL) { lastLineSec = null; }
+                var lastEsCuaTrimeada = (!lastOnAir && (lastLineSec === null || cands[cands.length - 1].timeSec >= lastLineSec));
+                if (lastEsCuaTrimeada) {
+                    try {
+                        window.FASTPASS_UI.Utils.log('   [Ungrouped] ' + (last.num || '?') + ' és la cua trimeada del bloc (' +
+                            cands[cands.length - 1].timeSec.toFixed(0) + 's ≥ ' + (lastLineSec === null ? '?' : lastLineSec) + 's) → no es marca', 'DEBUG');
+                    } catch (e2b) { }
+                }
                 for (var c = 0; c < cands.length; c++) {
                     var it = cands[c].item;
-                    if (it === last && !lastOnAir) continue;
+                    if (it === last && lastEsCuaTrimeada) continue;
                     if (window.FASTPASS_UI && window.FASTPASS_UI.Workflows && window.FASTPASS_UI.Workflows.Markers &&
                         window.FASTPASS_UI.Workflows.Markers._isGraphicByNum && window.FASTPASS_UI.Workflows.Markers._isGraphicByNum(it.num)) continue;
                     out.push(it);

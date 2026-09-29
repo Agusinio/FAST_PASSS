@@ -13,6 +13,19 @@
 
     let _lastCheckAt = 0; // Guard de debounce
 
+    // ── TIMING D'ARRENCADA (2026-09-29) ─────────────────────────────────────
+    // Marca fites al _boot_timing.log (infraestructura a main.js → FASTPASS_UI.Boot)
+    // per saber QUINA fase de la càrrega inicial es menja el temps (escaneig NAS,
+    // escaleta, crides JSX de projecte…). Silenciós si l'API encara no hi és.
+    const _bmark = (lbl) => {
+        try {
+            const B = window.FASTPASS_UI && window.FASTPASS_UI.Boot;
+            if (B && typeof B.mark === 'function') B.mark('[Context] ' + lbl);
+        } catch (eBM) { }
+    };
+    // Durada llegible: 812 → "812 ms"; 108568 → "108,6 s".
+    const _bsec = (ms) => (ms >= 10000 ? (Math.round(ms / 100) / 10) + ' s' : ms + ' ms');
+
     // ─── MECÀNICA D'INICI (2026-09-04) ────────────────────────────────────────
     // La data de treball NO es dedueix de l'hora del programa ni dels repositoris.
     //   - Defecte: HOY (data del sistema) en seleccionar Programa+Bloque.
@@ -186,6 +199,7 @@
             if (!(_opts && _opts.force) && now - _lastCheckAt < 1000) return;
             _lastCheckAt = now;
         
+            const _tCC0 = Date.now();
             try {
                 // Ahora ya puedes validar si existen
                 if (!elProg || !elBloc || !elProg.value || elBloc.value === "---") {
@@ -249,7 +263,9 @@
                 let folderPath = getUtils().workFolder(ctx) + "/";
                 
                 // 2. ESCANEIG GENÈRIC (Usant Utils.readFolder a través de Scanner)
+                const _tRF = Date.now();
                 let projectFiles = await getUtils().readFolder(folderPath);
+                _bmark('checkContext · readFolder NAS (' + _bsec(Date.now() - _tRF) + ', ' + (projectFiles ? projectFiles.length : 0) + ' fitxers)');
 
                 if (!projectFiles || projectFiles.length === 0) {
                     getUtils().log("ℹ️ Carpeta buida o inexistent. Conclusió: NEW", "DEBUG");
@@ -275,11 +291,15 @@
                 const readerE = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                 if (readerE) {
                     const datePrefixD = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                    const _tEsc = Date.now();
                     try {
                         semaforoData.esc = await readerE.getStatus(ctx.progData.archivo, ctx.bloque, datePrefixD);
                     } catch (eSt) {
                         getUtils().log('⚠️ [checkContext] Error llegint estat de l\'escaleta: ' + eSt.message, 'DEBUG');
                     }
+                    _bmark('checkContext · escaleta getStatus (' + _bsec(Date.now() - _tEsc) + ')');
+                } else {
+                    _bmark('checkContext · SENSE EscaletaReader');
                 }
 
                 if (!existingProjectName) {
@@ -296,9 +316,11 @@
                     // verd. Ara la FOTO local passa a ser font vàlida i permet arrancar.
                     let escLocal = null;
                     if (readerE && typeof readerE.lookupLocalStatus === 'function') {
+                        const _tLoc = Date.now();
                         try { escLocal = await readerE.lookupLocalStatus(ctx); } catch (eLoc) {
                             getUtils().log('⚠️ [checkContext] Error buscant escaleta local: ' + eLoc.message, 'DEBUG');
                         }
+                        _bmark('checkContext · escaleta local/FOTO (' + _bsec(Date.now() - _tLoc) + ')');
                     }
 
                     // La ingesta es mesura sobre l'escaleta més fiable disponible.
@@ -335,8 +357,10 @@
                         let mediaD = null;
                         let wotsD = null;
                         const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
+                        const _tMw = Date.now();
                         try { if (sc && sc.mediaAssets) mediaD = await sc.mediaAssets(ctx); } catch (eM) { /* sense xarxa */ }
                         try { if (sc && sc.wotts) wotsD = await sc.wotts(ctx); } catch (eW) { /* sense xarxa */ }
+                        _bmark('checkContext · scan media+wotts (sense projecte) (' + _bsec(Date.now() - _tMw) + ')');
                         const hasIngesta = !!(mediaD && (mediaD.mp4 || mediaD.srt));
                         const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
                         earlyState = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
@@ -369,6 +393,7 @@
                     data.semaforo = semaforoData;
                     this._lastConclusion = earlyState;
                     this._lastButtonData = data;
+                    _bmark('checkContext · TOTAL (' + _bsec(Date.now() - _tCC0) + ') → ' + earlyState + ' [early]');
                     this.updateLights(elProg.value, ctx.bloque, null, false, semaforoData);
                     this.updateButton(earlyState, data);
                     return;
@@ -378,6 +403,7 @@
                 let lockOwner = null;
                 let lockFile = null;
                 let isLockOwned = true;
+                const _tPj = Date.now(); // timing de les consultes JSX de projecte obert + lock
             
                 if (existingProjectName) {
                     // Obtener lista de proyectos abiertos en Premiere
@@ -460,18 +486,22 @@
                     }
                 }
             
+                _bmark('checkContext · projecte obert+lock (JSX) (' + _bsec(Date.now() - _tPj) + ', ' +
+                    (existingProjectName || 'sense projecte') + ')');
                 getUtils().log("🔍 Conclusión contexto: " + conclusion + (existingProjectName ? " (projecte: " + existingProjectName + ")" : ""), "DEBUG");
                 
                 // [NOU] SEMAFOR: completar estats d'assets (esc ja avaluat a la fase anterior)
                 try {
                     // 2. Assets al projecte (nomes si el projecte esta obert o en UPDATE)
                     if (conclusion === 'UPDATE' || conclusion === 'GO') {
+                        const _tSem = Date.now();
                         const [hasMp4, chyItemsRaw, hasSrt, mediaFiles] = await Promise.all([
                             getUtils().callJSX("hasClips(1, 'video')"),
                             getUtils().callJSX("FASTPASS.Project.items('CHY')"),
                             getUtils().callJSX("hasClips(1, 'subtitle')"),
                             getUtils().readFolder(ctx.config.rutas.verticalitzacio) // Per al SRT físic
                         ]);
+                        _bmark('checkContext · semàfor assets (4 crides) (' + _bsec(Date.now() - _tSem) + ')');
 
                         // MP4
                         const mp4Present = (hasMp4 === "true");
@@ -516,6 +546,7 @@
                 // Informa de què ja és al NAS perquè l'usuari sàpiga quan pot crear o
                 // actualitzar. MP4/Rètols en VERD INTERMITENT = ja importables.
                 if (!existingProjectName && semaforoData.esc && semaforoData.esc.found) {
+                    const _tSN = Date.now();
                     try {
                         const scN = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
                         if (scN && scN.mediaAssets) {
@@ -549,6 +580,7 @@
                     } catch (eSN) {
                         getUtils().log('⚠️ [checkContext] Error calculant semàfor NEW: ' + eSN.message, 'DEBUG');
                     }
+                    _bmark('checkContext · semàfor NEW (' + _bsec(Date.now() - _tSN) + ')');
                 }
 
                 // 4. FEEDBACK UI
@@ -560,6 +592,7 @@
                     data.isLockOwned = lockOwner.trim() === ctx.config.autor.trim();
                 }
                 
+                _bmark('checkContext · TOTAL (' + _bsec(Date.now() - _tCC0) + ') → ' + conclusion);
                 this.updateLights(elProg.value, ctx.bloque, null, (conclusion === 'UPDATE'), semaforoData);
                 this._lastConclusion = conclusion;
                 this._lastButtonData = data;
@@ -567,6 +600,7 @@
             
             } catch (e) {
                 getUtils().log("💥 Error checkContext: " + e.message, "ERROR");
+                _bmark('checkContext · ERROR (' + _bsec(Date.now() - _tCC0) + '): ' + e.message);
                 // FIX A3: No mantenir 'NEW' per defecte en cas d'error.
                 // Un error de xarxa/permisos es pot interpretar erròniament com
                 // "carpeta buida". Forcem WAITING per evitar que l'usuari premi
@@ -806,6 +840,7 @@
         },
 
         async init() {
+            const _tInit0 = Date.now();
             const p = document.getElementById('programa');
             const b = document.getElementById('bloc');
             const config = FASTPASS_UI.Config.get();
@@ -856,6 +891,8 @@
                 console.log("💾 [CONTEXT] Selección recuperada:", p.value, b.value);
             }
         
+            _bmark('init · selectors PROG/BLOC (' + _bsec(Date.now() - _tInit0) + ')');
+
             // 4. Definir el Trigger con LOGS
             const trigger = async () => {
                 console.log("🔄 [EVENT] Cambio en selectores detectado");
@@ -878,11 +915,17 @@
             // 6. Arrencada inicial forzada
             console.log("🚀 [CONTEXT] Forzando primer check...");
             try {
+                const _tChk = Date.now();
                 await this.checkContext();
+                _bmark('init · checkContext (' + _bsec(Date.now() - _tChk) + ')');
+                const _tCond = Date.now();
                 await this.syncConductorUI();
+                _bmark('init · syncConductorUI/COND (' + _bsec(Date.now() - _tCond) + ')');
             } catch (e) {
                 console.error("💥 Error en inicialización de contexto:", e);
+                _bmark('init · ERROR: ' + e.message);
             }
+            _bmark('init · TOTAL (' + _bsec(Date.now() - _tInit0) + ')');
         },
 
         // ── CACHÉ DE LA LLISTA DE CONDUCTORES ──────────────────────────────
@@ -994,6 +1037,8 @@
                 defaults = [].concat(progData.conductors.titular, progData.conductors.substituts).filter(Boolean);
             }
 
+            _bmark('syncConductorUI · inici (programa=' + programKey + ', defaults=' + defaults.length + ')');
+
             const mountOptions = (parent, list) => {
                 list.forEach(fileName => {
                     const opt = document.createElement('option');
@@ -1029,11 +1074,14 @@
 
             // 3. Noms del NAS amb límit de temps (via ràpida cep.fs.readdir + caché 10 min)
             let nasNames = [];
+            const _tNas = Date.now();
             try {
                 nasNames = await this._withTimeout(
                     this._listConductorNames(config.rutas.conductors, defaults.length === 0), 8000, 'conductors');
+                _bmark('syncConductorUI · NAS conductors (' + _bsec(Date.now() - _tNas) + ', ' + (nasNames ? nasNames.length : 0) + ' noms)');
             } catch (eCond) {
                 FASTPASS_UI.Utils.log('⚠️ [COND] Llistat del NAS no disponible (' + eCond.message + '): es mantenen els del programa', 'WARN');
+                _bmark('syncConductorUI · NAS conductors TIMEOUT/ERROR (' + _bsec(Date.now() - _tNas) + ')');
                 this._conductorUIRendered = programKey;
                 return;
             }

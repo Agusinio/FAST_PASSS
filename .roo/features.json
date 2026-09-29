@@ -3,7 +3,7 @@
   "version": "2.9.5",
   "codename": "LIPO-PRO",
   "description": "Extensión CEP para Adobe Premiere Pro — Automatización de producción de informativos y verticalización 9:16",
-  "updated": "2026-09-25",
+  "updated": "2026-09-29",
 
   "architecture": {
     "tiers": {
@@ -525,9 +525,136 @@
         "files": ["js/logic/3_Project_Logic.js"],
         "commit": "BUGs #93-#98, 2026-09-25 (test OK Premiere)",
         "date": "2026-09-25"
+      },
+      {
+        "id": "#99",
+        "desc": "REPARTIR (traduccions/chyrons) només omplia el PRIMER clip de V1 quan les traduccions del tram queien a cavall de 2 clips seleccionats",
+        "root_cause": "flow_chyrons.repartirChyronTraduccio agafava com a referencia NOMES el clip de V1 sota la PRIMERA traduccio del tram (_clipAtInstant) -> tots els slots es distribuïen dins d'aquell clip; amb 2 clips seleccionats el segon quedava buit. A mes, el limit de l'ultim slot podia ser un marcador INTERN (el tall entre els 2 clips) i truncava encara mes el repartiment.",
+        "fix": "La referencia del tram passa a ser la UNIO dels clips V1 seleccionats que INTERSECTEN el span temporal del tram (IN del primer -> OUT de l'ultim). Amb 2+ clips no s'aplica el limit per marcador (mana la seleccio de l'operador); amb 1 clip es mante el comportament anterior. Slots uniformes (slotDur = (limit - bStart)/M) = durades iguals. Log amb refN i avis si hi ha forat >0,5s.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de test a Premiere)",
+        "date": "2026-09-25"
+      },
+      {
+        "id": "#103",
+        "desc": "REPARTIR només tenia en compte el PRIMER clip seleccionat de V1 (2 clips seleccionats → 1 usat)",
+        "root_cause": "MESURAT (log 28/09 11:35:08 i 11:35:19, TNV V2): '🎯 [Repartir] V1: 2, Trad (V8): 5' però '📐 [Repartir] Tram 1/1: ... ref V1 [28.44-34.84] (1 clip(s): 28.44-34.84)' → els 5 slots s'apretaven en 6.40s (1.28s cadascun) i el 2n clip seleccionat quedava buit. El fix #99 calculava la referència del tram per INTERSECCIÓ amb el span temporal de les traduccions (spanClips = selectedV1.filter(c => c.end > gFirst && c.start < gLast)); el fix #101 de COLOCAR fa que el repartiment inicial arrenqui a l'IN del clip de referència → les 5 traduccions de TC=00.29 queden ENCERRADES dins del clip [28.44-34.84] → cap altre clip 'toca' el tram → refN=1 i el 2n clip s'ignorava. ABANS 'funcionava' per accident: el fallback clipEnd = clipStart + 10 del COLOCAR vell desbordava les traduccions fora del clip i el span arribava al clip veí.",
+        "fix": "repartirChyronTraduccio: la referència del tram es calcula per POSICIÓ dins la SELECCIÓ de V1 (l'operador marca l'extensió amb Ctrl+clic), no per intersecció temporal: selOrd = selectedV1 ordenat per start; idx0 = primer clip amb end > gFirst (o el darrer si cap el conté); idx1 = darrer clip seleccionat, o el clip ANTERIOR al que conté l'inici del tram SEGÜENT (gNextFirst = min(start) del grup següent) → es manté l'esperit del #99 (cada tram dins del SEU material: el bloc 2 no envaeix el bloc 1) i amb 1 sol clip el comportament és idèntic a l'anterior. Test unitari que EXECUTA el bloc real extret del fitxer de producció: 13/13 PASS (C:/temp/fp_rep_test.html).",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de test a Premiere · 13/13 PASS unit test V8)",
+        "date": "2026-09-28"
+      },
+      {
+"id": "#102",
+        "desc": "El chyron del CONDUCTOR no es col·locava (TNV V3 28/09) i el log deia '✅ col·locat' igualment",
+        "root_cause": "MESURAT (logs 28/09 09:32 i 10:54, projecte TNV V3): el conductor NO és mai al projecte. El desplegable #conductor llista els .mov de la biblioteca del NAS (cfg.rutas.conductors, via Context.syncConductorUI), NO ítems del projecte: en un projecte nou ningú no importa el conductor, així que Clips.insert('Conduct_*.mov') tornava sempre 'ERR_ITEM_NOT_FOUND' (log 10:54:43: 'Cap fitxer Conduct_*.mov al projecte'). El desplegable duia el conductor de TNM perquè el selector de programa del panell estava desincronitzat, però amb qualsevol conductor passaria el mateix. A més placeChyronConductor no comprovava insertRes → registrava '✅ col·locat' i status 'exito' (fals positiu).",
+        "fix": "Nou _ensureConductorInProject() (substitueix _resolveConductorFile): (1) si el conductor TRIAT ja és al projecte (nom exacte o sense extensió) s'usa el nom REAL de l'ítem; (2) si no, s'IMPORTA del NAS amb la pauta canònica de Project/Assembly (cfg.rutas.conductors + nom del desplegable, ruta amb '/' + Utils.importList → 'root') i es reintenta la lectura; (3) últim recurs: qualsevol 'Conduct_*.mov' ja al projecte (WARN, pot no ser el triat); (4) si no, ERROR i s'omet el conductor. El fitxer triat al desplegable mana SEMPRE (ja no es substitueix pel titular del programa). A placeChyronConductor es comprova insertRes: si comença per ERR → ❌ + status warn (mai més un ✅ fals). SEGONA CAUSA MESURADA (log 11:19:20 del mateix dia i projecte): la ruta rutas.conductors del FALLBACK (11_Configuracio.js L25) apuntava a una altra carpeta del NAS on el nom del desplegable NO existeix; la carpeta correcta és la de Profile.json (.../PROJECTE 9x16 PREMIERE 2/CHYRONS CONDUCTORS/) i, a més, Profile.json no el carrega ningú (a js/ només se'l menciona en comentaris) → la config viva és sempre el fallback. proj.importFiles és ASÍNCRON i NO llança mai: amb una ruta inexistent el projecte queda sense ítem i Utils.importList retorna sense error (per això el delay de 500 ms era inútil). FIX v47: (a) ruta del fallback alineada amb Profile.json; (b) _ensureConductorInProject resol el nom REAL dins de cfg.rutas.conductors abans d'importar (clau normalitzada: sense Conduct_, sense token de programa, sense accents ni extensió → lliga noms antics i moderns en les dues direccions, preferint el del programa actiu) i valida amb cep.fs.stat/readdir (❌ explícit si el fitxer no existeix, mai més un silenci); (c) SONDEIG del projecte cada 500 ms fins a 20 s (⏳ cada 5 s); (d) runAutoPlacement ja no passa el valor cru del desplegable. Validat amb un unit test que EXECUTA la funció REAL extreta del fitxer: 17/17 PASS (C:/temp/fp_cond_test.html).",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de commit · 17/17 PASS unit test V8 · test a Premiere pendent)",
+        "date": "2026-09-28"
+      },
+      {
+        "id": "#101",
+        "desc": "El placement inicial de traduccions (per TC) col·locava les últimes traduccions FORA del seu clip de referència de V1 (TC=01.10: 2 clips @ 70.00s dur=10.00s quan el clip és [69.68-77.48])",
+        "root_cause": "MESURAT (log TNV V2 28/09 09:18): _snapToNearestCut rebutja per DISSENY els talls ANTERIORS a l'ideal ('si el tall més proper és anterior al marcador → usar el marcador'): TC=01.10 → ideal 70.00s amb el tall real a 69.68s → retorna 70.00s (que NO és un tall). Després, la cerca del clip de referència exigia coincidència EXACTA (|cl.start − clipStart| < 0.05) → cap clip de V1 comença a 70.00s → no es trobava la referència i quedava el fallback `clipEnd = clipStart + 10` (10 s fixos!) → 2 slots de 5s = 70→80s, travessant el tall de 77.48s i envaint el clip següent. Senyal al log: 'dur=10.00s' amb N clips = referència NO trobada.",
+        "fix": "placeChyronTraduccio: la referència passa a ser el clip de V1 que CONTÉ el punt ideal (i, si no n'hi ha cap, el més proper), i el repartiment comença al SEU IN (refStart) → les N traduccions omplen exactament el clip (69.68-77.48 → 2×3.90s). El fallback de 10 s es manté només si no hi ha cap clip (amb WARN). Log ampliat amb la referència ('← clip V1 [a-b]s'). Extra: l'insert inicial ja no passa endSec (quirk de l'API: l'aplicava al DARRER clip de la pista i el retallava) → Clips.endAt per temps, i el log diu la pista real (V8) en lloc de 'V7'.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de test a Premiere)",
+        "date": "2026-09-28"
+      },
+      {
+        "id": "#100",
+        "desc": "REPARTIR destrossava el clip veí de la dreta de la pista (rètol Llocdata) en col·locar-hi les traduccions",
+        "root_cause": "MESURAT (log 2026-09-28 09:06, TNV V2): el repartiment va bé (ref V1 [28.64-47.44] amb 2 clips, 5 slots de 3.76s fins a 47.44s) i el rètol Llocdata era JUST a la dreta: V8 @ [47.84-52.94]. No va quedar dins cap slot: el va TRENCAR l'insert (Clips.insert = targetTrack.overwriteClip amb la durada COMPLETA del PNG, no el slot) -> el log mostra '🩹 … tocat per un insert [49.68-52.94] → restaurat a [47.84-52.94]'. _repararClipsV7 el tornava a lloc, PERÒ amb Clips.insert: crea una INSTÀNCIA NOVA del clip → es perden els efectes/paràmetres/animació que l'operador hi havia aplicat (i el clip queda 'estropat' encara que start/end siguin correctes).",
+        "fix": "Protocol de protecció de veïns (3 passos) a repartirChyronTraduccio: (1) el límit del repartiment s'atura a l'entrada del proper clip existent de la pista (en aquest cas 47.44 < 47.84 → el repartiment NO canvia); (2) els clips veïns de la zona de perill (rang + 30 s pel sobrepassament de l'overwrite del PNG) es MOUEN fora de la pista amb Clips.moveToRange — reassigna start/end, NO sobreescriu i sobretot NO re-crea el clip → efectes i animacions intactes — i (3) es TORNEN exactament a la seva posició original al final. Logs 🛡️ (apartat) i ↩️ (tornat); _repararClipsV7 queda com a xarxa de seguretat per a altres casos.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de test a Premiere)",
+        "date": "2026-09-25"
       }
     
-    ]
+,
+      {
+        "id": "#104",
+        "desc": "L'IN del bloc arrencava DINS del sumari anterior (TNM V1 27/09 'DIRECTE PUERTA DEL SOL': el corchete IN queia a 14:30:52 en lloc de 14:32:16 → 84 s de tema aliè a la capçalera del clip; el directe entrava a ~2:15-2:47 del clip en lloc de ~0:10)",
+        "root_cause": "MESURAT (log ...PROVES/FASTPASS.log 28/09 13:54:38 + manifest TNM_V1.fastpass.json + repro headless amb el JSON real d'escaleta): 'Tier1-COMPETE: primer estructural 03dp entrada=52252.00s < Tier0-IN=52336.00s. Guanya Tier1 (més aviat)' → worldBlockStartSec=52252 (14:30:52) i mp4ExpandedInPoint=212 s. El candidat sortia de getItemEntradaSec('03dp') via _deduceOnAirEntrada SENSE ignoreAgrupacio: en recórrer la llista cap enrere, els ítems de l'ALTRA agrupació sense OnAir (SM4, SM5, SM6, SM7, CARETA, '01', '02' — agrupacio null) es descartaven amb un continue que NO acumulava la seva durada → l'àncora quedava clavada al darrer ítem del sumari amb OnAir ('SM3': OnAir 14:30:37 + duradaOnAir 0:15 = 14:30:52) i s'ignoraven els 91 s restants del sumari (45 s SM4-SM7 + 13 s CARETA corregida + 33 s '01') que la ruta ignoreAgrupacio=true SÍ calcula (52343 s). La salvaguarda BUG #21 no ho protegeix perquè només adopta la Prevista quan és ANTERIOR al resultat deduït (aquí Prevista 52336 > 52252) i la COMPETÈNCIA Tier0/Tier1 premia el candidat MÉS AVIAT.",
+        "fix": "_deduceOnAirEntrada (js/core/escaleta_items.js): el continue de frontera d'agrupació ara ACUMULA la durada de l'ítem saltat (isItemEstructural + _getCorrectedDuration per a caretes) en lloc de descartar-lo → les dues rutes (amb i sense ignoreAgrupacio) donen el mateix i la deducció avança per la cadena real d'emissió. Repro headless amb el JSON real (C:/temp/fp_in_test.html + fp_in_test.ps1, stubs d'Utils/Config): ABANS _deduceOnAirEntrada('03dp')=52252 s i calcPrecisionTrimBounds V1 mp4In=212 s (idèntic al log real); DESPRÉS =52336 s (14:32:16, = Prevista del 03dp) i mp4In=296 s amb mp4Out=558 s intacte, InTier=10 → 84 s de sumari fora del clip i el directe a 51 s (handles 20 s) en lloc de 135 s. BUG #21 segueix limitant la deducció per la Prevista, així que el canvi no pot endarrerir l'IN més enllà d'aquesta. PENDENT DE DECIDIR: si el corchete ha d'ancorar-se al primer ítem del bloc (03dp, 14:32:16) o al DIRECTE (03dir, 14:32:47 = OnAir del IPD '03' 14:33:47 − durada 1:00).",
+        "files": ["js/core/escaleta_items.js"],
+        "commit": "(pendent de test a Premiere · repro headless OK · check_js_v8 65/66)",
+        "date": "2026-09-28"
+      }
+,
+      {
+        "id": "#105",
+        "desc": "L'IN del bloc arrencava DINS d'un VÍDEO ALIÈ encara en emissió (TNM V1 28/09 'DIRECTE PUERTA DEL SOL': amb el #104 el corchete ja no cau dins del sumari, però cau a 14:32:16, 26 s DINS del BV '01' que s'emetia 14:32:09→14:32:42 → el clip arrenca amb un tema aliè a la capçalera; l'usuari el veu com un 'vídeo BV de 33 s' abans del directe)",
+        "root_cause": "MESURAT (escaleta real TNM 28/09 + repro headless C:/temp/fp_in_test.html): l'IN calculat = 52336 (14:32:16 = Prevista del donapas '03dp', primer ítem del bloc v1) però l'ítem ANTERIOR és '01 | CRONOLOGIA DE L'ACAMPADA PER L'HABITATGE' (teVideo=true, font=BV, durada 0:33, horaEntradaPrevista 14:32:09, prevOut 14:32:42, SENSE horaEntradaOnAir, agrupacio null) → el vídeo s'està emetent quan comença el bloc. L'IN·FLOOR de calcPrecisionTrimBounds només recorre allOnAirVideos (ítems teVideo && horaEntradaOnAir), així que un vídeo sense OnAir és invisible i no pot fer de piso; i el SOSTRE del piso ('només ítems que acabin abans del bloc', _pvEnd <= ref+15 s) també l'hauria exclòs (acaba 26 s després de l'inici del bloc).",
+        "fix": "js/core/escaleta_bounds.js: nou piso _applyForeignVideoFloor(data, worldBlockStartSec, blockLines, 600), invocat DESPRÉS de _applyBaseColumnFloor (última paraula sobre l'IN). Per a cada ítem FORA del bloc amb teVideo===true, SENSE OnAir vàlid i amb horaEntradaPrevista: si end = prevista + getItemDuradaSec > IN (+1 s) i el salt és < 600 s i l'ítem no és posterior al bloc (start <= ref + 15 s, amb ref = hora del primer ítem del bloc), l'IN passa al seu final; s'itera fins a punt fix (vídeos aliens encadenats) i worldBlockAnchorSec segueix el piso. Els ítems amb OnAir NO es toquen (ja els cobreix l'IN·FLOOR) i els del bloc tampoc (el seu inici el defineix el bloc). Log '🚧 [ER:Bounds] PISO vídeo aliè'.",
+        "files": ["js/core/escaleta_bounds.js"],
+        "commit": "(pendent de test a Premiere · repro headless OK)",
+        "date": "2026-09-28"
+      },
+
+      {
+        "id": "#106",
+        "desc": "El chyron de CONDUCTOR s'inseria en un bloc que no té cap ítem de presentació (TNV V1 'LEAD DIAGONAL TALLADA' 29/09: conductor a 0.40s sobre un bloc que obre amb un lead + un marcador de chyron del GF)",
+        "root_cause": "MESURAT (C:/temp/FASTPASS_2909.log + MARCADORS_2026-09-29_0939.txt del bloc \\\\DSMEDIA07\\...\\PROVES\\04_TN VESPRE_PROJECTES\\2026_09_28\\V1): el bloc té 4 marcadors (01lead@0.00, 01 GF-@5.40, 01chy@12.68, 01 GF-1@18.52) i cap ítem de plató, però DUES causes feien col·locar el conductor: (a) _isPresenterLine comptava el sufix 'lead' com a plató → l'ítem 01lead (entradilla amb el seu Tema-Títol, sense presentadora en càmera) passava per plató; (b) el respatller 'else if (itemPlato)' de placeChyronConductor, quan l'ítem de plató de l'escaleta NO té marcador propi al timeline, l'inseria igualment a l'inici del bloc (log 09:40:19: 'Cap marcador de plató; l'ítem 01lead no en té i no hi ha res marcat abans → OBRE el bloc (inici 0.00s)' i 'CasB Marge insuficient (3.08s < 11.04s): Conductor @ 0.40s' → Clips.insert OK a V7).",
+        "fix": "flow_chyrons.js: (1) _isPresenterLine ja no accepta el sufix 'lead' (només i, dp, dir, f, off + els tokens de títol OFF/DONAPAS/CONN/INTRO...); (2) el respatller de placeChyronConductor desapareix: sense MARCADOR de l'ítem de plató al timeline → ⏭️ log + status warn + return (regla de l'usuari 29/09: 'el conductor només va en un ítem de presentació; si no hi ha ítem/marcador, no es col·loca'). Amb el fix, el mateix bloc: 'Cap ítem de plató (intro/donapas/off/directe...) ni als marcadors ni a l'escaleta. Ometent conductor.' i 0 insercions a V7.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de test a Premiere · unit test C:/temp/fp_chy_test.html 10/10 PASS)",
+        "date": "2026-09-29"
+      },
+      {
+        "id": "#107",
+        "desc": "El Tema-Títol GRAN s'ancorava al marcador d'un ALTRE ítem (un chyron de grafisme) i el titulillo d'entrada quedava 11s abans: TNV V1 'LEAD DIAGONAL TALLADA' 29/09, gran a 12.68s (= marcador 01chy) en lloc de l'inici del bloc, amb el titulillo entrant a 0.40→1.42s",
+        "root_cause": "MESURAT: el filtre de marcadors estructurals de placeChyronTitol era /^\\d+[a-z]{0,3}\\s*-\\s*.+$/i → el sufíx 'lead' té 4 lletres i el marcador '01lead - LEAD DIAGONAL TALLADA' (@0.00) quedava EXCLÒS (log: '1 marcadors estructurals; ids: [1CHY]'). Sense el marcador propi de l'ítem, markerTimeFor('01lead') queia al respatller markersByBase['1'] = 12.68 (el marcador del 01chy del GF) i el gran s'hi ancorava ('→ 12.68s (marcador 1 (base))'); el titulillo (Titol·Petit) d'entrada s'inseria a 0.40s perquè _blockStartTime tornava CasB (conductor a V7) → 11s de separació entre el titullet i el gran. El revers del titulillo (_fillTitulilloGaps::markerTimeForItem) patia el mateix ancoratge ('SORTINT → 11.68s→12.68s').",
+        "fix": "flow_chyrons.js: (a) STRUCTURAL_RE/STRUCT_RE de placeChyronTitol i _fillTitulilloGaps passen a [a-z]{0,5} → el marcador propi d'un ítem '01lead' torna a comptar com a estructural; (b) guarda baseTakenByOther a markerTimeFor/markerTimeForItem: el respatller per BASE no s'usa si un ALTRE ítem de la mateixa base té marcador amb sufíx ('01chy' vs '01lead') → l'ítem sense marcador propi va a l'inici del bloc. Resultat al mateix bloc: gran a 0.40s (inici del bloc · CasA), sense conductor i sense titulillo; escenaris de regressió: 02lead@30 amb 02chy@45 → 30.00s; base lliure (marcador '03' sense sufíx) → 40.00s.",
+        "files": ["js/workflows/flow_chyrons.js"],
+        "commit": "(pendent de test a Premiere · unit test C:/temp/fp_chy_test.html 10/10 PASS)",
+        "date": "2026-09-29"
+      },
+      {
+        "id": "#108",
+        "desc": "Marcadors que queden VERDS (color per defecte de Premiere): TNV_V2 'NEGOCIACIONS HABITATGE' 29/09 — el marcador `01dir` sortia verd després de la fase F4·ASIG",
+        "root_cause": "MESURAT (FASTPASS_audit.log 2026-09-29 10:59:07): `Markers.placeByPrefixes('[{\"prefix\":\"01dir\",\"timeSec\":75.68,\"comment\":\"01dir - CONNEXIÓ DIRECTE SOL\"}]')` — SENSE colorIdx. El JSX fa DELETE+CREATE de cada marcador i només aplica color si el placement porta colorIdx; si no, intenta heretar `savedColor` (= existing.color) però `Markers.get()` retorna SEMPRE color:-1 (no és llegible en PPro 23) → el marcador recreat queda amb el color per defecte = VERD. Les 3 fases que emetien placements sense colorIdx: `_ordenarISeparar` (2 pushes), `_asignarAnclasPorDuracion` (1 push, la del cas real) i `snapOrphanMarkers` (forçava 6 perquè la condició `foundMk.color >= 0` mai es complia).",
+        "fix": "flow_markers.js: (1) nou helper `_colorByNumFromManifest(manifest)` que recalcula num→colorIdx des de l'escaleta (_getColorIdx); (2) `_ordenarISeparar` i `_asignarAnclasPorDuracion` afegeixen colorIdx a TOTS els seus placements; (3) XARXA DE SEGURETAT a `_safePlaceByPrefixes`: qualsevol placement amb colorIdx absent/negatiu passa a 6 (BLAU) amb WARN — cap marcador pot tornar a quedar verd per accident.",
+        "files": ["js/workflows/flow_markers.js"],
+        "commit": "(pendent de test a Premiere · unit test C:/temp/fp_markers_test.html 18/18 PASS)",
+        "date": "2026-09-29"
+      },
+      {
+        "id": "#109",
+        "desc": "L'ítem NO agrupat `02dir` ('LIN DIRECTE PUERTA DEL SOL', agrupacio:null) no rebia cap marcador vermell al bloc TNV_V2 29/09",
+        "root_cause": "MESURAT (TNV_V2.fastpass.json: seq=42 num=02dir agrupacio=null flotant=false prevista=21:05:34; bloc V2 = 75739..76043s). `_detectUngroupedItems` (assembly_context.js) descartava l'ÚLTIM candidat no agrupat si no tenia OnAir (`if (it === last && !lastOnAir) continue;`), amb la idea que era 'el final trimeat per l'usuari'. Amb el V2, l'últim candidat per temps era `02dir` (21:05:34) → s'excloïa; el log del pipeline només llistava `[Ungrouped] 3 item(s) ... 01 GF-2, 01 GF-3, 01 GF-4`.",
+        "fix": "assembly_context.js `_detectUngroupedItems`: l'últim candidat només s'exclou si cau DESPRÉS de l'última línia orgànica del bloc (comparació amb `lines[lines.length-1]`), que sí que és la cua trimeada. Amb el V2 real: es conserven 4 no agrupats (01 GF-2/3/4 + 02dir).",
+        "files": ["js/core/assembly_context.js"],
+        "commit": "(pendent de test a Premiere · unit test C:/temp/fp_markers_test.html 18/18 PASS)",
+        "date": "2026-09-29"
+      },
+      {
+        "id": "#110",
+        "desc": "Els marcadors VERMELLS (ítems no del bloc) no es col·locaven MAI en el flux automàtic OUT&GO, i els no agrupats sense OnAir tampoc mai (cas `02dir`)",
+        "root_cause": "MESURAT: els vermells només es creaven dins de `placeOnAirMarkers` (F1) i (a) l'array `phases` de `runFullPipelineOut` (js/main.js) NO incloïa cap fase F1 — tot i que el seu docstring deia 'OnAir (F1)' (els marcadors OnAir els acaba creant F3·Coinc); (b) el bucle de no agrupats de F1 exigeix OnAir (`if (!_ugHasOnAir) continue;`) → `02dir` (prevista 21:05:34, sense OnAir) quedava fora per segona vegada. Resultat: 0 vermells al bloc V2 tot i haver-hi 2dir + 3 gràfics no agrupats.",
+        "fix": "flow_markers.js: nou mètode JS `placeUngroupedMarkers()` (tier work-flow, zero JSX nou) que col·loca tots els `ungroupedItems` en color 1 usant OnAir i, si no n'hi ha, `horaEntradaPrevista`; js/main.js: nova fase 'Vermells (no agrupats)' al final de `runFullPipelineOut`; flow_assembly.js: alias Assembly.placeUngroupedMarkers. Amb les dades reals: `02dir` → 193.12s colorIdx=1 (els 01 GF-2/3/4 cauen a -1.88s i s'ometen per seguretat).",
+        "files": ["js/workflows/flow_markers.js", "js/main.js", "js/workflows/flow_assembly.js"],
+        "commit": "(pendent de test a Premiere · unit test C:/temp/fp_markers_test.html 18/18 PASS)",
+        "date": "2026-09-29"
+      },
+      {
+        "id": "#111",
+        "status": "pendent_implementar",
+        "desc": "Els ítems d'escaleta FLOTANTS (`flotant:true`) no reben cap marcador; segons la regla de l'usuari haurien de portar marcador VERMELL (cas real `03` «+++ IPD MEDIACIÓ MARICARMEN +++» del bloc V2 del TN_VESPRE 28/09)",
+        "root_cause": "`assembly_context.js::getLinesForBlock` fa `if (l.flotant === true) continue;` → els flotants queden fora de `lines` i, per tant, de F2/F4/F5/F6/F7 i del recompte del bloc. Conseqüència: cap marcador per a un ítem que sí que apareix a l'escaleta del bloc.",
+        "rule": "Usuari 29/09/2026: «Cualquier item flotante es como si no existiera, por lo tanto tiene un marker rojo, aunque esté incluido en el bloque. El editor incluye los temas que crea conveniente, pero si al final falta un item, lo flota. Es más fácil para ellos mientras están en directo. Esta indicación afecta a las dos salidas, la de directo y la de la verticalización.»",
+        "fix": "PENDENT (no implementat · ajornat al 30/09 junt amb bounds+markers). Opció acordada: col·locar els flotants del bloc com a VERMELLS dins de `placeUngroupedMarkers` — amb OnAir/Prevista si en tenen i, si no en tenen (cas `03`), interpolant entre els veïns d'escaleta que JA tenen marcador (mateix càlcul que F7·Cobertura). Cal aclarir abans el matís «flotant = dura 0, no s'emet».",
+        "date": "2026-09-29"
+      },
+      {
+        "id": "#112",
+        "status": "pendent_diagnostic",
+        "desc": "IPD+: el clip de transparència de subtítols (pista V2) canvia de POSICIÓ a més de canviar de pista",
+        "root_cause": "NO MESURAT (reportat per l'usuari 29/09). Sospita: a `Graphics.runIpdPlus`, `_ipdPlusAplicar` fa servir `moveToRange`/`insertClipFrom` per deixar 1 sol clip a SRC (PARK=3) i el clip mogut deixa d'estar alineat amb el punt d'origen (o el `position` del Motion es desplaça).",
+        "fix": "PENDENT — mesurar amb el log + `Clips.get()` abans/després de `Graphics.runIpdPlus` (pista V2 de subtítols)",
+        "date": "2026-09-29"
+      }
   },
 
   "sessions": [
@@ -553,7 +680,7 @@
 
   "git": {
     "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
-    "portable": "E:\\PortableGit\\bin\\git.exe",
+    "portable": "F:\\PortableGit\\bin\\git.exe",
     "branch": "main",
     "status": "BUGs #93-#98 pipeline IN/OUT (snap keyframe, corchetes, ancoratge) — 2026-09-25, test OK a Premiere"
   },

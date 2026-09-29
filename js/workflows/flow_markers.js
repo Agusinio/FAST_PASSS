@@ -99,6 +99,23 @@
                         safePlacements[sp].comment = safePlacements[sp].comment.replace(/'/g, '');
                     }
                 }
+                // (2026-09-29) BUG #108 · XARXA DE SEGURETAT DE COLOR:
+                // placeByPrefixes fa DELETE+CREATE i només aplica color si el placement porta
+                // colorIdx; si no, mira d'heretar `savedColor` (existing.color), però
+                // Markers.get() retorna sempre -1 → el marcador recreat quedava amb el color
+                // PER DEFECTE de Premiere (VERD). Amb això, cap placement pot sortir sense color.
+                var senseColor = 0;
+                for (var scc = 0; scc < safePlacements.length; scc++) {
+                    var ciSc = Number(safePlacements[scc].colorIdx);
+                    if (!isFinite(ciSc) || ciSc < 0) {
+                        senseColor++;
+                        log('   🎨 [' + label + '] ' + safePlacements[scc].prefix + ': placement sense colorIdx → s\'aplica 6 (BLAU) per no quedar verd per defecte', 'WARN');
+                        safePlacements[scc].colorIdx = 6;
+                    }
+                }
+                if (senseColor > 0) {
+                    log('   🎨 [' + label + '] ' + senseColor + ' placement(s) sense color → recolorejats a 6 (revisa els callers)', 'WARN');
+                }
                 // (2026-09-24) REGLA D'USUARI: un marcador VERMELL (ítem no agrupat, color 1)
                 // només s'ha de col·locar si queda ENTRE dos marcadors d'un altre color (blaus,
                 // etc.). Abans només ho filtrava F7 i els vermells seguien apareixent de F1/F2/F5
@@ -178,6 +195,31 @@
             else if (parts.length === 3) dSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
             else dSec = (typeof parts[0] === 'number') ? parts[0] : 0;
             return dSec === 0 ? 4 : 1;
+        },
+
+        /**
+         * _colorByNumFromManifest (2026-09-29 · BUG #108): mapa `num → colorIdx` recalculat
+         * des de l'escaleta del manifest.
+         *
+         * PER QUÈ: `Markers.get()` NO retorna el color (sempre -1 en PPro 23) i
+         * `Markers.placeByPrefixes` fa DELETE+CREATE de cada marcador: si el placement no
+         * porta `colorIdx`, el JSX intenta heretar `savedColor` (= existing.color = -1) i
+         * acaba deixant el marcador amb el color PER DEFECTE de Premiere = VERD.
+         * Per tant, tot placement que mogui un marcador existent ha de portar `colorIdx`.
+         *
+         * @param {Object} manifest - Manifest de sessió (usa escaletaItems)
+         * @returns {Object} { num: colorIdx }
+         */
+        _colorByNumFromManifest: function (manifest) {
+            var out = {};
+            var all = (manifest && manifest.escaletaItems) ? manifest.escaletaItems : [];
+            for (var i = 0; i < all.length; i++) {
+                var it = all[i];
+                if (!it || !it.num) continue;
+                var k = String(it.num);
+                if (out[k] === undefined) out[k] = this._getColorIdx(it);
+            }
+            return out;
         },
 
         // ═══════════════════════════════════════════════════════════════
@@ -868,6 +910,68 @@
             log('🟢 [F1·OnAir] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
         },
 
+        /**
+         * placeUngroupedMarkers (2026-09-29 · BUG #110): col·loca en VERMELL (color 1) els
+         * marcadors dels ítems que NO són del bloc (`agrupacio:null`, `ungroupedItems`).
+         *
+         * PER QUÈ UN MÈTODE PROPI: els vermells només es creaven dins de `placeOnAirMarkers`
+         * (F1), i això tenia dos forats:
+         *   1. `placeOnAirMarkers` NO forma part del pipeline automàtic (js/main.js
+         *      `runFullPipelineOut`), tot i que el seu docstring diu que sí → en el flux
+         *      OUT&GO no es col·locava MAI cap vermell.
+         *   2. El bucle de no agrupats exigia `horaEntradaOnAir` (`if (!_ugHasOnAir) continue;`)
+         *      → qualsevol ítem no agrupat sense OnAir (cas real 28/09 TNV_V2: `02dir`
+         *      "LIN DIRECTE PUERTA DEL SOL", agrupacio:null, prevista 21:05:34) es quedava
+         *      sense marcador vermell.
+         * Aquí s'usa OnAir i, si no n'hi ha, `horaEntradaPrevista`.
+         *
+         * SEGURETAT: només AFEGEIX/MOU els seus propis prefixes (placeByPrefixes fa upsert
+         * per prefix). No esborra ni toca cap altre marcador.
+         */
+        placeUngroupedMarkers: async function () {
+            log('🔴 [Ungrouped] Col·locant marcadors VERMELLS dels ítems no agrupats...');
+            try { await this.ensureExtractedRef(window.FASTPASS_UI.State); } catch (ePrepUg) { /* noop */ }
+
+            const ctxData = await getAssemblyContext().loadAssemblyContext();
+            if (!ctxData) { log('⚠️ [Ungrouped] loadAssemblyContext ha fallat. Abortant.'); return; }
+            const { manifest, reader, lines, clips, ungroupedItems } = ctxData;
+
+            const list = (ungroupedItems && ungroupedItems.length) ? ungroupedItems : [];
+            if (list.length === 0) { log('🔴 [Ungrouped] Cap ítem no agrupat dins del bloc. ✓ FINALITZAT.'); return; }
+
+            const structuralItems = this._classifyItems(lines).structuralItems;
+            const anchors = this._calcTemporalAnchors(manifest, reader, structuralItems, clips);
+            if (!anchors) { log('⚠️ [Ungrouped] _calcTemporalAnchors ha fallat. Abortant.'); return; }
+            const { tlClipStartSec, refF1 } = anchors;
+            if (refF1 === null) { log('⚠️ [Ungrouped] Sense referència F1. Abortant.'); return; }
+
+            var placements = [];
+            for (var i = 0; i < list.length; i++) {
+                var ug = list[i];
+                var tc = ug.horaEntradaOnAir;
+                var tcOnAir = tc && tc !== '00:00:00' && String(tc).trim() !== '';
+                if (!tcOnAir) tc = ug.horaEntradaPrevista;   // (BUG #110) fallback a la prevista
+                if (!tc || tc === '00:00:00' || String(tc).trim() === '') {
+                    log('   ⏭️ [Ungrouped] ' + (ug.num || '?') + ': sense OnAir ni prevista. Saltant.');
+                    continue;
+                }
+                var tSec = reader.tcToSeconds(tc);
+                if (tSec === null || tSec === undefined) continue;
+                var pos = tlClipStartSec + (tSec - refF1);
+                if (!(pos >= 0)) {
+                    log('   ⏭️ [Ungrouped] ' + (ug.num || '?') + ': cau fora del clip (' + pos.toFixed(2) + 's). Saltant.');
+                    continue;
+                }
+                var comment = ((ug.num ? ug.num + ' - ' : '') + (ug.titol || '').substring(0, 60)).trim();
+                placements.push({ prefix: ug.num, timeSec: pos, comment: comment, colorIdx: 1, name: 'color=1' });
+                log('   🔴 [Ungrouped] ' + (ug.num || '?') + ': → ' + pos.toFixed(2) + 's [VERMELL: no és del bloc · ref ' + tc + (tcOnAir ? ' OnAir' : ' prevista') + ']');
+            }
+
+            if (placements.length === 0) { log('🔴 [Ungrouped] Cap marcador vermell per col·locar. ✓ FINALITZAT.'); return; }
+            var result = await this._safePlaceByPrefixes(placements, 'Ungrouped');
+            log('🔴 [Ungrouped] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
+        },
+
         // ═══════════════════════════════════════════════════════════════
         // 🟢 F2: placeDeducedOnAirMarkers — Marcadors deduïts (OnAir indirecte)
         // ═══════════════════════════════════════════════════════════════
@@ -1456,6 +1560,11 @@
             if (list.length < 2) return { revisats: list.length, moguts: 0, gap: GAP };
             list.sort(function (a, b) { return a.seq - b.seq; });
 
+            // (2026-09-29) BUG #108: aquesta fase movia marcadors amb placements SENSE
+            // colorIdx → delete+create → color per defecte (VERD). El color es recalcula
+            // des de l'escaleta del manifest (Markers.get() no el retorna).
+            var colorByNumSep = this._colorByNumFromManifest(manifest);
+
             var placements = [], moguts = 0, anterior = null;
             for (var k = 0; k < list.length; k++) {
                 var cur = list[k];
@@ -1500,7 +1609,7 @@
                         }
                         if (cutTrobat !== null) nou = cutTrobat;
                         log('   🔧 [SEP] ' + cur.prefix + ': ' + cur.time.toFixed(2) + 's → ' + nou.toFixed(2) + 's (GAP ' + GAP + 's després de ' + anterior.prefix + (cutTrobat !== null ? ', corte ' + cutTrobat.toFixed(2) + 's' : ', sense corte lliure a prop') + (comparteix ? ' [corte compartit]' : '') + ') [Δ ' + (nou - cur.time).toFixed(2) + 's]');
-                        placements.push({ prefix: cur.prefix, timeSec: parseFloat(nou.toFixed(2)), comment: cur.comment });
+                        placements.push({ prefix: cur.prefix, timeSec: parseFloat(nou.toFixed(2)), comment: cur.comment, colorIdx: (colorByNumSep[cur.prefix] != null ? colorByNumSep[cur.prefix] : 6) });
                         cur.time = nou;
                         moguts++;
                     } else {
@@ -1513,7 +1622,7 @@
                                 log('   ⚠️ [SEP] ' + anterior.prefix + ' no es pot apartar sense xocar amb l\'inici de bloc → es deixa (ho resol PAS 2)');
                             } else {
                                 log('   🔧 [SEP] ' + anterior.prefix + ': ' + anterior.time.toFixed(2) + 's → ' + nouAnt.toFixed(2) + 's (' + cur.prefix + ' està protegit a ' + cur.time.toFixed(2) + 's)');
-                                placements.push({ prefix: anterior.prefix, timeSec: parseFloat(nouAnt.toFixed(2)), comment: anterior.comment });
+                                placements.push({ prefix: anterior.prefix, timeSec: parseFloat(nouAnt.toFixed(2)), comment: anterior.comment, colorIdx: (colorByNumSep[anterior.prefix] != null ? colorByNumSep[anterior.prefix] : 6) });
                                 anterior.time = nouAnt;
                                 moguts++;
                             }
@@ -1613,6 +1722,12 @@
             }
             objectiu.sort(function (a, b3) { return a.seq - b3.seq; });
 
+            // (2026-09-29) BUG #108: aquesta fase (F4·ASIG) re-ancorava marcadors amb
+            // placements SENSE colorIdx → delete+create → VERD per defecte. Cas real
+            // 28/09 TNV_V2: `01dir` va quedar verd (audit log 10:59:07, placeByPrefixes
+            // sense colorIdx). El color es recalcula des de l'escaleta del manifest.
+            var colorByNumAsig = this._colorByNumFromManifest(manifest);
+
             var placements = [], anterior = 0, assignats = 0, idxA = 0;
             for (var o = 0; o < objectiu.length; o++) {
                 var cur = objectiu[o];
@@ -1625,7 +1740,7 @@
                 }
                 if (!triat) continue;
                 if (Math.abs(triat.t - cur.time) <= 0.25) { anterior = Math.max(anterior, triat.t); continue; }
-                placements.push({ prefix: cur.prefix, timeSec: parseFloat(triat.t.toFixed(2)), comment: cur.comment });
+                placements.push({ prefix: cur.prefix, timeSec: parseFloat(triat.t.toFixed(2)), comment: cur.comment, colorIdx: (colorByNumAsig[cur.prefix] != null ? colorByNumAsig[cur.prefix] : 6) });
                 log('   🔧 [ASIG] ' + cur.prefix + ': ' + cur.time.toFixed(2) + 's → ' + triat.t.toFixed(2) + 's (' + triat.tipus + ')');
                 ocup[cur.time.toFixed(2)] = false;
                 ocup[triat.t.toFixed(2)] = true;

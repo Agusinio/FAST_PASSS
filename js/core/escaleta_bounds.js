@@ -25,6 +25,8 @@
  *   - calcClipBounds(worldTCMediaStart, worldTCBlockIn, worldTCBlockOut, handleSecs, worldTCMediaStop)
  *   - calcOnAirBounds(data, blockId, worldTCMediaStart, worldTCMediaStop, cfg)
  *   - _findCaretasBetween(allLines, fromIdx, toIdx, data)
+ *   - _applyBaseColumnFloor(data, worldBlockStartSec, blockLines, maxGapSec)
+ *   - _applyForeignVideoFloor(data, worldBlockStartSec, blockLines, maxGapSec)
  *   - calcPrecisionTrimBounds(data, blockId, mediaStart, mediaStop, config)
  * ============================================================================
  */
@@ -744,6 +746,78 @@
         }
     };
 
+    /**
+     * _applyForeignVideoFloor: PISO de l'inici del bloc quan un VÍDEO ALIÈ encara
+     * s'està emetent en el moment calculat d'inici. El clip no pot arrencar a mitges
+     * d'un vídeo que no és del bloc: l'IN s'endarrereix fins al seu acabament (mínim
+     * exigible; si l'ítem següent torna a solapar, s'itera).
+     *
+     * Només mira ítems de vídeo SENSE OnAir (BV/BVI d'una altra agrupació o sense
+     * agrupació): els que SÍ tenen OnAir ja els cobreix l'IN·FLOOR de
+     * calcPrecisionTrimBounds. L'hora d'entrada és la PREVISTA (no hi ha dada real
+     * d'emissió) i el final = prevista + getItemDuradaSec (duradaOnAir si n'hi ha).
+     *
+     * Cas TNM V1 2026-09-28 (post-#104): el bloc V1 deduïa IN=14:32:16 (prevista del
+     * donapas "03dp"), però el BV "01" (CRONOLOGIA DE L'ACAMPADA, 0:33, sense OnAir)
+     * s'emetia 14:32:09→14:32:42 → el clip arrencava amb 26 s d'un tema aliè.
+     */
+    ER._applyForeignVideoFloor = function (data, worldBlockStartSec, blockLines, maxGapSec) {
+        try {
+            if (worldBlockStartSec == null || !blockLines || blockLines.length === 0) return worldBlockStartSec;
+            var all = (data && data.escaleta && data.escaleta.liniesEscaleta) ? data.escaleta.liniesEscaleta : [];
+            if (!all.length) return worldBlockStartSec;
+            var gapMax = (maxGapSec != null) ? maxGapSec : 600;
+
+            // Ítems del bloc → no són "aliens" (el seu inici el defineix el propi bloc).
+            var inBlock = {};
+            for (var bi = 0; bi < blockLines.length; bi++) {
+                var kbi = all.indexOf(blockLines[bi]);
+                if (kbi >= 0) inBlock[kbi] = true;
+            }
+
+            // Referència: hora del PRIMER ítem del bloc (OnAir real; si no, prevista).
+            var refSec = null;
+            var fb0 = blockLines[0];
+            if (fb0) {
+                var hoa = fb0.horaEntradaOnAir;
+                var hpv0 = fb0.horaEntradaPrevista;
+                if (hoa && String(hoa).trim() !== '' && String(hoa) !== '00:00:00') refSec = this.tcToSeconds(hoa);
+                else if (hpv0 && String(hpv0).trim() !== '' && String(hpv0) !== '00:00:00') refSec = this.tcToSeconds(hpv0);
+            }
+
+            var newStart = worldBlockStartSec;
+            var guard = 0;
+            while (guard++ < 20) {
+                var floorSec = null, floorNum = '';
+                for (var i = 0; i < all.length; i++) {
+                    var it = all[i];
+                    if (!it || it.flotant === true) continue;
+                    if (inBlock[i] === true) continue;                       // ítem del bloc actual
+                    if (it.teVideo !== true) continue;                       // només vídeo real
+                    var oa = it.horaEntradaOnAir;
+                    if (oa && String(oa).trim() !== '' && String(oa) !== '00:00:00') continue;  // amb OnAir → ja el cobreix IN·FLOOR
+                    var hpv = it.horaEntradaPrevista;
+                    if (!hpv || String(hpv).trim() === '' || String(hpv) === '00:00:00') continue;
+                    var st = this.tcToSeconds(hpv);
+                    if (st == null || !isFinite(st) || st <= 0) continue;
+                    if (refSec !== null && isFinite(refSec) && st > refSec + 15) continue;      // posterior al bloc
+                    var endSec = st + this.getItemDuradaSec(it);
+                    if (!(endSec > newStart + 1.0)) continue;                // ja acaba abans de l'IN → no solapa
+                    if (endSec - newStart > gapMax) continue;                // massa lluny → soroll
+                    if (floorSec === null || endSec < floorSec) { floorSec = endSec; floorNum = String(it.num || '?'); }
+                }
+                if (floorSec === null || floorSec <= newStart + 0.5) break;
+                log('🚧 [ER:Bounds] PISO vídeo aliè: el vídeo "' + floorNum + '" encara s\'emetia al ' + this.secondsToTC(newStart) +
+                    ' → IN ' + this.secondsToTC(newStart) + ' → ' + this.secondsToTC(floorSec) + ' (no es talla a mitges)');
+                newStart = floorSec;
+            }
+            return newStart;
+        } catch (e) {
+            log('⚠️ [ER:Bounds] Error PISO vídeo aliè: ' + e.message, 'WARN');
+            return worldBlockStartSec;
+        }
+    };
+
     // ----------------------------------------------------------------
     // 6. PRECISION TRIM BOUNDS (Sistema 2+1 tiers)
     // ----------------------------------------------------------------
@@ -1012,6 +1086,18 @@
             // (flow_markers.js la fa servir per situar els marcadors sobre el clip).
             worldBlockAnchorSec = worldBlockStartSec;
             log('🔒 [ER:Bounds] Àncora actualitzada al piso: ' + this.secondsToTC(worldBlockAnchorSec));
+        }
+
+        // (2026-09-28) PISO DE VÍDEO ALIÈ: el bloc no pot arrencar a mitges d'un vídeo que
+        // no és seu (BV/BVI d'una altra agrupació, o sense agrupació, encara en emissió).
+        // Cas TNM V1 28/09: IN deduït 14:32:16 queia DINS del BV "01" (14:32:09→14:32:42)
+        // → el clip arrencava amb 26 s del tema anterior a la capçalera.
+        var _inPreForeign = worldBlockStartSec;
+        worldBlockStartSec = this._applyForeignVideoFloor(data, worldBlockStartSec, blockLines, 600);
+        if (_inPreForeign != null && worldBlockStartSec !== _inPreForeign) {
+            // El piso mou l'inici real del bloc → l'àncora l'ha de seguir.
+            worldBlockAnchorSec = worldBlockStartSec;
+            log('🔒 [ER:Bounds] Àncora actualitzada al piso de vídeo aliè: ' + this.secondsToTC(worldBlockAnchorSec));
         }
 
         // (2026-09-21) REFERÈNCIA NETA: ELIMINADA. El càlcul per tiers + PISO ja era correcte

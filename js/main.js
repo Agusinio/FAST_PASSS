@@ -207,8 +207,31 @@ function applySliderLimits() {
     // ruta de log — era el motiu pel qual les línies ⏱️ [BOOT] no apareixien).
     var _bootLines = [];
     var _bootRoot = null;
+    var _bootLast = _tBoot;    // per calcular el Δ respecte la marca anterior
+    var _bootClosed = false;   // l'arrencada ja ha acabat → les marques de fons no embruten el log
+    // ── VISIBILITAT DEL TIMING (2026-09-29) ─────────────────────────────────
+    // Si l'arrencada supera aquest llindar, el log S'OBRE TOT SOL en acabar (un sol
+    // cop per sessió) perquè es vegi de seguida què ha trigat. 0 = mai.
+    // Canviable des de la consola del panell:
+    //   FASTPASS_UI.Boot.setAutoOpen(0)      → desactivat
+    //   FASTPASS_UI.Boot.setAutoOpen(20000)  → només si l'arrencada passa de 20 s
+    var _bootAutoOpenMs = 15000;
+    var _bootAutoOpened = false;
+    try {
+        var _bootPref = window.localStorage ? parseInt(window.localStorage.getItem('fp_bootAutoOpenMs'), 10) : NaN;
+        if (!isNaN(_bootPref)) _bootAutoOpenMs = _bootPref;
+    } catch (eBPref) { }
+    var _bootPad = function (n, w) { return ('        ' + n).slice(-(w || 7)); };
+    var _bootHead = function () {
+        var d = new Date(_tBoot);
+        var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+        return 'FASTPASS · timing d\'arrencada del panell\n' +
+            'Inici: ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) +
+            '  (ms = des de l\'inici · Δ = des de la marca anterior)\n';
+    };
+    var _bootText = function () { return _bootHead() + _bootLines.join('\n') + '\n'; };
     var _bootFlush = function () {
-        var txt = 'FASTPASS · timing d\'arrencada del panell\n' + _bootLines.join('\n') + '\n';
+        var txt = _bootText();
         // 1) Carpeta de l'extensió (el destí natural).
         try {
             if (_bootRoot) window.cep.fs.writeFile(_bootRoot + '\\_boot_timing.log', txt);
@@ -217,14 +240,56 @@ function applySliderLimits() {
         try { window.cep.fs.writeFile('C:\\temp\\_boot_timing.log', txt); } catch (eF2) { }
     };
     var _bootMark = function (label, lvl) {
-        var ms = Date.now() - _tBoot;
-        _bootLines.push('+' + ms + ' ms\t' + label);
+        var now = Date.now();
+        var ms = now - _tBoot;
+        var dt = now - _bootLast;
+        _bootLast = now;
+        // Un cop acabada l'arrencada, els cicles de fons (auto-refresc de 60 s) no
+        // s'escriuen al fitxer: només a consola. Amb lvl = 'force' sí que s'hi afegeixen.
+        if (_bootClosed && lvl !== 'force') {
+            try { console.log('⏱️ [BOOT·post] ' + label + ' (+' + ms + ' ms · Δ' + dt + ')'); } catch (eC2) { }
+            return;
+        }
+        _bootLines.push('+' + _bootPad(ms) + ' ms  (Δ' + _bootPad(dt) + ' ms)  ' + label);
         _bootFlush();
-        try { console.log('⏱️ [BOOT] ' + label + ' (+' + ms + ' ms)'); } catch (eC) { }
+        try { console.log('⏱️ [BOOT] ' + label + ' (+' + ms + ' ms · Δ' + dt + ')'); } catch (eC) { }
         try { if (utils && utils.log) utils.log('⏱️ [BOOT] ' + label + ' (+' + ms + ' ms)', lvl || 'INFO'); } catch (eL) { }
     };
     try { _bootRoot = csInterface.getSystemPath(SystemPath.EXTENSION).replace(/[\\/]+$/, ''); } catch (eRoot) { _bootRoot = null; }
-    var _bootMarkSafe = function (label) { try { _bootMark(label); } catch (eM) { } };
+    var _bootMarkSafe = function (label, lvl) { try { _bootMark(label, lvl); } catch (eM) { } };
+    // ── API PÚBLICA DE TIMING D'ARRENCADA ───────────────────────────────────
+    // Qualsevol mòdul pot marcar fites amb:  FASTPASS_UI.Boot.mark('[Context] …')
+    // (els mòduls ho fan de manera silenciosa si l'API encara no hi és).
+    try {
+        window.FASTPASS_UI = window.FASTPASS_UI || {};
+        window.FASTPASS_UI.Boot = {
+            logPath: function () { return _bootRoot ? (_bootRoot + '\\_boot_timing.log') : 'C:\\temp\\_boot_timing.log'; },
+            mark: function (label, lvl) { _bootMarkSafe(label, lvl); },
+            text: function () { return _bootText(); },
+            autoOpenMs: function () { return _bootAutoOpenMs; },
+            setAutoOpen: function (ms) {
+                _bootAutoOpenMs = (typeof ms === 'number' && ms >= 0) ? ms : (parseInt(ms, 10) || 0);
+                try { window.localStorage.setItem('fp_bootAutoOpenMs', String(_bootAutoOpenMs)); } catch (eSA) { }
+                _bootMarkSafe('Boot.setAutoOpen(' + _bootAutoOpenMs + ' ms)', 'force');
+                return _bootAutoOpenMs;
+            },
+            /**
+             * Obre _boot_timing.log per llegir-lo còmodament.
+             * 1) ShellExecute del sistema (l'aplicació associada al .log).
+             * 2) Fallback: Notepad via el shell JSX atòmic ja existent (IO.executeShell).
+             */
+            openLog: function () {
+                var p = _bootRoot ? (_bootRoot + '\\_boot_timing.log') : 'C:\\temp\\_boot_timing.log';
+                var pFwd = p.replace(/\\/g, '/'); // ExtendScript: barras normals → el nom no s'ha d'escapar
+                try { csInterface.openURLInDefaultBrowser('file:///' + encodeURI(pFwd)); return true; } catch (eOL1) { }
+                try {
+                    var U = window.FASTPASS_UI.Utils;
+                    if (U && U.isJsxReady) { U.callJSX("FASTPASS.IO.executeShell('notepad \"" + pFwd + "\"')"); return true; }
+                } catch (eOL2) { }
+                return false;
+            }
+        };
+    } catch (eBootApi) { }
     _bootMarkSafe('main.js: arrencada');
     // ── ESTAT D'ESPERA DEL BOTÓ MAIN ─────────────────────────────────────────
     // Mentre el motor JSX i el primer checkContext no acabin, el botó MAIN no ha de
@@ -289,7 +354,21 @@ function applySliderLimits() {
             }
             var _totBoot = Date.now() - _tBoot;
             _bootMarkSafe('ARRENCADA COMPLETA');
+            _bootClosed = true; // a partir d'aquí el log no creix amb els cicles de fons
             utils.status("⏱️ Panell a punt (" + (Math.round(_totBoot / 100) / 10) + " s)", "info");
+            // ── ARRENCADA LENTA → S'OBRE EL LOG TOT SOL (2026-09-29) ────────────
+            // Un sol cop per sessió, perquè es vegi QUÈ ha trigat sense haver de
+            // buscar el fitxer a mà. Desactivable: FASTPASS_UI.Boot.setAutoOpen(0)
+            try {
+                if (!_bootAutoOpened && _bootAutoOpenMs > 0 && _totBoot >= _bootAutoOpenMs) {
+                    _bootAutoOpened = true;
+                    _bootMarkSafe('⚠️ arrencada lenta (' + (Math.round(_totBoot / 100) / 10) + ' s ≥ ' +
+                        Math.round(_bootAutoOpenMs / 1000) + ' s) → s\'obre _boot_timing.log', 'force');
+                    setTimeout(function () {
+                        try { if (window.FASTPASS_UI.Boot) window.FASTPASS_UI.Boot.openLog(); } catch (eOL3) { }
+                    }, 1200);
+                }
+            } catch (eAO) { }
         } else {
             // Si el motor falla, ahora el 'result' nos dirá EXACTAMENTE en qué línea del JSX falló
             console.error("❌ Fallo en el motor: " + result);
@@ -904,10 +983,15 @@ if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers
 
     /**
      * runFullPipelineOut: Marcadors del botó OUT en mode TREBALL.
-     * Ordre: OUT (recorte i neteja), TROSSEJA, OnAir (F1), Deduc (F2), Prev (F3),
-     * Correl (F3.5), Density (F4), Inferits (F5), Ordre (F6) i Gràfics (F6·GF:
-     * marcadors grocs dels ítems gràfics de l'escaleta). Els chyrons es col·loquen
+     * Ordre: OUT (recorte i neteja), TROSSEJA, Dedu (F2), Prev (F3),
+     * Correl (F3.5), Density (F4), Inferits (F5), Ordre (F6), Gràfics (F6·GF:
+     * marcadors grocs dels ítems gràfics de l'escaleta) i Vermells (ítems no
+     * agrupats, agrupacio:null → color 1). Els chyrons es col·loquen
      * després (botó COLOCAR), un cop l'usuari ha verificat els marcadors.
+     *
+     * NOTA (2026-09-29 · BUG #110): aquest docstring deia que F1 (OnAir) era al
+     * pipeline però l'array de fases NO el contenia (els marcadors OnAir els crea
+     * F3·Coinc). L'única cosa que hi faltava de debò era la fase dels VERMELLS.
      */
     async function runFullPipelineOut() {
         const utils = FASTPASS_UI.Utils;
@@ -920,7 +1004,12 @@ if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers
             ['Density (F4)',           () => callWorkflow('Assembly', 'snapFaroMarkers')],
             ['Inferits (F5)',          () => callWorkflow('Markers', 'placeInferredItems')],
             ['Ordre (F6)',             () => callWorkflow('Markers', 'enforceMarkerOrder')],
-            ['Gràfics (F6·GF)',        () => callWorkflow('Markers', 'placeGraphicMarkers')]
+            ['Gràfics (F6·GF)',        () => callWorkflow('Markers', 'placeGraphicMarkers')],
+            // (2026-09-29) BUG #110: els marcadors VERMELLS (ítems no agrupats,
+            // agrupacio:null) només es creaven dins de placeOnAirMarkers (F1), que no
+            // formava part d'aquest pipeline → en el flux automàtic OUT&GO no apareixia
+            // cap vermell (cas real 28/09 TNV_V2: `02dir`). Fase pròpia i idempotent.
+            ['Vermells (no agrupats)', () => callWorkflow('Markers', 'placeUngroupedMarkers')]
         ];
         utils.log('🚀 [PIPE] Marcadors post-OUT: ' + phases.map(p => p[0]).join(' → ') + '. Verifica els marcadors i usa COLOCAR per als chyrons.', 'INFO');
         // [2026-09-17] NOMES MARCADORS: si la V1 ja esta trocejada (>=2 clips) no tornem a
