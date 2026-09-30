@@ -3,7 +3,7 @@
   "version": "2.9.5",
   "codename": "LIPO-PRO",
   "description": "Extensión CEP para Adobe Premiere Pro — Automatización de producción de informativos y verticalización 9:16",
-  "updated": "2026-09-29",
+  "updated": "2026-09-30",
 
   "architecture": {
     "tiers": {
@@ -636,6 +636,7 @@
         "fix": "flow_markers.js: nou mètode JS `placeUngroupedMarkers()` (tier work-flow, zero JSX nou) que col·loca tots els `ungroupedItems` en color 1 usant OnAir i, si no n'hi ha, `horaEntradaPrevista`; js/main.js: nova fase 'Vermells (no agrupats)' al final de `runFullPipelineOut`; flow_assembly.js: alias Assembly.placeUngroupedMarkers. Amb les dades reals: `02dir` → 193.12s colorIdx=1 (els 01 GF-2/3/4 cauen a -1.88s i s'ometen per seguretat).",
         "files": ["js/workflows/flow_markers.js", "js/main.js", "js/workflows/flow_assembly.js"],
         "commit": "(pendent de test a Premiere · unit test C:/temp/fp_markers_test.html 18/18 PASS)",
+        "note": "(2026-09-30 · TNC V2) Fase VALIDADA en execució real (s'executa i col·loca), però el seu filtre de vermells queda NEUTRALITZAT per la vàlvula de seguretat de `_safePlaceByPrefixes` → veure #116 (el lot només conté vermells, així que `mantinguts.length === 0` sempre).",
         "date": "2026-09-29"
       },
       {
@@ -654,8 +655,43 @@
         "root_cause": "NO MESURAT (reportat per l'usuari 29/09). Sospita: a `Graphics.runIpdPlus`, `_ipdPlusAplicar` fa servir `moveToRange`/`insertClipFrom` per deixar 1 sol clip a SRC (PARK=3) i el clip mogut deixa d'estar alineat amb el punt d'origen (o el `position` del Motion es desplaça).",
         "fix": "PENDENT — mesurar amb el log + `Clips.get()` abans/després de `Graphics.runIpdPlus` (pista V2 de subtítols)",
         "date": "2026-09-29"
+      },
+      {
+        "id": "#113",
+        "status": "notejada_pendent",
+        "desc": "ARRENCADA LENTA (14,1 s) a la primera obertura del dia: el 99% del temps és NAS fred dins de checkContext, amb treball duplicat i un scan innecessari",
+        "measure": "_boot_timing.log 2026-09-30 09:15:57 (TNC V1) → TOTAL 14 117 ms. Motor JSX 82 ms + frescor 71 ms (el codi no és el coll d'ampolla). Fred vs calent: readFolder NAS 1209 vs 10-269 ms; escaleta getStatus 3550-6738 vs 597 ms; escaleta local/FOTO 6339 vs 206 ms (x30). `scan media+wotts (sense projecte)` = 10,2 s (mediaAssets + wotts en sèrie, 4_Context.js:361-362). 3 marques de readFolder + 3 de getStatus + 2 de local/FOTO dins dels 14 s.",
+        "root_cause": "(a) checkContext s'executa >=2 cops concurrents: el guard de 4_Context.js:197-200 és temporal (`now - _lastCheckAt < 1000`), no un single-flight, i les passades solapades tornen a pagar el cost SMB fred. (b) El scan media+wotts és **bloquejant** a l'arrencada tot i servir només per triar MASSA vs ESPERANT. (c) 2-3 arrels UNC fredes (DSMEDIA07 projectes / 192.168.147.199 ESCALETES / DSMEDIA11 cleanfeed) → handshakes SMB+DFS+ACL. (d) lookupLocalStatus es consulta SEMPRE (FIX 2026-09-16) encara que el NAS ja digui found+ready.",
+        "fix": "PENDENT (acord 30/09: NOMÉS NOTA, no implementar si l'usuari no ho demana). Propostes A-G: A single-flight a checkContext · B pintar el botó i fer el scan en segon pla (treu 10,2 s del boot percebut) · C mediaAssets+wotts amb Promise.all · D readFolder/getStatus/local en paral·lel i saltar local/FOTO quan el NAS ja és found+ready · E cache en disc 'estat del dia' per fer el 1r boot igual de ràpid que la resta · F warm-up en paral·lel de les 3 arrels UNC al carregar el panell · G TTL de la cache de Scanner.js (`_key='wotts:'+pathNAS`).",
+        "note": "L'auto-refresh de 60 s (main.js:1505) repeteix checkContext sencer mentre l'estat és MASSA/ESPERANT (mesurat 5 s i fins a 28 s per cicle al FASTPASS.log) → manté el NAS calent i és la raó que la resta de projectes del dia arrenquin ràpid. `_bootAutoOpenMs = 15000` (amb 14,1 s no es va obrir el log tot sol).",
+        "date": "2026-09-30"
+      },
+      {
+        "id": "#114",
+        "status": "fet",
+        "desc": "NETEJA DEL REPO (P0→P5): 6.487 ficheros → 165 útiles, 87 .md → 22, bin/ 38 → 24 scripts, docs/SAMPLES (19 MB) fuera del git y higiene anti-contaminación para el agente",
+        "measure": "Antes: 2.235 ficheros `._*` (basura AppleDouble, 70 versionados) + 19.000 ficheros sueltos en C:\\temp + .cline 70 MB + bin/ffmpeg 422 MB + docs/SAMPLES 19 MB (94 versionados) + INFO/ (espejo duplicado de docs/) + 65 .md cerrados. Después: 0 `._*`, repo útil 3,23 MB / 165 ficheros, índice de git sin basura, docs/ = 6 guías + 6 specs + 5 reference + 1 plan + 5 archive.",
+        "fix": "P0: C:\\temp\\fp\\ + helpers bin\\find.ps1 (búsqueda → fichero), bin\\sizes.ps1, bin\\rep.ps1, bin\\merge_md.ps1. P1: 2.235 `._*` borrados + `git rm --cached` de los 70 versionados + fuera el directorio basura `-p/` + .gitignore ampliado. P2: 17 scripts muertos de bin/ borrados. P3: 65 .md fusionados en docs/archive/{AUDITORIAS,DEBUG,PLANS_CLOSED,SESSIONS}.md. P4: docs/SAMPLES → C:\\temp\\fp\\docs_SAMPLES + docs/reference/SAMPLES_ADOBE.md. P5: sección HIGIENE DEL ENTORNO en .clinerules + README.md y .clinerules-debug actualizados.",
+        "date": "2026-09-30"
+      },
+      {
+        "id": "#115",
+        "status": "pendent_verificar",
+        "desc": "CÓDIGO MUERTO en js/ y jsx/: 28 de los 72 .js NO los carga index.html y al menos uno (`js/core/escaleta_trim.js`) ni compila",
+        "measure": "bin/check_js_v8.ps1: TOTAL 96 | OK 95 | FAIL 1 → core/escaleta_trim.js (Invalid or unexpected token; 94 líneas, 0 referencias en todo el repo, no listado en index.html). Candidatos: 28 .js no listados en index.html, todos con nomenclatura vieja (flux_*.js, 12_Estat.js, 22_Escaneig.js, 3x_*.js…) frente a los actuales (flow_*.js, *_Logic.js, 4_Context.js).",
+        "root_cause": "Probablemente restos del refactor de nomenclatura (español → inglés/numerado nuevo). NO demostrado todavía: el test de referencias por subcadena da falsos positivos (nombres prefijados). Mecanismo real confirmado: index.html es la autoridad para js/ (no hay cargador dinámico) y jsx/main.jsx carga los .jsx con load(\"X.jsx\") explícitos.",
+        "fix": "PENDIENTE — sesión dedicada: (1) cruzar candidatos con la lista de loaders, (2) comprobar con palabra completa si el código cargado usa su API, (3) validar en Premiere (1 arranque + 1 NEW + 1 CUT) y solo después borrar. escaleta_trim.js es el caso más claro.",
+        "date": "2026-09-30"
+      },
+      {
+        "id": "#116",
+        "status": "notejada_pendent",
+        "desc": "MARCADOR VERMELL DE CUA (TNC V2, 131,64 s) que no hauria d'existir: el filtre de vermells el descarta correctament i tot seguit la vàlvula de seguretat de `_safePlaceByPrefixes` el torna a afegir (acaba amb `Nous: 1`)",
+        "measure": "FASTPASS.log 2026-09-30 09:40:45→09:43:32 · Pruebas_TNC_V2_POQUES TEULADES A BARCELONA AMB PLAQUES SOLARS.prproj (bloc TNC_V2; manifest `TNC_V2.fastpass.json` BUIT → ancoratge per fallback: ANCHOR-FALLBACK + ANCORATGE·FIX-A, offset 22,360 s). Timeline: 62 clips a V1 = 0→132,00 s; 2 estructurals (12i, 12); 1 far (12); 0 gràfics. Línies 296-302 del log: fase 'Vermells (no agrupats)' → '🔴 [Ungrouped] ?: → 131.64s [VERMELL: no és del bloc · ref 14:17:52 OnAir]' → '⛔ [Ungrouped] : marcador VERMELL (no agrupat) fora d'un interval entre marcadors → no es col·loca (131.64s)' → '⚠️ [Ungrouped] El filtre de vermells deixaria el bloc sense marcadors → es manté tota la llista.' → 'Moguts: 0 | Nous: 1 | Total: 1'. L'ítem és '? - MOLINET 02 TNC 3CATINFO' (sense `num` a l'escaleta) amb OnAir 14:17:52, que és el MATEIX TC que l'OUT real del bloc ('[ER:Bounds] TCs reals: start=14:15:38 end=14:17:52').",
+        "root_cause": "(a) DECISIU · vàlvula de seguretat de `_safePlaceByPrefixes` (flow_markers.js:154-158): `if (mantinguts.length === 0 && safePlacements.length > 0)` manté tota la llista 'perquè el bloc no quedi sense marcadors'. El filtre de vermells (flow_markers.js:119-152) fa bé la seva feina (l'ítem queda fora de l'interval entre marcadors), però la fase `placeUngroupedMarkers` (#110) envia un lot NOMÉS de vermells → amb un únic vermell descartat, `mantinguts.length === 0` és inevitable → la vàlvula neutralitza el filtre SEMPRE en aquesta fase. (b) L'ítem només arriba a ser candidat perquè `_detectUngroupedItems` (assembly_context.js:282-297) només exclou la cua trimeada si l'ítem NO té OnAir (`!lastOnAir`); el MOLINET sí que en té (14:17:52) i cau a ≥ última línia estructural (12 → 14:15:50).",
+        "fix": "PENDENT (acord 30/09: NOMÉS NOTA; s'implementarà pas a pas validant a Premiere). (1) Vàlvula: decidir-la per l'estat REAL del bloc, no pel lot → mantenir la llista només si no queda cap marcador NO vermell ni al lot ni al timeline (`mkExist`). (2) `_detectUngroupedItems`: ampliar la regla de cua trimeada a l'ítem AMB OnAir quan el seu TC és ≥ l'última línia estructural del bloc (és la referència d'OUT, no un ítem intern). (3) Revisar l'ítem sense `num` (prefix buit al name del marcador). Validació esperada al log: la línia '⛔ … no es col·loca' ha de sortir SENSE la '⚠️ … es manté tota la llista' al darrere i la fase ha d'acabar en 'Nous: 0'.",
+        "date": "2026-09-30"
       }
-
     ]
   },
 
@@ -677,14 +713,21 @@
       "handoff": "plans/HANDOFF_2026-09-25.md",
       "summary": "Auditoria i arreglada del pipeline IN/OUT de punta a punta (ffmpeg → bounds → clip V1 → corchete → ancoratge). Mesurat amb dades reals (log + manifests + ffprobe/ffmpeg sobre el cleanfeed): el -ss no era el 0 del fitxer (keyframe pre-roll, 0,81 s), crash zonaInOffset, IN·FLOOR contaminat, ancoratge amb la ref del manifest. Nou dump 🔎 [DOMAINS] amb les 4 invariants. Test OK a Premiere.",
       "bugs_resolved": ["#93", "#94", "#95", "#96", "#97", "#98"]
+    },
+    {
+      "date": "2026-09-30",
+      "handoff": "docs/archive/PLANS_CLOSED.md",
+      "summary": "Marcadores TNC/TNM/TNV (solo notas) + diagnóstico de arranque lento (#113) + NETEJA del repo (#114: 87→22 .md, bin/ 38→24, SAMPLES fuera del git, 2.235 ficheros de basura fuera) + hallazgo de código muerto (#115, pendiente de verificar).",
+      "bugs_resolved": ["#114"],
+      "note": "Los handoffs previos (plans/HANDOFF_*) y las sesiones diarias antiguas se fusionaron en docs/archive/ (PLANS_CLOSED.md, SESSIONS.md) el 2026-09-30."
     }
   ],
 
   "git": {
     "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
-    "portable": "F:\\PortableGit\\bin\\git.exe",
+    "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
-    "status": "BUGs #93-#98 pipeline IN/OUT (snap keyframe, corchetes, ancoratge) — 2026-09-25, test OK a Premiere"
+    "status": "NETEJA 2026-09-30 (#114): repo 6.487→165 ficheros útiles, 87→22 .md, bin/ 38→24, SAMPLES fuera del git — PENDIENTE DE COMMIT"
   },
 
   "paths": {
