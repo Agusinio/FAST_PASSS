@@ -427,6 +427,45 @@
                     return;
                 }
 
+                // ── (#121, 2026-09-30) DURADA REAL DEL CLEANFEED (no el snapshot del JSON) ──
+                // El JSON d'escaleta és un SNAPSHOT del moment de publicació: el seu
+                // cleanFeed.mediaStop diu fins on havia arribat la ingesta ALEES, no la
+                // durada del fitxer. Si el projecte es crea més tard (o en diferit), el MP4
+                // ja conté molt més material i el snapshot queda curt → guarda d'ingesta
+                // FALSA i fallback al MP4 del bloc (que pot ser un render PREMATUR amb
+                // material d'un altre bloc). Cas real TNM V4 29/09/2026: el JSON deia que el
+                // fitxer arribava a 15:00:40 (33:40) i el fitxer real durava 68:00 (fins
+                // 15:35:21) → el bloc (offset 2123 s) hi era de ple, però el sistema el va
+                // donar per "no ingerit" i va importar un MP4 de verticalització escrit 15:00:51
+                // (41 s ABANS de l'inici del bloc) amb el material d'un altre bloc.
+                // Es mesura amb ffprobe (Logic.FFmpeg.getMediaDuration) i, si el fitxer
+                // arriba més enllà del snapshot, s'usa la durada REAL com a límit.
+                let cleanFeedMediaStopEff = (jsonData && jsonData.cleanFeed) ? jsonData.cleanFeed.mediaStop : null;
+                let cleanFeedRealDurSec = null;
+                try {
+                    const _ffLogic = window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.FFmpeg;
+                    const _cfPath = (jsonData && jsonData.cleanFeed) ? jsonData.cleanFeed.mediaPath : null;
+                    if (readerG && typeof readerG.tcToSeconds === 'function' && _ffLogic && _ffLogic.getMediaDuration && _cfPath) {
+                        const _durRes = await _ffLogic.getMediaDuration(_cfPath);
+                        if (_durRes && _durRes.ok) {
+                            cleanFeedRealDurSec = _durRes.duration;
+                            const _snapStart = readerG.tcToSeconds(jsonData.cleanFeed.mediaStart);
+                            const _snapStop  = readerG.tcToSeconds(jsonData.cleanFeed.mediaStop);
+                            const _realStop  = _snapStart + cleanFeedRealDurSec;
+                            if (_realStop > _snapStop + 1 && typeof readerG.secondsToTC === 'function') {
+                                cleanFeedMediaStopEff = readerG.secondsToTC(_realStop);
+                                log(`📏 [NOU] Durada REAL del cleanFeed: ${cleanFeedRealDurSec.toFixed(1)}s → final ${cleanFeedMediaStopEff} (snapshot JSON=${jsonData.cleanFeed.mediaStop}, ${(_snapStop - _snapStart).toFixed(1)}s). S'usa la real.`);
+                            } else {
+                                log(`📏 [NOU] Durada REAL del cleanFeed: ${cleanFeedRealDurSec.toFixed(1)}s ≈ snapshot JSON (${(_snapStop - _snapStart).toFixed(1)}s) → es manté el snapshot.`);
+                            }
+                        } else {
+                            log(`⚠️ [NOU] No s'ha pogut mesurar la durada real del cleanFeed (${(_durRes && _durRes.error) || '?'}) → s'usa el snapshot del JSON (${jsonData.cleanFeed.mediaStop}).`, "WARN");
+                        }
+                    }
+                } catch (eDurCf) {
+                    log('⚠️ [NOU] Durada real del cleanFeed: ' + eDurCf.message, "WARN");
+                }
+
                 // ── FIX (2026-09-16): no importar un cleanFeed encara en ingesta ──────
                 // Si el MP4 del bloc ja és al NAS però la ingesta encara no ha arribat al
                 // TC de sortida (mediaStop < out del bloc), importar-lo el deixaria
@@ -434,16 +473,29 @@
                 // no el reimportaria mai. Es crea el projecte sense vídeo i es completa
                 // amb ACTUALITZAR quan l'ingesta acabi.
                 let skipVideoIngesta = false;
+                let skipVideoIngestaMsg = null;   // (#120) motiu, per re-escriure'l al log del projecte
+                let mediaMp4Ingesta = null;       // (#120) asset MP4 guardat, per si el fallback l'ha de restaurar
                 try {
                     if (assets && assets.media && assets.media.mp4 && jsonData && jsonData.cleanFeed && readerG) {
                         const blkIng = (typeof readerG.getBlock === 'function') ? readerG.getBlock(jsonData, ctx.bloque) : null;
-                        const stopIng = (typeof readerG.tcToSeconds === 'function') ? readerG.tcToSeconds(jsonData.cleanFeed.mediaStop) : null;
+                        // (#121) stopIng amb el final EFECTIU: si la durada REAL del fitxer va
+                        // més enllà del snapshot del JSON, la ingesta ja cobreix el bloc.
+                        const stopIng = (typeof readerG.tcToSeconds === 'function') ? readerG.tcToSeconds(cleanFeedMediaStopEff || jsonData.cleanFeed.mediaStop) : null;
                         const outIng = (blkIng && typeof readerG.tcToSeconds === 'function') ? readerG.tcToSeconds(blkIng.out) : null;
                         if (isFinite(stopIng) && isFinite(outIng) && stopIng < outIng) {
                             skipVideoIngesta = true;
-                            log("⏳ [NOU] CleanFeed en ingesta (" + jsonData.cleanFeed.mediaStop + " < " + (blkIng && blkIng.out) + "): el projecte es crearà SENSE VÍDEO (ni MP4 ni extracció de clip). Fes ACTUALITZAR quan acabi.", "WARN");
+                            skipVideoIngestaMsg = "⏳ [NOU] CleanFeed en ingesta (" + jsonData.cleanFeed.mediaStop + " < " + (blkIng && blkIng.out) + "): el projecte es crearà SENSE VÍDEO (ni MP4 ni extracció de clip). Fes ACTUALITZAR quan acabi.";
+                            log(skipVideoIngestaMsg, "WARN");
                             getUtils().status("MP4 en ingesta: projecte sense vídeo (ACTUALITZAR després)", "warn");
+                            // (#120, 2026-09-30) Guardem l'asset: si el fallback troba el MP4 del
+                            // bloc de verticalització, la guarda s'aixeca (vegeu més avall) i s'ha
+                            // de poder restaurar `assets.media.mp4`.
+                            mediaMp4Ingesta = assets.media.mp4;
                             assets.media = { mp4: null, srt: (assets.media.srt || null) };
+                        } else if (cleanFeedRealDurSec != null && isFinite(stopIng) && isFinite(outIng)) {
+                            // (#121) La guarda NO s'aplica perquè el fitxer real ja arriba més enllà
+                            // del bloc, encara que el snapshot del JSON digui el contrari.
+                            log(`🔓 [NOU] Guarda d'ingesta NO aplicable: el fitxer real arriba a ${cleanFeedMediaStopEff} i el bloc acaba a ${(blkIng && blkIng.out) || '?'}.`);
                         }
                     }
                 } catch (eIngMp4) {
@@ -471,6 +523,11 @@
 
                 // ─── Inicialitzar fitxer de log per a aquest projecte ──────────────
                 getUtils()._setLogPath(folderPath, fileName);
+
+                // (#120, 2026-09-30) La guarda "cleanFeed en ingesta" s'avalua ABANS d'aquest
+                // punt i _setLogPath buida FASTPASS.log → el motiu es perdia (run V4 del 29/09:
+                // el log no deia per què el projecte sortia sense vídeo). Es re-escriu aquí.
+                if (skipVideoIngestaMsg) log(skipVideoIngestaMsg, "WARN");
 
                 // ─── NOU: Inicialitzar Manifest de Sessió ──────────────────────────
                 // Registrem l'inici del procés per tenir una font de veritat persistent
@@ -507,11 +564,14 @@
                                 const allItems = jsonData.escaleta?.liniesEscaleta || [];
 
                                 // ─── SISTEMA DE 3 TIERS: Precisió de trim ─────────────────
+                                // (#121) mediaStop EFECTIU: si la durada real del fitxer supera el
+                                // snapshot del JSON, el límit del MP4 és la durada real (abans el
+                                // [OUT-MARGIN] tallava l'OUT al final del snapshot → OUT truncat).
                                 const bounds = reader.calcPrecisionTrimBounds(
                                     jsonData,
                                     ctx.bloque,
                                     jsonData.cleanFeed.mediaStart,
-                                    jsonData.cleanFeed.mediaStop,
+                                    cleanFeedMediaStopEff || jsonData.cleanFeed.mediaStop,
                                     ctx.config
                                 );
 
@@ -528,7 +588,7 @@
                                     const outOfRangeCheck = reader.isBoundsOutOfCleanFeedRange(
                                         bounds,
                                         jsonData.cleanFeed.mediaStart,
-                                        jsonData.cleanFeed.mediaStop
+                                        cleanFeedMediaStopEff || jsonData.cleanFeed.mediaStop
                                     );
 
                                     if (outOfRangeCheck.outOfRange) {
@@ -541,8 +601,25 @@
                                                 const blockAssets = await scanner.mediaAssets(ctx);
                                                 if (blockAssets && blockAssets.mp4) {
                                                     blockMediaPath = blockAssets.mp4.path;
-                                                    useBlockMedia = true;
-                                                    log(`✅ [FALLBACK] MP4 del bloc trobat: ${blockAssets.mp4.name}`);
+                                                    // ── (#121, 2026-09-30) VALIDACIÓ DEL MP4 DEL BLOC ────
+                                                    // El pipeline de verticalització publica el fitxer del bloc
+                                                    // amb el seu nom, però el pot publicar PREMATURAMENT (abans
+                                                    // que el bloc s'hagi emès): el 0 del fitxer és aleshores el
+                                                    // material del bloc ANTERIOR. Cas real (TNM V4 29/09/2026):
+                                                    // TN_MIGDIA_V4_*.mp4 escrit 15:00:51 amb el reportatge de
+                                                    // comarques, per a un bloc emès a les 15:02:43 → es va
+                                                    // importar material aliè a V1 i els marcadors no hi quadraven.
+                                                    // Criteri: el render ha de ser POSTERIOR a l'inici del bloc i
+                                                    // la seva durada ha de cobrir la del bloc.
+                                                    const _chk = await this._validateBlockMedia(bounds, blockMediaPath);
+                                                    if (_chk.ok) {
+                                                        useBlockMedia = true;
+                                                        log(`✅ [FALLBACK] MP4 del bloc validat: ${blockAssets.mp4.name} (${_chk.motiu})`);
+                                                    } else {
+                                                        blockMediaPath = null;
+                                                        log(`⛔ [FALLBACK] MP4 del bloc DESCARTAT (${_chk.motiu}) → no s'importa material d'un altre bloc. El projecte quedarà SENSE VÍDEO: fes ACTUALIZAR quan l'ingesta del cleanFeed arribi.`, "ERROR");
+                                                        getUtils().status("MP4 del bloc descartat (render prematur): projecte sense vídeo", "warn");
+                                                    }
                                                 } else {
                                                     log(`⚠️ [FALLBACK] No s'ha trobat MP4 individual del bloc a ${ctx.config.rutas.verticalitzacio}. Es continuarà amb el cleanFeed (pot fallar).`);
                                                 }
@@ -582,6 +659,24 @@
                                                 bounds.ref.worldSecMediaStart = fbWorldSecMediaStart;
 
                                                 log(`📐 [FALLBACK] Bounds recalculats per al MP4 del bloc: IN=0s OUT=${fallbackBounds.mp4ExpandedOutPoint.toFixed(1)}s dur=${fallbackBounds.mp4Duration.toFixed(1)}s | ref.worldSecMediaStart ajustat a ${fbWorldSecMediaStart.toFixed(1)}s`);
+                                            }
+
+                                            // ── (#120, 2026-09-30) AIXECAR LA GUARDA "cleanFeed en ingesta" ──
+                                            // La guarda de dalt protegeix contra importar un cleanFeed TRUNCAT.
+                                            // El MP4 del bloc de VERTICALITZACIÓ és un fitxer INDEPENDENT i
+                                            // sencer (es renderitza per bloc): si hi és, val més importar-lo
+                                            // que deixar V1 buit. Cas real (run TNM V4 del 29/09): l'escaleta
+                                            // era una captura 46s ABANS del bloc → mediaStop < out → guarda
+                                            // activa → però el MP4 del bloc cobria tot el bloc. Resultat: V1
+                                            // buit i els marcadors impossibles de testar.
+                                            // Aquí el fallback ja ha confirmat que el fitxer existeix → no aplica.
+                                            if (skipVideoIngesta) {
+                                                skipVideoIngesta = false;
+                                                if (mediaMp4Ingesta) {
+                                                    assets.media = { mp4: mediaMp4Ingesta, srt: (assets.media && assets.media.srt) || null };
+                                                }
+                                                log(`🔓 [FALLBACK] Guarda "CleanFeed en ingesta" AIXECADA: s'usa el MP4 del bloc (${String(blockMediaPath).split(/[\\/]/).pop()}) → s'importa a V1 i es munten marcadors.`);
+                                                getUtils().status("MP4 del bloc importat (cleanFeed encara en ingesta)", "info");
                                             }
                                         }
                                     }
@@ -690,7 +785,12 @@
                                     // ─── FASE 0: Extracció de clip via ffmpeg (si possible) ──
                                     try {
                                         const ffmpeg = window.FASTPASS_UI.Logic.FFmpeg;
-                                        if (!skipVideoIngesta && ffmpeg && ffmpeg.extractClip) {
+                                        // (#120, 2026-09-30) `!useBlockMedia`: amb el MP4 del bloc NO s'extreu
+                                        // clip. El fitxer de verticalització ja ÉS el material del bloc i
+                                        // s'insereix SENCER (branca isFallbackBlockMedia de 3_Project_Logic,
+                                        // domini 'source/bloc-media', fileIn=0). Extreure'n un clip local
+                                        // deixaria el 0 del fitxer a handleSecs i desalinearia els marcadors.
+                                        if (!skipVideoIngesta && !useBlockMedia && ffmpeg && ffmpeg.extractClip) {
                                             const clipName = `${ctx.progData.wott || "TNV"}_${ctx.bloque}_CLIP.mp4`;
                                             // Destí: DIRECTORI DEL PROJECTE (folderPath = on neix el .prproj a _runNew).
                                             // El clip del bloc, l'AUDIO_REF.bin i el .prproj queden sempre junts
@@ -948,7 +1048,17 @@
                                                 log(`ℹ️ [EXTRACT] No s'usa clip extret. Es manté el comportament actual (MP4 complet).`);
                                             }
                                         } else {
-                                            log(`ℹ️ [EXTRACT] FFmpegLogic.extractClip no disponible. Usant MP4 complet (fallback).`);
+                                            // (#120, 2026-09-30) Missatge HONEST: abans deia sempre
+                                            // "FFmpegLogic.extractClip no disponible", també quan el que
+                                            // passava era que s'ometia per la guarda d'ingesta → va costar
+                                            // una sessió sencera de diagnòstic (run V4 del 29/09).
+                                            if (useBlockMedia) {
+                                                log(`ℹ️ [EXTRACT] MP4 del bloc (fallback): s'insereix SENCER a V1, sense extracció de clip.`);
+                                            } else if (skipVideoIngesta) {
+                                                log(`⏳ [EXTRACT] Omesa: cleanFeed encara en ingesta i sense MP4 del bloc → projecte sense vídeo (ACTUALITZAR després).`);
+                                            } else {
+                                                log(`ℹ️ [EXTRACT] FFmpegLogic.extractClip no disponible. Usant MP4 complet (fallback).`);
+                                            }
                                         }
                                     } catch (eExtract) {
                                         log(`⚠️ [EXTRACT] Error durant extracció de clip: ${eExtract.message}. Continuant sense clip extret.`);
@@ -1009,7 +1119,7 @@
                                         jsonData,
                                         ctx.bloque,
                                         jsonData.cleanFeed.mediaStart,
-                                        jsonData.cleanFeed.mediaStop,
+                                        cleanFeedMediaStopEff || jsonData.cleanFeed.mediaStop,
                                         ctx.config
                                     );
                                     if (fallbackBounds) {
@@ -1121,6 +1231,9 @@
                     // FIX (2026-09-16): amb el cleanFeed en ingesta es crea el projecte SENSE
                     // vídeo (ni clip extret ni MP4) perquè quedi truncat a V1. ACTUALITZAR el
                     // col·locarà quan l'ingesta hagi acabat.
+                    // (#120, 2026-09-30): NO aplica si el fallback ha trobat el MP4 del bloc —
+                    // en aquest cas la guarda s'aixeca més amunt i skipVideoIngesta ja és false,
+                    // així que cleanFeedData (mediaPath = MP4 del bloc) s'importa amb normalitat.
                     skipVideoIngesta ? null : cleanFeedData);
 
                 // 2. FINALITZAR ref (Obtenir tlClipStartSec real post-inserció)
@@ -1372,6 +1485,118 @@
         },
 
         /**
+         * _validateBlockMedia: Valida que el MP4 de verticalització del bloc sigui un render
+         * POSTERIOR a l'inici del bloc i que cobreixi la durada del bloc.
+         *
+         * (#121, 2026-09-30) Motiu: el pipeline de verticalització publica el fitxer amb el
+         * nom del bloc però pot fer-ho ABANS que el bloc s'hagi emès. En aquest cas el 0 del
+         * fitxer és el material del bloc ANTERIOR (cas real TNM V4 29/09/2026: fitxer escrit
+         * 15:00:51 amb material de comarques per a un bloc emès a les 15:02:43) i importar-lo
+         * omple la timeline de material aliè.
+         *
+         * @param {Object} bounds - Bounds calculats (usa bounds.ref.worldBlockStartSec/EndSec)
+         * @param {string} path   - Ruta del MP4 del bloc
+         * @returns {Promise<{ok:boolean, motiu:string}>}
+         */
+        _validateBlockMedia: async function (bounds, path) {
+            const ref = (bounds && bounds.ref) || {};
+            const wBlockStart = ref.worldBlockStartSec;
+            const wBlockEnd = ref.worldBlockEndSec;
+            const planned = (isFinite(wBlockStart) && isFinite(wBlockEnd) && wBlockEnd > wBlockStart)
+                ? (wBlockEnd - wBlockStart) : null;
+            const motius = [];
+
+            // 1. Durada real del fitxer vs durada del bloc
+            let dur = null;
+            try {
+                const ff = window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.FFmpeg;
+                if (ff && ff.getMediaDuration) {
+                    const r = await ff.getMediaDuration(path);
+                    if (r && r.ok) dur = r.duration;
+                }
+            } catch (eD) { dur = null; }
+            if (dur != null && planned != null && dur < planned - 2) {
+                motius.push(`durada ${dur.toFixed(1)}s < bloc ${planned.toFixed(1)}s`);
+            }
+
+            // 2. Data de modificació: el render ha de ser posterior a l'inici del bloc
+            const mtSec = this._fileMtimeSecOfDay(path);
+            if (mtSec != null && isFinite(wBlockStart) && mtSec < wBlockStart - 60) {
+                motius.push(`fitxer escrit ${this._secToHHMMSS(mtSec)} ABANS de l'inici del bloc ${this._secToHHMMSS(wBlockStart)}`);
+            }
+
+            if (motius.length) return { ok: false, motiu: motius.join(' + ') };
+
+            const det = [];
+            if (dur != null) det.push(`durada ${dur.toFixed(1)}s`);
+            if (mtSec != null) det.push(`escrit ${this._secToHHMMSS(mtSec)}`);
+            return { ok: true, motiu: det.length ? det.join(', ') : 'sense metadades (validació parcial)' };
+        },
+
+        /**
+         * _fileMtimeSecOfDay: mtime d'un fitxer en segons des de mitjanit (hora local).
+         * Retorna null si no es pot obtindre (UNC sense stat, etc.).
+         */
+        _fileMtimeSecOfDay: function (path) {
+            try {
+                const fs = window.cep && window.cep.fs;
+                if (!fs || !fs.stat || !path) return null;
+                const st = fs.stat(path);
+                if (!st || st.err !== 0 || !st.data || st.data.mtime == null) return null;
+                let ms = new Date(st.data.mtime).getTime();
+                if (!isFinite(ms)) return null;
+                if (ms < 946684800000) ms = ms * 1000;   // epoch en segons → ms
+                const d = new Date(ms);
+                return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+            } catch (e) { return null; }
+        },
+
+        /**
+         * _secToHHMMSS: segons → "HH:MM:SS" (només per a logs).
+         */
+        _secToHHMMSS: function (s) {
+            if (!isFinite(s)) return '?';
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+            const p = (n) => String(n).padStart(2, '0');
+            return p(h) + ':' + p(m) + ':' + p(sec);
+        },
+
+        /**
+         * _guardBlockMedia: (#121, 2026-09-30) Guarda d'ingesta per als fluxos que
+         * agafen el MP4 de `rutas.verticalitzacio` via `Scan.mediaAssets` (ACTUALITZAR,
+         * LOAD, GO): el render del bloc pot existir PREMATURAMENT (abans que el bloc
+         * s'hagi emès) i el seu 0 és aleshores material d'un altre bloc. Si el fitxer
+         * no cobreix el bloc o és més antic que el seu inici, s'anul·la (mai material aliè).
+         * Si no es pot validar (sense metadades), es deixa passar com abans.
+         */
+        _guardBlockMedia: async function (ctx, media) {
+            if (!media || !media.mp4 || !media.mp4.path) return media;
+            try {
+                const reader = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
+                if (!reader || typeof reader.calcPrecisionTrimBounds !== 'function') return media;
+                const datePrefix = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+                const jsonMeta = await reader.ensureLocalCopy(ctx, datePrefix);
+                if (!jsonMeta || !jsonMeta.path) return media;
+                const jsonData = await reader.load(jsonMeta.path);
+                if (!jsonData || !jsonData.cleanFeed) return media;
+                const bounds = reader.calcPrecisionTrimBounds(
+                    jsonData, ctx.bloque,
+                    jsonData.cleanFeed.mediaStart, jsonData.cleanFeed.mediaStop, ctx.config
+                );
+                const chk = await this._validateBlockMedia(bounds, media.mp4.path);
+                if (chk.ok) {
+                    log(`✅ [SCAN] MP4 del bloc validat: ${media.mp4.name} (${chk.motiu})`);
+                } else {
+                    log(`⛔ [SCAN] MP4 del bloc DESCARTAT (${chk.motiu}) → no s'importarà material d'un altre bloc.`, 'ERROR');
+                    return { ...media, mp4: null };
+                }
+            } catch (eG) {
+                log('⚠️ [SCAN] No s\'ha pogut validar el MP4 del bloc: ' + eG.message, 'WARN');
+            }
+            return media;
+        },
+
+        /**
          * _fullScan: Escaneja rètols, media i portada, i actualitza flags de Context.
          */
         _fullScan: async function (ctx) {
@@ -1379,7 +1604,7 @@
             
             // 1. Busquem materials al NAS
             const wotts = await window.Scan.wotts(ctx);
-            const media = await window.Scan.mediaAssets(ctx, wotts.tema);
+            const media = await this._guardBlockMedia(ctx, await window.Scan.mediaAssets(ctx, wotts.tema));
             const portada = await window.Scan.portadas(ctx);
             
             // 2. Actualitzem State global
@@ -1515,11 +1740,33 @@
                 return null;
             }
             try {
+                // (#121, 2026-09-30) El snapshot cleanFeed.mediaStop del JSON pot quedar
+                // curt si el manifest es reconstrueix més tard (la ingesta va continuar):
+                // la durada REAL del fitxer mana, igual que a _runNew. Si no es pot
+                // mesurar, es manté el snapshot (comportament anterior).
+                let stopEffMf = jsonData.cleanFeed.mediaStop;
+                try {
+                    const ffMf = window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.FFmpeg;
+                    const cfPathMf = jsonData.cleanFeed ? jsonData.cleanFeed.mediaPath : null;
+                    if (ffMf && ffMf.getMediaDuration && cfPathMf &&
+                        typeof reader.tcToSeconds === 'function' && typeof reader.secondsToTC === 'function') {
+                        const durMf = await ffMf.getMediaDuration(cfPathMf);
+                        if (durMf && durMf.ok) {
+                            const stopRealMf = reader.tcToSeconds(jsonData.cleanFeed.mediaStart) + durMf.duration;
+                            if (stopRealMf > reader.tcToSeconds(jsonData.cleanFeed.mediaStop) + 1) {
+                                stopEffMf = reader.secondsToTC(stopRealMf);
+                                log(`📏 [Manifest] Durada REAL del cleanFeed: ${durMf.duration.toFixed(1)}s → final ${stopEffMf} (snapshot ${jsonData.cleanFeed.mediaStop}).`);
+                            }
+                        }
+                    }
+                } catch (eDurMf) {
+                    log('⚠️ [Manifest] No s\'ha pogut mesurar la durada real: ' + eDurMf.message, 'WARN');
+                }
                 const bounds = reader.calcPrecisionTrimBounds(
                     jsonData,
                     ctx.bloque,
                     jsonData.cleanFeed.mediaStart,
-                    jsonData.cleanFeed.mediaStop,
+                    stopEffMf,
                     ctx.config
                 );
                 if (!bounds) {

@@ -188,9 +188,85 @@
         },
 
         /**
+         * getMediaDuration: Durada REAL d'un fitxer de vídeo (ffprobe), en segons.
+         *
+         * ⚠️ (2026-09-30) PER QUÈ CAL: `cleanFeed.mediaStop` / `mediaDuration` del JSON
+         * d'escaleta és un SNAPSHOT del moment de publicació — diu fins on havia arribat la
+         * ingesta ALEES, no la durada del fitxer. Si el projecte es crea més tard (o en
+         * diferit), el MP4 ja conté molt més material i el snapshot queda curt → falsa
+         * guarda "CleanFeed en ingesta" i fals fallback al MP4 del bloc.
+         * Cas real (TNM V4, 29/09/2026): el JSON deia 33:40 (15:00:40) i el fitxer durava
+         * 68:00 (fins 15:35:21) → el bloc (offset 2123 s) hi era de ple, però el sistema el
+         * va donar per "no ingerit" i va importar un MP4 de verticalització PREMATUR
+         * (escrit 15:00:51) amb material d'un altre bloc.
+         *
+         * Mecanisme: mateix patró que keyframeAtOrBefore (IO.executeShell + redirect a fitxer
+         * temporal + polling del CONTINGUT fins estabilitzar-se). NO s'usa waitForFile perquè
+         * espera que IO.readTxt retorni literalment "OK" i l'eixida de ffprobe és un número.
+         *
+         * @param {string} sourcePath - Ruta del MP4 (UNC o local)
+         * @returns {Promise<{ok:boolean, duration:number, error:string|null}>}
+         */
+        getMediaDuration: async function(sourcePath) {
+            if (!sourcePath) return { ok: false, duration: 0, error: 'sourcePath buit' };
+            try {
+                const ffprobeBin = await getFfprobe();
+                const tempOut = `C:\\temp\\ffprobe_dur_${Date.now()}.txt`;
+                const safeTemp = tempOut.replace(/\\/g, '\\\\');
+                const cmd = `"${ffprobeBin}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${sourcePath}" > "${tempOut}" 2>&1`;
+                utils.log(`📏 [duration] ffprobe: ${String(sourcePath).split(/[\\/]/).pop()}`);
+                await utils.callJSX(`IO.executeShell(${JSON.stringify(cmd)})`);
+
+                // Polling del CONTINGUT (el redirect crea el fitxer buit de seguida).
+                // Només s'accepta una línia que sigui EXACTAMENT un número: si ffprobe ha
+                // fallat (p.ex. "No such file"), el nom del fitxer conté dígits i un regex
+                // laxo tornaria una "durada" absurda.
+                let raw = '';
+                let dur = 0;
+                let _prevLen = -1;
+                let _stable = 0;
+                for (let i = 0; i < 25; i++) {
+                    await new Promise(r => setTimeout(r, 400));
+                    let chunk = '';
+                    try { chunk = await utils.callJSX(`IO.readTxt('${safeTemp}')`); } catch (eR) { chunk = ''; }
+                    if (chunk && chunk.length > raw.length) raw = chunk;
+                    const lines = String(raw).split(/\r?\n/);
+                    for (let j = 0; j < lines.length; j++) {
+                        const s = lines[j].trim();
+                        if (/^\d+(\.\d+)?$/.test(s)) {
+                            const v = parseFloat(s);
+                            if (isFinite(v) && v > 0 && v < 43200) dur = v;   // < 12 h (sanity)
+                        }
+                    }
+                    if (dur > 0) {
+                        if (raw.length === _prevLen) { _stable++; } else { _stable = 0; }
+                        _prevLen = raw.length;
+                        if (_stable >= 2) break;
+                    }
+                }
+                try { await utils.callJSX(`IO.remove('${safeTemp}')`); } catch (eRm) { }
+
+                if (!(dur > 0)) {
+                    utils.log(`⚠️ [duration] Sense durada a "${String(raw).substring(0, 120)}" → ${String(sourcePath).split(/[\\/]/).pop()}`);
+                    return { ok: false, duration: 0, error: `ffprobe sense durada: "${String(raw).substring(0, 120)}"` };
+                }
+                utils.log(`📏 [duration] ${String(sourcePath).split(/[\\/]/).pop()} → ${dur.toFixed(2)}s`);
+                return { ok: true, duration: dur, error: null };
+            } catch (e) {
+                utils.log(`⚠️ [duration] ffprobe ha fallat: ${e.message}`);
+                return { ok: false, duration: 0, error: e.message };
+            }
+        },
+
+        /**
          * checkSourceDuration: Comprova si el MP4 original té durada suficient
          * per cobrir el segment requerit (requiredEndSec + handles).
-         * Usa ffprobe per obtenir la durada total del MP4.
+         *
+         * ⚠️ (2026-09-30) NO usar per MESURAR durades: fa servir `waitForFile`, que espera
+         * que IO.readTxt retorni literalment "OK" — i l'eixida de ffprobe és un número
+         * ("4080.02") → cada crida acabava en ERR_TIMEOUT de 5 s i retornava sempre el
+         * "fallback suficient" cec (això és el que es va documentar com a "poc fiable").
+         * Per a durades reals, usar getMediaDuration().
          *
          * @param {string} sourcePath     - Ruta del MP4 original (cleanFeed)
          * @param {number} requiredEndSec - Segon final requerit (worldBlockEndSec)

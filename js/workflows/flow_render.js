@@ -324,6 +324,11 @@
          *      Clips.insertClipFrom (ripple: més enllà del final del projecte no desplaça
          *      res; NO s'usa Clips.duplicate perquè fa overwriteClip al START del clip
          *      font i machacaria la V1 real) i l'inPoint alineat al cabezal.
+         *   2b. MOTION de l'original copiat a la còpia (posició, escala i retalls) amb
+         *      Anim.get/setMotionValues: insertClip crea una INSTÀNCIA NOVA des de
+         *      l'ítem i el Motion del clip de pista NO s'hereta. Sense això la captura
+         *      NO és el frame que es veu a la timeline (IPD 144% + pos offsets, DF
+         *      amb retalls…) i el PNG queda sobre una foto diferent.
          *   3. La PRIMERA portada del tema (Scan.portadas) a V2, damunt de la còpia i
          *      centrada.
          *   4. Cabezal a la zona neta i captura amb Render.snapshot (exportFrameQE:
@@ -359,6 +364,29 @@
                 // Frame EXACTE que es veu sota el cabezal = inPoint + desplaçament.
                 const mediaIn = parseFloat(src.inPoint) + (cti - parseFloat(src.start));
                 log(`🎯 [Portada] CTI=${cti.toFixed(2)}s → V1[${src.index}] "${src.name}" (${parseFloat(src.start).toFixed(2)}→${parseFloat(src.end).toFixed(2)}s) | frame del cabezal = media ${mediaIn.toFixed(2)}s`);
+
+                // ── 1b. MOTION DE L'ORIGINAL (es llegeix ABANS de tocar res) ──────
+                // `Clips.insertClipFrom` fa targetTrack.insertClip(projectItem) → crea una
+                // INSTÀNCIA NOVA des de l'ÍTEM DEL PROJECTE, i Premiere li aplica el Motion
+                // PER DEFECTE (centrat, escala 100, sense retalls): el Motion viu a la
+                // instància de PISTA, no a l'ítem, i per tant NO s'hereta. Sense això la
+                // captura sortia amb un frame diferent del que es veu a la timeline
+                // (IPD 144% + pos [-94.5, 562] px, retalls de la DF…).
+                // Es llegeix ARA perquè el CTI encara és al cabezal → valor del frame exacte
+                // que es vol capturar; s'aplica a la còpia a 4b. Els àtoms get/set treballen
+                // en les mateixes unitats (get torna PÍXELS i set els normalitza ell mateix).
+                let srcMotion = null;
+                try {
+                    const mvSrc = await callJSX(`Anim.getMotionValues(${T_V1}, ${src.index})`);
+                    if (mvSrc && String(mvSrc).indexOf('ERR') !== 0) {
+                        srcMotion = JSON.parse(mvSrc);
+                        log(`🎯 [Portada] Motion de l'ORIGINAL V${T_V1}[${src.index}]: ${mvSrc}`);
+                    } else {
+                        log(`⚠️ [Portada] Motion de l'original no llegible (${mvSrc}) → la còpia quedarà amb el Motion per defecte`, "WARN");
+                    }
+                } catch (eMv) {
+                    log(`⚠️ [Portada] Llegint el Motion de l'original: ${eMv.message}`, "WARN");
+                }
 
                 // ── 2. PORTADA: la PRIMERA del tema ──────────────────────────────
                 // La data de treball es passa explícitament perquè Scan.portades
@@ -412,6 +440,30 @@
                 const mv = await callJSX(`Clips.moveToRange(${T_V1}, ${idxCopy}, ${tempTC}, ${tempTC + PORTADA_DUR}, 'video')`);
                 log(`📐 [Portada] Còpia a la zona neta: ${mv}`);
                 log(`   · còpia V${T_V1}[${idxCopy}] → ${await callJSX(`Clips.get(${T_V1}, ${idxCopy}, 'video')`)}`);
+
+                // ── 4b. HERETAR EL MOTION: posició + escala (+ retalls) = ORIGINAL ──
+                // La còpia s'ha de veure EXACTAMENT com el clip original; si no, el PNG es
+                // compon sobre un frame que no és el de la timeline. Només s'envien les
+                // claus que el JSX ha pogut llegir (les null s'ometen i no es toquen).
+                if (srcMotion) {
+                    const vals = {};
+                    ['position', 'scale', 'scaleWidth', 'cropLeft', 'cropTop', 'cropRight', 'cropBottom']
+                        .forEach(function (k) {
+                            if (srcMotion[k] !== null && srcMotion[k] !== undefined) vals[k] = srcMotion[k];
+                        });
+                    try {
+                        const mvRes = await callJSX(`Anim.setMotionValues(${T_V1}, ${idxCopy}, '${utils.escape(JSON.stringify(vals))}')`);
+                        log(`🎯 [Portada] Motion heretat → còpia V${T_V1}[${idxCopy}]: ${JSON.stringify(vals)} → ${mvRes}`);
+                        log(`   · comprovació còpia V${T_V1}[${idxCopy}] → ${await callJSX(`Anim.getMotionValues(${T_V1}, ${idxCopy})`)}`);
+                        if (String(mvRes).indexOf('OK') !== 0) {
+                            log(`⚠️ [Portada] La còpia NO ha pogut heretar el Motion (${mvRes}) → el frame capturat pot no coincidir amb la timeline`, "WARN");
+                        }
+                    } catch (eSm) {
+                        log(`⚠️ [Portada] Aplicant el Motion a la còpia: ${eSm.message}`, "WARN");
+                    }
+                } else {
+                    log("⚠️ [Portada] Sense Motion de l'original → còpia amb el Motion per defecte", "WARN");
+                }
 
                 // ── 5. PORTADA DAMUNT de la còpia, CENTRADA ──────────────────────
                 const look = await callJSX(`IO.lookFor('${utils.escape(JSON.stringify([portada.name]))}')`);

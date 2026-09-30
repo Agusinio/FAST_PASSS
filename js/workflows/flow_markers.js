@@ -61,12 +61,42 @@
             '**********'
         ]),
 
+        // (2026-09-30) BUG #122 · NORMALITZACIÓ DEL SUFIX (un sol punt de veritat).
+        // L'escaleta del TNV escriu els números amb ESPAI i GUIONET ("01 GF", "01 GF-1",
+        // "02 GF-2", "25 P2-1") però _GRAPHIC_SUFFIXES conté el sufix "net" ('gf', 'gf1',
+        // 'p21'…). Sense normalitzar, " gf" no casava MAI → els GF del TNV es tractaven com a
+        // ESTRUCTURALS i això encadenava TRES símptomes alhora (TNV V1 29/09):
+        //   1) F2·Deduced els apilava a l'inici del bloc (1,32s → 0,00s) en comptes de
+        //      deixar-los a F6·Gràfics (D13: dins de la intro, +10/+15/+20/+25s).
+        //   2) Contaminaven el Δ de correlació (F3.5 movia el marcador OnAir "01" 1,32s
+        //      ABANS del seu corte real).
+        //   3) La fase Vermells (no agrupats) els pintava de color 1 (VERMELL) en comptes
+        //      de GROC (4), perquè ni _detectUngroupedItems (assembly_context) ni
+        //      _getColorIdx els reconeixien com a gràfics.
+        // Normalitzar aquí arregla els tres camins alhora (tots criden _isGraphicByNum).
+        _normSuffix: function (num) {
+            if (num === null || num === undefined) return null;
+            var clean = String(num).toLowerCase().replace(/[\s_\-]/g, '');
+            var m = clean.match(/^\d+(.*)$/);
+            if (!m) return null;
+            return m[1];
+        },
+
+        _graphicSuffixesNorm: function () {
+            if (!this._GRAPHIC_SUFFIXES_NORM) {
+                var n = new Set();
+                this._GRAPHIC_SUFFIXES.forEach(function (s) {
+                    n.add(String(s).toLowerCase().replace(/[\s_\-]/g, ''));
+                });
+                this._GRAPHIC_SUFFIXES_NORM = n;
+            }
+            return this._GRAPHIC_SUFFIXES_NORM;
+        },
+
         _isGraphicByNum: function (num) {
-            if (!num) return false;
-            var clean = num.toString().toLowerCase().trim();
-            var match = clean.match(/^\d+(.*)$/);
-            if (!match || match[1] === '') return false;
-            return this._GRAPHIC_SUFFIXES.has(match[1]);
+            var suf = this._normSuffix(num);
+            if (suf === null || suf === '') return false;
+            return this._graphicSuffixesNorm().has(suf);
         },
 
         // ═══════════════════════════════════════════════════════════════
@@ -182,12 +212,16 @@
         // agrupacio == null + durada > 0 → 1 (Vermell)
         // ═══════════════════════════════════════════════════════════════
         _getColorIdx: function (line) {
-            if (line.agrupacio) return 6;
+            // (2026-09-30) BUG #122 · ORDRE DELS CHECKS: el GRÀFIC mana SEMPRE, també quan
+            // porta agrupació (escaleta TNV: '01 GF' amb agrupacio=v1). ABANS el check
+            // d'agrupació anava primer → un gràfic agrupat sortia BLAU (6) i la fase Vermells
+            // el podia pintar de color 1 (no agrupat).
             // (2026-09-24) ELS ÍTEMS GRÀFICS (P2, GF, TE, ft…) SÓN SEMPRE GROCS (4): són gràfics
             // de l'escaleta, no "no agrupats". ABANS, si portaven durada > 0 queien al color 1
             // (VERMELL) i podien ser descartats pel filtre de vermells (queixa d'usuari
             // 2026-09-24: "Google hauria de ser marker groc (gràfic)").
             if (line.num && this._isGraphicByNum(line.num)) return 4;
+            if (line.agrupacio) return 6;
             var dStr = line.durada || line.duradaOnAir || '0:00';
             var parts = dStr.split(':').map(Number);
             var dSec = 0;
@@ -608,6 +642,14 @@
 
                 var comment = mk.comments || '';
                 var prefix = _extractPrefix(comment);
+                // (2026-09-30) BUG #122: els marcadors GRÀFICS (grocs) NO voten el Δ: la seva
+                // posició ve del seu PARE (D13, F6·Gràfics), no de l'emissió. Si voten, el Δ
+                // s'omple de l'offset d'ancoratge (TNV V1 29/09: 4 GF apilats a 1,32s feien
+                // Δ=-1,32s i arrossegaven el marcador OnAir "01" 1,32s ABANS dels seu corte).
+                if (this._isGraphicByNum(prefix)) {
+                    log('   🔬 [CorrelationSnap] Excloent gràfic ' + prefix + ' (' + markerTime.toFixed(2) + 's) → no vota el Δ');
+                    continue;
+                }
                 var markerType = _classifyMarker(prefix);
                 var baseWeight = (markerType === 'onAir') ? ON_AIR_WEIGHT : ((markerType === 'deduced') ? DEDUCED_WEIGHT : 0.3);
                 if (markerType === 'onAir') onAirCount++;
@@ -1305,14 +1347,18 @@
             };
             var candidateMarkers = [];
             var skippedPrevistos = 0;
+            var skippedGraphics35 = 0;
             for (var i = 0; i < allMarkers.length; i++) {
                 var mk = allMarkers[i];
                 if (mk.name === 'definitiu') continue;
                 var prefix = _extractPrefix35(mk.comments || '');
+                // (2026-09-30) BUG #122: els GRÀFICS (grocs) queden FORA del Δ — la seva
+                // posició la mana F6·Gràfics (ancorats al pare, D13), no l'emissió.
+                if (this._isGraphicByNum(prefix)) { skippedGraphics35++; continue; }
                 if (_isOnAirOrDeduced(prefix)) candidateMarkers.push(mk);
                 else skippedPrevistos++;
             }
-            log('   🔸 [F3.5] OnAir+Deducit: ' + candidateMarkers.length + ' | Previstos saltats: ' + skippedPrevistos);
+            log('   🔸 [F3.5] OnAir+Deducit: ' + candidateMarkers.length + ' | Previstos saltats: ' + skippedPrevistos + ' | Gràfics saltats: ' + skippedGraphics35);
             if (candidateMarkers.length === 0) {
                 log('🟠 [F3.5·CorrelationSnap] Cap marcador OnAir/Deducit no-definitiu. ✓ FINALITZAT.');
                 return;
@@ -1731,17 +1777,31 @@
             var placements = [], anterior = 0, assignats = 0, idxA = 0;
             for (var o = 0; o < objectiu.length; o++) {
                 var cur = objectiu[o];
-                var triat = null;
+                // (2026-09-30 · BUG #123) ABANS: es triava la PRIMERA ancla lliure en ordre
+                // d'escaleta, encara que quedés molt lluny de l'ítem (cas TNV_V2 30/09:
+                // `16dir` a 41,60s → ancla 18,00s, Δ=-23,60s, i això arrossegava `16dp`
+                // a 15,00s via SEP). ARA: s'escull l'ancla MÉS PROPERA a la posició actual
+                // de l'ítem, amb penalització per a les ancles 'corte·medi' (es prefereix
+                // una ruptura de clip llarg), amb xarxa de seguretat MAX_NEAR.
+                var MAX_NEAR = 15.0, PENALITZACIO_MEDI = 2.0;
+                var triat = null, bestIdx = -1, bestCost = Infinity, primer = null, primerIdx = -1;
                 for (var a2 = idxA; a2 < ancles.length; a2++) {
                     var ta = ancles[a2].t;
                     if (ta < anterior + GAP) continue;
                     if (ocup[ta.toFixed(2)] && Math.abs(ta - cur.time) > 0.25) continue;
-                    triat = ancles[a2]; idxA = a2 + 1; break;
+                    if (primer === null) { primer = ancles[a2]; primerIdx = a2; }
+                    var costA = Math.abs(ta - cur.time) + ((ancles[a2].tipus === 'corte·medi') ? PENALITZACIO_MEDI : 0);
+                    if (costA < bestCost - 0.001) { bestCost = costA; triat = ancles[a2]; bestIdx = a2; }
+                }
+                if (triat && Math.abs(triat.t - cur.time) > MAX_NEAR) {
+                    log('   ⚠️ [ASIG] ' + cur.prefix + ': l\'ancla més propera (' + triat.t.toFixed(2) + 's) queda a més de ' + MAX_NEAR.toFixed(0) + 's → es manté la primera en ordre (' + (primer ? primer.t.toFixed(2) + 's' : '-') + ')');
+                    triat = primer; bestIdx = primerIdx;
                 }
                 if (!triat) continue;
+                idxA = bestIdx + 1;
                 if (Math.abs(triat.t - cur.time) <= 0.25) { anterior = Math.max(anterior, triat.t); continue; }
                 placements.push({ prefix: cur.prefix, timeSec: parseFloat(triat.t.toFixed(2)), comment: cur.comment, colorIdx: (colorByNumAsig[cur.prefix] != null ? colorByNumAsig[cur.prefix] : 6) });
-                log('   🔧 [ASIG] ' + cur.prefix + ': ' + cur.time.toFixed(2) + 's → ' + triat.t.toFixed(2) + 's (' + triat.tipus + ')');
+                log('   🔧 [ASIG] ' + cur.prefix + ': ' + cur.time.toFixed(2) + 's → ' + triat.t.toFixed(2) + 's (' + triat.tipus + ', Δ=' + (triat.t - cur.time).toFixed(2) + 's)');
                 ocup[cur.time.toFixed(2)] = false;
                 ocup[triat.t.toFixed(2)] = true;
                 anterior = triat.t;
@@ -2021,6 +2081,79 @@
             return { target: null, why: '' };
         },
 
+        /**
+         * _preAssignDeducedToBreaks: (2026-09-30 · BUG #123) Assignació 1:1 entre les
+         * RUPTURES DE DENSITAT LLIURES i els ítems DEDUÏTS (sense OnAir) del mateix
+         * tram, entès com l'espai entre dos faros consecutius.
+         *
+         * Cas real TNV_V2 30/09 (audit log + FASTPASS.log 12:52): `16dp` quedava a 16,36s
+         * i `16dir` a 18,00s quan les ruptures reals del bloc eren a 23,36s (00:00:23:09)
+         * i 48,80s (00:00:48:20). El snap genèric de F4 no hi arriba perquè la finestra
+         * dels deduïts és ±2,5s i ASIG/SEP ja havien arrossegat els marcadors abans.
+         *
+         * Regla: si en un tram hi ha EXACTAMENT tantes ruptures lliures com ítems
+         * deduïts, s'assignen 1:1 en ordre d'escaleta (la 1a ruptura al 1r ítem).
+         * Si la cardinalitat no quadra, no es toca res (conservador). Els GRÀFICS
+         * queden fora (els mana F6·Gràfics) i el marcador d'inici també.
+         *
+         * @param {Array} markers - marcadors existents [{time, comments}]
+         * @param {Object} hasOnAirByNum - { num: true|false } (de _buildOnAirMap)
+         * @param {Array} breaks - ruptures de densitat [{time, dpDirPair, ...}]
+         * @param {Object} lineByNum - { num: línia d'escaleta } (per l'ordre `sequencia`)
+         * @returns {Object} { prefix: timeSec } només els que tenen assignació 1:1
+         *
+         * MESURAT (test Edge headless, mateix V8 del CEP) amb l'estat real de F4·Faro al
+         * run TNV_V2: {15@0, 16 GF-1@9,96, 16 GF-2@13,16, 16dp@15,00, 16dir@18,00,
+         * 16@61,60} + ruptures [23,36 · 48,80 · 61,60] → {"16dp":23.36,"16dir":48.8}.
+         * Amb 3 deduïts al mateix tram (cardinalitat 2≠3) → {} (no toca res).
+         */
+        _preAssignDeducedToBreaks: function (markers, hasOnAirByNum, breaks, lineByNum) {
+            var out = {}, TOL = 0.25, MIN_GAP = 0.5;
+            var faros = [], ded = [], i, t, pfx;
+
+            // 1) Separar faros (OnAir) de deduïts (sense OnAir). Gràfics fora.
+            for (i = 0; i < (markers || []).length; i++) {
+                t = Number(markers[i] && markers[i].time);
+                if (!isFinite(t)) continue;
+                pfx = this._extractPrefixFromComment(markers[i].comments || '');
+                if (!pfx || this._isGraphicByNum(pfx)) continue;
+                // El 🔒 marcador d'inici (00:00) NO es mou mai, però SÍ que és una
+                // frontera vàlida del primer tram (0 → primer faro del bloc).
+                if (t <= 0.15) { faros.push(0); continue; }
+                if (hasOnAirByNum[pfx] === false) {
+                    var ln = lineByNum[pfx];
+                    ded.push({ prefix: pfx, time: t, seq: (ln && ln.sequencia != null) ? Number(ln.sequencia) : 9999 });
+                } else {
+                    faros.push(t);
+                }
+            }
+            if (ded.length === 0 || !breaks || breaks.length === 0) return out;
+
+            // 2) Ruptures LLIURES = les que no estan ocupades per un faro
+            var lliures = [];
+            for (var b = 0; b < breaks.length; b++) {
+                var tb = Number(breaks[b] && breaks[b].time);
+                if (!isFinite(tb)) continue;
+                var ocupada = false;
+                for (var f = 0; f < faros.length; f++) { if (Math.abs(faros[f] - tb) <= TOL) { ocupada = true; break; } }
+                if (!ocupada) lliures.push(tb);
+            }
+            if (lliures.length === 0) return out;
+
+            // 3) Per cada tram (faro anterior, faro següent): només si quadra 1:1
+            faros.sort(function (a, b2) { return a - b2; });
+            lliures.sort(function (a, b2) { return a - b2; });
+            for (var s = 0; s < faros.length - 1; s++) {
+                var lo = faros[s], hi = faros[s + 1];
+                var br = lliures.filter(function (x) { return x > lo + MIN_GAP && x < hi - MIN_GAP; });
+                var dd = ded.filter(function (d) { return d.time > lo && d.time < hi; })
+                            .sort(function (a, b3) { return a.seq - b3.seq; });
+                if (dd.length === 0 || br.length !== dd.length) continue;
+                for (var k = 0; k < dd.length; k++) out[dd[k].prefix] = br[k];
+            }
+            return out;
+        },
+
         // ═══════════════════════════════════════════════════════════════
         // 🟠 F4: snapFaroMarkers — Snap dels marcadors al TALL REAL més
         // proper (o a la ruptura de densitat DP+DIR), finestra ±0,6 s
@@ -2097,6 +2230,18 @@
                 log('⚠️ [F4·Faro] Sense mapa OnAir (' + eT.message + ') → tots els marcadors com a faro');
             }
 
+            // (2026-09-30 · BUG #123) Assignació 1:1 ruptures lliures ↔ ítems deduïts
+            // (parells DP+DIR). Es calcula ABANS del bucle i té prioritat sobre el snap
+            // genèric (que amb ±2,5s no arriba quan ASIG/SEP han mogut el marcador).
+            var preAssigned = {};
+            try {
+                preAssigned = this._preAssignDeducedToBreaks(existingMarkers, hasOnAirByNum, breaks, lineByNum);
+            } catch (ePA) {
+                preAssigned = {};
+                log('⚠️ [F4·Faro] Pair ruptures↔deduïts: ' + ePA.message, 'WARN');
+            }
+            log('   🟠 [F4·Faro] Pair ruptures↔deduïts (1:1): ' + (Object.keys(preAssigned).length ? JSON.stringify(preAssigned) : 'cap'));
+
             var _extractPrefix = function (comment) {
                 if (!comment) return '';
                 var spaceDashIdx = comment.indexOf(' -');
@@ -2117,11 +2262,20 @@
                 var prefix = _extractPrefix(comment);
                 if (!prefix) continue;
 
+                // (2026-09-30) BUG #122: els GRÀFICS no s'imanten a un corte. La seva posició
+                // ve del seu PARE (D13, F6·Gràfics) i F4 corre ABANS que F6 → si els toqués
+                // els trauria del pare (TNV V1: 4 GF apilats a 0,00s).
+                if (this._isGraphicByNum(prefix)) { alreadyOk++; continue; }
+
                 // DEDUÏT només si consta que l'ítem no té OnAir (si no, faro).
                 var isDeduced = (hasOnAirByNum[prefix] === false);
                 var win = isDeduced ? this._snapWindowDeduced() : SEARCH_WINDOW;
 
-                var pick = this._chooseSnapTarget(markerTime, win, isDeduced, breaks, clips);
+                // (2026-09-30 · BUG #123) Si l'ítem deduït té assignació 1:1 (parell
+                // ruptures↔deduïts) mana aquesta; si no, snap genèric dins de la finestra.
+                var pick = (isDeduced && preAssigned[prefix] != null)
+                    ? { target: preAssigned[prefix], why: 'parell ruptures↔deduïts (1:1)' }
+                    : this._chooseSnapTarget(markerTime, win, isDeduced, breaks, clips);
                 var target = pick.target, why = pick.why;
 
                 if (target === null || Math.abs(target - markerTime) < MIN_MOVE) { alreadyOk++; continue; }
@@ -2667,6 +2821,23 @@
             var moves = [];
             var SEARCH_WINDOW = 2.0;
 
+            // (2026-09-30 · BUG #123) El color NO és llegible des de Markers.get()
+            // (`color:-1` sempre en PPro 23, veure #108) → ABANS aquesta fase forçava 6
+            // (BLAU) i pintava de blau tot el que movia (pendent registrat a
+            // docs/archive/SESSIONS.md:5175). El color es recalcula des de l'escaleta
+            // del manifest (mateixa solució que #108/#122) i els GRÀFICS se salten
+            // (la seva posició la mana F6·Gràfics, igual que a F4·Faro).
+            var lineByNumF5 = {};
+            try {
+                var ctxF5 = await getAssemblyContext().loadAssemblyContext();
+                var linesF5 = (ctxF5 && ctxF5.lines) ? ctxF5.lines : [];
+                for (var lb5 = 0; lb5 < linesF5.length; lb5++) {
+                    if (linesF5[lb5] && linesF5[lb5].num) lineByNumF5[String(linesF5[lb5].num)] = linesF5[lb5];
+                }
+            } catch (eF5) {
+                log('⚠️ [F5·Orphans] Sense escaleta (' + eF5.message + ') → color per defecte', 'WARN');
+            }
+
             var _extractPrefix = function (comment) {
                 if (!comment) return '';
                 var spaceDashIdx = comment.indexOf(' -');
@@ -2682,6 +2853,11 @@
                 var comment = mk.comments || '';
                 var prefix = _extractPrefix(comment);
                 if (!prefix) continue;
+
+                if (this._isGraphicByNum(prefix)) {
+                    log('   ⏭️ [F5·Orphans] ' + prefix + ': és GRÀFIC → no es toca (el mana F6·Gràfics)');
+                    continue;
+                }
 
                 var nearestDist = SEARCH_WINDOW + 999;
                 var nearestCut = null;
@@ -2715,7 +2891,9 @@
                         break;
                     }
                 }
-                var mkColor = (foundMk && typeof foundMk.color === 'number' && foundMk.color >= 0) ? foundMk.color : 6;
+                // (2026-09-30 · BUG #123) Color des de l'escaleta (mai 6 per defecte si
+                // l'ítem hi consta); `foundMk.color` no és fiable (sempre -1, veure #108).
+                var mkColor = lineByNumF5[mvPrefix] ? this._getColorIdx(lineByNumF5[mvPrefix]) : 6;
                 placements.push({
                     prefix: mvPrefix,
                     timeSec: moves[mv].newTimeSec,
@@ -2901,6 +3079,21 @@
                         continue;
                     }
                     idealPosSec = anchorEfTimelineSec + (refSec - anchorEfectiva);
+                    // (2026-09-30) BUG #122: gràfic SENSE pare dins el bloc que cau a la CUA
+                    // (la seva previsió és l'OUT del bloc = escaleta del bloc SEGÜENT, p.ex.
+                    // '02 GF-1'/'02 GF-2' amb previsió 21:04:43 = final del V1 del TNV). ABANS
+                    // el FALLBACK el col·locava igualment i quedava un marcador sol al final del
+                    // timeline ("se ha vuelto a colocar un marker rojo al final"). Es descarta.
+                    var _blockEndTl6 = null;
+                    try {
+                        if (manifest && manifest.ref && isFinite(Number(manifest.ref.worldBlockEndSec))) {
+                            _blockEndTl6 = anchorEfTimelineSec + (Number(manifest.ref.worldBlockEndSec) - anchorEfectiva);
+                        }
+                    } catch (eB6) { _blockEndTl6 = null; }
+                    if (_blockEndTl6 !== null && idealPosSec >= _blockEndTl6 - 0.05) {
+                        log('   ⏭️ [F6·Gràfics] ' + gNum + ': sense pare al bloc i previsió a la CUA (' + idealPosSec.toFixed(2) + 's ≥ ' + _blockEndTl6.toFixed(2) + 's) → és del bloc següent → no es col·loca', 'WARN');
+                        continue;
+                    }
                     log('   🟢 [F6·Gràfics] ' + gNum + ': FALLBACK escaleta → ' + idealPosSec.toFixed(2) + 's');
                 }
 
