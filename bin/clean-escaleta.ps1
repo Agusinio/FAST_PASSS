@@ -1,5 +1,5 @@
 param(
-    [string]$FilePath = "docs/SAMPLES/DATA/TN_VESPRE_20260429_213007.json",
+    [string]$FilePath = "C:\temp\fp\docs_SAMPLES\DATA\TN_VESPRE_20260429_213007.json",
     [switch]$DryRun = $false,
     [switch]$FilterFields = $true
 )

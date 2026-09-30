@@ -125,10 +125,7 @@ log("[DEBUG] calcPrecisionTrimBounds → prevVideoData.endSec=" + prevVideoData.
 
 | Archivo | Propósito |
 |---------|-----------|
-| `docs/debug/DERIVA_INGESTA_23FRAMES.md` | Análisis de deriva de frames en ingesta |
-| `docs/debug/FLASH_WHITE_CLEANUP_PROBLEM.md` | Problema de limpieza de flash blanco |
-| `docs/debug/Informe Tecnico.md` | Informe técnico general |
-| `docs/debug/INFORME_REVISION_CODIGO.md` | Revisión de calidad de código |
+| `docs/archive/DEBUG.md` | Los 4 informes de diagnóstico (deriva 23 frames, flash whites, informe técnico, revisión de código), fusionados el 2026-09-30. |
 
 ---
 

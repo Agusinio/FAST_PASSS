@@ -36,9 +36,15 @@ graphify-out/
 .roo/progress/*.md
 !.roo/progress/README.md
 
-# ffmpeg local (no es pusheja, es copia amb la instal·lacio)
+# ffmpeg local (no es pusheja, es copia amb la instalï¿½lacio)
 bin/ffmpeg/
 
 
 # Dades locals de l'agent (DB, secrets, sessions) - NO al repo
 .cline/
+
+# Neteja 2026-09-30 (veure .roo/progress/2026-09-30.md)
+__pycache__/
+*.pyc
+# Mostres SDK Adobe mogudes fora del repo (veure docs/reference/SAMPLES_ADOBE.md)
+docs/SAMPLES/

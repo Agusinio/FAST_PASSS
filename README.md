@@ -33,24 +33,23 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 
 | Carpeta | Contingut |
 |---------|-----------|
-| `docs/guides/` | Guies: arquitectura, usuari, botonera, desenvolupament, Git. |
+| `docs/guides/` | Guies: arquitectura, propietat del codi, usuari, botonera, desenvolupament, Git. |
 | `docs/specs/` | Especificacions tècniques: escaleta JSON, markers, NNEWS, classificació. |
-| `docs/audits/` | Auditories tècniques històriques (v2.4.2 → v2.9.5). |
-| `docs/plans/` | Plans d'implementació actius i completats (`done/`). |
-| `docs/debug/` | Informes de debugging i diagnòstic. |
-| `docs/reference/` | Material de referència: keyframes, temps onAir. |
-| `docs/archive/` | Codi obsolet, estructures històriques. |
-| `docs/SAMPLES/` | Mostres de codi SDK oficial, snippets, fitxers NNEWS. |
+| `docs/reference/` | Material de referència: keyframes, interpolació, estructura del parser, temps onAir. |
+| `docs/plans/` | Pla actiu en curs. |
+| `docs/archive/` | Només consulta: codi obsolet i l'arxiu històric fusionat. |
+
+> 🧹 **Neteja 2026-09-30:** les auditories, informes de debug, plans tancats i sessions diàries
+> s'han fusionat en 4 fitxers d'arxiu (`docs/archive/AUDITORIAS.md`, `DEBUG.md`, `PLANS_CLOSED.md`
+> i `SESSIONS.md`) i s'han eliminat 65 originals. Les mostres del SDK d'Adobe (19 MB) han sortit
+> del repo a `C:\temp\fp\docs_SAMPLES` — veure [`docs/reference/SAMPLES_ADOBE.md`](docs/reference/SAMPLES_ADOBE.md).
 
 ### **Centre de control** — `.roo/`
 
 | Fitxer | Propòsit |
 |--------|----------|
-| `.roo/agents.md` | Arquitectura multi-agent i punt d'entrada. |
 | `.roo/features.json` | Catàleg de features i bugs (registre viu). |
-| `.roo/init.ps1` | Script de validació d'entorn de desenvolupament. |
-| `.roo/progress/` | Tracking de sessions de treball. |
-| `.roo/skills/` | Skills especialitzades (coder-genius, fmt-escaletes, powershell, debug, git). |
+| `.roo/progress/` | Tracking de sessions de treball (només `README.md` i el dia en curs; la resta a `docs/archive/SESSIONS.md`). |
 
 ### **Codi font** – Organització per capes (5 Tiers)
 
@@ -70,7 +69,7 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 - Adobe Premiere Pro (versió compatible amb CEP).
 - Extensió instal·lada i activada (veure [`CSXS/manifest.xml`](CSXS/manifest.xml)).
 - Accés al NAS amb l'estructura esperada de fitxers.
-- Git portable a `F:\PortableGit` (per desenvolupament; la lletra d'unitat del USB pot variar).
+- Git portable a `E:\PortableGit` (per desenvolupament; la lletra d'unitat del USB pot ser `E:` o `F:` — comprova-ho amb `Test-Path`).
 
 ### 2. **Execució**
 1. Obre Premiere Pro.
@@ -80,25 +79,26 @@ L'extensió implementa una arquitectura de **5 capes** que separa responsabilita
 
 ### 3. **Documentació clau**
 - [🗺️ Mapa d'arquitectura](docs/guides/ARCHITECTURE_MAP.md) — Visió de les 5 capes.
-- [⚙️ Flux operatiu](docs/guides/OPERATIVE_FLOW.md) — Detall de cada fase.
+- [🧭 Propietat del codi](docs/guides/CODE_OWNERSHIP.md) — Qui fa què a cada mòdul.
 - [📖 Guia d'usuari](docs/guides/USER_GUIDE.md) — Manual d'ús del panell.
 - [🕹️ Guia de botonera](docs/guides/GUIA_BOTONERA.md) — Funcionalitats de cada botó.
 - [🛠️ Guia de desenvolupament](docs/guides/DEVELOPMENT.md) — Convencions i flux de treball.
-- [ Documentació tècnica](docs/) — Auditories, especificacions, plans.
+- [📚 Especificacions](docs/specs/) — Escaleta JSON, markers, NNEWS, classificació.
+- [⚙️ Flux operatiu](docs/archive/PLANS_CLOSED.md) — Detall de cada fase (arxivat 2026-09-30).
 
 ### 4. **Desenvolupament**
-- El centre de control multi-agent és a [`.roo/`](.roo/) — consulta [`agents.md`](.roo/agents.md).
-- Les skills especialitzades són a [`.roo/skills/`](.roo/skills/).
-- Scripts d'automatització a [`bin/`](bin/).
-- Valida l'entorn amb: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\.roo\init.ps1"`
+- El registre viu de bugs i features és a [`.roo/features.json`](.roo/features.json).
+- El tracking diari és a [`.roo/progress/`](.roo/progress/) i els handoffs a [`plans/`](plans/).
+- Scripts d'automatització a [`bin/`](bin/); els informes llargs es deixen a `C:\temp\fp\` (vegeu [`bin/rep.ps1`](bin/rep.ps1)).
+- Valida la sintaxi del panell amb el motor V8: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\check_js_v8.ps1"`
 
 ---
 
 ## 🔧 Manteniment i actualitzacions
 
 - **Versió actual:** 2.9.5 (TACTICAL).
-- **Roadmap:** Consulta [`docs/guides/OPERATIVE_FLOW.md`](docs/guides/OPERATIVE_FLOW.md) per a les millores pendents.
-- **Auditories tècniques:** Es guarden a [`docs/audits/`](docs/audits/) per a referència històrica.
+- **Pla actiu:** [`docs/plans/PLAN_MARKERS_CAPAS.md`](docs/plans/PLAN_MARKERS_CAPAS.md).
+- **Historial tècnic:** [`docs/archive/`](docs/archive/) — auditories, debug, plans tancats i sessions fusionats.
 - **Bugs i features:** Registre viu a [`.roo/features.json`](.roo/features.json).
 - **Tracking de sessions:** [`plans/HANDOFF_*.md`](plans/) i [`.roo/progress/`](.roo/progress/).
 
@@ -111,5 +111,5 @@ Aquest projecte és d'ús intern.
 
 ---
 
-*Documentació actualitzada el 2026-05-29 (reestructuració Harness Engineering).
+*Documentació actualitzada el 2026-09-30 (neteja i consolidació: 87 → 22 fitxers `.md`, SAMPLES fora del repo, `bin/` de 38 → 24 scripts).
 Per a qualsevol dubte, revisa la documentació tècnica a [`docs/`](docs/).*

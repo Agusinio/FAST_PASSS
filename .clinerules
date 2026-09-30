@@ -66,7 +66,7 @@ El entorno es **Windows 10** con **VSCode**. PowerShell 7 (`pwsh`) NO está inst
 
 ```powershell
 # Ejecutar script .ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\check_and_fmt.ps1" -BaseDir "\\ruta\unc\..."
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\fmt_daily.ps1" -DateStr "YYYYMMDD"
 
 # Comando inline
 powershell -Command "Get-ChildItem -Path '.' -Filter '*.js' | Select-Object Name, Length"
@@ -116,7 +116,7 @@ powershell -Command "cd 'C:\ruta'; .\script.ps1; Write-Host 'Done'"
 
 | Variable | Valor |
 |----------|-------|
-| **Binario Git** | `F:\PortableGit\bin\git.exe` (⚠️ la letra de unidad **cambia**: hoy `F:`, antes `E:` — verificar con `Test-Path F:\PortableGit\bin\git.exe`) |
+| **Binario Git** | `E:\PortableGit\bin\git.exe` (⚠️ la letra de unidad **cambia**: hoy `E:`, antes `F:` — verificar con `Test-Path` antes de usarla) |
 | **Directorio repo** | `c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS` |
 | **Flag obligatorio** | `-C` para especificar directorio de trabajo |
 | **user.name** | `Agusinio` |
@@ -127,15 +127,15 @@ powershell -Command "cd 'C:\ruta'; .\script.ps1; Write-Host 'Done'"
 ### Comandos esenciales
 
 ```cmd
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" status
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" diff --stat
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" add -A
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" commit -m "mensaje"
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" log --oneline -10
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" push origin main
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" pull origin main
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" status
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" diff --stat
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" add -A
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" commit -m "mensaje"
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" log --oneline -10
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" push origin main
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" pull origin main
 ```
-> ⚠️ La letra de unidad del USB **cambia entre sesiones** (hoy `F:`, antes `E:`). Antes de usarla: `Test-Path F:\PortableGit\bin\git.exe`
+> ⚠️ La letra de unidad del USB **cambia entre sesiones** (hoy `E:`, antes `F:`). Antes de usarla: `Test-Path E:\PortableGit\bin\git.exe` (si falla, probar `F:`)
 
 ### Convenciones de commit
 
@@ -163,7 +163,7 @@ Tipos:
 
 | Síntoma | Causa | Solución |
 |---------|-------|----------|
-| `git not recognized` | Git no en PATH | Usar ruta completa `"F:\PortableGit\bin\git.exe"` |
+| `git not recognized` | Git no en PATH | Usar ruta completa `"E:\PortableGit\bin\git.exe"` |
 | `Test-Path` devuelve `False` | El USB cambió de letra (`E:` ↔ `F:`) | Probar ambas con `Test-Path` antes de nada |
 | `fatal: not a git repository` | Falta `-C` | Añadir `-C "ruta\al\repo"` |
 | `schannel: failed handshake` | Proxy no configurado | `git config --local http.proxy http://172.20.0.152:8088` |
@@ -181,8 +181,8 @@ powershell -Command "[System.Net.WebRequest]::GetSystemWebProxy().GetProxy('http
 powershell -Command "Test-NetConnection -ComputerName github.com -Port 443"
 
 # Configurar proxy en el repo
-F:\PortableGit\bin\git.exe -C "c:/Users/gonz_agu/AppData/Roaming/Adobe/CEP/extensions/FAST_PASSS" config --local http.proxy http://172.20.0.152:8088
-F:\PortableGit\bin\git.exe -C "c:/Users/gonz_agu/AppData/Roaming/Adobe/CEP/extensions/FAST_PASSS" config --local https.proxy http://172.20.0.152:8088
+E:\PortableGit\bin\git.exe -C "c:/Users/gonz_agu/AppData/Roaming/Adobe/CEP/extensions/FAST_PASSS" config --local http.proxy http://172.20.0.152:8088
+E:\PortableGit\bin\git.exe -C "c:/Users/gonz_agu/AppData/Roaming/Adobe/CEP/extensions/FAST_PASSS" config --local https.proxy http://172.20.0.152:8088
 ```
 
 ---
@@ -238,11 +238,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\open_ayer.ps1" -DateS
 
 | # | Problema | Causa | Solución |
 |---|----------|-------|----------|
-| 1 | `check_and_fmt.ps1` error sintaxis PS 5.1 | `if (-not $DatePrefix)` falla | Usar `fmt_june.ps1` (reescrito) |
-| 2 | `-Command "..."` pierde variables | cmd.exe interpreta `$var` como vacío | **Siempre** `-File script.ps1`, nunca inline con variables |
-| 3 | Filtro `TN_*_202606*.json` no encuentra | Archivos reales: `TN_COMARQUES_V1_..._20260610_...json` | Patrón: `TN_COMARQUES_*202606*.json` |
-| 4 | `code` no en PATH | VSCode Portable en `E:\AAA_VSCode_4_WIN\bin\code.cmd` | Ruta absoluta en `open_ayer.ps1` |
-| 5 | Terminal saturado errores residuales | Fallos previos corrompen buffer PSReadLine | Terminal fresca cada sesión |
+| 1 | `-Command "..."` pierde variables | cmd.exe interpreta `$var` como vacío | **Siempre** `-File script.ps1`, nunca inline con variables |
+| 2 | Filtro `TN_*_202606*.json` no encuentra | Archivos reales: `TN_COMARQUES_V1_..._20260610_...json` | Patrón: `TN_COMARQUES_*202606*.json` |
+| 3 | `code` no en PATH | VSCode Portable en `E:\AAA_VSCode_4_WIN\bin\code.cmd` | Ruta absoluta en `open_ayer.ps1` |
+| 4 | Terminal saturado errores residuales | Fallos previos corrompen buffer PSReadLine | Terminal fresca cada sesión |
+| 5 | PowerShell 5.1 destroza los acentos al leer/escribir | `Get-Content`/`Set-Content` usan la página ANSI | `[System.IO.File]::ReadAllText/WriteAllText` + `UTF8Encoding($false)` |
 
 ---
 
@@ -251,42 +251,79 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\open_ayer.ps1" -DateS
 | Qué buscas | Dónde está |
 |-----------|-----------|
 | Arquitectura del código | `docs/guides/ARCHITECTURE_MAP.md` |
+| Propiedad del código | `docs/guides/CODE_OWNERSHIP.md` |
 | Guía de usuario | `docs/guides/USER_GUIDE.md` |
 | Guía de botonera | `docs/guides/GUIA_BOTONERA.md` |
 | Desarrollo | `docs/guides/DEVELOPMENT.md` |
 | Git workflow | `docs/guides/GIT_WORKFLOW.md` |
 | Especificaciones técnicas | `docs/specs/` |
-| Planes activos | `docs/plans/` |
-| Debugging | `docs/debug/` |
-| Auditorías | `docs/audits/` |
-| Código obsoleto | `docs/archive/CODIGO_OBSOLETO.md` |
+| Referencia (keyframes, parser, onAir) | `docs/reference/` |
+| Plan activo | `docs/plans/PLAN_MARKERS_CAPAS.md` |
 | Handoffs diarios | `plans/` |
+| Código obsoleto | `docs/archive/CODIGO_OBSOLETO.md` |
+| Auditorías (histórico) | `docs/archive/AUDITORIAS.md` |
+| Debug (histórico) | `docs/archive/DEBUG.md` |
+| Planes cerrados (histórico) | `docs/archive/PLANS_CLOSED.md` |
+| Sesiones 2026-03 → 2026-09 (histórico) | `docs/archive/SESSIONS.md` |
+
+> 🛑 **Nunca leer los `docs/archive/*.md` enteros** (5.500 líneas). Buscar dentro con
+> `bin/find.ps1 -Patro "..." -All`.
 
 ---
 
 ## 🛠️ HERRAMIENTAS DIARIAS
 
-### Formateo de escaletas
+### Formateo de escaletas (diario)
 ```powershell
-.\bin\check_and_fmt.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\fmt_daily.ps1" -DateStr "YYYYMMDD"
 ```
 
 ### Validación de sintaxis JS (REAL, motor V8)
-
 ```powershell
-# Compila los 66 .js/.jsx con V8 (Chromium headless = mismo motor que el CEF del panel)
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\check_js_v8.ps1"
 # -ShowOk lista también los OK · exit 0 = todo OK, 1 = hay FAIL, 2 = sin navegador
 ```
 
-> ⚠️ `bin/check_js_balance.ps1` **NO entiende los template literals**: da falsos `DESEQUILIBRIO`
-> (medido: `flow_chyrons.js` L353, por el apóstrofe de `s'ha` dentro de `` ` ``). Usar `check_js_v8.ps1`
-> como validador único de sintaxis.
+> ⚠️ Validador único: `check_js_v8.ps1`. El viejo `check_js_balance.ps1` (falsos positivos con
+> template literals) se eliminó el 2026-09-30.
+
+### Higiene de salidas (anti-contaminación / anti-truncado)
+```powershell
+# Buscar en el código (js/, jsx/, html) → resultado íntegro en C:\temp\fp\find_*.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\find.ps1" -Patro "checkContext"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\find.ps1" -Patro "wotts" -All
+
+# Ejecutar cualquier comando y volcar la salida ENTERA a C:\temp\fp\<Nom>.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\rep.ps1" -Nom context -Cmd "Select-String ..."
+
+# Informe de tamaño del repo (vigila que no se acumule basura)
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\sizes.ps1"
+
+# Fusionar N .md en un archivo de histórico (UTF-8 sin BOM)
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\merge_md.ps1" -Title "T" -Out "docs\archive\X.md" -Src "a.md","b.md"
+```
 
 ### Git status
 ```cmd
-"F:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" status
+"E:\PortableGit\bin\git.exe" -C "c:\Users\gonz_agu\AppData\Roaming\Adobe\CEP\extensions\FAST_PASSS" status
 ```
+> ⚠️ La letra del USB cambia (`E:` ↔ `F:`): comprobar con `Test-Path` antes de usarla.
+
+---
+
+## 🧹 HIGIENE DEL ENTORNO (contaminación y tokens)
+
+- **Salidas largas → fichero**: nunca batir varias consolas con salida larga en una misma llamada
+  (se mezclan y se truncan). Usar `bin\rep.ps1` o redirigir a `C:\temp\fp\<nom>.txt` y **leer el fichero**
+  (`start_line`/`end_line`).
+- **Carpeta de trabajo del agente**: `C:\temp\fp\` (informes, dumps, `docs_SAMPLES`). No usar `C:\temp` a pelo:
+  tiene +19.000 ficheros de otros procesos.
+- **NUNCA escanear** (coste brutal en tokens y tiempo): `.git\` (79 MB), `.cline\` (70 MB de datos del agente),
+  `bin\ffmpeg\` (422 MB), `C:\temp\fp\docs_SAMPLES` (19 MB de muestras SDK fuera del repo), `node_modules`.
+- **Un comando por tema** por llamada; si falla, no reintentar a ciegas — verificar la ruta antes.
+- **Arranque de sesión**: para el estado basta `.roo\features.json` + `.roo\progress\<hoy>.md` + `docs\plans\`.
+  Lo histórico (auditorías, debug, planes cerrados, sesiones antiguas) vive en `docs\archive\*.md` y solo se
+  consulta con búsqueda dirigida.
 
 ---
 
