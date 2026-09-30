@@ -805,7 +805,7 @@
     "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
     "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
-    "status": "NETEJA 2026-09-30 (#114) committejada i pujada a origin/main: 646d295 (cleanup P0-P5 · 218 fitxers · +14.069/-59.425) + 71df683 (registres de sessió #113-#116). Repo útil 165 fitxers / 3,23 MB · 0 ficheros ._*"
+    "status": "Sessió 2026-09-30 pujada a origin/main: 646d295 (cleanup P0-P5 · 218 fitxers) + 71df683 (registres #113-#116) + 5fefff1 (registre V3/#117) + 9a02643 (+596/-28 · BUGs #120-#124: getMediaDuration via ffprobe, ancoratge al cleanfeed real, GF/P2, parelles ruptures↔deduïts, portada hereta Motion) + 4cbed3c (registres #118-#124). PENDENT el test a Premiere dels #120-#124 (cal RECARREGAR el panell per als cache-bust v10/v29/v62/v24)."
   },
 
   "paths": {
