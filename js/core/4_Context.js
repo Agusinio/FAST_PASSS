@@ -40,6 +40,9 @@
         // Últim estat calculat per checkContext (per al Ctrl+clic de MAIN)
         _lastConclusion: null,
         _lastButtonData: null,
+        // F4/D (2026-10-01): token del scan de fons en curs (evita que un scan
+        // vell repinti per sobre d'un checkContext més nou).
+        _bgProbeToken: 0,
 
         /**
          * _targetDateDir: Retorna la data de treball (YYYY_MM_DD).
@@ -186,6 +189,137 @@
             }
         },
 
+        // ── F4/D (2026-10-01) · SCAN DE MEDIA+WOTTS EN SEGON PLA ─────────────
+        // PROBLEMA (#113): al camí «encara no hi ha escaleta del dia» el
+        // checkContext feia DOS scans COMPLETS i bloquejants (mediaAssets +
+        // wotts). Tots dos passen per IO.scanDirectory, que llegeix 3 propietats
+        // per fitxer via COM/SMB (i obre els .mov amb length 0): 1.080 fitxers
+        // ≈ 70 s ⇒ el panell es quedava ~78 s sense pintar res.
+        //
+        // SOLUCIÓ (provisió ràpida + veritat en segon pla):
+        //   1) SONDA RÀPIDA (aquest mètode): enumera les dues carpetes amb
+        //      cep.fs.readdir (~0,03 s, NOMÉS noms) i mira si hi ha CANDIDATS
+        //      del programa+bloc. Serveix per pintar MASSA/ESPERANT de seguida.
+        //   2) SCAN REAL (_resolveNoEscaletaBg): s'engega SENSE bloquejar, omple
+        //      les cachés (Scanner · TTL 30 s) i, si el seu veredicte difereix
+        //      de la provisió, repinta botó i llums.
+        // Si cap de les dues carpetes es pot enumerar (readdir falla) es manté
+        // el camí antic bloquejant: mai pitjor que abans.
+        //
+        // ⚠️ La sonda NO llegeix metadades: un .mov que no porta la data al nom
+        // compta com a candidat encara que sigui d'un altre dia. Per això la
+        // provisió pot ser optimista (ESPERANT) i el scan real la corregeix.
+        //
+        // @param {Object} ctx - Context (config.rutas, progData, bloque, dateDir)
+        // @returns {{ok:boolean, ingesta:boolean, chyrons:boolean}}
+        //           `ok:false` = cap carpeta enumerable (cal el camí antic).
+        _quickProbeNoEscaleta: function (ctx) {
+            const out = { ok: false, ingesta: false, chyrons: false };
+            if (!ctx || !ctx.config || !ctx.config.rutas) return out;
+            if (!window.cep || !window.cep.fs || typeof window.cep.fs.readdir !== 'function') return out;
+
+            // Enumeració per nom (sense stats). null = no s'ha pogut llegir.
+            const listNames = function (folder) {
+                try {
+                    if (!folder) return null;
+                    const rd = window.cep.fs.readdir(folder);
+                    if (!rd || rd.err !== 0 || !rd.data) return null;
+                    return rd.data.map(function (n) { return String(n).toUpperCase(); });
+                } catch (eRd) { return null; }
+            };
+            const namesMedia = listNames(ctx.config.rutas.verticalitzacio || ctx.config.rutas.vertical);
+            const namesChyrons = listNames(ctx.config.rutas.chyrons);
+            if (!namesMedia && !namesChyrons) return out;   // sense sonda → camí antic
+
+            const dateTarget = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
+            // MATEIX mecanisme de datació per nom que Scanner (mecanisme únic):
+            // token sencer de 8/14 dígits separat per '_'. ⚠️ NO es pot fer servir
+            // un regex sobre tot el nom: els .mov acaben amb el nº de seqüència
+            // (…Barcelona.00612292.mov) i es prendria per data.
+            const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic) ? window.FASTPASS_UI.Logic.Scan : null;
+            const nameDate = (sc && typeof sc._extractDateFromFileName === 'function')
+                ? function (n) { return sc._extractDateFromFileName(n); }
+                : function (n) {
+                    const parts = String(n).split('_');
+                    for (let i = 0; i < parts.length; i++) {
+                        if (/^\d{8}$/.test(parts[i])) return parts[i];
+                        if (/^\d{14}$/.test(parts[i])) return parts[i].substring(0, 8);
+                    }
+                    return null;
+                };
+            // Un fitxer serveix si no porta data al nom (no es pot datar amb la
+            // sonda) o si porta la data de treball.
+            const dateOk = function (name) {
+                const d = nameDate(name);
+                if (!d || !dateTarget) return true;
+                return d === dateTarget;
+            };
+
+            if (namesMedia) {
+                const pMedia = (String((ctx.progData && ctx.progData.archivo) || '') + '_' +
+                    String(ctx.bloque || '') + '_').toUpperCase();
+                out.ingesta = namesMedia.some(function (n) {
+                    return n.indexOf(pMedia) !== -1 &&
+                           (n.endsWith('.MP4') || n.endsWith('.SRT')) && dateOk(n);
+                });
+            }
+            if (namesChyrons) {
+                const pWott = ((ctx.progData && ctx.progData.wott ? String(ctx.progData.wott).toUpperCase() : 'TNV') +
+                    (ctx.bloque ? '_' + ctx.bloque + '_' : '_V1_')).toUpperCase();
+                out.chyrons = namesChyrons.some(function (n) {
+                    return n.indexOf(pWott) !== -1 && n.endsWith('.MOV') && dateOk(n);
+                });
+            }
+            out.ok = true;
+            return out;
+        },
+
+        /**
+         * _resolveNoEscaletaBg: veredicte REAL de l'estat (MASSA/ESPERANT) sense
+         * bloquejar el pintat. El crida checkContext quan la sonda ràpida ja ha
+         * pintat una provisió; si el resultat difereix, repinta botó i llums.
+         * @param {Object} ctx - Mateix context que checkContext
+         * @param {Object} semaforoData - Semàfor ja calculat (per repintar)
+         * @param {string} provState - Estat provisional pintat ('MASSA'|'ESPERANT')
+         */
+        _resolveNoEscaletaBg: async function (ctx, semaforoData, provState) {
+            const token = ++this._bgProbeToken;
+            const _t0 = Date.now();
+            const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic) ? window.FASTPASS_UI.Logic.Scan : null;
+            let mediaD = null;
+            let wotsD = null;
+            try { if (sc && sc.mediaAssets) mediaD = await sc.mediaAssets(ctx); } catch (eM) { /* sense xarxa */ }
+            try { if (sc && sc.wotts) wotsD = await sc.wotts(ctx); } catch (eW) { /* sense xarxa */ }
+            if (token !== this._bgProbeToken) return;   // un checkContext més nou ha manat
+
+            const hasIngesta = !!(mediaD && (mediaD.mp4 || mediaD.srt));
+            const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
+            const real = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
+            _bmark('checkContext · scan media+wotts EN SEGON PLA (' + _bsec(Date.now() - _t0) + ') → ' + real);
+            log('🔎 [checkContext] Scan en segon pla (' + _bsec(Date.now() - _t0) + '): ' + real +
+                ' · provisional era ' + provState + ' · media: ' + (hasIngesta ? 'sí' : 'no') +
+                ' · rètols: ' + (hasChyrons ? 'sí' : 'no'), 'INFO');
+
+            if (real === provState) return;                  // la provisió ja era bona
+            if (this._lastConclusion !== provState) return;  // algú altre ha manat mentrestant
+
+            const data = { ...ctx, name: real };
+            data.motiu = (real === 'ESPERANT' && semaforoData.esc && semaforoData.esc.complete && !semaforoData.esc.complete.ok)
+                ? 'bloc_en_emissio'
+                : (real === 'ESPERANT' ? 'ingesta' : 'sense_dades');
+            data.semaforo = semaforoData;
+            this._lastConclusion = real;
+            this._lastButtonData = data;
+            _bmark('checkContext · repintat en segon pla → ' + real);
+            try {
+                const elProg = document.getElementById('programa');
+                this.updateLights(elProg ? elProg.value : null, ctx.bloque, null, false, semaforoData);
+                this.updateButton(real, data);
+            } catch (eRp) {
+                log("⚠️ [checkContext] No s'ha pogut repintar l'estat de segon pla: " + eRp.message, 'DEBUG');
+            }
+        },
+
         async checkContext() {
             if (!getUtils().isJsxReady) return; 
         
@@ -288,6 +422,9 @@
                     mp4: false, wot: false, srt: false
                 };
                 let earlyState = null;
+                // F4/D (2026-10-01): true si l'estat l'ha decidit la SONDA ràpida
+                // (llavors cal confirmar-lo amb el scan complet en segon pla).
+                let provNoEscaleta = false;
                 const readerE = window.EscaletaReader || window.FASTPASS_UI.EscaletaReader;
                 if (readerE) {
                     const datePrefixD = ctx.dateDir ? String(ctx.dateDir).replace(/_/g, '') : null;
@@ -354,16 +491,31 @@
                     if (!semaforoData.esc || !semaforoData.esc.found) {
                         // Sense JSON del dia D (ni remot ni local): hi ha MP4/SRT o chyrons
                         // del dia (ingesta/preparació en curs)?
-                        let mediaD = null;
-                        let wotsD = null;
-                        const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
+                        // ── F4/D (2026-10-01) · SENSE BLOQUEJAR ~70 s ──────────────
+                        // El scan complet de media+wotts costava ~70 s (3 lectures de
+                        // propietats per fitxer via IO.scanDirectory) i deixava el
+                        // panell sense pintar. Ara es decideix amb una SONDA de noms
+                        // (cep.fs.readdir, ~0,03 s) i el scan real s'engega en segon
+                        // pla; si el seu veredicte difereix, es repinta (més avall).
                         const _tMw = Date.now();
-                        try { if (sc && sc.mediaAssets) mediaD = await sc.mediaAssets(ctx); } catch (eM) { /* sense xarxa */ }
-                        try { if (sc && sc.wotts) wotsD = await sc.wotts(ctx); } catch (eW) { /* sense xarxa */ }
-                        _bmark('checkContext · scan media+wotts (sense projecte) (' + _bsec(Date.now() - _tMw) + ')');
-                        const hasIngesta = !!(mediaD && (mediaD.mp4 || mediaD.srt));
-                        const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
-                        earlyState = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
+                        const prov = this._quickProbeNoEscaleta(ctx);
+                        if (prov.ok) {
+                            earlyState = (prov.ingesta || prov.chyrons) ? 'ESPERANT' : 'MASSA';
+                            provNoEscaleta = true;
+                            _bmark('checkContext · sonda ràpida media+wotts (' + _bsec(Date.now() - _tMw) +
+                                ') → ' + earlyState + ' [provisional]');
+                        } else {
+                            // Sense sonda fiable (readdir KO): camí antic, garantit.
+                            let mediaD = null;
+                            let wotsD = null;
+                            const sc = (window.FASTPASS_UI && window.FASTPASS_UI.Logic && window.FASTPASS_UI.Logic.Scan);
+                            try { if (sc && sc.mediaAssets) mediaD = await sc.mediaAssets(ctx); } catch (eM) { /* sense xarxa */ }
+                            try { if (sc && sc.wotts) wotsD = await sc.wotts(ctx); } catch (eW) { /* sense xarxa */ }
+                            _bmark('checkContext · scan media+wotts (sense projecte) (' + _bsec(Date.now() - _tMw) + ')');
+                            const hasIngesta = !!(mediaD && (mediaD.mp4 || mediaD.srt));
+                            const hasChyrons = !!(wotsD && wotsD.list && wotsD.list.length > 0);
+                            earlyState = (hasIngesta || hasChyrons) ? 'ESPERANT' : 'MASSA';
+                        }
                     } else if (!semaforoData.esc.ready || ingestaEnCurs) {
                         // Es permet CREAR sempre que hi hagi una ESCALETA localitzada:
                         //   · FOTO local (on_demand) capturada per l'usuari,
@@ -396,6 +548,16 @@
                     _bmark('checkContext · TOTAL (' + _bsec(Date.now() - _tCC0) + ') → ' + earlyState + ' [early]');
                     this.updateLights(elProg.value, ctx.bloque, null, false, semaforoData);
                     this.updateButton(earlyState, data);
+                    // ── F4/D (2026-10-01): confirmar la provisió en segon pla ────
+                    // El pintat ja s'ha fet amb la sonda (instantani). El scan
+                    // complet (metadades → dates) corre ARA sense bloquejar:
+                    // omple les cachés de Scanner (TTL 30 s) i, si el veredicte
+                    // és un altre, repinta botó i llums.
+                    if (provNoEscaleta) {
+                        this._resolveNoEscaletaBg(ctx, semaforoData, earlyState).catch(function (eBg) {
+                            log('⚠️ [checkContext] Scan de segon pla fallit: ' + eBg.message, 'DEBUG');
+                        });
+                    }
                     return;
                 }
 
