@@ -595,6 +595,56 @@
         },
 
         /**
+         * _ipdPlusLlegirMotion: Llegeix el Motion d'un clip (en PX, tal com el mostra la UI)
+         * i el torna com a objecte. Si no és llegible torna `null` i el flux CONTINUA
+         * (pitjor un clip amb el Motion per defecte que un IPD+ avortat).
+         * Àtom existent: `Anim.getMotionValues` (ZERO JSX nou).
+         * @returns {Promise<Object|null>} {position, scale, scaleWidth, cropLeft..Bottom} o null
+         */
+        _ipdPlusLlegirMotion: async function (track, idx, tag) {
+            try {
+                const raw = await callJSX(`Anim.getMotionValues(${track}, ${idx})`);
+                if (raw && String(raw).indexOf('ERR') !== 0) {
+                    log(`🎬 [IPD+]   Motion ${tag} V${track}[${idx}]: ${raw}`);
+                    return JSON.parse(raw);
+                }
+                log(`⚠️ [IPD+]   Motion ${tag} V${track}[${idx}] no llegible (${raw}) → quedarà el Motion per defecte`, 'WARN');
+            } catch (e) {
+                log(`⚠️ [IPD+]   Motion ${tag} V${track}[${idx}]: ${e.message}`, 'WARN');
+            }
+            return null;
+        },
+
+        /**
+         * _ipdPlusHeredarMotion: Aplica a un clip el Motion llegit d'un altre (mateix patró
+         * del fix #124 de la portada): només s'envien les claus que s'han pogut llegir
+         * (les `null` s'ometen i no es toquen). Els àtoms get/set treballen en les mateixes
+         * unitats (get torna PÍXELS · set els normalitza ell mateix dividint per frameSize).
+         */
+        _ipdPlusHeredarMotion: async function (track, idx, mv, tag) {
+            if (!mv) {
+                log(`⚠️ [IPD+]   sense Motion per heretar a V${track}[${idx}] (${tag}) → queda amb el Motion per defecte`, 'WARN');
+                return false;
+            }
+            const vals = {};
+            ['position', 'scale', 'scaleWidth', 'cropLeft', 'cropTop', 'cropRight', 'cropBottom']
+                .forEach(function (k) { if (mv[k] !== null && mv[k] !== undefined) vals[k] = mv[k]; });
+            try {
+                const res = await callJSX(`Anim.setMotionValues(${track}, ${idx}, '${getUtils().escape(JSON.stringify(vals))}')`);
+                log(`🎬 [IPD+]   Motion heretat → V${track}[${idx}] (${tag}): ${JSON.stringify(vals)} → ${res}`);
+                log(`   · comprovació V${track}[${idx}] → ${await callJSX(`Anim.getMotionValues(${track}, ${idx})`)}`);
+                if (String(res).indexOf('OK') !== 0) {
+                    log(`⚠️ [IPD+]   V${track}[${idx}] NO ha pogut heretar el Motion (${res})`, 'WARN');
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                log(`⚠️ [IPD+]   aplicant el Motion heretat a V${track}[${idx}]: ${e.message}`, 'WARN');
+                return false;
+            }
+        },
+
+        /**
          * _ipdPlusLimpiarAudio: (2026-09-23) Esborra els clips d'ÀUDIO que les insercions
          * d'IPD+ deixen a les pistes **A2 i següents** dins l'interval (el vídeo inserit hi
          * arrossega el seu so). **A1 NO es toca mai** (és l'àudio del programa).
@@ -723,11 +773,19 @@
             const ip0 = (first.inPoint != null) ? first.inPoint : 0;
             const inPt = ip0 + Math.max(0, rng.start - first.start);
             const outPt = ip0 + Math.max(0.04, rng.end - first.start);
+            // (2026-10-01 · #129) MOTION DE L'ORIGINAL: es llegeix ARA, amb el clip de SRC
+            // encara intacte a la pista (després de `_ipdPlusPoner` ja és a PARK).
+            // `Clips.insertClipFrom` fa `tgtTrack.insertClip(projectItem)` → el clip de PARK
+            // neix amb el Motion PER DEFECTE (centrat, 100%, sense retalls; MATEIX root cause
+            // que #124 a la portada): el Motion viu a la INSTÀNCIA DE PISTA, no a l'ítem.
+            // Si el clip de SRC duu la MÀSCARA posicionada/escalada, a V3 sortia descol·locada.
+            const mvSrc = await this._ipdPlusLlegirMotion(P.SRC, first.index, 'ORIGINAL');
             // Estat del clip original de SRC (per poder-lo restaurar al revertir)
             this._ipdPlusStates['src'] = {
                 name: first.name, inPoint: ip0,
                 outPoint: (first.outPoint != null) ? first.outPoint : (ip0 + (first.end - first.start)),
-                start: first.start, end: first.end
+                start: first.start, end: first.end,
+                motion: mvSrc
             };
             const put = await this._ipdPlusPoner(P.SRC, first.index, P.PARK, rng.start, inPt, outPt, rng.end);
             if (!put.ok) {
@@ -735,6 +793,9 @@
                 return;
             }
             log(`🎬 [IPD+]   V${P.SRC}[${first.index}] → V${P.PARK}[${put.idx}] retallat [in=${inPt.toFixed(2)} out=${outPt.toFixed(2)} end=${rng.end.toFixed(2)}] → ${put.res} · àudio=${put.audio}`);
+            // 1b. (2026-10-01 · #129) El clip aparcat a PARK HERETA el Motion de l'original
+            // (posició + escala + retalls): l'insertClip no el porta pas.
+            await this._ipdPlusHeredarMotion(P.PARK, put.idx, mvSrc, 'PARK');
             await getUtils().delay(250);
 
             // ── 2. V2 (SRC): deixar-hi NOMÉS el tros ANTERIOR a l'interval ──
@@ -838,6 +899,10 @@
                         await callJSX(`Clips.removeLinkedAudio(${P.SRC}, ${idxR})`);
                         const rR = await callJSX(`Clips.retrim(${P.SRC}, ${idxR}, ${st.inPoint.toFixed(4)}, ${st.outPoint.toFixed(4)}, ${st.end.toFixed(4)}, 'video')`);
                         log(`🎬 [IPD+]   V${P.SRC} restaurat "${st.name}" [in=${st.inPoint.toFixed(2)} out=${st.outPoint.toFixed(2)} end=${st.end.toFixed(2)}] → ${rR}`);
+                        // (2026-10-01 · #129) El clip restaurat neix de `Clips.insert` → Motion PER
+                        // DEFECTE: es torna a aplicar el Motion que duia l'original (si no, la
+                        // màscara quedaria descol·locada després d'un cicle aplicar/revertir).
+                        await this._ipdPlusHeredarMotion(P.SRC, idxR, st.motion, 'RESTAURAT');
                     }
                 } else {
                     log(`⚠️ [IPD+]   no s'ha pogut restaurar "${st.name}" a V${P.SRC} (${rIR})`, 'WARN');

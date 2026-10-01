@@ -125,7 +125,14 @@
             try {
                 const pathNAS = ctx.config.rutas.verticalitzacio;
                 const allFiles = await utils.readFolder(pathNAS);
-                if (!allFiles || allFiles.length === 0) return { mp4: null, srt: null };
+                // ── F1 (2026-10-01) · lectura FALLIDA ≠ carpeta buida ─────────────
+                // Sense això, un error/timeout del pont feia creure que el bloc no
+                // té MP4/SRT (i el flux decidia com si no hi hagués material).
+                if (!allFiles) {
+                    utils.log('❌ [SCAN:media] Lectura FALLIDA de la carpeta de verticalització (' + pathNAS + ').', 'ERROR');
+                    return { mp4: null, srt: null, failed: true };
+                }
+                if (allFiles.length === 0) return { mp4: null, srt: null };
 
                 var datePrefix = ctx.dateDir ? ctx.dateDir.replace(/_/g, '') : null;
                 var prefix = ctx.progData.archivo + '_' + ctx.bloque + '_';
@@ -213,18 +220,33 @@
                 // polls), cosa que bloquejava la UI del panell i endarreria la llista de
                 // presentadors. Amb 30 s de TTL n'hi ha prou: la ingesta no canvia en
                 // mig minut i el botó CREAR/ACTUALITZAR treballa amb el mateix marge.
+                // (2026-10-01 · F2) La caché NOMÉS guarda llistes NO buides: una
+                // lectura fallida o buida no s'hi pot quedar 30 s enverinant el panell.
                 var _now = Date.now();
                 if (!this._readCache) this._readCache = {};
                 var _key = 'wotts:' + pathNAS;
                 var _c = this._readCache[_key];
                 var allFiles;
-                if (_c && (_now - _c.at) < 30000) {
+                // ── F2 (2026-10-01) · NOMÉS es reutilitza una llista NO buida ──────
+                // Abans una lectura buida o FALLIDA quedava cachetada 30 s i el
+                // panell treballava amb 0 rètols tot i tenir-los al NAS.
+                if (_c && (_now - _c.at) < 30000 && _c.list && _c.list.length > 0) {
                     allFiles = _c.list;
                 } else {
                     allFiles = await utils.readFolder(pathNAS);
-                    this._readCache[_key] = { at: _now, list: allFiles };
+                    if (allFiles && allFiles.length > 0) {
+                        this._readCache[_key] = { at: _now, list: allFiles };
+                    } else {
+                        delete this._readCache[_key];   // mai cachejar buit/fallada
+                    }
                 }
-                if (!allFiles || allFiles.length === 0) return { tema: "PENDENT", list: [] };
+                // ── F1/F3: null = la lectura ha FALLAT (no és "no hi ha rètols") ──
+                if (!allFiles) {
+                    utils.log('❌ [SCAN:wotts] Lectura de la carpeta de rètols FALLIDA (' + pathNAS +
+                        '). NO es pot saber si hi ha wotts del bloc → es conserva l\'estat anterior.', 'ERROR');
+                    return { tema: 'ERROR', list: [], failed: true };
+                }
+                if (allFiles.length === 0) return { tema: "PENDENT", list: [] };
     
                 var fProg = (ctx.progData && ctx.progData.wott) ? ctx.progData.wott.toUpperCase() : 'TNV';
                 var fBloc = ctx.bloque ? '_' + ctx.bloque + '_' : '_V1_';

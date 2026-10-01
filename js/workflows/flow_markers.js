@@ -50,9 +50,14 @@
         // ═══════════════════════════════════════════════════════════════
         _GRAPHIC_SUFFIXES: new Set([
             'chy', 'chy1', 'chy2',
-            'gf', 'gf1', 'gf2', 'gf_01', 'gf_02', 'gf_011',
+            // (2026-09-30 · BUG #125) La família GF és OVERTA (GF-1…GF-N). L'escaleta del
+            // TNV_V1 29/09 porta GF-3 i aquí només hi havia gf/gf1/gf2 → GF-3 queia com a
+            // ESTRUCTURAL (F2/F3.5/F4 la tractaven com a ítem del bloc) i sortia BLAVA.
+            // El guard genèric /^gf\d+$/ de _isGraphicByNum cobreix GF-4…GF-N.
+            'gf', 'gf1', 'gf2', 'gf3', 'gf4', 'gf5', 'gf_01', 'gf_02', 'gf_011',
             'te', 'te1', 'te2', 'te3',
-            'p2', 'p21', 'p22', 'p23', 'p24', 'p3', 'p4', 'p5', 'p51', 'p52',
+            'p2', 'p21', 'p22', 'p23', 'p24', 'p3', 'p4', 'p40', 'p41', 'p42',
+            'p5', 'p51', 'p52',
             'p5_01', 'p5_02', 'p7', 'p7_01', 'p7_02', 'p7_03', 'p7_0',
             'p71', 'p72', 'p73', 'p',
             'td', 'td1', 'td2', 'td3', 'td4', 'td_01', 'td_02', 'td_at1',
@@ -96,6 +101,12 @@
         _isGraphicByNum: function (num) {
             var suf = this._normSuffix(num);
             if (suf === null || suf === '') return false;
+            // (2026-09-30 · BUG #125) La família GF és OVERTA a l'escaleta (GF-1…GF-N): amb
+            // el whitelist tancat, un 'GF-3' o 'GF-4' queia com a ESTRUCTURAL → F2/F3.5/F4
+            // el movien pel bloc i, com que porta agrupacio, _getColorIdx el pintava BLAU
+            // (TNV_V1 29/09: '01 GF-3' acabat a 58,52s, dins del vídeo). Qualsevol dígit
+            // darrere de 'gf' és gràfic, igual que les entrades explícites de la resta.
+            if (/^gf\d+$/.test(suf)) return true;
             return this._graphicSuffixesNorm().has(suf);
         },
 

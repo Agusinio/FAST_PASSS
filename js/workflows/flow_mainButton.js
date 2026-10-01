@@ -1608,14 +1608,32 @@
             const portada = await window.Scan.portadas(ctx);
             
             // 2. Actualitzem State global
-            window.FASTPASS_UI.State.detectedTheme = wotts.tema;
-            window.FASTPASS_UI.State.hasMedia = !!media.mp4;
+            // ── F3 (2026-10-01) · una lectura FALLIDA no ha de mentir sobre l'estat ──
+            // F1 fa que una lectura fallida sigui `failed`/`null` (i no una llista
+            // buida silenciosa). Aquí NO s'ha de publicar aquest buit com si fos real:
+            // es conserva l'estat anterior i s'avisa amb ERROR (nivell sempre visible).
+            if (wotts.failed) {
+                log('❌ [SCAN] Lectura dels RÈTOLS del NAS FALLIDA → es conserva detectedTheme/' +
+                    'structure (' + (window.FASTPASS_UI.State.structure ? window.FASTPASS_UI.State.structure.length : 0) +
+                    ' blocs). Torna a prémer el botó.', 'ERROR');
+            } else {
+                window.FASTPASS_UI.State.detectedTheme = wotts.tema;
+            }
+            if (media && media.failed) {
+                log('❌ [SCAN] Lectura de MEDIA del NAS FALLIDA → es conserva State.hasMedia', 'ERROR');
+            } else {
+                window.FASTPASS_UI.State.hasMedia = !!media.mp4;
+            }
             // Generar estructura de bloques a partir de los Wotts
             if (wotts.list && wotts.list.length > 0) {
                 window.FASTPASS_UI.State.structure = window.Parse.files(wotts.list, ctx.progData.wott, ctx.bloque);
                 window.FASTPASS_UI.State.pieceIndex = 0;
                 log(`🏗️ Estructura generada: ${window.FASTPASS_UI.State.structure.length} blocs`);
-            } else {
+            } else if (!wotts.failed) {
+                // Cas real (2026-10-01): amb la lectura fallida NO es buida
+                // `structure`, perquè tots els botons de chyrons quedaven morts
+                // amb "No hi ha estructura carregada" i el símptoma deia
+                // "no s'han importat els wotts" sense cap pista de la causa.
                 window.FASTPASS_UI.State.structure = [];
                 window.FASTPASS_UI.State.pieceIndex = 0;
                 log("⚠️ No hi ha Wotts per generar estructura");

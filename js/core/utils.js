@@ -488,9 +488,14 @@
             // els wotts/portades ("69 -> 0, NO datables") i no es col·locava res.
             // Revertit al JSX. Si es vol tornar a intentar, cal PRIMER verificar que
             // cep.fs.stat('./ruta UNC') retorna creationTime.
+            // ── CONTRACTE (F1, 2026-10-01) ──────────────────────────────────────
+            //   Array (fins i tot []) = lectura OK ([ ] = carpeta buida DE DEBÒ)
+            //   null                  = la lectura ha FALLAT (pont/motor/permisos)
+            // Els cridaners han de comprovar `!result` per distingir-ho: un null
+            // MAI s'ha de tractar com "no hi ha res" sense avisar l'usuari.
             var isUnc = (path || '').indexOf('\\\\') === 0 || (path || '').indexOf('//') === 0;
             if (isUnc) {
-                return await this._readFolderViaJsx(path);
+                return await this._readFolderViaJsx(path);   // pot ser null (F1)
             }
 
             // Rutes locals: CEP (més ràpid). creationTime directe; mai mtime com a created.
@@ -537,34 +542,86 @@
         /**
          * _scanDirectoryMap: Llista la carpeta via JSX (File.created) i la retorna
          * com a mapa name → { modified, created, size }.
+         *
+         * ── F1 (2026-10-01) · LECTURA FALLIDA ≠ CARPETA BUIDA ─────────────────
+         * Retorna `null` NOMÉS quan la lectura ha FALLAT:
+         *   · el pont no ha retornat res ('' / undefined),
+         *   · error del motor ('ERR…'),
+         *   · la crida ha quedat encuada pel Batching ('QUEUED'),
+         *   · el motor diu 0 fitxers MENTRE CEP n'hi veu (readdir) → llistat perdut.
+         * Un mapa buit (`{}`) vol dir carpeta buida de debò.
+         * ABANS, qualsevol d'aquests errors es convertia en una llista buida
+         * silenciosa → el panell creia "no hi ha rètols del bloc" i els botons de
+         * chyrons quedaven morts sense cap pista (cas real 2026-10-01: 0 wotts
+         * importats tot i haver-hi 24 .mov del bloc V1 al NAS).
+         * @param {string} path
+         * @returns {Promise<Object|null>} mapa (pot ser {}) o null si ha FALLAT
          */
         _scanDirectoryMap: async function(path) {
+            // Testimoni independent del motor: cep.fs.readdir (barat, sense stats
+            // per fitxer) diu quants fitxers hi hauria d'haver.
+            var expected = null;
             try {
-                var jsonResult = await this.callJSX(`IO.scanDirectory('${this.escape(path)}')`);
-                if (!jsonResult || jsonResult === "[]" || jsonResult.indexOf('ERR') === 0) return null;
-                var items = JSON.parse(jsonResult);
-                var map = {};
-                for (var k = 0; k < items.length; k++) {
-                    map[items[k].name] = {
-                        modified: items[k].modified || 0,
-                        created: items[k].created || 0,
-                        size: items[k].size || 0
-                    };
+                var rd = window.cep.fs.readdir(path);
+                if (rd && rd.err === 0 && rd.data) expected = rd.data.length;
+            } catch (eRd) { expected = null; }
+
+            var items = null;
+            try {
+                // rawError:true → els ERR del motor arriben TAL QUAL (no es
+                // converteixen en "[]", que és el que amagava la fallada).
+                var raw = await this.callJSX(`IO.scanDirectory('${this.escape(path)}')`, { rawError: true });
+                if (raw === 'QUEUED') {
+                    this.log('❌ [FS] Lectura FALLIDA: la crida ha quedat encuada pel Batching: ' + path, 'ERROR');
+                    return null;
                 }
-                return map;
+                if (raw === undefined || raw === null || raw === '') {
+                    this.log('❌ [FS] Lectura FALLIDA (el pont no ha retornat res): ' + path +
+                        ' · CEP hi veu ' + (expected === null ? '?' : expected) + ' fitxers', 'ERROR');
+                    return null;
+                }
+                if (String(raw).indexOf('ERR') === 0) {
+                    this.log('❌ [FS] Error del motor llistant ' + path + ': ' + String(raw).substring(0, 80), 'ERROR');
+                    return null;
+                }
+                items = JSON.parse(raw);
             } catch (e) {
-                this.log(`💥 Error en scanDirectory JSX: ${e.message}`, "ERROR");
+                this.log(`💥 Error en scanDirectory JSX (${path}): ${e.message}`, "ERROR");
                 return null;
             }
+
+            if (!items || items.length === 0) {
+                // El motor diu buit. Si CEP hi veu fitxers, la lectura s'ha perdut.
+                if (expected && expected > 0) {
+                    this.log('❌ [FS] Lectura INCOMPLETA de ' + path + ': el motor diu 0 fitxers i CEP n\'hi veu ' +
+                        expected + ' → es descarta (NO es tracta com a carpeta buida)', 'ERROR');
+                    return null;
+                }
+                return {};   // carpeta buida de debò
+            }
+            if (expected !== null && items.length !== expected) {
+                this.log('⚠️ [FS] Llistat parcial de ' + path + ': motor=' + items.length + ' · CEP=' + expected, 'WARN');
+            }
+
+            var map = {};
+            for (var k = 0; k < items.length; k++) {
+                map[items[k].name] = {
+                    modified: items[k].modified || 0,
+                    created: items[k].created || 0,
+                    size: items[k].size || 0
+                };
+            }
+            return map;
         },
 
         /**
          * _readFolderViaJsx: Llegeix la carpeta completament via JSX (rutas UNC).
          * created prové de File.created (data de creació real, fiable).
+         * @returns {Promise<Array|null>} [] = carpeta buida · null = lectura FALLIDA
          */
         _readFolderViaJsx: async function(path) {
             var jsxMap = await this._scanDirectoryMap(path);
-            if (!jsxMap) return [];
+            if (!jsxMap) return null;   // F1: fallada (null) ≠ carpeta buida ([])
             var out = [];
             for (var name in jsxMap) {
                 if (!jsxMap.hasOwnProperty(name)) continue;

@@ -490,7 +490,8 @@
             var out = [];
             try {
                 var utils = U();
-                var list = await utils.readFolder(folder);            // UNC → via JSX
+                // F1 (2026-10-01): readFolder pot retornar null (lectura FALLIDA ≠ buit)
+                var list = (await utils.readFolder(folder)) || [];    // UNC → via JSX
                 for (var i = 0; i < list.length; i++) {
                     var n = list[i].name;
                     if (/^\./.test(n)) continue;                      // ocults
