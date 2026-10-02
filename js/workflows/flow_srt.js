@@ -71,7 +71,8 @@
         }
 
         // 3.5 Verificar el fitxer escrit
-        var verifyContent = await callJSX("IO.readTxt('" + modPath.replace(/\\/g, '\\\\') + "')");
+        // (2026-10-02) readTxt → ANSI: reparar perquè el log de verificació mostri el text real.
+        var verifyContent = getUtils()._fromMojibake(await callJSX("IO.readTxt('" + modPath.replace(/\\/g, '\\\\') + "')"), 'flow_srt');
         log("📝 SRT: Verificant fitxer escrit - primers 200 chars:\n" + (verifyContent ? verifyContent.substring(0, 200) : "null"));
         log("📝 SRT: Longitud del fitxer: " + (verifyContent ? verifyContent.length : 0) + " chars");
 
@@ -356,7 +357,8 @@
         /**
          * runSrtReset (2026-09-22): Botó ♻️ (RESET / neteja subtítols).
          *   1. Restaura l'estat inicial del SRT que ja hi havia carregat: taula sense
-         *      edicions, sense marcadors i esborra els clips de subtítols de la seqüència
+         *      edicions, sense marcadors (esborrats de memòria **i del disc**, #138) i
+         *      esborra els clips de subtítols de la seqüència
          *      (comportament de sempre: `SrtEditor.resetToOriginal`).
          *   2. **TORNA A BUSCAR els .SRT DEL TEMA** del bloc i el carrega: mateix mecanisme
          *      que el SCAN principal (`Scan.mediaAssets` amb el tema detectat → carpeta de
@@ -397,7 +399,14 @@
                 if (!ed.loadSrt) { getUtils().status("Error: SrtEditor.loadSrt no disponible", "error"); return; }
 
                 log("♻️ SRT_RESET: " + via + " → " + cand.path);
-                const ok = await ed.loadSrt(cand.path);
+                // (2026-10-02 · BUG #138) Els marcadors s'han d'esborrar TAMBÉ al disc del
+                // .srt que es torna a carregar. `loadSrt` els restaura del fitxer persistit
+                // al projecte i, com que el RESET sol carregar un .srt DIFERENT del que hi
+                // havia obert (p. ex. l'emergència de 15 min → el .srt del tema), les
+                // marques velles tornaven a aparèixer i semblava que el RESET no les
+                // esborrés. El fitxer queda buit i la restauració se salta en aquesta càrrega.
+                if (ed._wipeMarkersFile) ed._wipeMarkersFile(cand.path);
+                const ok = await ed.loadSrt(cand.path, { skipMarkerRestore: true });
                 if (ok) {
                     getUtils().status("SRT resetejat i recarregat: " + cand.name, "exito");
                     log("✅ SRT_RESET: carregat a l'editor: " + cand.name);

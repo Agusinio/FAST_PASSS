@@ -38,7 +38,9 @@
                 return this._cache[path];
             }
             try {
-                const raw = await utils.callJSX(`IO.readTxt('${utils.escape(path)}')`);
+                // (2026-10-02) IO.readTxt llegeix amb ANSI: els títols amb accents del
+                // manifest tornaven malmesos i, en reescriure's, quedaven fixats.
+                const raw = utils._fromMojibake(await utils.callJSX(`IO.readTxt('${utils.escape(path)}')`), 'manifest');
                 if (raw && !raw.startsWith('ERR') && raw !== '') {
                     const parsed = JSON.parse(raw);
                     this._cache[path] = parsed;

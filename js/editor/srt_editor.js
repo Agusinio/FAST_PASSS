@@ -337,10 +337,21 @@
             this._updateZoomBar();
         },
 
-        loadSrt: async function (srtPath) {
-            log("📝 SRT_EDIT: Carregant " + srtPath);
+        /**
+         * loadSrt: llegeix un .srt, munta la taula, la waveform i els marcadors.
+         * @param {string} srtPath - Ruta del .srt a carregar.
+         * @param {Object} [opts] - { skipMarkerRestore: true } → NO restaura els marcadors
+         *   persistits. El fa servir el RESET ♻️ (#138): un cop esborrats, els marcadors
+         *   no han de tornar a aparèixer en recarregar el mateix .srt.
+         * @returns {boolean} true si s'ha carregat
+         */
+        loadSrt: async function (srtPath, opts) {
+            var skipMarkerRestore = !!(opts && opts.skipMarkerRestore);
+            log("📝 SRT_EDIT: Carregant " + srtPath + (skipMarkerRestore ? " (sense restaurar marcadors)" : ""));
             var escapedPath = srtPath.replace(/\\/g, '\\\\');
-            var srtContent = await callJSX("IO.readTxt('" + escapedPath + "')");
+            // (2026-10-02) IO.readTxt llegeix amb ANSI i els .srt del projecte són UTF-8
+            // → els accents arribaven malmesos ("Ã“" en lloc de "Ó"). Es repara aquí.
+            var srtContent = getUtils()._fromMojibake(await callJSX("IO.readTxt('" + escapedPath + "')"), 'srt_editor');
             if (!srtContent || srtContent.indexOf('ERR') === 0) {
                 getUtils().status("Error llegint .srt", "error");
                 return false;
@@ -374,7 +385,8 @@
                 if (projFolder && String(projFolder).indexOf('ERR') !== 0) this._projectKey = projFolder;
                 // Els marcadors es guarden a la CARPETA DEL PROJECTE (al costat del
                 // manifest), no a C:/temp, perquè cada projecte tingui els seus.
-                await this._restoreMarkers();
+                if (skipMarkerRestore) log("📝 SRT_EDIT: marcadors NO restaurats (RESET ♻️)");
+                else await this._restoreMarkers();
                 if (wg && projFolder) {
                     var binPath = await wg.getBinPath(projFolder);
                     if (binPath) {
@@ -541,7 +553,8 @@
                 const all = [];
                 for (let c = 0; c < candidates.length; c++) {
                     const cand = candidates[c];
-                    const content = await callJSX(`IO.readTxt('${u.escape(cand.path)}')`);
+                    // (2026-10-02) readTxt → ANSI: reparar el mojibake dels SRT UTF-8.
+                    const content = u._fromMojibake(await callJSX(`IO.readTxt('${u.escape(cand.path)}')`), 'srt_emergencia');
                     if (!content || content.indexOf('ERR') === 0) continue;
                     const entries = FASTPASS_UI.Logic.SrtParser.srtToEntries(content);
                     for (let e = 0; e < entries.length; e++) {
@@ -1876,9 +1889,11 @@
          * _markersFilePath: ruta d'un fitxer LOCAL petit per als marcadors.
          * Evita reescriure el manifest de 224 ítems (53KB) al NAS en cada operació,
          * que era la causa dels cuelgues (IO.writeTxt bloquejava ExtendScript ~25s).
+         * @param {string} [srtNameOverride] - Nom del SRT (sense extensió) per al qual
+         *   es vol la ruta; per defecte, el SRT carregat (`_srtName`).
          */
-        _markersFilePath: function () {
-            var safe = (this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
+        _markersFilePath: function (srtNameOverride) {
+            var safe = (srtNameOverride || this._srtName || 'srt').replace(/[^a-zA-Z0-9_-]/g, '_');
             // Els marcadors viuen a la CARPETA DEL PROJECTE (al costat del manifest
             // .fastpass.json), de manera que cada projecte té els seus propis marcadors
             // i no s'interfereixen entre projectes. Fallback local si no hi ha projecte.
@@ -1886,6 +1901,35 @@
                 ? this._projectKey
                 : 'C:/temp';
             return String(base).replace(/[\\/]+$/, '').replace(/\\/g, '/') + '/fastpass_srt_markers_' + safe + '.json';
+        },
+
+        /**
+         * _wipeMarkersFile: BUIDA al disc el fitxer de marcadors persistits d'un .SRT.
+         * (2026-10-02 · BUG #138) El RESET ♻️ esborrava els marcadors de MEMÒRIA i desava
+         * la llista buida, però només per al .srt que estava carregat. Com que el RESET
+         * acaba carregant el .srt DEL TEMA (que sovint NO és el que hi havia obert, p. ex.
+         * l'emergència de 15 min), `loadSrt` tornava a llegir el fitxer d'AQUEST altre .srt
+         * —que continuava amb les marques antigues— i els marcadors reapareixien: semblava
+         * que el RESET no els esborrés. Amb aquesta crida el fitxer queda buit de debò (els
+         * marcadors s'esborren «amb la resta»), tant al projecte com al respatller C:/temp.
+         * @param {string} srtPathOrName - Ruta o nom del .srt objectiu.
+         */
+        _wipeMarkersFile: function (srtPathOrName) {
+            try {
+                var raw = String(srtPathOrName || this._srtName || 'srt');
+                var name = raw.split(/[\\/]/).pop().replace(/\.srt$/i, '');
+                var safe = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+                var full = this._markersFilePath(name);
+                try { window.cep.fs.writeFile(full, ''); } catch (e1) { }
+                // Respatller local: si l'escriptura al projecte (UNC) ha fallat, el de
+                // C:/temp encara podria contenir marques antigues i restaurar-les.
+                if (String(full).indexOf('C:/temp') !== 0) {
+                    try { window.cep.fs.writeFile("C:/temp/fastpass_srt_markers_" + safe + ".json", ''); } catch (e2) { }
+                }
+                log("📝 SRT_EDIT: marcadors buidats al disc per a '" + safe + "'");
+            } catch (eW) {
+                log("⚠️ SRT_EDIT: Error buidant els marcadors: " + eW.message);
+            }
         },
 
         _persistMarkers: function () {
@@ -2183,7 +2227,8 @@
 
         /**
          * resetToOriginal: Torna a la situació inicial: restaura la taula del SRT
-         * carregat (sense edicions) i esborra tots els marcadors.
+         * carregat (sense edicions), esborra tots els marcadors —de memòria I DEL DISC
+         * (#138)— i elimina els clips de subtítols de la seqüència.
          */
         resetToOriginal: async function () {
             if (!this._loadedEntries || this._loadedEntries.length === 0) {
@@ -2204,7 +2249,12 @@
             // Esborrar també els clips de subtítols (pistes caption) de la seqüència
             await this._clearSubtitleTracks();
             this.render();
-            this._persistMarkers();
+            // (2026-10-02 · BUG #138) Els marcadors s'esborren «amb la resta»: a més de
+            // buidar la memòria, es buida el fitxer persistit al projecte. Només desant-hi
+            // la llista buida, el .srt del tema que carrega el RESET (normalment un de
+            // DIFERENT de l'obert) podia restaurar les seves marques i els marcadors
+            // tornaven a aparèixer.
+            this._wipeMarkersFile(this._srtName);
             getUtils().status("SRT reiniciat i subtítols de la seqüència esborrats", "exito");
         },
 

@@ -150,6 +150,24 @@
         },
 
         /**
+         * _nodeReq: requereix un mòdul de Node (`fs`, `child_process`…) amb la
+         * mateixa cascada que _nodeFs. Retorna null si Node no està disponible.
+         * @param {string} name - nom del mòdul ("child_process")
+         * @returns {Object|null}
+         */
+        _nodeReq: function(name) {
+            if (!name) return null;
+            this._nodeMods = this._nodeMods || {};
+            if (this._nodeMods[name] !== undefined) return this._nodeMods[name];
+            var mod = null;
+            try { if (window.cep_node && window.cep_node.require) { mod = window.cep_node.require(name); } } catch (e1) { mod = null; }
+            if (!mod) { try { if (typeof require === 'function') { mod = require(name); } } catch (e2) { mod = null; } }
+            if (!mod) { try { if (window.cep && window.cep.node && window.cep.node.require) { mod = window.cep.node.require(name); } } catch (e3) { mod = null; } }
+            this._nodeMods[name] = mod || null;
+            return this._nodeMods[name];
+        },
+
+        /**
          * _writeNow: escriu les línies acumulades a disc.
          * - Amb Node fs  → appendFile ASÍNCRON (no bloqueja el fil de la UI).
          * - Sense Node   → writeFile de CEP (síncron), però només 1 cop per flush.
@@ -474,6 +492,79 @@
             try { return decodeURIComponent(n); } catch (e) { return n; }
         },
 
+        // ── REPARACIÓ DE MOJIBAKE (2026-10-02) ──────────────────────────────
+        // El pont ExtendScript (File.read / callSystem) descodifica com a ANSI
+        // (CP1252). Quan el que hi arriba és UTF-8 (l'API de digition), cada
+        // caràcter accentuat es converteix en DOS ("Ò" → "Ã’") i, en tornar-se a
+        // escriure en UTF-8, el text queda DOBLEMENT codificat. Conseqüència real:
+        // el tema del bloc V1 de TNC (02/10/2026) va sortir com a "CRANICA VACTOR"
+        // perquè el NFD de sanitizeName convertia "Ã" en "A" i inventava la lletra.
+        /** Taula inversa CP1252 → byte (només el bloc 0x80-0x9F; la resta és identitat). */
+        _CP1252_HIGH: {
+            0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, 0x2026: 0x85,
+            0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88, 0x2030: 0x89, 0x0160: 0x8A,
+            0x2039: 0x8B, 0x0152: 0x8C, 0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92,
+            0x201C: 0x93, 0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+            0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, 0x0153: 0x9C,
+            0x017E: 0x9E, 0x0178: 0x9F
+        },
+
+        /**
+         * _isMojibake: detecta el patró "Ã"/"Â"/"â"/"ð" (bytes de capçalera UTF-8)
+         * seguits d'un caràcter del bloc CP1252 0x80-0xBF (o del caràcter de
+         * substitució U+FFFD que deixa el descodificador quan el byte no existeix
+         * a CP1252). Ex: "Ã’"=Ò, "Ã‡"=Ç, "Ã©"=é, "â€”"=—, "Â·"=·.
+         * Un text català net MAI té aquestes combinacions.
+         * @param {string} str
+         * @returns {boolean}
+         */
+        _isMojibake: function(str) {
+            var s = String(str === null || str === undefined ? '' : str);
+            return /[\u00C2\u00C3\u00C5\u00E2\u00F0][\u0080-\u00BF\uFFFD\u2018-\u201E\u2020-\u2022\u2026\u2030\u2039\u203A\u20AC\u2122\u0160\u0161\u0152\u0153\u017D\u017E\u0178\u02C6\u02DC\u0192]/.test(s);
+        },
+
+        /**
+         * _fromMojibake: DESFÀ el mojibake CP1252 tornant cada caràcter al seu byte
+         * original i descodificant el resultat com a UTF-8 de debò.
+         * - Byte perdut (U+FFFD): CP1252 no defineix 0x81/0x8D/0x8F/0x90/0x9D. Darrere
+         *   d'un "Ã" (0xC3) la lletra original és À/Í/Ï/Ð/Ý; en català només hi ha Í i
+         *   Ï i totes dues donen la mateixa lletra base ("I") → s'assumeix 0x8D (Í).
+         * - Si la reparació no quadra, no hi ha TextDecoder o el text ja és net, es
+         *   retorna l'entrada sense tocar.
+         * @param {string} str
+         * @param {string} [where] - origen per al log
+         * @returns {string}
+         */
+        _fromMojibake: function(str, where) {
+            var s = String(str === null || str === undefined ? '' : str);
+            if (!this._isMojibake(s)) return s;
+            var map = this._CP1252_HIGH, bytes = [], ambig = 0, i, c;
+            for (i = 0; i < s.length; i++) {
+                c = s.charCodeAt(i);
+                if (c === 0xFFFD) {
+                    // Byte que CP1252 NO defineix (0x81/0x8D/0x8F/0x90/0x9D): el
+                    // descodificador ja l'ha perdut, així que se n'ha de triar un.
+                    // Darrere d'un 0xC3 ("Ã") la lletra original és À/Í/Ï/Ð/Ý → 0x8D
+                    // (Í: l'única possible en català). En qualsevol altre cas és
+                    // puntuació tipogràfica ("â€…") → 0x9D (cometes de tancament ”).
+                    // Si la tria fes una seqüència UTF-8 invàlida, es descarta tota
+                    // la reparació (retorna l'original) gràcies al guard de sota.
+                    bytes.push(bytes.length && bytes[bytes.length - 1] === 0xC3 ? 0x8D : 0x9D);
+                    ambig++;
+                }
+                else if (c <= 0xFF) { bytes.push(c); }
+                else if (map[c] !== undefined) { bytes.push(map[c]); }
+                else { return s; }   // text real (no mojibake): no tocar res
+            }
+            try {
+                var txt = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bytes));
+                if (txt.indexOf('\uFFFD') !== -1) return s;
+                this.log('🩹 Mojibake CP1252 reparat' + (where ? ' (' + where + ')' : '') +
+                    (ambig ? ' · ' + ambig + ' byte(s) ambigu(s) assumits com a Í' : ''), 'WARN');
+                return txt;
+            } catch (e) { return s; }
+        },
+
         readFolder: async function(path) {
             // ── FILTRAT PER DATA DE CREACIÓ (2026-09-07) ───────────────────────
             // Els fitxers del NAS (wotts .mov, portades .png, SRT...) poden tenir el
@@ -714,6 +805,10 @@
 
         sanitizeName: function(str) {
             if (!str) return "Unnamed_Item";
+            // (2026-10-02) XARXA DE SEGURETAT: si el text arriba doblement codificat
+            // (mojibake CP1252, p. ex. "CRÃ’NICA"), reparar-lo ABANS del NFD. Sense
+            // això el NFD convertia "Ã" en "A" i inventava lletres ("CRÒNICA"→"CRANICA").
+            if (this._isMojibake(str)) str = this._fromMojibake(str, 'sanitizeName');
             // (2026-09-23) NOMS SEMPRE EN ASCII I IDÈNTICS entre bloc, projecte i seqüència.
             // 1. NFD + treure diacrítics: Ç→C, à→a, è→e, í→i, ·→(res), ’→'…
             var normalized = String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "");

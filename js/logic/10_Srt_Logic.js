@@ -192,7 +192,10 @@
 
         extractEntriesFromSrtFile: async function (srtPath) {
             var escapedPath = srtPath.replace(/\\/g, '\\\\');
-            var srtContent = await window.FASTPASS_UI.Utils.callJSX("IO.readTxt('" + escapedPath + "')");
+            // (2026-10-02) IO.readTxt llegeix amb ANSI i els .srt del projecte són UTF-8
+            // → reparar el mojibake dels accents abans de parsejar.
+            var srtContent = window.FASTPASS_UI.Utils._fromMojibake(
+                await window.FASTPASS_UI.Utils.callJSX("IO.readTxt('" + escapedPath + "')"), 'srt_logic');
             if (!srtContent || srtContent.indexOf('ERR') === 0) return [];
             return this.srtToEntries(srtContent);
         }

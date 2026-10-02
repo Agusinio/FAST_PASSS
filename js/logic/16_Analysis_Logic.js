@@ -32,7 +32,9 @@
          * Carga el archivo JSON de análisis existente, o retorna objeto vacío.
          */
         _load: async function (path) {
-            const raw = await callJSX("IO.readTxt('" + path + "')");
+            // (2026-10-02) IO.readTxt llegeix amb ANSI: els títols amb accents de l'anàlisi
+            // tornaven malmesos (i el re-desar els fixava definitivament).
+            const raw = window.FASTPASS_UI.Utils._fromMojibake(await callJSX("IO.readTxt('" + path + "')"), 'analisi');
             if (!raw || raw.startsWith('ERR') || raw === '') return {};
             try { return JSON.parse(raw); } catch (e) { return {}; }
         },

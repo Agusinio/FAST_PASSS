@@ -840,6 +840,18 @@
                 log('\u26A0\uFE0F [ER:IO] No s\'ha pogut llegir: ' + jsonPath);
                 return null;
             }
+            // ── (2026-10-02) REPARACIÓ DE MOJIBAKE A LA CARREGA ────────────────
+            // Les escaletes FOTO (escaleta_on_demand_*.json) escrites fins ara passaven
+            // pel pont ExtendScript amb el text JA malmès pel descodificador ANSI →
+            // el fitxer quedava DOBLEMENT codificat ("CRÃ’NICA VÃ�CTOR", 74 "Ã" + 5 U+FFFD
+            // al bloque V1 de TNC 02/10) i el tema en sortia com a "CRANICA VACTOR".
+            // Es repara EN MEMÒRIA perquè cap consumidor arribi a veure el text malmès.
+            try {
+                var U = window.FASTPASS_UI.Utils;
+                if (U && U._isMojibake && U._isMojibake(raw)) {
+                    raw = U._fromMojibake(raw, String(jsonPath || '').split(/[\/\\]/).pop());
+                }
+            } catch (eMb) { /* si no es pot reparar, es continua amb el text original */ }
             var data = JSON.parse(raw);
             // ── Validar que el JSON és una escaleta real, no un error del servidor ──
             // Ex: JSON V3 de TNC 06/07: {"missatge":"Error","debugInfo":"No s'ha localitzat..."}

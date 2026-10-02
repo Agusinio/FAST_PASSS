@@ -60,6 +60,118 @@
             '&mostraEscaleta=true';
     };
 
+    // ----------------------------------------------------------------
+    // TRANSPORT DE LA PETICIO (2026-10-02)
+    // ----------------------------------------------------------------
+    // PER QUE: fins ara la resposta viatjava SEMPRE pel pont ExtendScript
+    // (FASTPASS.IO.curl), que llegeix la sortida de curl com a ANSI (CP1252).
+    // Com que l'API retorna UTF-8, cada accent esdevenia DOS caracters
+    // ("O" accentuada -> "A"+cometes, "C" trencada -> "A"+doble daguer) i, en
+    // desar-ho, el JSON quedava DOBLEMENT codificat (TNC V1 02/10/2026:
+    // "titol":"CRONICA VICTOR..." -> tema "CRANICA VACTOR" al nom del projecte).
+    // SOLUCIO: demanar l'escaleta amb child_process de Node + curl.exe i
+    // decodificar la sortida com a BYTES -> UTF-8 de debo. El pont ExtendScript
+    // queda nomes com a respatller (amb reparacio de mojibake).
+    // No s'usa .bat: sense cmd.exe pel mig, els '%' de l'URL no s'expansionen.
+
+    /** _curlExe: ruta de curl.exe (System32) o "curl" del PATH si no hi es. */
+    ER._curlExe = function () {
+        var abs = 'C:\\Windows\\System32\\curl.exe';
+        try {
+            var fs = window.FASTPASS_UI.Utils._nodeFs();
+            if (fs && fs.existsSync && !fs.existsSync(abs)) return 'curl';
+        } catch (e) { }
+        return abs;
+    };
+
+    /**
+     * _execFileBuffer: executa curl amb child_process de Node i retorna la SEVA
+     * SORTIDA COM A BYTES (Buffer) des dels quals es deriva el text UTF-8.
+     * @param {string} exe
+     * @param {Array<string>} args
+     * @param {number} timeoutMs
+     * @returns {Promise<{ok:boolean, raw?:string, err?:string, ms?:number}>}
+     */
+    ER._execFileBuffer = function (exe, args, timeoutMs) {
+        return new Promise(function (resolve) {
+            var cp = window.FASTPASS_UI.Utils._nodeReq('child_process');
+            if (!cp || !cp.execFile) { resolve({ ok: false, err: 'Node/child_process no disponible' }); return; }
+            var t0 = Date.now(), done = false;
+            var finish = function (r) { if (done) return; done = true; r.ms = Date.now() - t0; resolve(r); };
+            var timer = setTimeout(function () {
+                finish({ ok: false, err: 'temps d\'espera exhaurit (' + Math.round(timeoutMs / 1000) + ' s)' });
+            }, timeoutMs + 2000);
+            try {
+                cp.execFile(exe, args, { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: timeoutMs },
+                    function (err, stdout, stderr) {
+                        clearTimeout(timer);
+                        var txt = stdout ? stdout.toString('utf8') : '';   // bytes reals -> UTF-8
+                        if (txt && txt.length > 2) { finish({ ok: true, raw: txt }); return; }
+                        var why = stderr ? stderr.toString('utf8').substring(0, 200) : (err ? String(err.message) : 'resposta buida');
+                        finish({ ok: false, err: why });
+                    });
+            } catch (e) { clearTimeout(timer); finish({ ok: false, err: e.message }); }
+        });
+    };
+
+    /**
+     * _fetchRaw: demana l'escaleta a l'API. 1a via Node+curl (UTF-8 exacte),
+     * 2a via FASTPASS.IO.curl (ExtendScript) amb reparacio de mojibake.
+     * @param {string} url
+     * @param {string} [tag] - escaletaId per al log
+     * @returns {Promise<string|null>} text del JSON o null si no hi ha resposta
+     */
+    ER._fetchRaw = async function (url, tag) {
+        var U = window.FASTPASS_UI.Utils;
+        var args = ['-s', '--connect-timeout', '15', '--max-time', '60',
+            '-X', 'POST', url, '-H', 'accept: application/json', '-H', API_AUTH];
+        var res = await this._execFileBuffer(this._curlExe(), args, 65000);
+        if (res.ok) {
+            log('🛰️ [ER:Fetch] API via Node/curl' + (tag ? ' (' + tag + ')' : '') +
+                ': ' + res.ms + ' ms · ' + res.raw.length + ' chars en UTF-8 exacte');
+            return res.raw;
+        }
+        log('⚠️ [ER:Fetch] Via Node/curl no disponible (' + res.err + ') → respatller ExtendScript');
+        var rawJsx = null;
+        try {
+            rawJsx = await U.callJSX(
+                "FASTPASS.IO.curl('" + String(url).replace(/'/g, "\\'") + "', '" + API_AUTH.replace(/'/g, "\\'") + "')",
+                { rawError: true }
+            );
+        } catch (eC) { rawJsx = null; }
+        var txt = String(rawJsx == null ? '' : rawJsx);
+        if (!txt || txt.indexOf('ERR') === 0) {
+            log('❌ [ER:Fetch] Respatller ExtendScript sense resposta: ' + (txt || 'buit'), 'ERROR');
+            return null;
+        }
+        return U._fromMojibake(txt, 'API' + (tag ? ' ' + tag : ''));
+    };
+
+    /**
+     * _writeEscaleta: desa el JSON de l'escaleta SEMPRE des del costat JS
+     * (window.cep.fs.writeFile, UTF-8: mateix modul que EscaletaReader.load fa
+     * servir per llegir-lo). Passar el text pel pont JSX era el que el malmetia.
+     * @param {string} folderPath
+     * @param {string} filename
+     * @param {string} raw - JSON ja en UTF-8 correcte
+     * @returns {string|null} ruta (separadors '/') o null si no s'ha pogut escriure
+     */
+    ER._writeEscaleta = function (folderPath, filename, raw) {
+        var path = String(folderPath || '').replace(/[\/\\]+$/, '') + '/' + filename;
+        try {
+            var w = window.cep.fs.writeFile(path, raw);
+            if (w && w.err === 0) return path;
+            log('⚠️ [ER:Fetch] cep.fs.writeFile err=' + (w && w.err));
+        } catch (e1) { log('⚠️ [ER:Fetch] cep.fs.writeFile ha fallat: ' + e1.message); }
+        var fs = window.FASTPASS_UI.Utils._nodeFs();
+        if (fs && fs.writeFileSync) {
+            try { fs.writeFileSync(path.replace(/\//g, '\\'), raw, 'utf8'); return path; }
+            catch (e2) { log('⚠️ [ER:Fetch] Node fs.writeFileSync ha fallat: ' + e2.message); }
+        }
+        log('❌ [ER:Fetch] No s\'ha pogut desar ' + filename + ' al projecte', 'ERROR');
+        return null;
+    };
+
     /**
      * fetchNewEscaleta: Fa una crida a l'API de digition per obtenir
      * la foto mes recent de l'escaleta i la guarda al directori del projecte.
@@ -210,12 +322,8 @@
             var id = list[c];
             var url = this._buildFetchUrl(id, dataStr, horaStr);
             var raw = null;
-            try {
-                raw = await window.FASTPASS_UI.Utils.callJSX(
-                    "FASTPASS.IO.curl('" + url.replace(/'/g, "\\'") + "', '" + API_AUTH.replace(/'/g, "\\'") + "')",
-                    { rawError: true }
-                );
-            } catch (eC) { raw = null; }
+            // (2026-10-02) Node/curl (bytes → UTF-8) amb respatller ExtendScript reparat
+            try { raw = await this._fetchRaw(url, id); } catch (eC) { raw = null; }
             var js = null, ok = false;
             try {
                 js = JSON.parse(String(raw || '').trim());
@@ -316,12 +424,13 @@
             try {
                 var tsP = Date.now();
                 var fnP = 'escaleta_on_demand_' + tsP + '.json';
-                var safeP = (folderPath + '/' + fnP).replace(/\\/g, '/').replace(/'/g, "\\'");
-                await window.FASTPASS_UI.Utils.callJSX(
-                    "IO.writeTxt('" + safeP + "', '" + probe.raw.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "')"
-                );
-                log('✅ [ER:Fetch] FOTO guardada amb escaletaId ' + probe.id + ': ' + safeP);
-                return { path: safeP, filename: fnP };
+                // (2026-10-02) Escriptura des de JS (UTF-8), mai pel pont JSX
+                var savedP = this._writeEscaleta(folderPath, fnP, probe.raw);
+                if (savedP) {
+                    log('✅ [ER:Fetch] FOTO guardada amb escaletaId ' + probe.id + ': ' + savedP);
+                    return { path: savedP, filename: fnP };
+                }
+                log('⚠️ [ER:Fetch] No s\'ha pogut guardar la foto resolta (' + probe.id + ')');
             } catch (eWP) {
                 log('⚠️ [ER:Fetch] No s\'ha pogut guardar la foto resolta: ' + eWP.message);
             }
@@ -350,13 +459,9 @@
             log('\uD83D\uDCE1 [ER:Fetch] Cridant API (intent ' + att + '/' + API_RETRIES + '): ' + url);
 
             var rawResult = null;
+            // (2026-10-02) Via Node/curl: bytes → UTF-8 exacte (respatller ExtendScript reparat)
             try {
-                // La crida es fa via JSX (curl no esta disponible des del navegador)
-                // Utilitzem un helper custom a JSX per executar la request HTTP
-                rawResult = await window.FASTPASS_UI.Utils.callJSX(
-                    "FASTPASS.IO.curl('" + url.replace(/'/g, "\\'") + "', '" + API_AUTH.replace(/'/g, "\\'") + "')",
-                    { rawError: true }
-                );
+                rawResult = await this._fetchRaw(url);
             } catch (eCurl) {
                 rawResult = null;
                 lastReason = 'curl: ' + eCurl.message;
@@ -386,14 +491,13 @@
                 if (respuestaValida) {
                     // Guardar el resultat JSON al directori del projecte
                     var filename = 'escaleta_on_demand_' + timestamp + '.json';
-                    var safeFolderPath = (folderPath + '/' + filename).replace(/\\/g, '/').replace(/'/g, "\\'");
-
-                    await window.FASTPASS_UI.Utils.callJSX(
-                        "IO.writeTxt('" + safeFolderPath + "', '" + rawResult.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "')"
-                    );
-
-                    log('\u2705 [ER:Fetch] JSON guardat: ' + safeFolderPath);
-                    return { path: safeFolderPath, filename: filename };
+                    // (2026-10-02) Escriptura des de JS (UTF-8), mai pel pont JSX
+                    var savedPath = this._writeEscaleta(folderPath, filename, rawResult);
+                    if (savedPath) {
+                        log('\u2705 [ER:Fetch] JSON guardat: ' + savedPath);
+                        return { path: savedPath, filename: filename };
+                    }
+                    lastReason = 'no s\'ha pogut desar el JSON al directori del projecte';
                 }
 
                 // Motiu REAL de l'API (abans aquesta informació es perdia)
