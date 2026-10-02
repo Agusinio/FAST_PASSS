@@ -246,7 +246,7 @@
         "fix": "flow_cut.js::runCutOut: las listas se calculan de las pistas reales de la secuencia (Tracks.count('video')/('audio')): vídeo 2..N (V1 se recorta antes con rippleOut) y audio 1..N. rippleOut ya recortaba el clip en curso y borraba los posteriores; solo faltaba pedírselo a V9. Log: 'Limpiando pistas secundarias: video [2,…,9] (de 9), audio [1,2] (de 2)'.",
         "files": ["js/workflows/flow_cut.js", "index.html"],
         "date": "2026-09-23",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "IPD_PLUS_DOBLE_FINESTRA_VERTICAL",
@@ -255,7 +255,7 @@
         "fix": "flow_graphics.js: config única `IPDPLUS` (SRC=2 pista del clip transformat, PARK=3 on s'aparca l'original i fa de fons, BASE=1 material que es copia a SRC, INFERIOR {position:[1058,812],scale:110}, SUPERIOR {position:[161,812],scale:50}). `runIpdPlus` = toggle (si hi ha clips a PARK dins l'interval → revertir). `_ipdPlusRango` (interval = unió dels clips SELECCIONATS de qualsevol pista via l'àtom JSX nou Clips.getSelection(); sense selecció → clip de BASE/V1 sota el cabezal), `_ipdPlusClipsEnRango`, `_ipdPlusMotion` (aplica i desa estat previ per pista:start), `_ipdPlusAplicar` (moveToRange+removeAt per deixar 1 sol clip a SRC → move a PARK → insertClipFrom BASE→SRC clip a clip + moveToRange → Motion), `_ipdPlusRevertir` (removeAt SRC → move PARK→SRC → BASE a estat previ/normal). Àtom JSX nou Clips.getSelection() a 6_Clips.jsx + alias a main.jsx (justificat: cap àtom retornava la selecció múltiple). La Doble Finestra 🪟🪟 queda igual (revertida la parametrització de perfils del FIX 40). index.html: 2 files de 3 + btnGrafIpdPlus. main.js: binding Graphics.runIpdPlus. FIX 42 (post-validació): (a) l'interval ja no s'agafa del clip de V2 sota el cabezal (podia durar tot el bloc: cas real 200,28 s → 28 clips) i la selecció es pren de qualsevol pista; (b) Clips.duplicate fallava (ERR_CLIP_NOT_FOUND_AFTER_DUP) → es fa servir Clips.insertClipFrom + moveToRange. PRECISIÓ DE L'USUARI: la SELECCIÓ és sempre de la pista BASE (V1) i el tall de V2 (SRC) es fa respecte a aquest interval → _ipdPlusRango filtra per BASE i ignora la resta de pistes. NOTA: `position` va en px del frame de la seqüència (el JSX normalitza dividint per frameSize) → si els valors venen d'un frame 1920×1080 i la seqüència és 608×1080 caldrà escalar-los.",
         "files": ["js/workflows/flow_graphics.js", "js/main.js", "index.html", "jsx/modules/6_Clips.jsx", "jsx/main.jsx"],
         "date": "2026-09-23",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "ESCAPE_BARRES_INJECTIO_JSX",
@@ -264,7 +264,7 @@
         "fix": "js/core/utils.js::importList: el payload passa a fer DOBLE escapada, `this.escape(JSON.stringify(rawPaths))` (JSON + escape), la mateixa tècnica que _freezeTemaTitol (flow_chyrons.js) i _freezeGrafEnd (flow_mapa.js). Compatible amb rutes amb '/' i amb '\\\\'. El flux de Project no es veia afectat perquè allà les rutes es passen amb '/' i escape() no toca les barres normals. Diagnòstic fet amb PROVES\\FASTPASS_audit.log (comparant la crida trencada amb la que funciona). Cache-buster: utils.js?v=16.",
         "files": ["js/core/utils.js", "index.html"],
         "date": "2026-09-23",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "GRAFISMES_PER_MARCADOR",
@@ -273,7 +273,7 @@
         "fix": "flow_mapa.js: _flow fa mkRef=_itemAtCti(CTI) → refSec=mkRef.time (TC del marcador) + _refClipAt(refSec) per a l'espai hàbil (fallback al clip seleccionat si no hi ha marcadors). Nous mètodes: _refClipAt(sec), _applyTrackConfig(), _freezeGrafEnd(gName, grafEnd, endLimit) [mecànica de _freezeTemaTitol: grafisme temporal a TC 10:00 + Render.snapshot de l'últim frame + treure el temporal + IO.importFiles al bin GRAF amb emparellament del nom real + Clips.insert/endAt a V3 amb dur=min(3s, endLimit−grafEnd)], GRAF_KEYWORDS=['MAPA'] (ampliable), _keywordOf() (normalitzat), _grafCandidates() (color===4 + paraula clau), runFromMarkers() + _runCandidates() (_match per nom → _askFiles si no hi ha coincidència → _import → _refClipAt/_freezeUnderCti → _placeClips al TC del marcador). main.js::runPlaceAllChyrons afegeix la fase final Mapa.runFromMarkers() (després dels chyrons i de l'IPD). index.html: tooltip del 🎨 actualitzat. FIX 37 (post-validació): el COLOR dels marcadors NO és llegible en aquesta versió de Premiere (Markers.get() retorna color=-1 a tots, verificat al snapshot MARCADORS_*.json), així que el filtre real és la PARAULA CLAU i el color només s'informa; només es descarta si el color és conegut i ≠ 4. Comprovat amb el bloc V1 del TNC: 01p22@15.00s + fitxer 'APP P2 MAPA CENTRES DE DADES.mov' a ZZZ_GRAFISME\\22 SETEMBRE → match automàtic. FIX 39: _freezeGrafEnd desa el cabezal (Timeline.get()) i el restaura en un bloc finally (Timeline.set) perquè el snapshot l'havia de moure al TC temporal; cache flow_mapa.js?v=18.",
         "files": ["js/workflows/flow_mapa.js", "js/main.js", "index.html"],
         "date": "2026-09-23",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "MARCADORS_GRAFICS_F6_DESCONNECTAT",
@@ -282,7 +282,7 @@
         "fix": "Diagnóstico verificado: el único productor de colorIdx:4 es flow_markers.js:1892 (placeGraphicMarkers); el botón 🎨 (btnMarksF6) fue reasignado el 2026-09-18 a Mapa.run y el grupo MARCADORS (TEST) solo llegaba a F5; el pipeline runFullPipelineOut (OUT&GO) incluía F1→F5 + Ordre(F6) pero NO Gràfics; flow_assembly.js solo tiene el alias. Con la escaleta real del TNC V1 (01p21/01p22 con horaEntradaPrevista 13:56:28, sufijos p21/p22 en _GRAPHIC_SUFFIXES) los ítems SÍ se clasifican como gráficos: solo faltaba ejecutar la fase. Fix: (1) nueva 10ª fase ['Gràfics (F6·GF)'] en runFullPipelineOut, DESPUÉS de 'Ordre (F6)' y antes del snapshot; (2) botón nuevo btnMarksF6GF 'GF' en el grupo MARCADORS (test-only) → Markers.placeGraphicMarkers; (3) title del 🎨 corregido (hace el MAPA) sin cambiar su función. Los grocs se anclan al marcador padre 01i con el criterio D13 (+10s / +15s). Colateral NO tocado: la fase/botón Correl (F3.5) llama a Assembly.correlationSnapMarkers, método INEXISTENTE (redundante: F3 ya ejecuta _correlationSnap internamente).",
         "files": ["js/main.js", "index.html"],
         "date": "2026-09-23",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "CONDUCTOR_BLOC_AMB_GRAFISMES",
@@ -291,7 +291,7 @@
         "fix": "flow_chyrons.js::placeChyronConductor: nueva regla (usuario): el conductor va al PRIMER MARCADOR DEL TIMELINE cuyo ítem sea de plató (intro/donapas/off/directe/conexión). Se leen los marcadores estructurales (resultado de F1-F7) y se decide 'es de plató' por el prefijo del marcador → ítem de la escaleta (lineByNum + _isPresenterLine) y, si no está, por el título del marcador (_isPresenterTitle). Eliminados el criterio 'plató = 1er ítem de la escaleta' y la ventana de 3 ítems del FIX 33. Respaldo: plató de la escaleta sin marcador propio (inicio del bloque). isFirstItem se mantiene (no hay marcador antes) para el CasA/CasB del Tema-Títol. Log: '🎙️ [Conductor] 1r marcador de PLATÓ al timeline: 01i @ Xs (OBRE el bloc) · plató de l'escaleta: 01i'. Repercusión indirecta: _blockStartTime lee el primer clip de V7 (conductor) → si está al inicio puede pasar a CasB (Tema-Títol tras el rótulo + titulillo con entrante a clipStart+0.40).",
         "files": ["js/workflows/flow_chyrons.js", "index.html"],
         "date": "2026-09-23",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "SLIDER_NO_ES_MOU_AMB_ESPAI",
@@ -300,7 +300,7 @@
         "fix": "main.js: (1) el tick ya no apaga el reencuadre con UNA pérdida momentánea de foco — necesita 2 ticks (~1 s) sin focus (_reframeNoFocusTicks), porque el AppActivate del VBS del ESPACIO hacía perder el foco un instante; (2) _applySliderRange ya NO reposiciona el thumb con la X del clip objetivo (solo aplica el rango y recorta si queda fuera): era el 'cur=333' que recentraba el slider al reactivar el reencuadre; (3) al enviar la tecla ya no se hace devolverFocoHost (blur) porque el VBS ya trae el foco a Premiere. Log: '🎚️ Slider límits(px): … cur=712 (clip=333) …'.",
         "files": ["js/main.js", "index.html"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "PLAY_PANELL_FOCUS_HOST",
@@ -309,7 +309,7 @@
         "fix": "Diagnóstico en el log: app.setAppFocus y app.bringToFront NO EXISTEN en esta versión de Premiere (is not a function) y el QE no tiene play(). Solución final: bin/send_space.vbs (WMI → PID de 'Adobe Premiere Pro.exe' → AppActivate → SendKeys ' ') lanzado con File.execute() vía callJSX (wscript: sin consola ni parpadeo; NO se usa IO.executeShell para no abrir un .bat). Solo se envía si el panel tiene el foco (document.hasFocus) y no es un eco propio (anti-bucle 1,5 s). comprobarApisPlay() elige la vía (QE → setAppFocus → bringToFront → VBS) y avisa en el log; devolverFocoHost ya no repite APIs inexistentes. Validado: cscript detecta el PID 15928 ✔.",
         "files": ["js/main.js", "bin/send_space.vbs", "index.html"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "ESPAI_FOCUS_BOTONS",
@@ -318,7 +318,7 @@
         "fix": "main.js (sección 7): handler global keydown en captura. ESPACIO/ENTER sobre BUTTON/A/input-button → preventDefault + stopPropagation + blur (mata el click fantasma y el foco pegajoso). ESPACIO (fuera de campos de texto, incluido el <input type=range> del slider) → SrtEditor.togglePlay(), que hace el play/stop REAL de Premiere con el QE DOM (app.enableQE(); qe.project.getActiveSequence().play()/.stop()) y, si el visor tiene vídeo, lo alinea; NO exige que el visor tenga vídeo cargado (si no lo tiene, el ESPACIO ya no queda inhábil). Los INPUT de texto/TEXTAREA/SELECT/contenteditable se excluyen. Validado headless (C:\\temp\\fp_space_test.html): ▶ clicks=0, foco→BODY, plays=1/2/3 en los tres escenarios (botón, slider y sin foco), text no interceptado.",
         "files": ["js/main.js", "index.html"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "INVERSIO_PEREZOSA_TITULILLO",
@@ -335,7 +335,7 @@
         "fix": "Nuevo Workflow.Srt.runSrtReset(): 1) SrtEditor.resetToOriginal() (restaura tabla/marcadores y limpia los clips de subtítulos de la secuencia); 2) vuelve a buscar el .SRT del tema con Scan.mediaAssets(ctx, State.detectedTheme) (carpeta de verticalización, prefijo {archivo}_{bloque}_ + fecha de trabajo) y, si no, Scan.srtFallback (día de trabajo) → SrtEditor.loadSrt(path). main.js: el botón ahora llama callWorkflow('Srt','runSrtReset').",
         "files": ["js/workflows/flow_srt.js", "js/main.js", "index.html"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "SRT_NOMES_DEL_DIA",
@@ -344,7 +344,7 @@
         "fix": "Scanner.srtFallback: todos los niveles exigen la fecha de trabajo (N1 = prefijo+data, N2 = cualquier .SRT del día). Eliminados 'prefix (qualsevol data)' y 'qualsevol .SRT de la carpeta'; sin dateDir no carga nada; aviso explícito en log y panel. El mecanismo principal (bloques de 15 min) ya filtraba por fecha.",
         "files": ["js/logic/Scanner.js", "js/workflows/flow_srt.js"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "BOTO_MAIN_CUADRAT",
@@ -353,7 +353,7 @@
         "fix": "style.css: regla #btnMainAction/btn-big-sq con width/height/min/max + !important, flex:0 0 auto, box-sizing:border-box y texto ajustado dentro (2 líneas). 4_Context.js: eliminadas las 5 asignaciones className='square-large'/'btn-new' (clase INEXISTENTE: el botón perdía btn-big-sq) y los estilos inline width:100%/minHeight:60px; se limpia el borde rojo del estado LOCKED al cambiar de estado. Validado headless (Edge + style.css real): 60x60 con todos los textos, incluso con width:100% inline o sin la clase.",
         "files": ["style.css", "js/core/4_Context.js", "index.html"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "REVERS_TITULILLO_FRAME",
@@ -378,7 +378,7 @@
         "fix": "flow_mapa.js: _resolveRefClip (V1 seleccionado → V1 bajo el CTI → otra selección); el material se inserta en el IN del clip y el espacio hábil es su rango [start,end]; congelado alineado al IN; _itemAtCti/_freezeUnderCti reciben la posición de referencia.",
         "files": ["js/workflows/flow_mapa.js"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "AUDIO_GRAFISMOS",
@@ -387,7 +387,7 @@
         "fix": "Nuevo Logic.Clips.insertNoAudio: Clips.insert + Clips.at + Clips.removeLinkedAudio (átomo existente) + red de seguridad por NOMBRE (nunca toca el audio del programa). Usado en flow_mapa.js (_placeClips) y flow_retols.js (_placeChyronsByType, traducciones x2).",
         "files": ["js/logic/6_Clips_Logic.js", "js/workflows/flow_mapa.js", "js/workflows/flow_retols.js"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "TITULILLO_SALIDA_MARCADOR",
@@ -404,7 +404,7 @@
         "fix": "flow_graphics.js: PAS0/PAS1/PAS2/PAS3/PAS4, _dpUnlockTracks y runMapa leen tracks.video (mp4/video1/video2/fondos). _colocarFonsMapa recibe la pista fondos. Preset DF con claves 'v'+pista; 7_KF.jsx acepta V4/V5. flow_mapa.js: GRAF/grafismos = graficos (V3) y congelado = tematitol (V6).",
         "files": ["js/workflows/flow_graphics.js", "jsx/modules/7_KF.jsx", "js/workflows/flow_mapa.js"],
         "date": "2026-09-22",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#17",
@@ -750,7 +750,7 @@
         "fix": "PENDENT (proposat, no implementat). (1) No llençar el fallback: passar `cleanFeedData` quan el MP4 del bloc s'ha trobat (`useBlockMedia`) — avui aquest flag viu dins del `if (bounds)` i cal elevar-lo a l'abast de `_runNew`: `(skipVideoIngesta && !useBlockMedia) ? null : cleanFeedData`. (2) Millor: decidir la guarda pel que s'IMPORTARÀ: si `Scan.mediaAssets(ctx)` troba el MP4 del bloc a `rutas.verticalitzacio`, la guarda no aplica (el contingut no depèn de la ingesta del cleanFeed). (3) Estat/UI diferenciat: 'MP4 del bloc importat (el cleanFeed no el cobreix)' vs 'sense vídeo: cleanFeed encara en ingesta'. (4) Reubicar la guarda DESPRÉS de `_setLogPath` (:473) perquè el seu WARN quedi al log del projecte. Validació esperada: `phases.mp4Imported:true`, `TNM_V4_CLIP.mp4` a la carpeta i V1 amb clip 0→149 s + `📐 ref establert: offsetSec=…`.",
         "fix_implemented": "IMPLEMENTAT 2026-09-30 (pendent de test a Premiere). `js/workflows/flow_mainButton.js`: (1) La guarda s'AIXECA quan el fallback ha trobat el MP4 del bloc — dins de `if (useBlockMedia && blockMediaPath)` (`:569-616`) ara es fa `skipVideoIngesta = false` i es restaura `assets.media.mp4` des de `mediaMp4Ingesta` (capturat a la guarda, `:437-453`) amb `🔓 [FALLBACK] Guarda \"CleanFeed en ingesta\" AIXECADA…` + estat UI 'MP4 del bloc importat (cleanFeed encara en ingesta)'. Es va descartar la variant '(2) millor' (decidir la guarda pel que s'importarà amb un scan previ): el lift es fa NOMÉS quan el fallback JA ha confirmat el fitxer, que és el camí que ja existia. (2) `!useBlockMedia` afegit a la condició de FASE 0 (`:723-728`): amb el MP4 del bloc NO s'extreu clip (el fitxer de verticalització és el material sencer i s'insereix via la branca `isFallbackBlockMedia` de `3_Project_Logic.js:185-217`, domini 'source/bloc-media', `fileIn=0`); extreure'n un clip local deixaria el 0 del fitxer a `handleSecs` i desalinearia tots els marcadors. (3) L'`else` de [EXTRACT] ja no menteix (`:985-997`): ara diu si s'omet per la guarda d'ingesta, si és MP4 del bloc o si ffmpeg no hi és (abans deia sempre 'FFmpegLogic.extractClip no disponible'). (4) El motiu de la guarda es re-escriu al log del projecte: `skipVideoIngestaMsg` + re-log DESPRÉS de `_setLogPath` (`:482-485`), perquè `_setLogPath` truncava `PROVES\\\\FASTPASS.log` i el WARN es perdia. NO s'ha fet servir `checkSourceDuration` per validar la durada del MP4 del bloc (ja documentat com a poc fiable per `IO.executeShell` amb pipes, `:749`). Validat amb `bin/check_js_v8.ps1`: `workflows/flow_mainButton.js OK`.",
         "date": "2026-09-30",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#121",
@@ -763,7 +763,7 @@
         "validation_expected": "Al run del V4: `📏 [NOU] Durada REAL del cleanFeed: 4080.0s → final 15:35:21 (snapshot JSON=15:00:40, 2020.0s)` · `🔓 [NOU] Guarda d'ingesta NO aplicable: el fitxer real arriba a 15:35:21 i el bloc acaba a …` · `📡 [PrecisionTrim] cleanFeed: out≈2292s` (sense 'Limitat pel final del cleanFeed') · CAP `⚠️ [FALLBACK]` · `🎬 [EXTRACT]` amb el clip del bloc i `phases.mp4Imported:true` amb `mediaPath` del cleanFeed.",
         "impact_on_120": "El #120 (aixecar la guarda quan el fallback troba el MP4 del bloc) es va implementar sobre una premissa que aquest run ha demostrat FALSA: el MP4 del bloc pot ser material d'un altre bloc. Amb #121 el camí normal del V4 ja no arriba al fallback (la durada real cobreix el bloc) i, si hi arriba, el fitxer ara es valida abans d'importar-lo.",
         "date": "2026-09-30",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#122",
@@ -774,7 +774,7 @@
         "fix": "IMPLEMENTAT 2026-09-30 (pendent de test a Premiere) · `js/workflows/flow_markers.js` (5 punts, una sola arrel): (1) nous helpers `_normSuffix` (:77) i `_graphicSuffixesNorm` (:85) — normalitzen traient espais/guions/baixos ('01 GF-1' → 'gf1'); `_isGraphicByNum` (:96) passa a ser l'ÚNIC punt de veritat i tots els camins hi passen; (2) `_getColorIdx` (:223) — el check de GRÀFIC va ABANS del d'`agrupacio` → GF/P2 SEMPRE groc (4); (3) `_correlationSnap` (:649) — els gràfics NO voten el Δ (log '🔬 [CorrelationSnap] Excloent gràfic …') + `skippedGraphics35` a F3.5 (:1357); (4) `F4·Faro` (:2169) — els gràfics es salten (`alreadyOk++`) perquè F6·Gràfics els ha d'ancorar al pare; (5) `F6·Gràfics` (:2955) — gràfic SENSE pare dins del bloc que cau a la CUA → es descarta. `index.html`: cache-bust `flow_markers.js?v=61` → `?v=62`. Sintaxi `bin/check_js_v8.ps1`: TOTAL 96 | OK 95 | FAIL 1 (només `core/escaleta_trim.js`, preexistent i aliè).",
         "validation_expected": "Al següent TNV V1: F2 sense cap línia '01 GF*' i 'Nous: 1' (només '01i - Intro' a 0,00s) · F3/F3.5 'Δ snap = 0.000s', '🔸 [F3.5] 01: 47.32s → 47.32s' (mai 46,00s) i 'Gràfics saltats: 4' · F6·Gràfics amb 4 ítems gràfics (GF grocs ancorats al pare, D13) · Fase Vermells sense '02 GF-1'/'02 GF-2' a 162,32s i sense '⚠️ … es manté tota la llista'.",
         "date": "2026-09-30",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#123",
@@ -785,7 +785,7 @@
         "fix": "IMPLEMENTAT 2026-09-30 (pendent de test a Premiere) · `js/workflows/flow_markers.js`: **(A)** NOU helper `_preAssignDeducedToBreaks` (:2091-2136) — assignació 1:1 entre RUPTURES DE DENSITAT LLIURES i ítems DEDUÏTS dins de cada tram entre faros consecutius; només si la cardinalitat quadra EXACTAMENT (conservador: si no, no toca res); el 🔒 marcador d'inici (≤0,15 s) compta com a frontera però mai es mou; els gràfics queden fora (`_isGraphicByNum`). Cridat a F4·Faro (:2233-2243, log `🟠 [F4·Faro] Pair ruptures↔deduïts (1:1): {…}`) i consumit a :2274-2278 (mana sobre el snap de ±2,5 s). **(B)** ASIG (:1780-1801): s'escull l'ancla de cost mínim `abs(Δ) + 2,0 si tipus = 'corte·medi'`, amb xarxa de seguretat `MAX_NEAR = 15 s` (si la millor queda més lluny, es manté el comportament antic) i log amb Δ. **(C)** F5·Orphans (:2816-2831, :2849-2853, :2886-2888): color des de l'escaleta (`_getColorIdx(lineByNum[prefix])`) en lloc del 6 fix, i els gràfics se salten (igual que F4 a #122). Validació: `bin/check_js_v8.ps1` → TOTAL 96 | OK 95 | FAIL 1 (només `core/escaleta_trim.js`, aliè) + TEST FUNCIONAL REAL amb el V8 del CEP (Edge headless carregant el flow_markers.js real, C:\\temp\\fp\\fp_pair_test.html) amb l'estat de F4 del run V2: `{15@0, 16 GF-1@9,96, 16 GF-2@13,16, 16dp@15,00, 16dir@18,00, 16@61,60}` + ruptures [23,36 · 48,80 · 61,60] → `{\"16dp\":23.36,\"16dir\":48.8}` ✓; 3 deduïts al mateix tram (2 ruptures) → `{}` ✓; sense deduïts → `{}` ✓.",
         "validation_expected": "Al següent TNV V2 (RECARREGAR el panell): `🟠 [F4·Faro] Pair ruptures↔deduïts (1:1): {\"16dp\":23.36,\"16dir\":48.8}` · `16dp … → 23.36s (parell ruptures↔deduïts (1:1))` · `16dir … → 48.80s` · ASIG sense salt a 18,00 s (`16dir: 41.60s → 48.80s`, Δ≈+7,2 s) · CAP línia `[SEP] 16dp: 22.60s → 15.00s` · audit: `16 GF-1`/`16 GF-2` amb `colorIdx:4` i col·locats per F6·Gràfics. Regressió: TN_COMARQUES, TN_MIGDIA, TNV V1/V3/V4 (V3/V4 ja correctes).",
         "date": "2026-09-30",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#124",
@@ -795,7 +795,7 @@
         "fix": "IMPLEMENTAT 2026-09-30 (pendent de test a Premiere) · js/workflows/flow_render.js runPortada: (1b, :363-384) just després de resoldre el clip de V1 sota el cabezal — amb el CTI encara al cabezal, valor del frame que es vol capturar — es llegeixen els valors amb Anim.getMotionValues(1, <src.index>); (4b, :444-466) després de Clips.moveToRange (inPoint i durada ja fixats) s'apliquen a la CÒPIA amb Anim.setMotionValues(1, <idxCopy>). Es transfereixen position, scale, scaleWidth i cropLeft/Top/Right/Bottom, ometent les claus null. Mateixos àtoms get/set → mateixes unitats (get torna PÍXELS i set els normalitza ell mateix dividint per frameSize). Camins d'error: get ERR*, JSON il·legible o set ERR → avís WARN i el flux CONTINUA (la portada es genera igual). ZERO JSX nou (composició amb àtoms existents). index.html: cache-bust flow_render.js?v=23 → ?v=24. Validació: bin/check_js_v8.ps1 → TOTAL 96 | OK 95 | FAIL 1 (només core/escaleta_trim.js, aliè) + TEST FUNCIONAL REAL amb el V8 del CEP (Edge headless, C:/temp/fp/fp_portada_motion_test.html) que extreu els DOS blocs REALS del fitxer i el utils.escape real i els executa amb un callJSX simulat → 23/23 PASS (traça get(original V1[3]) → set(còpia V1[7]) → comprovació; payload JSON vàlid amb negatius/decimals [-94.5, 562.25]; claus null omeses; i els 3 camins d'error sense excepció i sense escriure).",
         "validation_expected": "A la portada (RECARREGAR el panell): log 🎯 [Portada] Motion de l'ORIGINAL V1[n]: {position:[…],scale:…} · 🎯 [Portada] Motion heretat → còpia V1[m]: {…} → OK:scale=… · · comprovació còpia V1[m] → {…} amb els MATEIXOS valors que l'original · i el PNG de la portada amb el MATEIX frame que el cabezal (IPD/DF inclosos). Si surt ⚠️ no llegible o NO ha pogut heretar, el PNG queda com abans (Motion per defecte) i cal mirar el JSX.",
         "date": "2026-09-30",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#125",
@@ -818,7 +818,7 @@
         "validation": "Estructural: Profile.json parseja i mostra v_mascara=2 a les 4 estructures; cap BOM i CRLF intactes. bin/check_js_v8.ps1: TOTAL 96 | OK 95 | FAIL 1 (només core/escaleta_trim.js, preexistent i aliè). TEST FUNCIONAL REAL amb el motor V8 del CEP (Edge headless, C:/temp/fp/fp_mascara_test.html) que EXTREU els 4 mètodes del flow_graphics.js real i executa el 11_Configuracio.js real amb new Function('window', src): 48/48 PASS (config + àlies + fallback + els 4 blocs, Profile.json, cache-bust d'index.html, _mascaraTrack amb config i amb fallback, _mascaraClips amb pista/tipus de la config, majúscules i accent, MASCARILLA que NO casa i filtre d'interval, _avisMascara WARN/DEBUG i pista il·legible sense excepció, i l'ordre real de les crides a runIpdPlus i _dpPaso0).",
         "validation_expected": "Al proper run (RECARREGAR el panell): amb un clip MASCARA* dins de l'interval, IPD+ ha de treure «🛡️ [IPD+] MÀSCARA (V2): MASCARA … V2[n] a→b» amb nivell WARN i, si V2 és SRC/PARK/BASE, la línia «⚠️ [IPD+] la MÀSCARA viu a V2 … el clip es mourà/retallarà dins l'interval». Sense màscara dins de l'interval: «🛡️ [IPD+] MÀSCARA (V2): cap clip a l'interval a→b» (sense WARN). A Doble Finestra/PAS0, la mateixa línia 🛡️ amb etiqueta [DoblePantalla] i sense WARN. Cap excepció nova i el resultat d'IPD+/DF ha de quedar igual.",
         "date": "2026-10-01",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#127",
@@ -847,7 +847,7 @@
         "fix": "IMPLEMENTAT 2026-10-01 (pendent de test a Premiere; ZERO JSX nou): js/workflows/flow_graphics.js — dos metodes d'orquestracio nous (:598-645): _ipdPlusLlegirMotion (Anim.getMotionValues -> objecte o null + WARN) i _ipdPlusHeredarMotion (Anim.setMotionValues amb NOMES les claus que s'han pogut llegir; les null s'ometen; si peta, WARN i el flux CONTINUA). Cablejat: (1) a _ipdPlusAplicar el Motion de SRC es llegeix ABANS de moure'l (:732, amb el clip original encara intacte a la pista), es desa a _ipdPlusStates['src'].motion (:738) i s'hereta al clip de PARK tot just despres del put.ok (:748); (2) a _ipdPlusRevertir s'hereta al clip restaurat a V2 (:902-905). index.html: flow_graphics.js?v=22 -> ?v=23. Validacio: bin/check_js_v8.ps1 -> TOTAL 96 | OK 95 | FAIL 1 (nomes core/escaleta_trim.js, preexistent) + TEST FUNCIONAL REAL amb el V8 del CEP (Edge headless, C:/temp/fp/fp_ipdplus_motion_test.html) que EXTREU els dos metodes del fitxer real i els executa amb un callJSX simulat -> 29/29 PASS (payload complet, claus null omeses, escape aplicat, ERR i JSON trencat sense excepcio, i comprovacio de l'ordre de les crides al codi real).",
         "validation_expected": "Al proper test d'IPD+ (RECARREGAR el panell): log «🎬 [IPD+] Motion ORIGINAL V2[n]: {position:[...],scale:...}» · «🎬 [IPD+] Motion heretat -> V3[m] (PARK): {...} -> OK:...» · «· comprovacio V3[m] -> {...}» amb ELS MATEIXOS valors · i la mascara a V3 al SEU lloc (no centrada). Al REVERTIR: «V2 restaurat …» seguit de «Motion heretat -> V2[k] (RESTAURAT)» i la mascara torna on era. Si surt «⚠️ … no llegible» o «NO ha pogut heretar el Motion», el flux continua igual (Motion per defecte) i cal mirar el JSX.",
         "date": "2026-10-01",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       }
 ,
       {
@@ -878,7 +878,7 @@
         "validation": "`bin/check_js_v8.ps1`: TOTAL 95 | OK 95 | FAIL 0. TEST FUNCIONAL REAL amb el V8 del CEP (Edge headless, C:/temp/fp/fp_132_test.html, carrega el srt_editor.js REAL): 13/13 PASS → sense finestra l'eix és el clip sencer (2378→2652) i x=0 = inici del clip; després de `_setEditWindow()` amb el cas real del TNM V4 (peça 2479,4→2612,0 dins un clip 2378→2652) la finestra és [2478,40 → 2616,00], x=0 passa a ser l'inici de la peça i l'eix útil baixa de 274 s a 137,6 s; clip de 95 min amb peça de 100 s → eix útil 105 s (guany de zoom 54x); `_clearEditWindow()` torna a l'eix sencer; i l'exportació segueix convertint amb `_axisOrigin`.",
         "validation_expected": "A l'editor de subtítols (RECARREGAR el panell per al cache-bust v72): al prémer IN i/o OUT, el timeline de l'editor ha de quedar cenyit al tram de la peça amb un marge a la dreta (log `📝 SRT_EDIT: Finestra d'edició [a → b] (media, marges -1s/+4s) · clip sencer = 0→N s`), la barra inferior (zoom) ha de reflectir només aquest tram i els subtítols exportats a Premiere han de caure EXACTAMENT on queien abans (mateixa posició dins el clip). Sense IN/OUT, comportament actual.",
         "date": "2026-10-02",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#133",
@@ -890,7 +890,7 @@
         "validation": "`bin/check_js_v8.ps1`: TOTAL 96 | OK 95 | FAIL 1 en el moment del fix (l'únic FAIL era el preexistent i aliè `core/escaleta_trim.js`, ESBORRAT després el mateix dia → ara TOTAL 95 | OK 95 | FAIL 0, vegeu #115; `flow_chyrons.js` OK). TEST FUNCIONAL REAL amb el V8 del CEP (Edge headless, C:/temp/fp/fp_133_134_test.html, carrega el flow_chyrons.js REAL): 14/14 PASS amb els 9 noms REALS del NAS del 01/10 → 3 versions del Tema-Titol → 1 (la 00618565), 3 del Nomcarrec → 1 (la 00618569), 2 Llocdata amb wottId diferent → es conserven les 2 (no es fusiona el que no toca), nom sense número de generació → intacte, `_regenSeq` 618565/0, i TITOLET amb 3 re-generacions → queda la generació NOVA (618560).",
         "validation_expected": "Al proper run de chyrons (RECARREGAR el panell per al cache-bust v54): cap rètol repetit en capes diferents i, al log, `♻️ [Nom] / [Lloc] / [Resto] N còpia(es) de re-generació descartada(es) (mateix rètol i tc): es queda la versió més nova`. El rètol col·locat ha de ser l'últim generat (versió amb el número més alt).",
         "date": "2026-10-02",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "REGLA_TEMPS_FINAL",
@@ -903,7 +903,7 @@
         "validation": "`bin/check_js_v8.ps1`: TOTAL 96 | OK 95 | FAIL 1 en el moment del fix (l'únic FAIL era el preexistent i aliè `core/escaleta_trim.js`, ESBORRAT després el mateix dia → ara TOTAL 95 | OK 95 | FAIL 0, vegeu #115; `escaleta_io.js` OK). TEST FUNCIONAL REAL amb el V8 del CEP (Edge headless, C:/temp/fp/fp_133_134_test.html) sobre un fixture de l'escaleta REAL del 01/10 (C:/temp/fp/esc_tf.json, idx 190-198 amb el marcatge a l'índex 3): 7/7 PASS → tall=3 · 6 descartats · últim ítem retingut «tort CLAIM 3CATINFO» · minúscules («temps final tnc») també talla · sense marcatge → null i array intacte · entrades buides (`null`, `{}`) → null sense excepció.",
         "validation_expected": "Al proper NEW/recàrrega d'escaleta, al FASTPASS.log: `🛑 [ER:IO] \"TEMPS FINAL\" a l'ítem #N (\"TEMPS FINAL TNV\") → M ítem(s) descartat(s) de l'escaleta`. Cap ítem posterior al marcatge no ha d'influir en els bounds, els marcadors ni el manifest (el fitxer `<PROG>_<BLOC>.fastpass.json` ha de contenir només `escaletaItems` fins al marcatge).",
         "date": "2026-10-02",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#135",
@@ -915,7 +915,7 @@
         "validation": "`bin/check_js_v8.ps1`: TOTAL 95 | OK 95 | FAIL 0. TEST FUNCIONAL REAL (Edge headless, C:/temp/fp/fp_135_test.html: carrega els 5 mòduls REALS d'escaleta i executa `calcPrecisionTrimBounds` sobre les 4 escaletes REALS del TNM del 01/10): **V4 (el cas del report) passa de `start=15:06:58 (InTier=2)` a `start=15:08:22 (InTier=10 = Tier0)`** — l'IN cau al començament de la peça (intro `36i`) i l'extracte s'escurça de 264 s a 180 s; **regressió ZERO: V1=14:33:52 (52432), V2=14:41:48 (52908) i V3=14:53:50 (53630) surten IDÈNTICS als valors guardats als manifests del 01/10**. Traça del V4 amb el fix: `🕵️ [IN·FLOOR] El bloc no té hores pròpies → referència = IN dels tiers (54501.00s)` i CAP línia `PISO vídeo aliè` (abans n'hi havia 12 en cadena fins a 15:33:52).",
         "validation_expected": "Al proper run del V4 (RECARREGAR el panell per al cache-bust v20): `📐 [ER:Bounds] TCs reals: start=15:08:2x end=15:10:42` (InTier=10) i cap `🚧 PISO vídeo aliè` en cadena; el clip ha d'arrencar amb la intro `36i`, no amb 84 s del tema anterior. La resta de blocs (V1/V2/V3) han de sortir exactament igual que abans.",
         "date": "2026-10-02",
-        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma Â«todo okÂ» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-02): revisio global del panell; l'usuari confirma «todo ok» i deixa NOMES el tema del titulillo pendent de test. Tancament en bloc del 2026-10-02."
       },
       {
         "id": "#136",
