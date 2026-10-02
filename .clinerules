@@ -287,6 +287,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\check_js_v8.ps1"
 > ⚠️ Validador único: `check_js_v8.ps1`. El viejo `check_js_balance.ps1` (falsos positivos con
 > template literals) se eliminó el 2026-09-30.
 
+### Guardia de CÓDIGO MUERTO (anti-recaída del pendrive) 🔴
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\bin\check_dead.ps1"
+# exit 0 = limpio · 1 = hay ficheros en js/ o jsx/ que NADIE carga (o familia vieja)
+# Informe completo en C:\temp\fp\dead_code.txt · -ListAll lista también lo que sí se carga
+```
+Autoridades de carga (no hay cargador dinámico): `index.html` para `js/` (`<script src="js/...">`)
+y `jsx/main.jsx` para `jsx/` (`load("X.jsx")`). Cualquier fichero de `js/` o `jsx/` que no
+aparezca en ellas es CÓDIGO MUERTO. Escanear una copia externa: `-BaseDir "E:\FAST_PASSS"`.
+
+> 🧟 **Por qué existe esta guardia**: la familia `flux_*.js` (7) + `10_Eines.js`, `12_Estat.js`,
+> `13_Registre.js`, `14_Sintesi.js`, `logger.js`, `20_Sessio.js`, `21_Aplicacio.js`, `22_Escaneig.js`,
+> `23_Analisi.js`, `31_Pistes.js`, `32_Segments.js`, `35_Subtitols.js`, `36_Projecte.js` y los
+> `.jsx` `10_Sistema` / `11_Entorn` / `12_Arxiu` / `19_Diagnosi` ha vuelto **3 veces** (9/04, 23/07,
+> 29/09) después de borrarla. **No hay generador, script, hook ni tarea programada**: el mecanismo
+> real es una **restauración/copia masiva de un árbol antiguo desde el pendrive** (`E:\FAST_PASSS`,
+> snapshots `E:\FAST_PASSS_13Nd_CEP`) sobre la carpeta de la extensión, seguida de `git add -A`.
+> Probado por hash: los `flux_*.js` que reaparecieron el 29/09 (`c757b1e`) son **byte a byte
+> idénticos** a los de abril que siguen viviendo en esas copias, con el mismo mtime conservado.
+> → **Nunca copiar/restaurar un árbol del pendrive encima del repo sin pasar `check_dead.ps1`.
+
 ### Higiene de salidas (anti-contaminación / anti-truncado)
 ```powershell
 # Buscar en el código (js/, jsx/, html) → resultado íntegro en C:\temp\fp\find_*.txt
