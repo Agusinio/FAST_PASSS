@@ -44,6 +44,14 @@
         _wfMediaStart: 0,
         _wfMediaEnd: 0,
         _axisOrigin: 0,     // media on comença el timeline (IN del primer clip) → eix del editor
+        // (#132, 2026-10-02) FINESTRA D'EDICIÓ: un cop fixats l'IN/OUT de la peça
+        // (botons IN / OUT de l'editor) l'eix es cenyeix al TRAM DE LA PEÇA amb un
+        // marge a la dreta, en lloc d'estirar-se sobre tot el clip carregat.
+        // Són temps de MEDIA (com la resta de l'editor) i afecten NOMÉS l'eix
+        // (dibuix, regle, zoom i barra inferior): `_axisOrigin` continua essent
+        // l'origen real de la conversió MEDIA→TIMELINE de l'exportació.
+        _editWinStart: null,
+        _editWinEnd: null,
         _pollCount: 0,
         _localPlayInterval: null,
         _ctiSec: 0,
@@ -213,7 +221,8 @@
             var MIN_PPS = 5, MAX_PPS = 150;
 
             var totalTl = function () {
-                return Math.max(0.001, self._maxSec - (self._axisOrigin || 0));
+                // (#132) El total de l'eix és el de la FINESTRA d'edició si està fixada.
+                return Math.max(0.001, self._viewEnd() - self._viewOrigin());
             };
 
             var getView = function () {
@@ -349,6 +358,7 @@
             if (this._entries.length > 0) {
                 this._maxSec = this._entries[this._entries.length - 1].endSec + 10;
             }
+            this._clearEditWindow();   // (#132) SRT nou → eix sencer del clip
             log("📝 SRT_EDIT: " + this._entries.length + " entrades");
             this._isDirty = false;
             this._showEditor();
@@ -1357,7 +1367,9 @@
             if (!this._ctx || !this._canvas) return;
             var ctx = this._ctx;
             var origin = this._axisOrigin || 0;
-            var canvasW = Math.max(1800, (this._maxSec - origin) * this._pixelsPerSec + 100);
+            // (#132) L'amplada es calcula sobre la FINESTRA d'edició (peça + marge),
+            // no sobre el clip sencer: un clip llarg ja no aplana la vista.
+            var canvasW = Math.max(1800, (this._viewEnd() - this._viewOrigin()) * this._pixelsPerSec + 100);
             if (!isFinite(canvasW) || canvasW > 60000) canvasW = 60000; // guard de seguretat (evita cuelgues)
             var L = this._getLayout();
             this._canvas.width = canvasW;
@@ -1382,15 +1394,55 @@
             this._ensurePlayheadVisible();
         },
 
-        // Eix del timeline: x=0 correspon al media de l'IN del primer clip (_axisOrigin).
+        // Eix del timeline: x=0 correspon a l'ORIGEN VISIBLE (la finestra d'edició si
+        // està fixada; si no, l'IN del primer clip = _axisOrigin).
         // Així el que es veu a l'extensió coincideix amb el que es veu al timeline de Premiere
         // (regla, subtítols i waveform es mostren en temps de TIMELINE, no de media).
+
+        /** _viewOrigin: inici de l'eix visible (finestra d'edició si n'hi ha). */
+        _viewOrigin: function () {
+            return (this._editWinStart != null) ? this._editWinStart : (this._axisOrigin || 0);
+        },
+
+        /** _viewEnd: final de l'eix visible (finestra d'edició si n'hi ha). */
+        _viewEnd: function () {
+            return (this._editWinEnd != null) ? this._editWinEnd : (this._maxSec || 0);
+        },
+
+        /**
+         * _setEditWindow: Fixa la finestra d'edició al tram dels subtítols actuals
+         * (#132): [primer inici − marge esquerre, últim final + marge dret].
+         * Cridat pels botons IN i OUT de l'editor. Sense entrades → s'allibera.
+         */
+        _setEditWindow: function () {
+            if (!this._entries || this._entries.length === 0) { this._clearEditWindow(); return; }
+            var cfg = (window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get) ? window.FASTPASS_UI.Config.get() : null;
+            var mR = (cfg && cfg.srtEditMarginRightSec != null) ? Number(cfg.srtEditMarginRightSec) : 4;
+            var mL = (cfg && cfg.srtEditMarginLeftSec != null) ? Number(cfg.srtEditMarginLeftSec) : 1;
+            if (!isFinite(mR) || mR < 0) mR = 4;
+            if (!isFinite(mL) || mL < 0) mL = 1;
+            var first = this._entries[0].startSec;
+            var lastEnd = this._entries[this._entries.length - 1].endSec;
+            var minStart = this._axisOrigin || 0;
+            this._editWinStart = Math.max(minStart, first - mL);
+            this._editWinEnd = lastEnd + mR;
+            log("📝 SRT_EDIT: Finestra d'edició [" + this._editWinStart.toFixed(2) + "s → " + this._editWinEnd.toFixed(2) +
+                "s] (media, marges -" + mL + "s/+" + mR + "s) · clip sencer = " +
+                (0).toFixed(0) + "→" + ((this._maxSec || 0) - minStart).toFixed(1) + "s");
+        },
+
+        /** _clearEditWindow: Torna a l'eix sencer del clip carregat. */
+        _clearEditWindow: function () {
+            this._editWinStart = null;
+            this._editWinEnd = null;
+        },
+
         _secToX: function (sec) {
-            return (sec - (this._axisOrigin || 0)) * this._pixelsPerSec;
+            return (sec - this._viewOrigin()) * this._pixelsPerSec;
         },
 
         _xToSec: function (px) {
-            return px / this._pixelsPerSec + (this._axisOrigin || 0);
+            return px / this._pixelsPerSec + this._viewOrigin();
         },
 
         _drawRuler: function (ctx) {
@@ -1401,7 +1453,8 @@
             ctx.strokeStyle = '#555';
             var secInterval = Math.max(1, Math.floor(40 / this._pixelsPerSec));
             var origin = this._axisOrigin || 0;
-            for (var s = origin; s <= this._maxSec; s += secInterval) {
+            // (#132) El regle dibuixa l'eix VISIBLE (finestra d'edició si n'hi ha).
+            for (var s = this._viewOrigin(); s <= this._viewEnd(); s += secInterval) {
                 var x = this._secToX(s);
                 ctx.beginPath();
                 ctx.moveTo(x, this._rulerHeight - 6);
@@ -1446,7 +1499,7 @@
                 // converteix tl↔media (vegeu _mediaAtSec/_tlAtMedia).
                 // ⚡ Pre-càlcul: les altures per píxel només es recalculen quan
                 // canvia zoom/peaks/rangs (no a cada render → evita cuelgues al clicar).
-                var key = this._canvas.width + '|' + this._pixelsPerSec + '|' + this._waveformPeaks.length + '|' + this._axisOrigin + '|' + this._wfMediaStart + '|' + this._wfMediaEnd;
+                var key = this._canvas.width + '|' + this._pixelsPerSec + '|' + this._waveformPeaks.length + '|' + this._axisOrigin + '|' + this._wfMediaStart + '|' + this._wfMediaEnd + '|' + this._viewOrigin() + '|' + this._viewEnd();
                 if (key !== this._wfCacheKey || !this._wfPixelHeights || this._wfPixelHeights.length !== this._canvas.width) {
                     this._wfCacheKey = key;
                     this._computeWaveformPixels();
@@ -1986,6 +2039,9 @@
             }
             this._originalEntries = this._entries.map(function (e) { return { index: e.index, timeStr: e.timeStr, texts: e.texts.slice(), startSec: e.startSec, endSec: e.endSec }; });
             this._originalMarkers = this._markers.slice();
+            // (#132) IN fixat → l'eix es cenyeix al tram de la peça (marge esquerre) i
+            // deixarà de dependre de la llargada del clip carregat.
+            this._setEditWindow();
             this._isDirty = true; this.render();
             this._persistMarkers();
             getUtils().status("IN: " + this._entries.length + " entrades", "exito");
@@ -2009,6 +2065,8 @@
             }
             this._originalEntries = this._entries.map(function (e) { return { index: e.index, timeStr: e.timeStr, texts: e.texts.slice(), startSec: e.startSec, endSec: e.endSec }; });
             this._originalMarkers = this._markers.slice();
+            // (#132) OUT fixat → finestra d'edició = [inici de la peça − marge, OUT + marge dret].
+            this._setEditWindow();
             this._isDirty = true; this.render();
             this._persistMarkers();
             getUtils().status("OUT: " + this._entries.length + " entrades", "exito");
@@ -2205,6 +2263,7 @@
             this._waveformPeaks = null; this._waveformPPS = 480; this._wfCacheKey = ""; this._wfPixelHeights = null; this._isPlaying = false;
             this._waveformSegments = []; this._waveformMediaTag = ""; this._pollCount = 0;
             this._wfMediaStart = 0; this._wfMediaEnd = 0;
+            this._clearEditWindow();   // (#132)
             this._markers = []; this._originalMarkers = []; this._dragIdx = -1;
             this._lastCtiSec = -1; this._lastLocalT = -1; this._lastLocalPx = -1;
             this._pendingSeek = null;

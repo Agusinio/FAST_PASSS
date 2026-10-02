@@ -767,6 +767,39 @@
     };
 
     /**
+     * truncateAtTempsFinal: Talla l'escaleta a l'ítem "TEMPS FINAL".
+     *
+     * (2026-10-02 · regla d'usuari) L'editor de l'escaleta hi deixa ítems de prova
+     * DESPRÉS del marcatge "TEMPS FINAL" (ex: TNM V1 01/10: un ítem de V1 solt al
+     * final). El playout NO els emet, però contaminaven els bounds del bloc (talls
+     * massa llargs) i els marcadors.
+     * Regla: en repassar els ítems, el primer que conté "TEMPS FINAL" (inclòs) marca
+     * el final de l'escaleta útil → el procés s'atura aquí.
+     *
+     * S'aplica dins de ER.load, just abans de cachejar: tots els consumidors (bounds,
+     * marcadors, manifest `escaletaItems`, semàfor d'estat) veuen la MATEIXA escaleta
+     * retallada, sense haver de repetir la regla a cada flux.
+     *
+     * @param {Object} data - JSON complet de l'escaleta (es muta in-place)
+     * @returns {{cut:number, dropped:number, titol:string}|null} null si no hi és
+     */
+    ER.truncateAtTempsFinal = function (data) {
+        var lines = (data && data.escaleta && data.escaleta.liniesEscaleta)
+            ? data.escaleta.liniesEscaleta : null;
+        if (!lines || lines.length === 0) return null;
+        for (var i = 0; i < lines.length; i++) {
+            var l = lines[i] || {};
+            var text = String(l.titol || l.titular || l.nom || '');
+            if (text.toUpperCase().indexOf('TEMPS FINAL') !== -1) {
+                var dropped = lines.length - i;
+                data.escaleta.liniesEscaleta = lines.slice(0, i);
+                return { cut: i, dropped: dropped, titol: text };
+            }
+        }
+        return null;
+    };
+
+    /**
      * load: Llegeix el JSON des de la ruta UNC via bridge JSX i el parseja.
      * Cacheja el resultat a window.FASTPASS_UI.State._escaletaCache
      * per evitar parsejar el mateix JSON de 7000+ línies fins a 5 cops per workflow.
@@ -842,6 +875,18 @@
                 }
             } catch (eLies) {
                 log('\u26A0\uFE0F [ER:IO] No s\'han pogut sanejar les hores mentideres: ' + eLies.message, 'WARN');
+            }
+            // (2026-10-02) TALL "TEMPS FINAL": el primer ítem que conté aquest text
+            // (inclòs) ja no és escaleta útil → el procés s'atura aquí. Es fa ABANS de
+            // cachejar perquè cap consumidor torni a veure els ítems de prova del final.
+            try {
+                var tf = this.truncateAtTempsFinal(data);
+                if (tf) {
+                    log('\uD83D\uDED1 [ER:IO] "TEMPS FINAL" a l\'ítem #' + tf.cut + ' ("' + tf.titol +
+                        '") \u2192 ' + tf.dropped + ' ítem(s) descartat(s) de l\'escaleta');
+                }
+            } catch (eTF) {
+                log('\u26A0\uFE0F [ER:IO] No s\'ha pogut tallar per "TEMPS FINAL": ' + eTF.message, 'WARN');
             }
             state._escaletaCache = { path: jsonPath, data: data };
             return data;

@@ -235,3 +235,60 @@ return { corte: idealPos, idx: -1 }; // Respeta el tiempo aditivo
 | `clasificarItem()` | `flow_assembly.js` | ~1002-1016 |
 | `getEffectiveDuradaSec()` | `flow_assembly.js` | ~989-996 |
 | Colores de marcadores | `INFO/MARKER_COLORS.md` | — |
+
+---
+
+## 10. Disponibilidad de `horaEntradaOnAir` / `duradaOnAir` por tipo de ítem (reglas de realización)
+
+> Aportado por el usuario (2026-10-02) y **verificado con datos el mismo día**: 80 escaletas reales de
+> `VERTICALITZACIO_INFORMATIUS\ESCALETES` + 4.804 ítems únicos agregados (un ítem cuenta como "tiene OnAir"
+> si aparece con `horaEntradaOnAir` en CUALQUIER snapshot del día, incluidos los posteriores a su emisión).
+
+### 10.1 Regla de realización (tu regla)
+
+| Tipo de ítem | ¿Tiene `horaEntradaOnAir`? | ¿Tiene `duradaOnAir`? |
+|---|---|---|
+| **INTROS** (`…i`, p. ej. `36i`), **DONAPAS** (`…dp`), **DIRECTES** (`especial`) | **NUNCA** | NUNCA |
+| **GRAFISMOS** (`TE-*`, `P2-*`, `GF*`, rótulos/QR) | **NUNCA** | NUNCA |
+| **VÍDEOS** (num propio, `teVideo: true`) | SÍ — **pero puede ser MENTIROSO** | SÍ (acompaña al OnAir) |
+| **OFF** (`Off`), **IPD** (`+++`/`IPD`) | A veces / casi nunca | Igual que su OnAir |
+| **CARETAS / MOLINET / CLAIM** | Casi nunca (2%) — tienen `durada` propia | Igual |
+
+### 10.2 Verificación con datos (80 escaletas, 4.804 ítems únicos)
+
+| Familia | Ítems únicos | Con OnAir | Veredicto |
+|---|---|---|---|
+| **DONAPAS** (`…dp`) | 91 | **0** | **MAI OnAir** ✅ |
+| **INTRO** (`…i`) | 196 | **0** | **MAI OnAir** ✅ |
+| **DIRECTE** (`…dir` / `especial`) | 70 | **0** | **MAI OnAir** ✅ |
+| **GRAFISME GF** | 107 | **0** | **MAI OnAir** ✅ |
+| **GRAFISME P2** | 140 | **0** | **MAI OnAir** ✅ |
+| **GRAFISME TE** | 131 | 4 | 3% (excepcions) |
+| **OFF** (`Off`) | 266 | 5 | 2% (casi nunca) |
+| **CARETA / MOLINET / CLAIM** | 327 | 8 | 2% |
+| **TALL** | 374 | 55 | 15% (mezcla) |
+| **IPD / `+++`** | 264 | 89 | 34% (a veces) |
+| **VÍDEO** (num propio) | 2.787 | 604 | 22% ⚠️ % sesgado: un snapshot previo a la emisión no tiene OnAir |
+| **VÍDEO `t`/`ft`** | 51 | 17 | 33% |
+
+`duradaOnAir` aparece **junto con** el OnAir (89/88, 604/593…): el playout escribe las dos a la vez al emitirse el ítem.
+
+### 10.3 Consecuencias para el motor (⚠️ leer antes de tocar bounds/marcadores)
+
+1. **Nunca anclar un IN/OUT a una intro, un donapas, un directe ni un grafismo**: no tendrán OnAir nunca.
+   Su posición se **deduce** de la cadena (`horaEntradaPrevista` + `durada` del propio ítem o del anterior).
+2. **VÍDEO con OnAir mentiroso**: ya está cubierto por `_sanitizeOnAirLies` (`escaleta_bounds.js`/`items.js`),
+   que neutraliza horas anteriores al inicio de programa, horas "encadenadas" a una mentirosa y retrocesos
+   grandes. Ojo: al neutralizar la `horaEntradaPrevista` de un ítem se le quita su **ancla propia** →
+   el IN de su bloque pasa a depender del vídeo anterior.
+3. **La forma fiable de acotar el IN de un bloque que arranca con intro/donapas es el VÍDEO ANTERIOR**:
+   `IN = horaEntradaOnAir(vídeo anterior) + duradaOnAir(vídeo anterior)`. Es exactamente el **Tier0** de
+   `calcPrecisionTrimBounds` y funciona: caso TNM V4 01/10 → `35 EL CADELL` OnAir 15:06:30 + `0:01:51` =
+   **54501 s = 15:08:21**, el valor correcto (log: `🔗 Tier0-IN … -> 54501.00s`).
+4. **Un guard NO debe descartar el valor ya deducido**: en ese mismo caso, un fallback posterior
+   (`IN = block.in − durada(36i)`) tiró el Tier0 y el IN acabó en **15:06:58** (80 s antes del arranque real).
+   Ver **#135** (`js/core/escaleta_bounds.js`: `PISO vídeo aliè` + `IN/OUT-GUARD`).
+5. **Fin de la escaleta útil**: el primer ítem cuyo `titol` contenga `TEMPS FINAL` marca el final de la
+   escaleta (el editor deja ítems de prueba detrás). Se aplica en `EscaletaReader.load()`
+   (`truncateAtTempsFinal`, 2026-10-02): desde ese ítem (incluido) no se cuenta nada más.
+

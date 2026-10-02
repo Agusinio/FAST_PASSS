@@ -761,7 +761,7 @@
      * donapas "03dp"), però el BV "01" (CRONOLOGIA DE L'ACAMPADA, 0:33, sense OnAir)
      * s'emetia 14:32:09→14:32:42 → el clip arrencava amb 26 s d'un tema aliè.
      */
-    ER._applyForeignVideoFloor = function (data, worldBlockStartSec, blockLines, maxGapSec) {
+    ER._applyForeignVideoFloor = function (data, worldBlockStartSec, blockLines, maxGapSec, refSecFallback) {
         try {
             if (worldBlockStartSec == null || !blockLines || blockLines.length === 0) return worldBlockStartSec;
             var all = (data && data.escaleta && data.escaleta.liniesEscaleta) ? data.escaleta.liniesEscaleta : [];
@@ -783,6 +783,12 @@
                 var hpv0 = fb0.horaEntradaPrevista;
                 if (hoa && String(hoa).trim() !== '' && String(hoa) !== '00:00:00') refSec = this.tcToSeconds(hoa);
                 else if (hpv0 && String(hpv0).trim() !== '' && String(hpv0) !== '00:00:00') refSec = this.tcToSeconds(hpv0);
+            }
+            // (2026-10-02 · #135) Mateix cas que a l'IN·FLOOR: si el bloc no té hores
+            // pròpies (intro sense OnAir i prevista anul·lada), la referència per decidir
+            // què és «posterior al bloc» és el IN deduït pels tiers.
+            if (refSec === null && refSecFallback != null && isFinite(refSecFallback) && refSecFallback > 0) {
+                refSec = refSecFallback;
             }
 
             var newStart = worldBlockStartSec;
@@ -1020,6 +1026,14 @@
             }
         }
 
+        // (2026-10-02 · #135) IN deduït pels TIERS: dada REAL del playout (OnAir +
+        // duradaOnAir de l'ítem anterior). Els PISO només el poden ENDARRERIR; aquest
+        // valor es conserva per a dues coses: (a) fer de referència quan el bloc no té
+        // hores pròpies (intro sense OnAir I prevista anul·lada pel sanejador →
+        // _refFloorSec = null i el sostre «posterior al bloc» quedava desactivat), i
+        // (b) recuperar-lo si els PISO deixen un IN invàlid (IN >= OUT).
+        var _tierInSec = worldBlockStartSec;
+
         // ═══ (2026-09-25) PISO DEL FINAL DE L'ÍTEM ANTERIOR (mecanisme duradaOnAir) ═══════════
         // L'inici del bloc NO pot ser ANTERIOR a l'acabament de l'ítem emès anterior
         // (horaEntradaOnAir + duradaOnAir, dada que ja existeix a l'escaleta). Abans, si la
@@ -1059,6 +1073,14 @@
                     }
                 }
             } catch (eRefFloor) { /* noop */ }
+            // (2026-10-02 · #135) Si el bloc NO té hores pròpies, la referència és el IN
+            // deduït pels tiers. Sense això el sostre «posterior al bloc» queda desactivat
+            // i un ítem POSTERIOR (p. ex. el «37» del bloc següent, que acaba a 54724)
+            // actua de piso: l'IN puja més enllà de l'OUT i el GUARD l'ha de rescatar.
+            if (_refFloorSec === null && _tierInSec != null && isFinite(_tierInSec) && _tierInSec > 0) {
+                _refFloorSec = _tierInSec;
+                log('   \uD83D\uDD27 [IN\u00B7FLOOR] El bloc no té hores pròpies → referència = IN dels tiers (' + _tierInSec.toFixed(2) + 's)');
+            }
             for (var pv = 0; pv < allOnAirVideos.length; pv++) {
                 var _pv = allOnAirVideos[pv];
                 if (!_pv || !_pv.item) continue;
@@ -1093,7 +1115,7 @@
         // Cas TNM V1 28/09: IN deduït 14:32:16 queia DINS del BV "01" (14:32:09→14:32:42)
         // → el clip arrencava amb 26 s del tema anterior a la capçalera.
         var _inPreForeign = worldBlockStartSec;
-        worldBlockStartSec = this._applyForeignVideoFloor(data, worldBlockStartSec, blockLines, 600);
+        worldBlockStartSec = this._applyForeignVideoFloor(data, worldBlockStartSec, blockLines, 600, _tierInSec);
         if (_inPreForeign != null && worldBlockStartSec !== _inPreForeign) {
             // El piso mou l'inici real del bloc → l'àncora l'ha de seguir.
             worldBlockAnchorSec = worldBlockStartSec;
@@ -1231,7 +1253,17 @@
             worldBlockStartSec >= worldBlockEndSec) {
             var originalIN = worldBlockStartSec;
             var blockInFallback = this.getBlock(data, blockId);
-            if (blockInFallback && blockInFallback.in) {
+            // (2026-10-02 · #135) ABANS de caure a `block.in − durada(intro)` (que arrossega
+            // els handles del cleanFeed i pot quedar 80 s ABANS del bloc), recuperar el IN
+            // que els TIERS ja havien deduït del playout: és dada real i ja és < OUT.
+            var _tierRecovered = false;
+            if (_tierInSec != null && isFinite(_tierInSec) && _tierInSec > 0 && _tierInSec < worldBlockEndSec) {
+                worldBlockStartSec = _tierInSec;
+                worldBlockAnchorSec = _tierInSec;
+                _tierRecovered = true;
+                log('   \uD83D\uDD04 [IN/OUT-GUARD] IN dels PISO invàlid (' + originalIN.toFixed(1) + 's >= OUT ' + worldBlockEndSec.toFixed(1) + 's) → es RECUPERA el IN deduït pels tiers: ' + _tierInSec.toFixed(1) + 's.');
+            }
+            if (!_tierRecovered && blockInFallback && blockInFallback.in) {
                 var blockInSec = this.tcToSeconds(blockInFallback.in);
                 // Restar la durada del primer item estructural (la intro/molinet)
                 // perquè quedi dins del clip, abans del block.in
