@@ -2346,9 +2346,16 @@
                 for (const mk of markersFull) {
                     const entry = structureById[mk.fullId];
                     if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
-                    const traduccions = entry.chyrons.filter(c =>
+                    const traduccionsRaw = entry.chyrons.filter(c =>
                         (c.rol || '').toUpperCase().includes("TRADUCCIO") || c.name.toUpperCase().includes("TRADUCCIO")
                     );
+                    // RE-GENERACIONS (#136, 2026-10-02): el MATEIX rètol de traducció
+                    // re-generat (mateixa línia, tc, text i índex [i-N]) pot estar al NAS
+                    // 2 cops. Com que el tc és idèntic, abans es col·locaven TOTS i sortien
+                    // el DOBLE de traduccions (cas TNM 02/10 bloc 36: 3 trad. × 2
+                    // generacions `.00618503` / `.00618621` = 6). Mana la versió més NOVA
+                    // del generador: mateix criteri que _placeChyronsByType (#133).
+                    const traduccions = this._dedupeRegenerations(traduccionsRaw, "Traducció");
                     if (traduccions.length === 0) continue;
 
                     const groups = new Map();
