@@ -4,6 +4,12 @@
 > Origen: petició de l'usuari del 2026-09-30 (vespre).
 > Handoff de la sessió: `plans/HANDOFF_2026-10-01.md`.
 > Regla de projecte que aplica: **JSX està CERRADO** → tot es compon amb els àtoms existents.
+> ⚠️ **Actualització 2026-10-02** (neteja de codi mort, #115 · `progress/2026-10-02.md` §10): les
+> referències d'aquest pla a `js/core/13_Registre.js` (:107-120 i §P4 :186, :205) i a
+> `js/core/escaleta_onair.js` (:56) queden **OBSOLETES** — cap dels dos fitxers no el carregava
+> `index.html` i s'han esborrat. L'equivalent VIU és `js/core/project_registry.js` (`Registry`) per al
+> registre de workflows i `js/core/escaleta_bounds.js` / `escaleta_config.js` per a OnAir/bounds i els
+> overrides de durada (els «9 usos» d'`escaleta_onair.js` no compten a l'inventari viu).
 
 ---
 

@@ -32,7 +32,7 @@
 | **`js/core/11_Configuracio.js`** | TOTS | `get()` retorna `tracks.video.mp4` (V1 = 1). Canviar el valor de V1 desplaça TOTES les operacions. `handles` i `tcOffset` afecten els càlculs de trim. |
 | **`js/core/session_manifest.js`** | MainButton, Markers, MP4 | `save()` i `load()` persisteixen i recuperen el manifest. Canvis d'estructura del manifest trenquen compatibilitat. |
 | **`js/core/escaleta_reader.js`** | MainButton, Markers | `findLatest()`, `findLatestValid()`, `calcPrecisionTrimBounds()`, `tcToSeconds()`, `_deduceOnAirEntrada()`. Canviar la lògica de deducció de TC afecta TOTES les projeccions. |
-| **`js/logic/14_Assembly_Logic.js`** | Chyrons, flow_retols | `runGuidedAssembly()`, `calcDensityFootprintV2()`, `conductor()`. Cridat des de `flow_chyrons.js` i `flow_retols.js`. |
+| **`js/logic/14_Assembly_Logic.js`** | Chyrons, Graphics, Markers, MP4 | `runGuidedAssembly()`, `calcDensityFootprintV2()`, `conductor()`. Cridat des de `flow_chyrons.js`, `flow_graphics.js`, `flow_markers.js` i `flow_mp4.js`. |
 | **`js/core/4_Context.js`** | TOTS | `checkContext()` verifica que s'està a la seqüència i projecte correctes. `init()` configura el panel. |
 | **`js/logic/3_Project_Logic.js`** | MainButton | `create()` insereix el MP4 a V1 amb `insertWithBounds`. Canvis en la inserció afecten el punt de partida de TOTS els marcadors. |
 
@@ -45,7 +45,6 @@
 | `js/workflows/flow_mp4.js` | MP4 (densitat, debug) | Anàlisi de V1 (read-only) excepte `placeRawMarkers` i `debugBlockItems`. |
 | `js/workflows/flow_cut.js` | Cut (IN, OUT, TROSEJA) | Operacions atòmiques de timeline. Només usa `rippleOut` que és compartit — 🟡 precaució. |
 | `js/workflows/flow_render.js` | Render | Només usa `Render.queue` JSX. Sense dependències de timeline. |
-| `js/workflows/flow_retols.js` | Rètols (chyrons) | Delega a `14_Assembly_Logic.runGuidedAssembly()`. |
 | `js/workflows/flow_KF.js` | Keyframes | Només usa `Anim.*` JSX. Sense dependències de timeline V1. |
 | `js/workflows/flow_srt.js` | Subtítols | Només usa `Clips.getSubtitles()` i `10_Srt_Logic`. |
 | `jsx/modules/8_Markers.jsx` | Marcadors JSX | Funció pura: llegeix/escriu marcadors. No toca clips ni tracks. |

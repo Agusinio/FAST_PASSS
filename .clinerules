@@ -11,7 +11,7 @@ Respetar estrictamente la jerarquía en capas:
 1. **WORKFLOW** (`js/workflows/`) — El Orquestador. Dirige el flujo de negocio (`NEW`, `CUT`, `RENDER`). Llama a Logic e Inspectors.
 2. **ACTION LOGIC** (`js/logic/`) — El Ejecutor. Operaciones lógicas puras: parseo de metadatos, escaneo NAS, cálculo de timeline.
 3. **INSPECTORS** (`js/inspectors/`) — El Sensor. Recoge datos del entorno Premiere Pro (secuencia activa, nombre de proyecto, volumen actual).
-4. **CORE** (`js/core/`) — La Base. Estado global (`state.js`), configuración de usuario (`config.js`), utilidades cross-layer (`utils.js`, `logger.js`).
+4. **CORE** (`js/core/`) — La Base. Estado global (`state.js`), configuración de usuario (`config.js`), utilidades cross-layer (`utils.js`).
 5. **SYSTEM / JSX** (`jsx/modules/`) — El Músculo. Funciones atómicas ExtendScript bajo namespace `FASTPASS`. **CERO lógica de negocio aquí.**
 
 ---

@@ -684,33 +684,6 @@ if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers
         // fase F6·Ordre del grup MARCADORS.
         if (btnMapaImport) btnMapaImport.addEventListener('click', () => callWorkflow('Mapa', 'run'));
 
-        // Botons ocults de moment (preservats per a ús futur):
-        // const btnResetGrafs = document.getElementById('btnResetGrafs');
-        // const btnPlaceGrafic = document.getElementById('btnPlaceGrafic');
-        // const btnGraph169 = document.getElementById('btnPlaceGraph169');
-        // const btnBg = document.getElementById('btnBg');
-        // const btnPlaceStructure = document.getElementById('btnPlaceStructure');
-        // const btnSetBlocIn = document.getElementById('btnSetBlocIn');
-        // const btnSetBlocOut = document.getElementById('btnSetBlocOut');
-        // if (btnResetGrafs) btnResetGrafs.addEventListener('click', () => callWorkflow('Retols', 'runResetGraphics'));
-        // if (btnPlaceGrafic) btnPlaceGrafic.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraphic'));
-        // if (btnGraph169) btnGraph169.addEventListener('click', () => callWorkflow('Retols', 'runPlaceGraph169'));
-        // if (btnBg) btnBg.addEventListener('click', () => callWorkflow('Retols', 'runPlaceBackground'));
-        // if (btnPlaceStructure) btnPlaceStructure.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'estructura'));
-        // if (btnSetBlocIn) btnSetBlocIn.addEventListener('click', () => callWorkflow('Assembly', 'runInOutCrudo'));
-        // if (btnSetBlocOut) btnSetBlocOut.addEventListener('click', () => callWorkflow('Assembly', 'updateBlocOutFromCTI'));
-        // // --- BOTONES DE ANÁLISIS (DEBUG MARCADORES) ---
-        // const btnMarksCrudo = document.getElementById('btnMarksCrudo');
-        // const btnInoutCocinado = document.getElementById('btnInoutCocinado');
-        // const btnMarksCocinado = document.getElementById('btnMarksCocinado');
-        // const btnCapturaUsuarioInOut = document.getElementById('btnCapturaUsuarioInOut');
-        // const btnCapturaUsuarioMarks = document.getElementById('btnCapturaUsuarioMarks');
-        // if (btnMarksCrudo) btnMarksCrudo.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'crudo'));
-        // if (btnInoutCocinado) btnInoutCocinado.addEventListener('click', () => callWorkflow('Assembly', 'runInOutCocinado'));
-        // if (btnMarksCocinado) btnMarksCocinado.addEventListener('click', () => callWorkflow('Assembly', 'placeMarkers', 'cocinado'));
-        // if (btnCapturaUsuarioInOut) btnCapturaUsuarioInOut.addEventListener('click', () => callWorkflow('Assembly', 'capturaUsuarioInOut'));
-        // if (btnCapturaUsuarioMarks) btnCapturaUsuarioMarks.addEventListener('click', () => callWorkflow('Assembly', 'capturaUsuarioMarks'));
-
         // --- BOTONS CHYRONS (6 tipus independents via marcadors) ---
         const btnChyronTitol = document.getElementById('btnChyronTitol');
         const btnChyronConductor = document.getElementById('btnChyronConductor');
