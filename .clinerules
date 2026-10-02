@@ -100,6 +100,8 @@ powershell -Command "Test-Path 'ruta\archivo.js'"
 | `node : not recognized` | Node no en PATH | Buscar alternativa en PS |
 | `Out-File`/`Set-Content` añade BOM | PS 5.1 escribe UTF-8 con BOM | Usar `[System.IO.File]::WriteAllText()` |
 | Rutas UNC no accesibles | `read_file` no soporta UNC | Usar `execute_command` con PS para operaciones de archivo |
+| Los acentos de un `.ps1` aparecen como `Â«`/`Ã©` en el fichero que escribe | PS 5.1 lee el `.ps1` **sin BOM** como ANSI (CP1252) → los literales con acentos se corrompen al volcarlos | Fuente **sólo-ASCII** + `[char]0x00AB` (o escribir el `.ps1` con BOM UTF-8) |
+| Un script que inserta líneas en un JSON lo deja inválido y no parsea | Faltó la **coma** del campo anterior y no se validó antes de escribir | Backup previo + `ConvertFrom-Json` en `try/catch` **ANTES** de `WriteAllText`; añadir la coma si falta |
 
 ### Chaining
 
