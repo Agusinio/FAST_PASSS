@@ -525,6 +525,9 @@
         // ═══════════════════════════════════════════════════════════════
         IPDPLUS: {
             SRC: 2,        // pista del clip que es transforma (es recorta i s'aparca a V3)
+            // (2026-10-01 · #126) V2 és la pista de la MÀSCARA (zona PROTEGIDA) i SRC hi
+            // coincideix → `runIpdPlus` hi fa VIGILÀNCIA (`_avisMascara`) i avisa que el
+            // clip MASCARA de l'interval es mourà a PARK.
             PARK: 3,       // pista on s'aparca el clip original (sense atributs)
             BASE: 1,       // pista del material base (es duplica a SRC i rep INFERIOR)
             // Atributs: `position` en px del frame · `scale` en % · crops en %
@@ -553,6 +556,20 @@
                     return;
                 }
                 log(`🎬 [IPD+] interval ${rng.start.toFixed(2)}s → ${rng.end.toFixed(2)}s (${(rng.end - rng.start).toFixed(2)}s)`);
+
+                // (2026-10-01 · #126) VIGILÀNCIA DE LA MÀSCARA (V2): la pista de la màscara
+                // és, a més, la SRC d'IPD+ → si hi ha un clip MASCARA dins l'interval,
+                // IPD+ se l'endú a PARK (V3) i deixa V2 ocupada per la còpia de V1 (el tros
+                // de fora de l'interval es manté i el Motion es preserva · #129).
+                const masks = await this._avisMascara(rng, 'IPD+', true);
+                if (masks.length) {
+                    const Tm = this._mascaraTrack();
+                    if (Tm === this.IPDPLUS.SRC || Tm === this.IPDPLUS.PARK || Tm === this.IPDPLUS.BASE) {
+                        log(`⚠️ [IPD+] la MÀSCARA viu a V${Tm} i és una pista d'IPD+ (SRC:V${this.IPDPLUS.SRC} PARK:V${this.IPDPLUS.PARK} BASE:V${this.IPDPLUS.BASE}) → el clip es mourà/retallarà dins l'interval. Si no el vols tocar, treu-lo de l'interval.`, 'WARN');
+                    } else {
+                        log(`ℹ️ [IPD+] la MÀSCARA (V${Tm}) no és cap pista d'IPD+ (SRC:V${this.IPDPLUS.SRC} PARK:V${this.IPDPLUS.PARK} BASE:V${this.IPDPLUS.BASE}) → no es toca.`);
+                    }
+                }
                 const park = await this._ipdPlusClipsEnRango(this.IPDPLUS.PARK, rng);
                 if (park.length > 0) {
                     log(`🎬 [IPD+] ja hi ha ${park.length} clip(s) a V${this.IPDPLUS.PARK} a l'interval → REVERTIR`);
@@ -725,6 +742,56 @@
                 }
             } catch (e) { log(`⚠️ [IPD+] llegint V${track}: ${e.message}`, 'WARN'); }
             return out;
+        },
+
+        /**
+         * _mascaraTrack: pista de la MÀSCARA (config; per defecte V2).
+         * (2026-10-01 · #126) Decisió de l'usuari: la màscara viu a V2 i «V4 ja NO és zona
+         * de màscara» → cap flux la transforma; només se'n fa VIGILÀNCIA.
+         */
+        _mascaraTrack: function () {
+            try {
+                const t = FASTPASS_UI.Config.get().tracks.video.mascara;
+                return (t != null) ? t : 2;
+            } catch (e) { return 2; }
+        },
+
+        /**
+         * _mascaraClips: clips de la pista de la MÀSCARA que SOLAPEN l'interval i que es
+         * reconeixen pel NOM (MASCARA / MÀSCARA), com feia el diagnòstic històric.
+         */
+        _mascaraClips: async function (rng, track) {
+            const T = (track != null) ? track : this._mascaraTrack();
+            const clips = await this._ipdPlusClipsEnRango(T, rng);
+            return clips.filter(c => /m[aà]scara/i.test(String(c.name || '')));
+        },
+
+        /**
+         * _avisMascara: VIGILÀNCIA de la MÀSCARA (#126): llista els clips MASCARA* de la
+         * pista de la màscara dins l'interval, per saber si el flux que crida els pot
+         * moure. Mai llança: si la pista no es pot llegir, avisa (WARN) i retorna [] perquè
+         * el flux continuï.
+         *   · `amenaca` = true  → el flux que crida SÍ que escriu a aquesta pista (WARN).
+         *   · `amenaca` = false → només informatiu (la pista no es toca).
+         * Retorna la llista de clips MASCARA* trobats.
+         */
+        _avisMascara: async function (rng, origen, amenaca) {
+            const T = this._mascaraTrack();
+            const et = `🛡️ [${origen}] MÀSCARA (V${T})`;
+            let ms = [];
+            try { ms = await this._mascaraClips(rng, T); }
+            catch (e) {
+                log(`⚠️ ${et}: no s'ha pogut llegir la pista (${e.message})`, 'WARN');
+                return ms;
+            }
+            if (!ms.length) {
+                log(`${et}: cap clip a l'interval ${rng.start.toFixed(2)}s→${rng.end.toFixed(2)}s`);
+                return ms;
+            }
+            for (const m of ms) {
+                log(`${et}: "${m.name}" V${T}[${m.index}] ${m.start.toFixed(2)}s→${m.end.toFixed(2)}s`, amenaca ? 'WARN' : 'DEBUG');
+            }
+            return ms;
         },
 
         /**
@@ -965,14 +1032,22 @@
                 if (lockedA.length) log(`⚠️ [DoblePantalla] PISTES D'ÀUDIO BLOQUEJADES: A${lockedA.map(t => t.index + 1).join(', A')}`, "WARN");
             } catch (eDiag) { log(`⚠️ [DoblePantalla] PAS0: no s'ha pogut analitzar el diag: ${eDiag.message}`); }
 
+            // (2026-10-01 · #126) VIGILÀNCIA DE LA MÀSCARA (V2 · informativa): la DF NO
+            // escriu a V2 (V4 ja NO és zona de màscara), però convé saber si la màscara
+            // cau dins de l'interval abans de tocar res.
+            await this._avisMascara({ start: dp.data.v1Start, end: dp.data.v1End }, 'DoblePantalla', false);
+
             getUtils().status("PAS0 OK: clip 16:9 detectat", "exito");
             return true;
         },
 
         /**
-         * Nota: el PAS automàtic de la MASCARA PER REELS (recortar i pujar a V4) s'ha
-         * OMIÉS del flujo perquè l'operador ja la col·loca manualment a V4.
-         * El flujo comença directament amb el MP4: PAS1 = moure V1→V2.
+         * (2026-10-01 · #126) NO hi ha cap PAS de MASCARA PER REELS: la màscara viu a
+         * **V2** (zona PROTEGIDA) i «**V4 ja NO és zona de màscara**» (decisió de
+         * l'usuari del 2026-10-01). La DF escriu a `video1` (V4), `video2` (V5) i
+         * `fondos` (V3) però MAI a V2, així que aquí no cal cap guarda; la vigilància de
+         * la màscara es fa a PAS0 (`_avisMascara`, informativa).
+         * El flujo comença directament amb el MP4: PAS1 = moure V1→V4.
          */
 
         _dpPaso1: async function (dp) {
@@ -1093,9 +1168,9 @@
             log(`🎬 [DoblePantalla]   V3 verificat → ${v3Check}`);
             try {
                 const v3Data = JSON.parse(v3Check);
-                if (v3Data && v3Data.name && v3Data.name.indexOf("MASCARA") !== -1) {
-                    log(`⚠️ [DoblePantalla]   ATENCIÓ: V3 conté la MASCARA, no el MP4.`, "WARN");
-                }
+                // (2026-10-01 · #126) Diagnòstic de MASCARA ELIMINAT: llegia `video2` (V5)
+                // i l'anomenava V3, i V4/V5 ja NO són zones de màscara (la màscara viu a
+                // V2 i es vigila a PAS0 amb `_avisMascara`).
                 // Diagnòstic: comparar in/out del V3 amb els del V2 origen
                 const v2Raw = await callJSX(`Clips.get(${T_V2}, ${v2NewIdx}, 'video')`);
                 log(`🎬 [DoblePantalla]   V2 origen (in/out) → ${v2Raw}`);

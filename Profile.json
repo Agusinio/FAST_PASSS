@@ -21,6 +21,7 @@
         "TNs": {
             "tracks": {
                 "v_mp4": 1,
+                "v_mascara": 2,
                 "v_fondos": 3,
                 "v_graf": 3,
                 "v_graficos": 3,
@@ -63,6 +64,7 @@
         "Sumari Matins": {
             "tracks": {
                 "v_mp4": 1,
+                "v_mascara": 2,
                 "v_fondos": 3,
                 "v_graf": 3,
                 "v_graficos": 3,
@@ -88,6 +90,7 @@
         "Fotomató": {
             "tracks": {
                 "v_mp4": 1,
+                "v_mascara": 2,
                 "v_fondos": 3,
                 "v_graf": 3,
                 "v_graficos": 3,
@@ -105,6 +108,7 @@
         "User Defined": {
             "tracks": {
                 "v_mp4": 1,
+                "v_mascara": 2,
                 "v_fondos": 3,
                 "v_graf": 3,
                 "v_graficos": 3,

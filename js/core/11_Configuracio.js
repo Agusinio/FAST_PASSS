@@ -14,7 +14,8 @@
 
     // Per defecte, si no hi ha Profile.json, usem aquests fallbacks
     // Tracks alineats amb Profile.json (2026-09-22, remapatge per evitar col·lisions):
-    //   v_mp4:1 · intocable:2 · v_fondos:3 · v_graf:4 · v_graficos:5 · v_tema:6 · v_chyrons:7 · v_lloc:8
+    //   v_mp4:1 · v_mascara:2 (MÀSCARA · PROTEGIDA · #126) · v_fondos:3 · v_graf:4
+    //   · v_graficos:5 · v_tema:6 · v_chyrons:7 · v_lloc:8
     let _activeConfig = {
         general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 2.5, clipOutMarginSec: 0, clipExtraTailSec: 60 },
         // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
@@ -36,6 +37,7 @@
             "TNs": {
                 tracks: {
                     v_mp4:    1,
+                    v_mascara: 2,    // (2026-10-01 · #126) V2 = MÀSCARA (zona PROTEGIDA)
                     v_fondos: 3,
                     v_graf:   3,
                     v_graficos: 3,
@@ -56,7 +58,7 @@
             },
             "Sumari Matins": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
+                    v_mp4: 1, v_mascara: 2, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
                     s_s1: 1, s_s2: 2
                 },
                 programas: [
@@ -70,14 +72,14 @@
             },
             "Fotomató": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
+                    v_mp4: 1, v_mascara: 2, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
                     s_s1: 1, s_s2: 2
                 },
                 programas: []
             },
             "User Defined": {
                 tracks: {
-                    v_mp4: 1, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
+                    v_mp4: 1, v_mascara: 2, v_fondos: 3, v_graf: 3, v_graficos: 3, v_tema: 6, v_chyrons: 7, v_lloc: 8, v_video1: 4, v_video2: 5, v_trad: 4,
                     s_s1: 1, s_s2: 2
                 },
                 programas: []
@@ -98,6 +100,11 @@
             const vTracks = {
                 mp4:       raw.v_mp4,
                 main:      raw.v_mp4,    // alias per flow_cut.js i flow_assembly.js
+                // (2026-10-01 · #126) MÀSCARA DE PISTA: V2 = «Màscara (PROTEGIT)». Decisió de
+                // l'usuari: la màscara viu aquí i «V4 ja NO és zona de màscara» → els fluxos
+                // que escriuen en aquesta pista (IPD+ SRC:2) hi fan VIGILÀNCIA amb avís
+                // (flow_graphics.js → `_avisMascara`).
+                mascara:   (raw.v_mascara !== undefined) ? raw.v_mascara : 2,
                 fondos:    raw.v_fondos,
                 graf:      raw.v_graf,
                 // (2026-09-22) GRAFISMOS: clau pròpia (v_graficos) perquè vagin a la seva pista
