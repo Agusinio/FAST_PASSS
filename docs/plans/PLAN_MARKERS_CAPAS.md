@@ -15,6 +15,13 @@
    - **Cortes reales de V1** (clips del timeline, ya afinados por el usuario).
    - **Δ de correlación**: se **mide en la capa 1** (dónde cayó el marcador duro vs dónde quedó el
      definitivo) y **se aplica dentro** de cada capa siguiente. No es un paso suelto (F3.5 integrado).
+4. **Ninguna fase puede reescribir una posición DESPUÉS del snap sin volver a imantar** (BUG #140,
+   2026-10-05). El snap al corte más cercano vive en **F4·Faro** (`_chooseSnapTarget`), pero
+   `placeUngroupedMarkers` (Vermells = última fase de `runFullPipelineOut`) hacía upsert por prefijo
+   con la posición **ideal** (OnAir/prevista cruda) y `Markers.placeByPrefixes` hace DELETE+CREATE
+   → movía el marcador y **deshacía** el snap. Toda fase que escriba posición después de F4 debe
+   llamar a `_imantAlCorte(pos, clips, hasOnAir, label)` (mismo motor y mismas ventanas que F4:
+   `snapWindowFaroSec` con OnAir, `snapWindowDeducedSec` sin él; idempotente si ya está en un corte).
 
 ## Capas
 | Capa | Nombre | Datos | Puede tocar |

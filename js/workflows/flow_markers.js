@@ -40,6 +40,31 @@
             (ff < 10 ? '0' + ff : ff);
     };
 
+    /**
+     * isIpdLine (2026-10-05 · BUG #139): l'ítem és un IPD (interrupció
+     * publicitària) dins el bloc?
+     *
+     * PER QUÈ: el cas real DONAPAS + DIRECTE (IPDs disparats a sobre del
+     * directe) és `agrupacio == null` + `durada > 0` → queia al VERMELL (1) i el
+     * filtre de vermells de _safePlaceByPrefixes el descartava com si no fos del
+     * bloc. La regla "IPD = turquesa (7)" JA existia, però NOMÉS a F5·Inferits i
+     * al detector de runAplicarIpdDesdeMarkers → aquí passa a ser l'ÚNICA font
+     * de veritat per a TOTES les fases.
+     *
+     * És una funció de MÒDUL (no un mètode amb `this`) perquè la regla no pot
+     * dependre del receptor: `_getColorIdx` rep crides de 12 punts i el color no
+     * ha de canviar segons com s'invoqui.
+     *
+     * @param {Object} line - ítem d'escaleta (num/titol)
+     * @returns {boolean}
+     */
+    function isIpdLine(line) {
+        if (!line) return false;
+        var num = (line.num !== null && line.num !== undefined) ? String(line.num) : '';
+        var titol = (line.titol !== null && line.titol !== undefined) ? String(line.titol) : '';
+        return /IPD/i.test(num + ' ' + titol);
+    }
+
     FASTPASS_UI.Workflows.Markers = {
 
         // ═══════════════════════════════════════════════════════════════
@@ -221,8 +246,16 @@
         // agrupacio != null → 6 (Blau)
         // agrupacio == null + durada == 0 → 4 (Groc, gràfics)
         // agrupacio == null + durada > 0 → 1 (Vermell)
+        // num/titol amb "IPD" → 7 (Turquesa, IPD DINS el bloc)
         // ═══════════════════════════════════════════════════════════════
+
         _getColorIdx: function (line) {
+            // (2026-10-05 · BUG #139) IPD DINS EL BLOC → TURQUESA (7), i va PRIMER:
+            // un IPD no és mai un gràfic ni un ítem "no verticalitzable de fora del
+            // bloc" — és un ítem EMÈS dins el bloc (tapa el directe). Sense això,
+            // l'IPD no agrupat sortia VERMELL → F6 l'excloïa de la guarda d'ordre
+            // (:2619) i el filtre de vermells (:170-199) el podia descartar.
+            if (isIpdLine(line)) return 7;
             // (2026-09-30) BUG #122 · ORDRE DELS CHECKS: el GRÀFIC mana SEMPRE, també quan
             // porta agrupació (escaleta TNV: '01 GF' amb agrupacio=v1). ABANS el check
             // d'agrupació anava primer → un gràfic agrupat sortia BLAU (6) i la fase Vermells
@@ -908,8 +941,11 @@
             // ── Afegir ítems no agrupats intercalats (D12) ──
             // ── (2026-09-17) TOTS els ítems NO agrupats del bloc ──────────────
             // Cas: bloc en calent amb ítems que no són del projecte (sense V1).
-            // ABANS només se'n marcava UN (firstUngroupedItem); ara es marquen TOTS
-            // en VERMELL (color 1, MARKER_COLORS.md) per delimitar el bloc.
+            // ABANS només se'n marcava UN (firstUngroupedItem); ara es marquen TOTS.
+            // (2026-10-05 · BUG #139) El color NO es força aquí: va SEMPRE per
+            // `_getColorIdx`. Un IPD no agrupat és una interrupció EMESA dins el bloc
+            // (turquesa, 7), no material aliè; amb `colorIdx: 1` fix el pintava VERMELL
+            // i, a més, el filtre de vermells de `_safePlaceByPrefixes` el podia DESCARTAR.
             var _ugList = (ungroupedItems && ungroupedItems.length) ? ungroupedItems
                 : (firstUngroupedItem ? [firstUngroupedItem] : []);
             for (var _ugi = 0; _ugi < _ugList.length; _ugi++) {
@@ -922,14 +958,15 @@
                 var _ugPosSec = tlClipStartSec + (_ugOnAirSec - refF1);
                 if (!(_ugPosSec >= 0)) continue;
                 var _ugComment = ((_ug.num ? _ug.num + ' - ' : '') + (_ug.titol || '').substring(0, 60)).trim();
+                var _ugColor = this._getColorIdx(_ug);
                 placements.push({
                     prefix: _ug.num,
                     timeSec: _ugPosSec,
                     comment: _ugComment,
-                    colorIdx: 1,
-                    name: 'color=1'
+                    colorIdx: _ugColor,
+                    name: 'color=' + _ugColor
                 });
-                log('   🔴 [F1·Ungrouped] ' + (_ug.num || '?') + ': → ' + _ugPosSec.toFixed(2) + 's [VERMELL: no es del bloc]');
+                log('   ' + (_ugColor === 1 ? '🔴' : '🔷') + ' [F1·Ungrouped] ' + (_ug.num || '?') + ': → ' + _ugPosSec.toFixed(2) + 's [color ' + _ugColor + (_ugColor === 1 ? ': no es del bloc' : ': IPD dins el bloc') + ']');
             }
             if (firstUngroupedItem) {
                 var ugOnAir = firstUngroupedItem.horaEntradaOnAir;
@@ -941,14 +978,15 @@
                         if (ugPosSec >= 0) {
                             var ugComment = (firstUngroupedItem.num ? firstUngroupedItem.num + ' - ' : '') + (firstUngroupedItem.titol || '').substring(0, 60);
                             ugComment = ugComment.trim();
+                            var ugColor = this._getColorIdx(firstUngroupedItem);
                             placements.push({
                                 prefix: firstUngroupedItem.num,
                                 timeSec: ugPosSec,
                                 comment: ugComment,
-                                colorIdx: 1,
-                                name: 'color=1'
+                                colorIdx: ugColor,
+                                name: 'color=' + ugColor
                             });
-                            log('   🔴 [F1·Ungrouped] ' + (firstUngroupedItem.num || '?') + ': → ' + ugPosSec.toFixed(2) + 's');
+                            log('   ' + (ugColor === 1 ? '🔴' : '🔷') + ' [F1·Ungrouped] ' + (firstUngroupedItem.num || '?') + ': → ' + ugPosSec.toFixed(2) + 's [color ' + ugColor + ']');
                         }
                     }
                 }
@@ -964,8 +1002,10 @@
         },
 
         /**
-         * placeUngroupedMarkers (2026-09-29 · BUG #110): col·loca en VERMELL (color 1) els
-         * marcadors dels ítems que NO són del bloc (`agrupacio:null`, `ungroupedItems`).
+         * placeUngroupedMarkers (2026-09-29 · BUG #110): col·loca els marcadors dels ítems
+         * que NO són del bloc (`agrupacio:null`, `ungroupedItems`). El color surt SEMPRE de
+         * `_getColorIdx` → 1 (VERMELL) per al material aliè i 7 (TURQUESA) per als IPD,
+         * que són interrupcions EMESES dins el bloc (2026-10-05 · BUG #139).
          *
          * PER QUÈ UN MÈTODE PROPI: els vermells només es creaven dins de `placeOnAirMarkers`
          * (F1), i això tenia dos forats:
@@ -982,7 +1022,7 @@
          * per prefix). No esborra ni toca cap altre marcador.
          */
         placeUngroupedMarkers: async function () {
-            log('🔴 [Ungrouped] Col·locant marcadors VERMELLS dels ítems no agrupats...');
+            log('🔴 [Ungrouped] Col·locant marcadors dels ítems no agrupats (VERMELL; els IPD → TURQUESA)...');
             try { await this.ensureExtractedRef(window.FASTPASS_UI.State); } catch (ePrepUg) { /* noop */ }
 
             const ctxData = await getAssemblyContext().loadAssemblyContext();
@@ -1015,12 +1055,26 @@
                     log('   ⏭️ [Ungrouped] ' + (ug.num || '?') + ': cau fora del clip (' + pos.toFixed(2) + 's). Saltant.');
                     continue;
                 }
+                // (2026-10-05 · BUG #140) AJUST AL CORTE MÉS PROPER: aquesta fase és l'ÚLTIMA
+                // del pipeline OUT&GO (js/main.js runFullPipelineOut), o sigui que corre
+                // DESPRÉS de F4·Faro. Sense imantar, l'upsert per prefix de placeByPrefixes
+                // tornava a deixar el marcador a la posició IDEAL (OnAir/prevista crua) i
+                // DESFEIA el snap que F4 ja havia fet → els IPD no quedaven clavats al tall
+                // (queixa d'usuari 2026-10-05). S'usa el MATEIX motor que F4 (_chooseSnapTarget)
+                // i la mateixa finestra: OnAir → snapWindowFaroSec; només prevista → snapWindowDeducedSec.
+                pos = this._imantAlCorte(pos, clips, tcOnAir, 'Ungrouped ' + (ug.num || '?'));
                 var comment = ((ug.num ? ug.num + ' - ' : '') + (ug.titol || '').substring(0, 60)).trim();
-                placements.push({ prefix: ug.num, timeSec: pos, comment: comment, colorIdx: 1, name: 'color=1' });
-                log('   🔴 [Ungrouped] ' + (ug.num || '?') + ': → ' + pos.toFixed(2) + 's [VERMELL: no és del bloc · ref ' + tc + (tcOnAir ? ' OnAir' : ' prevista') + ']');
+                // (2026-10-05 · BUG #139) El color NO es força a 1: aquesta fase és l'ÚLTIMA
+                // del pipeline OUT&GO (js/main.js runFullPipelineOut), de manera que un
+                // `colorIdx: 1` fix tornava a pintar de VERMELL l'IPD que F2/F3/F5 ja havien
+                // col·locat bé (el marcador s'upserta per prefix). Un IPD → 7 (turquesa);
+                // la resta d'aliens al bloc → 1 (vermell).
+                var ugColor = this._getColorIdx(ug);
+                placements.push({ prefix: ug.num, timeSec: pos, comment: comment, colorIdx: ugColor, name: 'color=' + ugColor });
+                log('   ' + (ugColor === 1 ? '🔴' : '🔷') + ' [Ungrouped] ' + (ug.num || '?') + ': → ' + pos.toFixed(2) + 's [color ' + ugColor + (ugColor === 1 ? ': no és del bloc' : ': IPD dins el bloc') + ' · ref ' + tc + (tcOnAir ? ' OnAir' : ' prevista') + ']');
             }
 
-            if (placements.length === 0) { log('🔴 [Ungrouped] Cap marcador vermell per col·locar. ✓ FINALITZAT.'); return; }
+            if (placements.length === 0) { log('🔴 [Ungrouped] Cap marcador per col·locar. ✓ FINALITZAT.'); return; }
             var result = await this._safePlaceByPrefixes(placements, 'Ungrouped');
             log('🔴 [Ungrouped] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
         },
@@ -1964,6 +2018,53 @@
         },
 
         /**
+         * _imantAlCorte: (2026-10-05 · BUG #140) «Ajust al corte más cercano» per a un
+         * marcador que NO passa per F4·Faro.
+         *
+         * PER QUÈ: F4·Faro és l'única fase que imanta els marcadors al tall real, i
+         * `placeUngroupedMarkers` (ítems no agrupats: vermells + IPD turquesa) és la
+         * ÚLTIMA fase del pipeline OUT&GO → el seu upsert per prefix deixava el marcador
+         * a la posició IDEAL (OnAir/prevista crua) i desfeia el snap. Amb això la fase
+         * aplica el mateix criteri que F4 (passada per `_chooseSnapTarget`: ruptura de
+         * densitat > tall d'obertura > tall real) i la mateixa finestra.
+         *
+         * SEMÀNTICA (regla d'usuari 2026-09-25): l'OnAir/prevista marca la ZONA, el CORTE
+         * la CONCRETA. Si ja està clavat a un tall (±0,15 s) no es mou (idempotent).
+         *
+         * @param {number} pos - posició ideal (s de timeline)
+         * @param {Array} clips - clips de V1 [{start,end}]
+         * @param {boolean} hasOnAir - true = faro (finestra curta) · false = deduït (llarga)
+         * @param {string} label - etiqueta pel log
+         * @returns {number} posició imantada (o la mateixa si no hi ha tall a la finestra)
+         */
+        _imantAlCorte: function (pos, clips, hasOnAir, label) {
+            try {
+                if (!clips || clips.length === 0) return pos;
+                if (this._isOnCut(pos, clips) !== null) {
+                    log('   🧲 [' + label + '] ' + pos.toFixed(2) + 's ja és a un tall → no es mou');
+                    return pos;
+                }
+                var win = hasOnAir ? this._snapWindowFaro() : this._snapWindowDeduced();
+                var breaks = [];
+                try {
+                    var df = this._calcDensityFootprint(clips);
+                    breaks = (df && df.breaks) ? df.breaks : [];
+                } catch (eB) { breaks = []; }
+                var pick = this._chooseSnapTarget(pos, win, !hasOnAir, breaks, clips);
+                if (pick && pick.target !== null && isFinite(pick.target)) {
+                    log('   🧲 [' + label + '] ' + pos.toFixed(2) + 's → ' + Number(pick.target).toFixed(2) +
+                        's (' + pick.why + ', finestra ±' + win.toFixed(1) + 's)');
+                    return pick.target;
+                }
+                log('   🧲 [' + label + '] ' + pos.toFixed(2) + 's: cap corte dins ±' + win.toFixed(1) + 's → es manté la posició ideal');
+                return pos;
+            } catch (e) {
+                log('⚠️ [imantAlCorte] ' + e.message, 'WARN');
+                return pos;
+            }
+        },
+
+        /**
          * sil_dump: Botó TEST «SIL». Només bolca el mapa de SILENCIS del bloc al log
          * (no col·loca res). Serveix per ajustar llindar/durada mínima amb dades reals.
          */
@@ -2437,9 +2538,11 @@
 
                 var titol = (line.titol || '').substring(0, 60).trim();
                 var comment = ((num + ' - ') + titol).trim();
-                // IPD → turquesa (7), la convenció que detecta runAplicarIpdDesdeMarkers
-                var isIpd = /IPD/i.test(num + ' ' + titol);
-                var colorIdx = isIpd ? 7 : this._getColorIdx(line);
+                // (2026-10-05 · BUG #139) La regla "IPD → turquesa (7)" viu ara a
+                // _getColorIdx (vegeu isIpdLine) perquè TOTES les fases la respectin;
+                // aquí només es conserva el flag per etiquetar el log.
+                var isIpd = isIpdLine(line);
+                var colorIdx = this._getColorIdx(line);
 
                 log('   📍 [F5·Inferits] ' + num + (isIpd ? ' [IPD]' : '') + ': → ' + tFinal.toFixed(2) + 's · ' + why + ' · color=' + colorIdx +
                     (Math.abs(tFinal - tCand) > 0.05 ? ' (ajustat de ' + tCand.toFixed(2) + 's per no xocar amb el veí)' : ''));
