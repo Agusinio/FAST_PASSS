@@ -157,7 +157,19 @@
      * @returns {string|null} ruta (separadors '/') o null si no s'ha pogut escriure
      */
     ER._writeEscaleta = function (folderPath, filename, raw) {
-        var path = String(folderPath || '').replace(/[\/\\]+$/, '') + '/' + filename;
+        if (!folderPath) {
+            log('❌ [ER:Fetch] Carpeta destí desconeguda: no es pot desar ' + filename, 'ERROR');
+            return null;
+        }
+        // ── BUGFIX (2026-10-05) ──────────────────────────────────────────────
+        // cep.fs.writeFile torna err=3 (ERR_NOT_FOUND) si la carpeta pare no
+        // existeix. La FOTO es pot prémer ABANS de cap execució NOU (carpeta del
+        // bloc encara per crear) → la foto es perdia amb "No s'ha pogut desar"
+        // malgrat que l'API hagués donat l'escaleta (i sense Node no hi ha pla B).
+        // Regla UNC Path Safety: assegurar l'arbre des de JS abans d'escriure.
+        try { window.FASTPASS_UI.Utils.ensureFolders(folderPath); }
+        catch (eMk) { log('⚠️ [ER:Fetch] ensureFolders ha fallat: ' + eMk.message); }
+        var path = String(folderPath).replace(/[\/\\]+$/, '') + '/' + filename;
         try {
             var w = window.cep.fs.writeFile(path, raw);
             if (w && w.err === 0) return path;
