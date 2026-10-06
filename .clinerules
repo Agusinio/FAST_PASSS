@@ -123,7 +123,7 @@ powershell -Command "cd 'C:\ruta'; .\script.ps1; Write-Host 'Done'"
 | **Flag obligatorio** | `-C` para especificar directorio de trabajo |
 | **user.name** | `Agusinio` |
 | **user.email** | `agonzalez.x@gmail.com` |
-| **Remote origin** | `https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git` |
+| **Remote origin** | `https://github.com/Agusinio/FAST_PASSS.git` (verificado 2026-10-06 con `git remote -v`) |
 | **⚠️ Proxy corporativo** | `http://172.20.0.152:8088` (obligatorio — sin proxy, `schannel` falla TLS) |
 
 ### Comandos esenciales
@@ -157,7 +157,7 @@ Tipos:
 
 1. **No commit sin testear** — Verificar en Premiere antes de commitear fixes.
 2. **Commits atómicos** — Un commit = un tema.
-3. **No commitear basura** — `.gitignore` excluye `._*`, `graphify-out/`, `.roo/progress/*.md` (excepto README).
+3. **No commitear basura** — `.gitignore` excluye `._*`, `graphify-out/`, `bin/ffmpeg/`, `.cline/`. Los diarios `.roo/progress/*.md` SÍ se versionan (2026-10-06: registro vivo de sesiones).
 4. **Siempre usar `-C` flag** — Git Portable requiere ruta absoluta.
 5. **Push puede fallar** — La red puede ser inestable. Si falla, reintentar más tarde.
 
