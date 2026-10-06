@@ -19,13 +19,15 @@
          * capture: Orquestra la captura d'un frame (PNG) amb polling de seguretat.
          */
         capture: async function(destPath, timeSec = "-1") {
-            const tempBase = "fast_snap_" + Date.now();
-            const tempFileNoExt = "C:\\temp\\" + tempBase;
-            const tempFileFull = tempFileNoExt + ".png";
+            const tempFileFull = "C:\\temp\\fast_snap_" + Date.now() + ".png";
 
-            // 1. Exportació física via bridge literal
-            const resExec = await utils.callJSX(`Render.snapshot('${tempFileNoExt}', '${timeSec}')`);
-            if (resExec !== "OK_EXEC") return { success: false, log: resExec };
+            // 1. Exportació física via bridge literal.
+            // (2026-10-05) `Render.snapshot` NO existeix al motor JSX (retornava «ERR:…» i
+            // `callJSX` el convertia en "[]" → captura impossible). L'ÚNIC mecanisme és
+            // `Render.frame` (= `seq.exportFrame`, l'API estàndard). Amb timeSec "-1" captura
+            // la posició actual del cabezal.
+            const resExec = await utils.callJSX(`Render.frame('${tempFileFull}', '${timeSec}')`);
+            if (String(resExec).indexOf('OK') !== 0) return { success: false, log: resExec };
 
             // 2. Polling per verificar que s'ha escrit el fitxer
             let found = false;
