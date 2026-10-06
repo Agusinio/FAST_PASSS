@@ -1004,7 +1004,17 @@
         "root_cause": "El 2026-10-05 es va donar per morta la via QE `Render.snapshot` creient que no existia i es va passar tot a `Render.frame`. La deducció era FALSA: `$.global.Render.snapshot` (jsx/main.jsx:669) → `FASTPASS.Render.exportFrameQE` (jsx/modules/9_Render.jsx:57) → `qeSeq.exportFramePNG(tc, fsName)` és exactament el mètode que funcionava (commit 6d6cb54, 2026-07-10 «fix:freeze-funciona-importa-CHY-estira-final»). `Render.frame`, en canvi, crida `seq.exportFrame(t, path)` (9_Render.jsx:107), que NO és cap funció del Sequence del DOM de Premiere.",
         "fix": "IMPLEMENTAT 2026-10-06 (ZERO JSX nou, cap mètode JSX creat) — ordre de vies invertit a TOTS els punts de captura: (1) js/workflows/flow_chyrons.js `_capturePng` (serveix Tema-Títol, titulillos, cadena TITOLET i mapa): primer `Render.snapshot(base, tc)` (QE, ruta SENSE extensió) i només si el PNG no apareix, `Render.frame(path, tc)`; es comprova el fitxer amb les dues variants de nom (amb i sense `.png`) i el log diu la via emprada (`via QE | API`). (2) js/workflows/flow_render.js (Portada): mateixa inversió. (3) Els dos alias locals `const callJSX` passen a `(s, o)` i les captures criden amb `{ rawError: true }` → el `ERR:` real ja NO es converteix en `[]` (aquest emmascarament va ser el que va retardar el diagnòstic). (4) index.html: flow_chyrons.js?v=58→59 i flow_render.js?v=25→26.",
         "validation": "`bin/check_js_v8.ps1`: TOTAL 57 | OK 57 | FAIL 0 · `bin/check_dead.ps1`: exit 0 (cap fitxer mort). VALIDAT per l'usuari a Premiere (2026-10-06): la cadena TITOLET ja captura el PNG i col·loca les targetes — `📸 [_capture] PNG a …Snapshots/freeze_*.png (… KB, via QE, OK_EXEC)`, carpeta `Snapshots/` poblada i `🎯 Cadena TITOLET → V8 [a→b] · N targetes · congelat Xs`; cap `seq.exportFrame is not a function`.",
-        "note": "El `Render.frame` que queda a js/logic/9_Render_Logic.js:29 (`FASTPASS_UI.Logic.Render.capture`) pertany a un mòdul SENSE invocadors (decisió d'esborrat pendent) → no s'ha tocat. Lliçó: usar `{ rawError: true }` a QUALSEVOL captura nova — el `[]` per defecte amaga la causa real.",
+        "note": "El `Render.frame` que quedava a js/logic/9_Render_Logic.js:29 (`FASTPASS_UI.Logic.Render.capture`) ha quedat ESBORRAT el 2026-10-06 (mòdul orfe, 0 cridadors). Lliçó: usar `{ rawError: true }` a QUALSEVOL captura nova — el `[]` per defecte amaga la causa real.",
+        "date": "2026-10-06"
+      },
+      {
+        "id": "#143",
+        "status": "implementat_pendent_test",
+        "desc": "TITOLET: la targeta col·locada a la timeline durava 5 frames MÉS que el rètol cremat a l'aire (petició d'usuari 2026-10-06).",
+        "measure": "Mesurat per l'usuari a la timeline: cada targeta de la cadena TITOLET s'acaba 5 frames (0,20 s a 25 fps) després del final real del rètol cremat, i el congelat arrencava 5 frames tard (buit a l'enllaç vídeo viu → congelat).",
+        "root_cause": "La cadena prenia com a durada de la part viva la durada del MÈDIA del wott i, al cas detectat, `detEnd` sense cap descompte: totes dues 5 frames llargues respecte del que es veu a l'aire.",
+        "fix": "IMPLEMENTAT 2026-10-06 — js/workflows/flow_chyrons.js `_placeTitoletChain`: nou `TRIM = REV_FRAME * cfg.titolet.cardTrimFrames`. Els frames es retallen del FINAL de la durada TOTAL i de la part VIVA (`liveWant = max(0,5, cardDur − TRIM)`; al cas detectat `want = max(liveWant, detEnd − tStart − TRIM)`), de manera que el congelat entra aquests 5 frames ABANS i la seva LLARGADA no canvia → l'enllaç vídeo viu → congelat queda SENSE buit. Aplica a les branques detectada i encadenada, i el log del pla mostra la traça («viu Xs = clip Ys − 5 frames»). js/core/11_Configuracio.js: `TITOLET_DEFAULTS.cardTrimFrames = 5` (0 = comportament antic). index.html: flow_chyrons ?v=63 · 11_Configuracio ?v=25.",
+        "validation": "`bin/check_js_v8.ps1`: TOTAL 57 | OK 57 | FAIL 0 · `bin/check_dead.ps1`: exit 0 (0 orfes). PENDENT el test a Premiere (cal RECARREGAR el panell per als cache-bust v63/v25).",
         "date": "2026-10-06"
       }
     ]
@@ -1039,7 +1049,7 @@
   ],
 
   "git": {
-    "remote": "https://github.com/Agusinio/FAST_PASSS_81c-LIPO.git",
+    "remote": "https://github.com/Agusinio/FAST_PASSS.git  (verificat amb `git remote -v` el 2026-10-06; abans deia FAST_PASSS_81c-LIPO.git per error)",
     "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
     "status": "Sessió 2026-09-30 pujada a origin/main: 646d295 (cleanup P0-P5 · 218 fitxers) + 71df683 (registres #113-#116) + 5fefff1 (registre V3/#117) + 9a02643 (+596/-28 · BUGs #120-#124: getMediaDuration via ffprobe, ancoratge al cleanfeed real, GF/P2, parelles ruptures↔deduïts, portada hereta Motion) + 4cbed3c (registres #118-#124). PENDENT el test a Premiere dels #120-#124 (cal RECARREGAR el panell per als cache-bust v10/v29/v62/v24). #125 (GF-3 blau) RESOLT I VALIDAT per l'usuari el 30/09 (TNV V1 OK) — PENDENT DE COMMIT: js/workflows/flow_markers.js + index.html (?v=63) + els registres (#125 resolt, #126/#127 nous)."
