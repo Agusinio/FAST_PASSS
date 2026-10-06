@@ -12,7 +12,7 @@
     const getScanner = () => window.FASTPASS_UI.Logic.Scan;
 
     const log = (m, lvl) => getUtils().log(m, lvl || "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const callJSX = (s, o) => getUtils().callJSX(s, o);
 
     // ── PORTADA (2026-09-18) ─────────────────────────────────────────────────
     // Durada (s) dels clips temporals que es fan servir a la zona neta.
@@ -331,8 +331,8 @@
          *      amb retalls…) i el PNG queda sobre una foto diferent.
          *   3. La PRIMERA portada del tema (Scan.portadas) a V2, damunt de la còpia i
          *      centrada.
-         *   4. Cabezal a la zona neta i captura amb Render.snapshot (exportFrameQE:
-         *      el mateix mecanisme del freeze que ja funciona).
+         *   4. Cabezal a la zona neta i captura amb `Render.snapshot` (QE `exportFramePNG`,
+         *      el mecanisme que funciona · 2026-10-06) i `Render.frame` com a reserva.
          *   5. Neteja: s'esborren NOMÉS la còpia i la portada (per TEMPS) i el cabezal
          *      torna on era. No es toca cap mute/lock de cap pista.
          *   6. El PNG va a la MATEIXA carpeta que el MP4 i amb EXACTAMENT el mateix nom
@@ -563,23 +563,24 @@
                     log(`📐 [Portada] Out point = ${out0.toFixed(2)}s · captura a ${needOut}s`);
                 }
 
-                // Captura amb DUES vies: 1a QE (Render.snapshot → exportFramePNG) i, si no
-                // ha escrit el fitxer, l'API estàndard (Render.frame → seq.exportFrame).
-                const snapRes = await callJSX(`Render.snapshot('${utils.escape(destPath.replace(/\.png$/i, ''))}', ${tempTC})`);
-                log(`📸 [Portada] Render.snapshot → ${snapRes}`);
+                // (2026-10-06) El mètode que FUNCIONA és `Render.snapshot` = QE exportFramePNG
+                // (main.jsx:669 → FASTPASS.Render.exportFrameQE; commit 4327704 «captura de frame
+                // (Render.snapshot)»). Rep la ruta SENSE extensió. `Render.frame`
+                // (= `seq.exportFrame`) LLANÇA «ERR: seq.exportFrame is not a function» → queda
+                // com a segona opció per si algun dia l'API estàndard existeix al DOM.
+                let snapRes = await callJSX(`Render.snapshot('${utils.escape(destPath.replace(/\.png$/i, ''))}', ${tempTC})`, { rawError: true });
                 let pngOk = await waitFile(destPath, 20);
                 let via = 'QE';
                 if (!pngOk) {
-                    log("⚠️ [Portada] QE no ha escrit el PNG · provant la via API (Render.frame)...", "WARN");
-                    const rFrame = await callJSX(`Render.frame('${utils.escape(destPath)}', ${tempTC})`);
-                    log(`📸 [Portada] Render.frame → ${rFrame}`);
+                    snapRes = await callJSX(`Render.frame('${utils.escape(destPath)}', ${tempTC})`, { rawError: true });
                     pngOk = await waitFile(destPath, 20);
                     via = 'API';
                 }
+                log(`📸 [Portada] ${via} → ${snapRes}`);
 
                 // Verificació: el fitxer hi és i no és buit (`cep.fs.stat` no retorna .size
                 // en aquest equip → la mida es comprova LLEGINT).
-                if (!pngOk) throw new Error(`El PNG no s'ha escrit a ${destPath} (QE=${snapRes})`);
+                if (!pngOk) throw new Error(`El PNG no s'ha escrit a ${destPath} (via ${via} → ${snapRes})`);
                 const rr = window.cep.fs.readFile(destPath);
                 const pngBytes = (rr && rr.err === 0 && rr.data)
                     ? ((typeof rr.data.length === 'number') ? rr.data.length : (rr.data.byteLength || 0))

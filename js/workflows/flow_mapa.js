@@ -596,7 +596,8 @@
          * _freezeGrafEnd: (2026-09-23) CONGELAT al final del clip de grafisme, amb la
          * mateixa mecànica que el congelat del Tema-Títol (_freezeTemaTitol, flow_chyrons.js):
          *   1. Insereix el grafisme en un TC temporal buit (10:00) per fer un snapshot NET.
-         *   2. Mesura la seva durada i captura el SEU ÚLTIM FRAME (Render.snapshot).
+         *   2. Mesura la seva durada i captura el SEU ÚLTIM FRAME (Chyrons._capturePng · via
+         *      Render.snapshot/QE, amb Render.frame de reserva).
          *   3. Esborra el clip temporal, importa el PNG al bin GRAF i l'insereix estirat des
          *      del final del grafisme: 3 s com a màxim, o menys si el clip de V1 acaba abans.
          * Així l'usuari pot estirar/retallar el congelat còmodament al timeline.
@@ -642,8 +643,15 @@
 
                 var folder = await callJSX('Context.folder()');
                 var snapPath = folder + '\\Snapshots\\freeze_graf_' + Date.now() + '.png';
-                var snapRes = await callJSX("Render.snapshot('" + utils.escape(snapPath.replace(/\.png$/i, '')) + "', " + snapTC.toFixed(4) + ")");
-                L('   📸 [MAPA·freeze] Render.snapshot → ' + snapRes);
+                // (2026-10-06) La captura va pel mecanisme ÚNIC del projecte:
+                // `Chyrons._capturePng` → `Render.snapshot` (QE `exportFramePNG`; rep la ruta
+                // SENSE extensió) amb `Render.frame` de reserva, ampliació/restauració de
+                // l'Out point i verificació del PNG. (La nota del 2026-10-05 que donava per
+                // morta la via QE era ERRÒNIA: vegeu #142 i `bin/check_js_v8.ps1`.)
+                var capFz = await W.Chyrons._capturePng(snapPath.replace(/\.png$/i, ''), snapTC);
+                var snapRes = capFz.res, snapOk = capFz.ok;
+                L('   📸 [MAPA·freeze] Captura via ' + (capFz.via || '?') + ' → ' + snapRes + ' · PNG ' +
+                    (snapOk ? 'OK (' + Math.round(capFz.bytes / 1024) + ' KB)' : 'NO escrit'));
 
                 // 3. Treure el clip temporal de la pista de grafismes
                 try {
@@ -659,8 +667,8 @@
                     L('   ⚠️ [MAPA·freeze] No he pogut treure el temporal: ' + eRT.message, 'WARN');
                 }
 
-                if (!snapRes || String(snapRes).indexOf('OK') !== 0) {
-                    L('   ❌ [MAPA·freeze] Snapshot fallit: ' + snapRes, 'ERROR');
+                if (!snapOk) {
+                    L('   ❌ [MAPA·freeze] Snapshot fallit: el PNG no s\'ha escrit (' + snapRes + ')', 'ERROR');
                     return { success: false, duration: 0 };
                 }
 
