@@ -557,7 +557,7 @@
             }
 
             if (!cap.ok) {
-                log(`   ❌ [_freeze] Congelat SENSE PNG a ${snapPath} (Render.frame → ${snapResult}) → no es col·loca res`, "ERROR");
+                log(`   ❌ [_freeze] Congelat SENSE PNG a ${snapPath} (via ${cap.via || 'cap'} → ${snapResult}) → no es col·loca res`, "ERROR");
                 return { success: false, duration: 0 };
             }
 
@@ -569,7 +569,9 @@
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
             log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s`);
 
-            // 5. Importar PNG al bin CHY (el congelat ja és a snapPath: `_capturePng` → Render.frame)
+            // 5. Importar PNG al bin CHY (el congelat ja és a snapPath: `_capturePng` prova
+            //    `Render.snapshot` (via QE `exportFramePNG`) i deixa `Render.frame` de reserva;
+            //    `cap.via` diu quina de les dues ha escrit el PNG)
             const fileName = snapPath.split("\\").pop();
             const importPayload = JSON.stringify([snapPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'CHY')`);
@@ -881,6 +883,12 @@
             // clip) i, si cal, retall de seguretat per no envair la targeta següent.
             const snapTol = (TT.snapTolSec != null) ? TT.snapTolSec : 1.0;
             const freezeMax = (TT.freezeMaxSec != null) ? TT.freezeMaxSec : 15;
+            // (2026-10-06, 6a passada · petició d'usuari) `TRIM` = 5 frames (0,20 s): la
+            // targeta TITOLET sortia 5 frames MÉS LARGA que el rètol cremat a l'aire. Es
+            // retallen del FINAL —de la durada total I de la part viva— de manera que el
+            // congelat entra AQUESTS 5 frames ABANS i l'enllaç vídeo viu → congelat queda
+            // SENSE buit (la llargada del congelat no canvia). Vegeu `titolet.cardTrimFrames`.
+            const TRIM = REV_FRAME * ((TT.cardTrimFrames != null) ? Number(TT.cardTrimFrames) : 5);
             const orderIdx = [];
             for (let i = 0; i < list.length; i++) {
                 const c = ttCards ? ttCards[i] : null;
@@ -931,26 +939,28 @@
                     // part viva diferent (mesurat: 0,5 s … 5,2 s), un congelat de 0,5 s forçat
                     // a totes i, a les «llargues», un congelat de 3 s que sobrepassava el
                     // final detectat (75,40→78,40 s quan el rètol cremat s'acabava a 76,50 s).
-                    const liveWant = cardDur;
-                    let want = (detEnd !== null) ? Math.max(liveWant, detEnd - tStart) : (liveWant + freezeDur);
+                    const liveWant = Math.max(0.5, cardDur - TRIM);
+                    let want = (detEnd !== null) ? Math.max(liveWant, detEnd - tStart - TRIM) : (liveWant + freezeDur);
                     want = Math.min(want, liveWant + freezeMax);
                     planned.push({
                         chy: chy, name: shortName, start: tStart, want: want, liveWant: liveWant,
                         det: true, detEnd: detEnd, relIn: c.relIn, how: how
                     });
                     log(`   🧲 [${p.label}] TITOLET ${i + 1}/${list.length} «${shortName}» relIn ${c.relIn}s ` +
-                        `(cov ${c.maxCov}%) → ${tStart.toFixed(2)}s [${how}] viu ${liveWant.toFixed(2)}s` +
-                        ((detEnd !== null && want > liveWant + 0.05) ? ` + congelat ${(want - liveWant).toFixed(2)}s (final detectat ${detEnd.toFixed(2)}s)` : ''));
+                        `(cov ${c.maxCov}%) → ${tStart.toFixed(2)}s [${how}] viu ${liveWant.toFixed(2)}s ` +
+                        `(= clip ${cardDur.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames)` +
+                        ((detEnd !== null && want > liveWant + 0.05) ? ` + congelat ${(want - liveWant).toFixed(2)}s (final detectat ${detEnd.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames)` : ''));
                     if (tStart + want > maxEndTl) maxEndTl = tStart + want;
                 } else {
                     const tStart = maxEndTl + GAP;
-                    const want = cardDur + freezeDur;
+                    const liveW = Math.max(0.5, cardDur - TRIM);
+                    const want = liveW + freezeDur;
                     planned.push({
-                        chy: chy, name: shortName, start: tStart, want: want, liveWant: cardDur,
+                        chy: chy, name: shortName, start: tStart, want: want, liveWant: liveW,
                         det: false, detEnd: null, relIn: null, how: 'encadenat'
                     });
                     log(`   ⛓️ [${p.label}] TITOLET ${i + 1}/${list.length} «${shortName}» SENSE detecció → ` +
-                        `encadenat a ${tStart.toFixed(2)}s (viu ${cardDur.toFixed(2)}s + congelat ${freezeDur.toFixed(2)}s)`);
+                        `encadenat a ${tStart.toFixed(2)}s (viu ${liveW.toFixed(2)}s = clip ${cardDur.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames + congelat ${freezeDur.toFixed(2)}s)`);
                     maxEndTl = tStart + want;
                 }
             }
@@ -2195,8 +2205,10 @@
                 await callJSX(`Timeline.set(${snapTC})`);
                 await utils.delay(400);
                 const folder = await callJSX("Context.folder()");
-                // (2026-10-05) `Render.snapshot` NO existeix al motor JSX → el congelat va
-                // per `_capturePng` (= `Render.frame` + verificació que el PNG s'ha escrit).
+                // (2026-10-06) El congelat va per `_capturePng`: intenta `Render.snapshot` (via QE
+                // `exportFramePNG`) i deixa `Render.frame` com a reserva, i VERIFICA que el PNG
+                // s'hagi escrit (mida > 0). El 2026-10-05 es va donar la QE per morta per ERROR:
+                // vegeu el bloc de `_capturePng` (línia ~376).
                 const capBase = `${folder}\\Snapshots\\freeze_titulillo_${Date.now()}`;
                 const cap = await this._capturePng(capBase, snapTC);
                 const snapPath = cap.path;
@@ -2258,7 +2270,8 @@
          *     [titulillo animat] → [congelat estirat] → [titulillo invertit] → [Tema-Títol gran]
          *
          *  - El titulillo és el Tema-Títol petit (~1s, qtrle amb alpha).
-         *  - El congelat (PNG net del titulillo via Render.frame) permet ALLARGAR-LO fins al
+         *  - El congelat (PNG net del titulillo via `_capturePng`: `Render.snapshot` QE primer,
+         *    `Render.frame` de reserva) permet ALLARGAR-LO fins al
          *    gran (mateixa mecànica que _freezeTemaTitol, amb el desplaçament = durada del
          *    titulillo en lloc de 8s).
          *  - El titulillo INVERTIT (ffmpeg) fa la transició d'entrada al Tema-Títol gran.

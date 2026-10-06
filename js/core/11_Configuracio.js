@@ -82,6 +82,11 @@
         freezeGrabFrac: 0.6,   // instant del frame congelat = 60 % del clip quan la part viva
                                //    és el clip SENCER: al final hi ha l'animació de sortida i
                                //    el PNG quedaria buit (congelat invisible)
+        cardTrimFrames: 5,     // 🔴 (2026-10-06, 6a passada · MESURAT per l'usuari) La targeta
+                               //    TITOLET deia 5 frames MÉS que el rètol cremat a l'aire: aquests
+                               //    5 frames es retallen del FINAL (total i part viva) i el
+                               //    congelat hi entra 5 frames ABANS → l'enllaç vídeo viu →
+                               //    congelat queda SENSE buit. 0 = comportament antic.
         freezeMaxSec: 15,      // topall del congelat (seguretat): mai més de 15 s de frame
                                //    congelat, encara que la detecció digui que va durar més
     };
