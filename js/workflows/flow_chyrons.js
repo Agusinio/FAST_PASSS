@@ -18,7 +18,7 @@
     const getAssemblyLogic = () => window.FASTPASS_UI.Logic.Assembly;
 
     const log = (m, lvl) => getUtils().log(m, lvl || "DEBUG");
-    const callJSX = (s) => getUtils().callJSX(s);
+    const callJSX = (s, o) => getUtils().callJSX(s, o);
 
     // (2026-09-22) 1 frame a 25 fps. S'usa per alinear els titulillos (entrada i revers) a la
     // rejilla de frames del timeline i per als ajustos d'1 frame de la cobertura.
@@ -348,37 +348,205 @@
             return tail;
         },
 
-        _freezeTemaTitol: async function (wottName, placeTime, stretchEnd, label) {
+        /**
+         * _waitFile: Espera que `path` existeixi i tingui contingut (bytes > 0).
+         * `cep.fs.stat` no sempre retorna `.size` en aquest equip → es comprova LLEGINT
+         * el fitxer (mateix criteri que el congelat de la Portada, flow_render.js).
+         * @param {string} path
+         * @param {number} [tries] - Intents (100 ms cadascun)
+         * @returns {Promise<number>} Bytes escrits, o 0 si no hi és
+         */
+        _waitFile: async function (path, tries) {
+            const n = (typeof tries === 'number') ? tries : 20;
+            for (let i = 0; i < n; i++) {
+                try {
+                    const rr = window.cep.fs.readFile(path);
+                    if (rr && rr.err === 0 && rr.data) {
+                        const b = (typeof rr.data.length === 'number') ? rr.data.length : (rr.data.byteLength || 0);
+                        if (b > 0) return b;
+                    }
+                } catch (eR) { }
+                await getUtils().delay(100);
+            }
+            return 0;
+        },
+
+        /**
+         * _capturePng: Captura el frame del programa a `<pathNoExt>.png`.
+         *
+         * ⚙️ MECANISME dels congelats (corregit 2026-10-06). La via que funciona és la QE,
+         * exposada al panell com `Render.snapshot` (`main.jsx:669` → `FASTPASS.Render.exportFrameQE`
+         * → `qeSeq.exportFramePNG`). El 2026-10-05 es va donar per morta per error i es va passar
+         * a `Render.frame`, que al DOM actual NO existeix → TOTS els congelats (Tema-Títol,
+         * titulillo, mapa, portada) fallaven EN SILENCI.
+         * (2026-10-06) MESURAT al motor real (log run del 06/10 09:00): `Render.frame`
+         * (= `seq.exportFrame`) LLANÇA «ERR: seq.exportFrame is not a function» → TOTS els
+         * congelats fallaven igualment (cap PNG escrit, `Snapshots/` buida, res col·locat).
+         * La via BONA és la QE, exposada al panell com **`Render.snapshot`** (`main.jsx:669`
+         * → `FASTPASS.Render.exportFrameQE` → `qeSeq.exportFramePNG`): és el mecanisme del
+         * commit 6d6cb54 (2026-07-10 «fix:freeze-funciona-importa-CHY-estira-final») ⇒
+         * s'intenta ELLA primer i `Render.frame` queda com a segona opció.
+         *
+         * ⚠️ La captura és del PROGRAMA COMPOST: si el TC cau damunt de vídeo, el PNG se
+         * l'endú congelat a dins (invisible en un grafisme a pàgina completa, però NO en un
+         * titulillo amb alpha). Per als grafismes amb transparència cal usar `_emptyProgramTC`.
+         * Premiere no exporta un frame fora del rang de la seqüència → s'amplia temporalment
+         * l'Out point si cal i SEMPRE es restaura.
+         *
+         * @param {string} pathNoExt - Ruta absoluta SENSE extensió (.png s'afegeix)
+         * @param {number} tcSec - Instant a capturar
+         * @returns {Promise<{ok:boolean, res:string, bytes:number, path:string, via:string}>} via = 'QE'|'API'
+         */
+        _capturePng: async function (pathNoExt, tcSec) {
+            const utils = getUtils();
+            const path = /\.png$/i.test(String(pathNoExt)) ? pathNoExt : (pathNoExt + '.png');
+            const base = path.replace(/\.png$/i, '');
+            const tc = Number(tcSec) || 0;
+            let outRestore = null;
+            try {
+                const out0 = parseFloat(await callJSX('Timeline.getOut()') || '0');
+                if (out0 > 0 && out0 < tc + 1) {
+                    outRestore = out0;
+                    await callJSX(`Timeline.out(${(tc + 2).toFixed(3)})`);
+                    log(`   📐 [_capture] Out point ampliat ${out0.toFixed(2)}s → ${(tc + 2).toFixed(2)}s (per exportar el frame)`);
+                }
+            } catch (eOut) { }
+            let res = '', via = '';
+            // 🥇 1) `Render.snapshot` = via QE (`$.global.Render.snapshot` → main.jsx:669 →
+            //     `FASTPASS.Render.exportFrameQE` → `qeSeq.exportFramePNG`). ÉS EL MÈTODE QUE
+            //     FUNCIONA (commit 6d6cb54 «fix:freeze-funciona…», 2026-07-10): rep la ruta
+            //     SENSE extensió (base), converteix segons → HH:MM:SS:FF (25 fps) i crea la
+            //     carpeta destí. També va bé amb rutes UNC.
+            try { res = await callJSX(`Render.snapshot('${utils.escape(base)}', ${tc.toFixed(4)})`, { rawError: true }); }
+            catch (e) { res = 'ERR:' + e.message; }
+            let bytes = await this._waitFile(path, 15);
+            if (bytes === 0) bytes = await this._waitFile(base, 5);   // QE pot escriure sense .png
+            if (bytes > 0) via = 'QE';
+            // 🥈 2) API estàndard `Render.frame` (= `seq.exportFrame`): al DOM actual NO existeix
+            //     («ERR: seq.exportFrame is not a function»), però es manté com a segona via.
+            if (bytes === 0) {
+                let res2 = '';
+                try { res2 = await callJSX(`Render.frame('${utils.escape(path)}', ${tc.toFixed(4)})`, { rawError: true }); }
+                catch (e2) { res2 = 'ERR:' + e2.message; }
+                bytes = await this._waitFile(path, 15);
+                if (bytes > 0) via = 'API';
+                res = res + ' · API→ ' + res2;
+            }
+            if (outRestore !== null) {
+                try { await callJSX(`Timeline.out(${outRestore.toFixed(3)})`); } catch (eR) { }
+            }
+            if (bytes > 0) {
+                log(`   📸 [_capture] PNG a ${path} (${Math.round(bytes / 1024)} KB, t=${tc.toFixed(2)}s, via ${via}, ${res})`);
+            } else {
+                log(`   ❌ [_capture] Sense PNG a ${path} (QE+API → ${res})`, 'WARN');
+            }
+            return { ok: bytes > 0, res: res, bytes: bytes, path: path, via: via };
+        },
+
+        /**
+         * _emptyProgramTC: TC on el PROGRAMA és buit (cap clip a CAP pista de vídeo).
+         * (2026-10-05) `_v6FreeTC` només garanteix que la PISTA DESTÍ sigui lliure: a 600 s
+         * el vídeo de V1 del bloc hi és, i el PNG d'un titulillo (amb transparència) se
+         * l'enduria congelat a dins. Aquí es va DESPRÉS del darrer clip de totes les pistes.
+         * @param {number} needSec - Amplada mínima que necessita la inserció temporal
+         * @returns {Promise<number>} TC en segons
+         */
+        _emptyProgramTC: async function (needSec) {
+            const need = Math.max(0.5, Number(needSec) || 0);
+            let maxEnd = 0;
+            let nTracks = 0;
+            try { nTracks = parseInt(await callJSX("Tracks.count('video')") || '0', 10) || 0; } catch (eN) { nTracks = 0; }
+            for (let t = 1; t <= nTracks; t++) {
+                try {
+                    const cl = (await getClipsLogic().getTrackClips(t, 'video')) || [];
+                    for (const c of cl) { if (isFinite(c.end) && c.end > maxEnd) maxEnd = c.end; }
+                } catch (eC) { }
+            }
+            const tc = (maxEnd > 0) ? (Math.ceil((maxEnd + 5) / REV_FRAME) * REV_FRAME) : 600;
+            log(`   🧭 [_emptyProgramTC] programa buit a ${tc.toFixed(2)}s (darrer clip ${maxEnd > 0 ? maxEnd.toFixed(2) + 's' : '?'} · ${nTracks} pistes de vídeo · necessita ${need.toFixed(1)}s)`);
+            return tc;
+        },
+
+        /**
+         * _freezeTemaTitol: Col·loca un wott amb el seu congelat estirat:
+         *   1. Insereix el wott en una zona temporal lliure i captura el seu ÚLTIM frame.
+         *   2. Treu el clip temporal i insereix el wott d'animació a `placeTime` (`CUT_OFFSET`
+         *      segons = 8 s al Tema-Títol; a la cadena TITOLET, la durada de la targeta).
+         *   3. Importa el PNG al bin CHY i l'estira des de `cutTime` fins a `stretchEnd`.
+         * @param {string} wottName
+         * @param {number} placeTime - Inici del clip d'animació
+         * @param {number|null} stretchEnd - Final del congelat (null = final de la seqüència)
+         * @param {string} label
+         * @param {Object} [opts] - {track, animSec, tempTC, freezeSec, frameMid}: pista destí,
+         *   durada del clip d'animació (part viva), zona temporal lliure ja calculada i durada
+         *   del congelat (ho usa la CADENA TITOLET). `freezeSec` = 0 → SENSE congelat (s'estalvia
+         *   tot el procés del PNG). `frameMid` = captura el frame del congelat al 60 % del clip.
+         * @returns {Promise<{success:boolean, duration:number}>}
+         */
+        _freezeTemaTitol: async function (wottName, placeTime, stretchEnd, label, opts) {
+            const o = opts || {};
             const cfg = FASTPASS_UI.Config.get();
-            const T_THEME = cfg.tracks.video.tematitol;
+            const T_THEME = (parseInt(o.track, 10) > 0) ? parseInt(o.track, 10) : cfg.tracks.video.tematitol;
             const utils = getUtils();
             const escapedWott = utils.escape(wottName);
-            const CUT_OFFSET = 8.0;
-            log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'}`);
+            const CUT_OFFSET = (Number(o.animSec) > 0.1) ? Number(o.animSec) : 8.0;
+            // (2026-10-06, 5a passada) La cadena TITOLET passa `freezeSec` explícit: si és 0 no
+            // hi ha congelat i no cal fer el viatge sencer del PNG (temporal + captura + import).
+            const needFreeze = (o.freezeSec != null) ? (Number(o.freezeSec) > 0.05) : true;
+            log(`   🧊 [_freeze] wott="${wottName.substring(0, 50)}..." placeTime=${placeTime.toFixed(2)}s stretchEnd=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'} (V${T_THEME}, anim ${CUT_OFFSET.toFixed(2)}s, congelat ${needFreeze ? ((stretchEnd !== null) ? Math.max(stretchEnd - (placeTime + CUT_OFFSET), 0).toFixed(2) : 'fins al final') : 'NO'}s)`);
             // (2026-10-01 · #129) Zona temporal LLIURE: el PNG estirat del Tema-Títol anterior
             // pot cobrir el TC clàssic (600 s) i l'insert l'esborraria.
-            const TEMP_TC = await this._v6FreeTC(T_THEME, 12);
+            // (2026-10-06) Si el cridador ja n'ha calculat una (`opts.tempTC`, cadena TITOLET →
+            // `_emptyProgramTC`: TC lliure a TOTES les pistes), s'usa AQUELLA: el TITOLET és un
+            // grafisme amb TRANSPARÈNCIA i amb un TC amb contingut al darrere el PNG sortiria
+            // amb el vídeo incrustat (l'alfa es perd).
+            const TEMP_TC = (Number(o.tempTC) > 0) ? Number(o.tempTC) : await this._v6FreeTC(T_THEME, 12);
             const cutTime = placeTime + CUT_OFFSET;
 
-            // 1. Inserir Wott TEMPORALMENT a TC 10:00 (clip sol, sense cap altre clip)
+            // 0. SENSE congelat (5a passada): només el clip d'animació, sense tocar el PNG.
+            if (!needFreeze) {
+                await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
+                await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
+                log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s (SENSE congelat)`);
+                return { success: true, duration: 0 };
+            }
+
+            // 1. Inserir Wott TEMPORALMENT a la zona lliure (clip sol, sense cap altre clip)
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${TEMP_TC}, null, 'video')`);
             await utils.delay(300);
 
-            // 2. Snapshot a 10:08 (només el Wott, sense res al voltant)
-            const snapTC = TEMP_TC + CUT_OFFSET;
+            // 2. Capturar l'ÚLTIM frame del wott temporal. El TC es pren del final REAL del
+            //    clip temporal (no de TEMP_TC + 8 s: si el mèdia és més curt, aquell instant
+            //    cauria fora del clip i el PNG sortiria buit).
+            let tmpDur = CUT_OFFSET;
+            try {
+                const clT = (await getClipsLogic().getTrackClips(T_THEME, 'video')) || [];
+                const mine = clT.filter(c => Math.abs(c.start - TEMP_TC) < 0.5)[0];
+                if (mine && isFinite(mine.end) && mine.end > TEMP_TC + 0.05) tmpDur = Math.min(CUT_OFFSET, mine.end - TEMP_TC);
+            } catch (eTD) { }
+            // Instant del frame congelat. (2026-10-06, 5a passada) Amb `opts.frameMid` es captura
+            // al 60 % del clip: quan la part viva és el clip SENCER, el darrer frame cau a
+            // l'animació de sortida (o al final del mèdia) i el PNG sortiria BUID → «congelat
+            // invisible» (l'usuari ho veia com un congelat innecessari).
+            const grabFrac = (cfg && cfg.titolet && Number(cfg.titolet.freezeGrabFrac) > 0)
+                ? Number(cfg.titolet.freezeGrabFrac) : 0;
+            const grabOff = (o.frameMid === true && grabFrac > 0)
+                ? Math.min(tmpDur - REV_FRAME, Math.max(REV_FRAME, tmpDur * grabFrac))
+                : (tmpDur - REV_FRAME);
+            const snapTC = Math.max(TEMP_TC, TEMP_TC + grabOff);
             await callJSX(`Timeline.set(${snapTC})`);
-            await utils.delay(500);
+            await utils.delay(400);
 
             const folder = await callJSX("Context.folder()");
             const snapPath = `${folder}\\Snapshots\\freeze_${Date.now()}.png`;
-            const snapResult = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapTC})`);
-            log(`   📸 [_freeze] Render.snapshot → ${snapResult} (path=${snapPath})`);
+            const cap = await this._capturePng(snapPath.replace(/\.png$/i, ''), snapTC);
+            const snapResult = cap.res;
             
             // Tornar el cabezal a la posició original per restaurar la vista
             await callJSX(`Timeline.set(${cutTime})`);
             log(`   📍 [_freeze] Cabezal retornat a ${cutTime.toFixed(2)}s`);
 
-            // 3. Eliminar el Wott temporal de V5
+            // 3. Eliminar el Wott temporal de la pista
             // Esborrar NOMÉS el clip temporal (és a TEMP_TC). Amb diversos Tema‑Titol
             // col·locats, l'índex 0 seria el primer clip legítim del bloc.
             try {
@@ -388,30 +556,25 @@
                 log(`   ⚠️ [_freeze] No s'ha pogut eliminar el temporal: ${eRT.message}`, "WARN");
             }
 
-            if (!snapResult || snapResult.indexOf('OK') !== 0) {
-                log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
+            if (!cap.ok) {
+                log(`   ❌ [_freeze] Congelat SENSE PNG a ${snapPath} (Render.frame → ${snapResult}) → no es col·loca res`, "ERROR");
                 return { success: false, duration: 0 };
             }
 
-            // 4. Inserir ara el Wott d'animació a placeTime (0→8s)
+            // 4. Inserir ara el Wott d'animació a placeTime (0→CUT_OFFSET)
             // (2026-10-01 · #129) SENSE endSec: `Clips.insert(..., endSec)` retalla el DARRER clip
             // de la pista (clips[numItems-1].end). El final es fixa amb `Clips.endAt` (cerca pel
             // start → immunitzat a renumeracions de clips).
             await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
-            log(`   🎞️ [_freeze] Clip animació inserit a V5 @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s`);
+            log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s`);
 
-            if (!snapResult || snapResult.indexOf('OK') !== 0) {
-                log(`   ❌ [_freeze] Snapshot fallit: ${snapResult}`, "ERROR");
-                return { success: false, duration: 0 };
-            }
-
-            // 5. Importar PNG al bin CHY (Render.snapshot ja escriu directament a snapPath)
+            // 5. Importar PNG al bin CHY (el congelat ja és a snapPath: `_capturePng` → Render.frame)
             const fileName = snapPath.split("\\").pop();
             const importPayload = JSON.stringify([snapPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'CHY')`);
 
-            // 7. Determinar durada i inserir PNG estirat a V5 des de cutTime fins a stretchEnd
+            // 6. Determinar durada i inserir PNG estirat a la pista des de cutTime fins a stretchEnd
             let duration;
             if (stretchEnd !== null && stretchEnd !== undefined) {
                 duration = Math.max(stretchEnd - cutTime, 0.5);
@@ -423,9 +586,446 @@
             // no ha de retallar el darrer clip de la pista.
             await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, null, 'video')`);
             await callJSX(`Clips.endAt(${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
-            log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V5 @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
+            log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V${T_THEME} @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
             
             return { success: true, duration };
+        },
+
+        /**
+         * _wfCtx: CONTEXT DE SESSIÓ (config, progData, bloque, dateDir) per als mòduls que
+         * llegeixen el manifest.
+         *
+         * ⚠️ (2026-10-06) Dins de `_placeChyronsByType` hi ha una variable LOCAL
+         * `ctx = { busy, placed }` (el ctx de COL·LOCACIÓ, el que alimenta `_addPlaced`).
+         * NO serveix per al manifest: `SessionManifest.getPath` fa `ctx.progData.wott` →
+         * «Cannot read properties of undefined (reading 'wott')». Aquest va ser el motiu
+         * real que la detecció TITOLET no s'executés mai (log: `TITOLET detecció amb error
+         * (Cannot read properties of undefined (reading 'wott')) → fallback`).
+         *
+         * Si State encara no porta `progData` (fluxos previs al Muntar), es recupera del
+         * select del panell amb la mateixa regla que `Core.AssemblyContext.loadAssemblyContext`.
+         * @returns {Object} FASTPASS_UI.State (usa'l COM A ctx)
+         */
+        _wfCtx: function () {
+            const S = FASTPASS_UI.State || {};
+            try {
+                if (!S.progData) {
+                    const cfg = FASTPASS_UI.Config.get();
+                    const sel = document.getElementById('programa');
+                    if (sel && sel.value && cfg.mapeoProgramas && cfg.mapeoProgramas[sel.value]) {
+                        S.progData = cfg.mapeoProgramas[sel.value];
+                        const bs = document.getElementById('bloc');
+                        if (!S.bloque && bs && bs.value) S.bloque = bs.value;
+                        log(`   ⚠️ [wfCtx] progData recuperat del select (${sel.value})`);
+                    } else {
+                        log(`   ⚠️ [wfCtx] sense progData (select de programa buit) → el manifest no es podrà resoldre`, 'WARN');
+                    }
+                }
+                if (!S.config) S.config = FASTPASS_UI.Config.get();
+            } catch (e) { }
+            return S;
+        },
+
+        /**
+         * _fileExists: existeix aquest fitxer? (CEP fs.stat — mateix criteri que
+         * `flow_chyrons._capturePng` i `flow_render.waitFile`).
+         * @param {string} path
+         * @returns {boolean}
+         */
+        _fileExists: function (path) {
+            try {
+                const fs = window.cep && window.cep.fs;
+                if (fs && fs.stat && path) return !!(fs.stat(path) && fs.stat(path).err === 0);
+            } catch (e) { }
+            return false;
+        },
+
+        /**
+         * _titoletAnchor: Àncora un instant de la TIMELINE a un instant del FITXER de vídeo
+         * que s'ha d'escanejar per detectar el TITOLET.
+         *
+         * ⚠️ (2026-10-06, 2a passada) La timeline NO conté el cleanFeed: conté el CLIP EXTRET
+         * del bloc (`<WOTT>_<BLOC>_CLIP.mp4`, a la carpeta de treball). El seu `inPoint` és
+         * temps DINS del fitxer del clip, i l'ancoratge bo és el MATEIX que fan servir els
+         * marcadors (flow_markers FIX-B/D) i els keyframes (`tKey = inPoint + (t − start)`):
+         *     fileSec = tlSec + (clip.inPoint − clip.start)
+         *
+         * Per què no n'hi ha prou amb el manifest: `ref.offsetSec` barreja coords d'ORIGEN i
+         * de CLIP EXTRET. Cas real mesurat (TNM V1 2026-10-05): clip 0 = cleanFeed 904 s,
+         * bloc = 924 s (cleanFeed) = clip 20 s; `offsetSec = −10` donava cleanFeed 10 s →
+         * 0 intervals. Amb l'`inPoint` del clip: 20 s → el rètol hi és.
+         *
+         * Xarxa de seguretat: si el clip de V1 no és l'extret (o el fitxer no hi és), s'usa
+         * el cleanFeed del manifest amb `ref.offsetSec` (fileSec = tlSec − offsetSec).
+         *
+         * @param {Object} p - {mk, clipsV1, label}
+         * @param {Object} wctx - ctx de SESSIÓ (per resoldre la carpeta de treball)
+         * @returns {Promise<{ok:boolean, mp4?:string, off?:number, how?:string, why?:string}>}
+         *   `off` = desplaçament: fileSec = tlSec + off
+         */
+        _titoletAnchor: async function (p, wctx) {
+            const utils = getUtils();
+            // ── 1) CLIP EXTRET del bloc (el que hi ha realment a la timeline) ──
+            try {
+                const ci = this._clipAtInstant(p.clipsV1 || [], p.mk.time);
+                const nm = ci ? String(ci.name || '') : '';
+                const inPt = ci ? Number(ci.inPoint) : NaN;
+                if (ci && isFinite(inPt) && /_CLIP/i.test(nm)) {
+                    const folder = String(utils.workFolder(wctx) || '').replace(/\//g, '\\').replace(/\\+$/, '');
+                    const prog = (wctx && wctx.progData && wctx.progData.wott) ? String(wctx.progData.wott) : '';
+                    const bloc = (wctx && wctx.bloque) ? String(wctx.bloque) : '';
+                    const cands = [folder + '\\' + nm];
+                    if (prog && bloc) cands.push(folder + '\\' + prog + '_' + bloc + '_CLIP.mp4');
+                    for (const c of cands) {
+                        if (!folder || !this._fileExists(c)) continue;
+                        const startCl = isFinite(Number(ci.start)) ? Number(ci.start) : 0;
+                        return {
+                            ok: true, mp4: c, off: inPt - startCl,
+                            how: 'CLIP EXTRET «' + nm + '» (inPoint ' + inPt.toFixed(2) + 's − start ' + startCl.toFixed(2) + 's = ' + (inPt - startCl).toFixed(2) + 's)'
+                        };
+                    }
+                    log(`   ⚠️ [${p.label}] TITOLET ancoratge: clip extret «${nm}» no trobat a «${folder}» → es prova el cleanFeed`, 'WARN');
+                }
+            } catch (eC) {
+                log(`   ⚠️ [${p.label}] TITOLET ancoratge: clip de V1 il·legible (${eC.message})`, 'WARN');
+            }
+            // ── 2) Xarxa de seguretat: cleanFeed del manifest (ref.offsetSec) ──
+            try {
+                const man = await FASTPASS_UI.SessionManifest.load(wctx);
+                const mp4 = (man && man.cleanFeed && man.cleanFeed.mediaPath) ? man.cleanFeed.mediaPath : null;
+                const rOff = (man && man.ref && isFinite(man.ref.offsetSec)) ? Number(man.ref.offsetSec) : null;
+                if (!mp4) return { ok: false, why: 'sense MP4 cleanFeed al manifest' };
+                if (rOff === null) return { ok: false, why: 'manifest sense ref.offsetSec' };
+                return { ok: true, mp4: mp4, off: -rOff, how: 'cleanFeed del manifest (offsetSec ' + rOff.toFixed(2) + 's)' };
+            } catch (eM) {
+                return { ok: false, why: 'manifest il·legible (' + eM.message + ')' };
+            }
+        },
+
+        /**
+         * _placeTitoletChain: COL·LOCACIÓ DELS TITOLET (2026-10-05 · reescrit 2026-10-06).
+         *
+         * Un ítem pot portar N TITOLET (grafismes de l'INSERT). El rastreig del vídeo cremat
+         * (`Logic.TitoletDetect`) diu QUAN va entrar i QUANT va durar cadascun, així que cada
+         * targeta va al SEU instant real a la timeline:
+         *
+         *     placeTime = mk.time + card.relIn     (relIn = segons dins de l'ítem de VÍDEO)
+         *     span      = card.on si és 'short' · mèdia + congelat si no
+         *
+         *     [T1 anim][T1 congelat][1s][T2 anim][T2 congelat][1s]…[Tn]
+         *
+         *   - Entrada del 1r TITOLET: marcador de l'ítem + 10 frames (0,40 s), la mateixa regla
+         *     que la resta de rètols.
+         *   - ORDRE: cronològic pel `relIn` detectat (abans s'ordenava pel wottId intern, que és
+         *     l'ordre de GENERACIÓ del grafisme i no té res a veure amb el de l'aire).
+         *   - 'IMANT' cap ENDARRERE: si l'instant detectat cau a ≤ `snapTolSec` del TALL anterior
+         *     de V1, la targeta entra a l'inici d'aquell clip + 10 frames (el taronja ja era a
+         *     l'aire uns frames abans de la primera mostra ON).
+         *   - SENSE detecció: la targeta s'encadena darrere de l'últim instant detectat.
+         *   - PISTA: `_chooseSlot` ([V8 Lloc/Data, V7 rètols]) TARGETA A TARGETA; el rang de cada
+         *     targeta es reserva a `ctx` en col·locar-la, així la resta de rètols de l'ítem el
+         *     veuen i no hi van a parar (abans es reservava el rang SENCER de la cadena, cosa que
+         *     amb la col·locació per instant bloquejaria tot l'ítem).
+         *
+         * @param {Object} p - {mk, itemEnd, titolets, wottIdx, cfg, ctx, wfCtx, clipsV1, label}
+         *   ⚠️ `ctx` = ctx de COL·LOCACIÓ ({busy, placed}) · `wfCtx` = ctx de SESSIÓ (manifest).
+         *      `clipsV1` = clips de V1 (per l'ancoratge del TITOLET: `inPoint`).
+         * @returns {Promise<number>} Targetes col·locades
+         */
+        _placeTitoletChain: async function (p) {
+            const utils = getUtils();
+            const cfg = p.cfg || FASTPASS_UI.Config.get();
+            const list = (p.titolets || []).slice();
+            if (list.length === 0) return 0;
+            // Clips de V1 (per l'«imant» al tall). ⚠️ (2026-10-06, FIX) El paràmetre és
+            // `p.clipsV1`: llegir-lo com a `clipsV1` lliure llançava
+            // `ReferenceError: clipsV1 is not defined` a la 1a targeta detectada i
+            // AVORTAVA tota la passada Resto (cap TITOLET col·locat).
+            const clipsV1 = p.clipsV1 || [];
+            const PL = FASTPASS_UI.Logic.Project;
+            const V_LLOC = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 8;
+            const V_CHYRONS = cfg.tracks.video.chyrons || 7;
+            const ANIM = 5.0;          // durada de la targeta TITOLET (si no es resol el mèdia)
+            const FREEZE = 3.0;        // congelat preferit
+            const FREEZE_MIN = 1.0;    // congelat quan la cadena no cap dins l'ítem
+            const GAP = 1.0;           // marge entre targetes
+            const OFF = 0.40;          // 10 frames: entrada del 1r TITOLET
+            // Ordre INTERN de les targetes: wottId del nom (només per numerar-les i per a la
+            // traça del log). ⚠️ L'ORDRE DE COL·LOCACIÓ ja NO surt d'aquí: ara mana el `relIn`
+            // detectat al vídeo cremat (vegeu el PLA DE COL·LOCACIÓ més avall).
+            list.sort((a, b) => (PL._wottIdNum(a.name) - PL._wottIdNum(b.name)));
+            const start = p.mk.time + OFF;
+            const itemEnd = (p.itemEnd && p.itemEnd > start + 0.5) ? p.itemEnd : null;
+            const avail = (itemEnd !== null) ? (itemEnd - start) : null;
+            // Durada real de cada targeta (ffprobe si el mèdia ja és al projecte)
+            const durs = list.map(c => {
+                const d = PL._resolveWottDur ? PL._resolveWottDur(p.wottIdx, c) : null;
+                const dd = (d && d.dur > 0.1) ? d.dur : ANIM;
+                if (!(d && d.dur > 0.1)) log(`   ⚠️ [${p.label}] TITOLET «${String(c.name).substring(0, 40)}»: durada no resolta → s'assumeix ${ANIM.toFixed(2)}s`, 'WARN');
+                return dd;
+            });
+            // ── DETECCIÓ TITOLET AL VÍDEO CREMAT (2026-10-06 · 2a passada) ──────
+            // Mesura al vídeo QUAN entra i QUANT dura cada rètol (color + OCR) per
+            // saber si la targeta conserva la cadència o s'ha de RETALLAR:
+            //   · onAir > longOnSec (5 s = durada de la targeta) → cadència actual.
+            //   · onAir <= longOnSec → la targeta es retalla a `on` (animSec = on − minTail).
+            //   · sense detecció / detecció fallida → fallback: cadència actual.
+            // Ancoratge: `_titoletAnchor` (2026-10-06, 2a passada). ⚠️ La timeline NO conté
+            // el cleanFeed: conté el CLIP EXTRET del bloc (<WOTT>_<BLOC>_CLIP.mp4) → mana el
+            // seu `inPoint` (mesurat: clip.inPoint=20s, clip 0 = cleanFeed 904s, bloc a 924s;
+            // amb `ref.offsetSec` = −10 s queia a cleanFeed 10 s → 0 intervals detectats).
+            // Amb `titolet.dryRun === true` NO es canvia res: només s'informa al log.
+            const TT = cfg.titolet || {};
+            let ttCards = null, ttPlan = null;
+            try {
+                const TD = FASTPASS_UI.Logic.TitoletDetect;
+                if (!TD) {
+                    log(`   ⚠️ [${p.label}] TITOLET detecció: mòdul Logic.TitoletDetect no carregat → fallback`, 'WARN');
+                } else if (TT.enabled === false) {
+                    log(`   ⚠️ [${p.label}] TITOLET detecció: desactivada (titolet.enabled = false) → fallback`, 'WARN');
+                } else {
+                    // ⚠️ (2026-10-06, FIX) El manifest NO es pot llegir amb `p.ctx`: això és el
+                    // ctx de COL·LOCACIÓ ({busy, placed}) i `SessionManifest.getPath` fa
+                    // `ctx.progData.wott` → TypeError. Es fa servir el ctx de SESSIÓ.
+                    const wctx = p.wfCtx || this._wfCtx();
+                    const anc = await this._titoletAnchor(p, wctx);
+                    if (!anc.ok) {
+                        log(`   ⚠️ [${p.label}] TITOLET detecció: ${anc.why} → fallback`, 'WARN');
+                    } else {
+                        const pad = (TT.scanPadSec != null) ? TT.scanPadSec : 3;
+                        // `anc.off`: fileSec = tlSec + off (temps DINS del fitxer a escanejar)
+                        const tItemStart = p.mk.time + anc.off;
+                        const itemSpan = (itemEnd !== null) ? (itemEnd - p.mk.time) : null;
+                        const win = ((itemSpan !== null) ? itemSpan : (TT.scanMaxSec || 300)) + 2 * pad;
+                        log(`   🧭 [${p.label}] TITOLET ancoratge: ${anc.how} → ítem del vídeo @ ${tItemStart.toFixed(2)}s` +
+                            (itemSpan !== null ? ` (finestra ${Math.min(TT.scanMaxSec || 300, win).toFixed(0)}s)` : " (sense final d'ítem)"));
+                        ttPlan = await TD.planForItem({
+                            mp4: anc.mp4, names: list.map(c => c.name), tItemStart: tItemStart,
+                            tScanStart: Math.max(0, tItemStart - pad),
+                            tScanDur: Math.min(TT.scanMaxSec || 300, win),
+                            cfg: TT, label: p.label
+                        });
+                        if (ttPlan && ttPlan.ok) ttCards = ttPlan.cards;
+                        else log(`   ⚠️ [${p.label}] TITOLET detecció fallida (${ttPlan ? ttPlan.error : '?'}) → fallback`, 'WARN');
+                    }
+                }
+            } catch (eTT) {
+                log(`   ⚠️ [${p.label}] TITOLET detecció amb error (${eTT.message}) → fallback`, 'WARN');
+            }
+            // Durada objectiu de cada targeta: la detectada (curta) o bé mèdia + congelat.
+            // Activat (2026-10-06, 2a passada): la detecció ja s'executa de veritat. Es pot
+            // forçar EN CALENT des de la consola del panell, sense tocar codi:
+            //   FASTPASS_UI.State.titoletDryRun = true   → no aplicar (només informe al log)
+            //   FASTPASS_UI.State.titoletDryRun = false  → aplicar (retallar les targetes curtes)
+            const ttDry = (typeof FASTPASS_UI.State.titoletDryRun === 'boolean')
+                ? FASTPASS_UI.State.titoletDryRun : (TT.dryRun === true);
+            const ttApply = !ttDry;
+            const ttOnOf = (i) => (ttApply && ttCards && ttCards[i] && ttCards[i].kind === 'short' && ttCards[i].on > 0) ? ttCards[i].on : null;
+            const cardTotal = (fd, i) => { const on = ttOnOf(i); return (on !== null) ? on : (durs[i] + fd); };
+            const totalFor = (fd, n) => {
+                let t = 0;
+                for (let i = 0; i < n; i++) t += cardTotal(fd, i) + GAP;
+                return Math.max(0, t - GAP);
+            };
+            const countFit = (fd) => {
+                if (avail === null) return list.length;
+                let t = 0, k = 0;
+                for (let i = 0; i < list.length; i++) {
+                    if ((t + cardTotal(fd, i)) > avail + 1e-6) break;
+                    t += cardTotal(fd, i) + GAP; k++;
+                }
+                return k;
+            };
+            // ── CONGELAT: 3 s si la cadena hi cap, 1 s si no ────────────────────────
+            // Requisit d'usuari (2026-10-05): els TITOLET van SEMPRE en cadena i TOTS.
+            // L'ítem NOMÉS decideix el congelat preferit (3 s → 1 s); MAI si la targeta es
+            // col·loca. Abans, exigint que cada targeta (mèdia + congelat + marge) cabés
+            // SENCERA dins de l'ítem, a l'ítem de prova (1,7 s per a 12 targetes) no se'n
+            // col·locava CAP i el resultat era «no s'ha posicionat res al timeline».
+            const freezeDur = (countFit(FREEZE) === list.length) ? FREEZE : FREEZE_MIN;
+            const nPlace = list.length;
+            if (freezeDur === FREEZE_MIN) {
+                log(`   🧩 [${p.label}] Cadena TITOLET: ${list.length} targetes amb congelat de ${FREEZE}s no caben a l'ítem (${avail !== null ? avail.toFixed(1) + 's' : 'sense límit'} disponibles) → congelat de ${FREEZE_MIN}s${(avail !== null && avail < totalFor(freezeDur, nPlace)) ? ' · la cadena sobresurt de l\'ítem' : ''}`);
+            }
+            const total = totalFor(freezeDur, nPlace);
+            // ── Informe de la detecció (dry-run): cadència actual vs pla detectat ──
+            if (ttCards) {
+                let planTotal = 0;
+                for (let i = 0; i < list.length; i++) {
+                    const c = ttCards[i];
+                    const on = (c && c.kind === 'short' && c.on > 0) ? c.on : null;
+                    planTotal += ((on !== null) ? on : (durs[i] + freezeDur)) + GAP;
+                }
+                planTotal = Math.max(0, planTotal - GAP);
+                const st = ttPlan.stats || {};
+                log(`   🎯 [${p.label}] TITOLET detecció${ttApply ? '' : ' (DRY-RUN: NO s\'aplica)'}: ${st.nMatched}/${st.nWotts} detectats · cadència actual ${total.toFixed(2)}s vs pla ${planTotal.toFixed(2)}s (Δ ${(planTotal - total).toFixed(2)}s) · ${st.nShort} curtes · ${st.nLong} llargues · ${st.nNone} sense detecció`);
+                for (let i = 0; i < ttCards.length; i++) {
+                    const c = ttCards[i];
+                    if (!c.found) { log(`      · ${i + 1}. «${String(c.wott).substring(0, 38)}» SENSE detecció → fallback`); continue; }
+                    log(`      · ${i + 1}. «${String(c.wott).substring(0, 38)}» mp4 ${c.relIn.toFixed(2)}s→${c.relOut.toFixed(2)}s (${c.on.toFixed(2)}s, cov ${c.maxCov}%, ${c.kind.toUpperCase()}, score ${c.score}, via ${c.how})` +
+                        (c.txt ? ` · text «${c.txt}»` : ' · text NO llegit'));
+                }
+            }
+
+            // ── PLA DE COL·LOCACIÓ (2026-10-06, 3a passada · viu/congelat: 5a passada) ──
+            // 🔴 Canvi de fons (petició d'usuari): «els TITOLET van al seu lloc real, per això
+            // fem la detecció». El rastreig diu QUAN va entrar cada rètol (`relIn`, en segons
+            // dins de l'ítem del VÍDEO) → cada targeta va al SEU instant de la timeline
+            // (mk.time + relIn) i l'ordre surt sol: cronològic.
+            // (Abans: `list.sort(by _wottIdNum)` + cadena encadenada des del marcador. Al cas
+            // real de l'ítem 16 del 05/10 això va deixar 9 de 12 targetes en un instant que no
+            // era el seu i en l'ordre de GENERACIÓ del grafisme, no en el de l'aire.)
+            // Els wotts SENSE detecció s'encadenen darrere de l'últim detectat (fallback).
+            // Llargada de cada targeta (5a passada): viu = clip sencer (homogeni per a totes)
+            // + congelat fins al final detectat (0 si el rètol cremat va durar menys que el
+            // clip) i, si cal, retall de seguretat per no envair la targeta següent.
+            const snapTol = (TT.snapTolSec != null) ? TT.snapTolSec : 1.0;
+            const freezeMax = (TT.freezeMaxSec != null) ? TT.freezeMaxSec : 15;
+            const orderIdx = [];
+            for (let i = 0; i < list.length; i++) {
+                const c = ttCards ? ttCards[i] : null;
+                orderIdx.push({
+                    i: i, det: !!(ttApply && c && c.found && isFinite(c.relIn)),
+                    rel: (c && c.found && isFinite(c.relIn)) ? c.relIn : null,
+                    id: PL._wottIdNum(list[i].name)
+                });
+            }
+            orderIdx.sort((a, b) => {
+                if (a.det && b.det) return a.rel - b.rel;       // ordre de l'aire
+                if (a.det !== b.det) return a.det ? -1 : 1;     // els detectats primer
+                return a.id - b.id;                             // resta: wottId
+            });
+            const planned = [];
+            let maxEndTl = start;
+            for (const o of orderIdx) {
+                const i = o.i, chy = list[i], cardDur = durs[i];
+                const c = ttCards ? ttCards[i] : null;
+                const shortName = String(chy.name).substring(0, 38);
+                if (o.det) {
+                    const ideal = p.mk.time + c.relIn;
+                    let tStart = ideal, how = 'lloc real';
+                    if (snapTol > 0 && clipsV1.length > 0) {
+                        // 'imant' al tall: si l'instant detectat cau a ≤ snapTol de l'inici del
+                        // clip de V1 que el conté, la targeta entra EXACTAMENT allà.
+                        // 🔴 (2026-10-06, 5a passada · petició d'usuari «la col·locació no es fa
+                        // amb imant i hi ha uns frames de retraso») ABANS s'hi sumava `OFF`
+                        // (0,40 s = 10 frames): mesurat al log real de l'ítem 16, totes les
+                        // targetes «imantades» entraven a `tall + 0,40 s` (31,00 en comptes de
+                        // 30,60; 143,00 en comptes de 142,60…) → l'imant no es veia i anaven
+                        // 10 frames tard.
+                        const ciS = this._clipAtInstant(clipsV1, ideal);
+                        if (ciS && (ideal - ciS.start) <= snapTol) {
+                            tStart = Math.max(p.mk.time, ciS.start);
+                            how = 'imant al tall ' + ciS.start.toFixed(2) + 's (Δ ' + (ideal - ciS.start).toFixed(2) + 's)';
+                        }
+                    }
+                    // Quant va viure el rètol cremat (final detectat, en coords de timeline).
+                    const detEnd = (isFinite(c.relOut) && c.relOut > c.relIn) ? (p.mk.time + c.relOut) : null;
+                    // ── VIU + CONGELAT (2026-10-06, 5a passada · petició d'usuari) ────────
+                    // «seria millor que la part de vídeo viva fos homogènia i afegir el
+                    // congelat fins on es detecta el final». Per això:
+                    //   · VIU = el clip SENCER de la targeta (mateixa plantilla → homogeni).
+                    //   · CONGELAT = només si el rètol cremat va viure MÉS enllà del clip, i
+                    //     dura EXACTAMENT fins al final detectat (`relOut`).
+                    // Abans: span = on detectat i anim = on − 0,5 s → cada targeta amb una
+                    // part viva diferent (mesurat: 0,5 s … 5,2 s), un congelat de 0,5 s forçat
+                    // a totes i, a les «llargues», un congelat de 3 s que sobrepassava el
+                    // final detectat (75,40→78,40 s quan el rètol cremat s'acabava a 76,50 s).
+                    const liveWant = cardDur;
+                    let want = (detEnd !== null) ? Math.max(liveWant, detEnd - tStart) : (liveWant + freezeDur);
+                    want = Math.min(want, liveWant + freezeMax);
+                    planned.push({
+                        chy: chy, name: shortName, start: tStart, want: want, liveWant: liveWant,
+                        det: true, detEnd: detEnd, relIn: c.relIn, how: how
+                    });
+                    log(`   🧲 [${p.label}] TITOLET ${i + 1}/${list.length} «${shortName}» relIn ${c.relIn}s ` +
+                        `(cov ${c.maxCov}%) → ${tStart.toFixed(2)}s [${how}] viu ${liveWant.toFixed(2)}s` +
+                        ((detEnd !== null && want > liveWant + 0.05) ? ` + congelat ${(want - liveWant).toFixed(2)}s (final detectat ${detEnd.toFixed(2)}s)` : ''));
+                    if (tStart + want > maxEndTl) maxEndTl = tStart + want;
+                } else {
+                    const tStart = maxEndTl + GAP;
+                    const want = cardDur + freezeDur;
+                    planned.push({
+                        chy: chy, name: shortName, start: tStart, want: want, liveWant: cardDur,
+                        det: false, detEnd: null, relIn: null, how: 'encadenat'
+                    });
+                    log(`   ⛓️ [${p.label}] TITOLET ${i + 1}/${list.length} «${shortName}» SENSE detecció → ` +
+                        `encadenat a ${tStart.toFixed(2)}s (viu ${cardDur.toFixed(2)}s + congelat ${freezeDur.toFixed(2)}s)`);
+                    maxEndTl = tStart + want;
+                }
+            }
+            // ── Retall de SEGURETAT (2026-10-06, 5a passada): cap targeta pot envair la
+            //    SEGÜENT ni el final de l'ítem. Amb la part viva = clip sencer, dues targetes
+            //    properes (cas real: relIn 108,5 s i 111 s, 2,5 s de separació) s'encavalarien;
+            //    aquí es retalla la part viva i NO s'hi afegeix congelat.
+            for (let k = 0; k < planned.length; k++) {
+                const pl = planned[k];
+                const nextStart = (k + 1 < planned.length) ? planned[k + 1].start : null;
+                let budget = Infinity;
+                if (nextStart !== null) budget = Math.min(budget, nextStart - pl.start - GAP);
+                if (itemEnd !== null) budget = Math.min(budget, itemEnd - pl.start);
+                if (!isFinite(budget) || budget >= pl.want) {
+                    pl.span = pl.want; pl.live = pl.liveWant;
+                } else {
+                    pl.span = Math.max(0.5, budget);
+                    pl.live = Math.max(0.1, Math.min(pl.liveWant, pl.span));
+                    log(`   ✂️ [${p.label}] TITOLET «${pl.name}» retallada a ${pl.span.toFixed(2)}s ` +
+                        `(viu ${pl.live.toFixed(2)}s, sense congelat): ${pl.want.toFixed(2)}s no hi caben` +
+                        (nextStart !== null ? ` (següent targeta a ${nextStart.toFixed(2)}s)` : '') +
+                        (itemEnd !== null ? ` (final d'ítem ${itemEnd.toFixed(2)}s)` : ''), 'WARN');
+                }
+                pl.freeze = Math.max(0, pl.span - pl.live);
+            }
+            // Zona temporal LLIURE per als congelats: `_emptyProgramTC` mira els clips que hi
+            // ha ARA, però les targetes s'aniran col·locant → la zona ha de quedar DESPRÉS del
+            // final de l'última. Si no, el clip temporal (overwrite) cauria damunt d'una
+            // targeta ja col·locada i l'esborraria.
+            // (El TITOLET és un grafisme amb TRANSPARÈNCIA: el congelat s'ha de capturar amb el
+            // PROGRAMA BUID perquè el PNG conservi l'alpha i no s'endugui cap frame de vídeo.)
+            const programFree = await this._emptyProgramTC(Math.max.apply(null, durs) + 2);
+            const tailCeil = Math.ceil((maxEndTl + 5) / REV_FRAME) * REV_FRAME;
+            const tempTC = Math.max(programFree, tailCeil);
+            if (tempTC > programFree) {
+                log(`   🧭 [${p.label}] Zona temporal dels congelats a ${tempTC.toFixed(2)}s (més enllà del final de la cadena ${maxEndTl.toFixed(2)}s)`);
+            }
+            // ── Col·locació: cada targeta al SEU instant. `_chooseSlot` decideix la pista (V8
+            //    Lloc/Data preferent, V7 rètols alternativa) i només mou la targeta si la pista
+            //    està ocupada en aquell rang; MAI abans de l'instant calculat. El rang de cada
+            //    targeta es reserva a `p.ctx` just després de col·locar-la, de manera que la
+            //    resta de rètols de l'ítem el veuen i no hi van a parar.
+            let placed = 0, nOverlap = 0;
+            for (const pl of planned) {
+                const slot = await this._chooseSlot([V_LLOC, V_CHYRONS], pl.start, pl.span, p.ctx, itemEnd);
+                if (!slot || slot.track === null) {
+                    log(`   ⚠️ [${p.label}] TITOLET «${pl.name}» NO col·locat (sense pista lliure)`, 'WARN');
+                    continue;
+                }
+                if (slot.overlap) nOverlap++;
+
+                let span = pl.span, live = pl.live;
+                if (slot.shrunk && slot.maxDur != null) {
+                    span = Math.max(0.5, Math.min(span, slot.maxDur));
+                    live = Math.max(0.1, Math.min(live, span));
+                }
+                const freeze = Math.max(0, span - live);
+                const movedMsg = slot.moved ? ` ⟵ desplaçat (pista ocupada; ideal ${pl.start.toFixed(2)}s)` : '';
+                const fr = await this._freezeTemaTitol(pl.chy.name, slot.start, slot.start + span, p.label,
+                    { track: slot.track, animSec: live, tempTC: tempTC, freezeSec: freeze, frameMid: true });
+                if (fr && fr.success) {
+                    placed++;
+                    this._addPlaced(p.ctx, slot.track, slot.start, slot.start + span);
+                    log(`   🧊 [${p.label}] TITOLET «${pl.name}»${pl.det ? '' : ' [encadenat]'} → V${slot.track} @ ` +
+                        `${slot.start.toFixed(2)}s (span ${span.toFixed(2)}s: viu ${live.toFixed(2)}s + congelat ` +
+                        `${freeze.toFixed(2)}s)${movedMsg}`);
+                } else {
+                    log(`   ⚠️ [${p.label}] TITOLET «${pl.name}» NO col·locat (congelat fallit)`, 'WARN');
+                }
+                await utils.delay(150);
+            }
+            if (nOverlap > 0) {
+                log(`   ⚠️ [${p.label}] ${nOverlap} TITOLET col·locat(s) DAMUNT de material existent: revisa el solapament`, 'WARN');
+            }
+            return placed;
         },
 
         /**
@@ -731,25 +1331,34 @@
         /**
          * _clipAtInstant: Clip de V1 que CONTÉ l'instant donat (o el següent si cau
          * just sobre el tall). És el "clip de referència" d'un rètol.
+         * ⚠️ Retorna el CLIP SENCER (name/start/end/inPoint/outPoint…) perquè
+         * l'ancoratge del TITOLET necessita `inPoint` (tots els cridadors actuals
+         * només en llegeixen `start`/`end`, així que el canvi és compatible).
          * @param {Array} clips - clips de V1 (getTrackClips)
          * @param {number} instant
-         * @returns {{start:number,end:number}|null}
+         * @returns {{name:string,start:number,end:number,inPoint:number}|null}
          */
         _clipAtInstant: function (clips, instant) {
             const list = clips || [];
             for (let i = 0; i < list.length; i++) {
-                if (list[i].start <= instant && list[i].end > instant) return { start: list[i].start, end: list[i].end };
+                if (list[i].start <= instant && list[i].end > instant) return list[i];
             }
             for (let j = 0; j < list.length; j++) {
-                if (list[j].start >= instant - 0.05) return { start: list[j].start, end: list[j].end };
+                if (list[j].start >= instant - 0.05) return list[j];
             }
             return null;
         },
 
         /**
          * _itemEndTime: Final de l'ítem d'un marcador estructural: el següent
-         * marcador (amb un petit marge), o el final del clip de V1 que el conté,
-         * o el final de la seqüència.
+         * marcador (amb un petit marge), o el CORCHETE DE SELECCIÓ OUT de la
+         * seqüència (`seq.outPoint`), o el darrer clip de totes les pistes.
+         *
+         * ⚠️ (2026-10-06) El corxet OUT mana (petició d'usuari). NO s'usa el final del clip
+         * de V1 que CONTÉ el marcador: amb el marcador a 0 s (l'últim/únic ítem) agafava el
+         * PRIMER clip de la pista (2,08 s al projecte de prova, amb 479 s de programa) com
+         * si fos tot el projecte → «1,7 s disponibles» per a 12 targetes = CAP col·locada.
+         * El respatller de totes les pistes només entra si el corxet OUT no està posat (0).
          * Serveix per repartir els TITOLET dins del seu ítem quan no tenen un
          * timecode fiable.
          * @param {Object} mk - {fullId, time}
@@ -760,15 +1369,36 @@
             const after = (markersFull || []).filter(m => m.time > mk.time + 0.01)
                 .sort((a, b) => a.time - b.time);
             if (after.length > 0) return after[0].time - 0.5;      // marge abans del següent ítem
-            try {
-                const clips = await getClipsLogic().getTrackClips(1, 'video');
-                const cl = (clips || []).filter(c => c.start <= mk.time && c.end > mk.time)[0];
-                if (cl && cl.end > mk.time) return cl.end;
-            } catch (e) { }
+            // 1. CORXET OUT de la seqüència (`Timeline.getOut()` = `seq.outPoint`;
+            //    `Timeline.duration()` retorna el mateix valor).
             try {
                 const end = parseFloat(await callJSX("Timeline.getOut()") || "0");
-                if (end > mk.time) return end;
+                if (end > mk.time + 0.5) {
+                    log(`   🧭 [itemEnd] marcador ${mk.fullId} @ ${mk.time.toFixed(2)}s sense marcador següent → corxet OUT ${end.toFixed(2)}s`);
+                    return end;
+                }
+                log(`   🧭 [itemEnd] marcador ${mk.fullId}: corxet OUT a ${end.toFixed(2)}s (no serveix) → es busca el final real del programa`, 'WARN');
+            } catch (e) { }
+            try {
+                const dur = parseFloat(await callJSX("Timeline.duration()") || "0");
+                if (dur > mk.time + 0.5) return dur;
             } catch (e2) { }
+            // 2. Respatller (només si el corxet OUT no està posat): darrer clip de TOTES les
+            //    pistes de vídeo. El primer clip de V1 NO és el projecte.
+            let last = 0;
+            let nTracks = 0;
+            try { nTracks = parseInt(await callJSX("Tracks.count('video')") || '0', 10) || 0; } catch (eN) { nTracks = 0; }
+            if (nTracks <= 0) nTracks = 1;
+            for (let t = 1; t <= nTracks; t++) {
+                try {
+                    const cl = (await getClipsLogic().getTrackClips(t, 'video')) || [];
+                    for (const c of cl) { if (isFinite(c.end) && c.end > last) last = c.end; }
+                } catch (eC) { }
+            }
+            if (last > mk.time + 0.5) {
+                log(`   🧭 [itemEnd] marcador ${mk.fullId} → final del programa ${last.toFixed(2)}s (${nTracks} pistes)`);
+                return last;
+            }
             return null;
         },
 
@@ -830,16 +1460,6 @@
                 const CHYRON_OFFSET_SEC = 0.40;   // 10 frames a 25 fps
                 const CHYRON_OFFSET_FRAMES = 10;
 
-                // (2026-09-18) Els TITOLET/INSERT no fan snap i quedaven SENSE límit
-                // (doSnap=false → placeEnd=null). També s'han de limitar: final del clip
-                // de V1 que conté l'instant i el SEGÜENT marcador (el que arribi abans).
-                const limitNoSnap = (instant, refTime) => {
-                    const ciT = this._clipAtInstant(allClipsV1, instant);
-                    const nmT = nextMarkerAfter(refTime);
-                    let limT = ciT ? ciT.end : null;
-                    if (nmT !== null && nmT > instant + 0.1 && (limT === null || nmT < limT)) limT = nmT;
-                    return (limT !== null && limT > instant) ? limT : null;
-                };
                 let allClipsV1 = [];
                 try { allClipsV1 = await getClipsLogic().getTrackClips(1, 'video'); } catch (eCL) { log(`⚠️ [${label}] Sense clips de V1: ${eCL.message}`); }
                 // (2026-09-21) ÍTEMS DE CONNEXIÓ: un rètol "Enviat/Directe/Presencial" pot venir
@@ -899,26 +1519,30 @@
                     matching = this._dedupeRegenerations(matching, label);
                     matching.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
                     log(`📌 [${label}] Marcador ${mk.fullId}: ${matching.length} chyron(s)`);
-                    // TITOLET: el tc del nom no és fiable (sempre 00.00/00.01) → es
-                    // reparteixen dins del seu ítem, tots a la mateixa pista i sense pisar-se.
-                    const titolGroup = matching.filter(c => this._isTitolet(c));
-                    const itemEnd = (titolGroup.length > 0) ? await this._itemEndTime(mk, markersFull) : null;
-                    for (const chy of matching) {
-                        const isTit = this._isTitolet(chy);
-                        let idealTime, doSnap = true;
-                        if (isTit && itemEnd && itemEnd > mk.time) {
-                            const n = titolGroup.length;
-                            const i = titolGroup.indexOf(chy);
-                            const slot = (itemEnd - mk.time) / n;
-                            idealTime = mk.time + (i * slot);
-                            doSnap = false;
-                            log(`   🧩 [${label}] TITOLET ${i + 1}/${n} sense tc fiable → repartit dins l'ítem ${mk.fullId} ` +
-                                `(${mk.time.toFixed(2)}s → ${itemEnd.toFixed(2)}s, pas ${slot.toFixed(1)}s)`);
-                        } else {
-                            const baseTime = this._baseTimeForChyron(chy, mk, allMarkers);
-                            idealTime = baseTime + getUtils().timeToSeconds(chy.tc || "000000");
+                    // ── CADENA TITOLET (2026-10-05) ────────────────────────────────
+                    // Els TITOLET (grafismes de l'INSERT) NO entren al bucle genèric: el tc del
+                    // seu nom no és fiable (sempre 00.00) i han d'anar SEMPRE en CADENA — targeta
+                    // + congelat, una darrere l'altra. `_placeTitoletChain` tria pista (V8
+                    // preferent, V7 alternativa) i RESERVA el rang sencer a `ctx` ABANS que la
+                    // resta de rètols de l'ítem busquin forat (així `_chooseSlot` els aparta sol);
+                    // si xoca amb rètols ja col·locats, els aparta o baixa la cadena de pista.
+                    if (opts && opts.chainTitolet) {
+                        const titolets = matching.filter(c => this._isTitolet(c));
+                        if (titolets.length > 0) {
+                            const itemEndChain = await this._itemEndTime(mk, markersFull);
+                            placedCount += await this._placeTitoletChain({
+                                mk: mk, itemEnd: itemEndChain, titolets: titolets,
+                                wottIdx: wottIdx, cfg: cfg, ctx: ctx, label: label,
+                                wfCtx: this._wfCtx(), clipsV1: allClipsV1
+                            });
+                            matching = matching.filter(c => !this._isTitolet(c));
+                            if (matching.length === 0) continue;
                         }
-                        const snapped = doSnap ? await this._snapToNearestCut(idealTime) : idealTime;
+                    }
+                    for (const chy of matching) {
+                        const idealTime = this._baseTimeForChyron(chy, mk, allMarkers) +
+                            getUtils().timeToSeconds(chy.tc || "000000");
+                        const snapped = await this._snapToNearestCut(idealTime);
                         const durInfo = FASTPASS_UI.Logic.Project._resolveWottDur(wottIdx, chy);
 
                         // Clip de referència = el clip de V1 que conté l'instant ideal. El rètol
@@ -933,7 +1557,7 @@
                         // efectes que no es detecten com a tall — així que l'entrada és
                         // max(inici del clip de V1, marcador de l'ítem) + 10 frames.
                         let limSlot = null;
-                        if (doSnap && allClipsV1.length > 0) {
+                        if (allClipsV1.length > 0) {
                             const ci = this._clipAtInstant(allClipsV1, snapped);
                             if (ci) {
                                 const durOwn = (durInfo.dur > 0) ? durInfo.dur : null;   // si no es resol, mana el media
@@ -970,13 +1594,6 @@
                                 log(`   📐 [${label}] ${String(chy.name).substring(0, 34)}… → clip [${ci.start.toFixed(2)}-${ci.end.toFixed(2)}] → entra a ${placeStart.toFixed(2)}s (+${CHYRON_OFFSET_FRAMES}f), surt a ${(placeEnd === null ? placeStart + Math.max(durInfo.dur, 0.5) : placeEnd).toFixed(2)}s` +
                                     (mkEff.fullId !== mk.fullId ? ` [ítem ${mkEff.fullId}]` : '') +
                                     (trimmed ? ' (acurtat per ' + limWhy + ')' : ' (durada pròpia del wott)'));
-                            }
-                        } else if (!doSnap) {
-                            // TITOLET/INSERT (sense snap): abans quedaven sense cap límit.
-                            const limT = limitNoSnap(placeStart, mk.time);
-                            if (limT !== null) {
-                                placeEnd = limT;
-                                log(`   📐 [${label}] (INSERT) ${String(chy.name).substring(0, 30)}… @ ${placeStart.toFixed(2)}s → límit ${limT.toFixed(2)}s`);
                             }
                         }
                         const chyronDur = (placeEnd !== null) ? Math.max(0.5, placeEnd - placeStart) : durInfo.dur;
@@ -1578,12 +2195,15 @@
                 await callJSX(`Timeline.set(${snapTC})`);
                 await utils.delay(400);
                 const folder = await callJSX("Context.folder()");
-                const snapPath = `${folder}\\Snapshots\\freeze_titulillo_${Date.now()}.png`;
-                const snapRes = await callJSX(`Render.snapshot('${utils.escape(snapPath.replace(/\.png$/i, ''))}', ${snapTC})`);
+                // (2026-10-05) `Render.snapshot` NO existeix al motor JSX → el congelat va
+                // per `_capturePng` (= `Render.frame` + verificació que el PNG s'ha escrit).
+                const capBase = `${folder}\\Snapshots\\freeze_titulillo_${Date.now()}`;
+                const cap = await this._capturePng(capBase, snapTC);
+                const snapPath = cap.path;
                 await callJSX(`Timeline.set(${startSec})`);
                 // Treure el titulillo temporal (és a TEMP_TC)
                 try { await callJSX(`Clips.removeAt(${track}, ${TEMP_TC}, 'video')`); } catch (eDel) { }
-                if (snapRes && String(snapRes).indexOf('OK') === 0) {
+                if (cap.ok) {
                     const fName = snapPath.split("\\").pop();
                     await callJSX(`IO.importFiles('${utils.escape(JSON.stringify([snapPath]))}', 'CHY')`);
                     // (2026-10-01 · #129) COL·LOCACIÓ NO DESTRUCTIVA del congelat.
@@ -1619,7 +2239,7 @@
                     log(`      ${label} → V${track} @ ${startSec.toFixed(2)}s→${endSec.toFixed(2)}s (${(endSec - startSec).toFixed(2)}s) [${mv}]`);
                     return true;
                 }
-                log(`   ⚠️ [Titol·Petit] Snapshot del congelat fallit (${snapRes})`, 'WARN');
+                log(`   ⚠️ [Titol·Petit] Snapshot del congelat fallit (${cap.res})`, 'WARN');
                 return false;
             } catch (e) {
                 log(`   ⚠️ [Titol·Petit] Congelat fallit: ${e.message}`, 'WARN');
@@ -1638,7 +2258,7 @@
          *     [titulillo animat] → [congelat estirat] → [titulillo invertit] → [Tema-Títol gran]
          *
          *  - El titulillo és el Tema-Títol petit (~1s, qtrle amb alpha).
-         *  - El congelat (PNG net del titulillo via Render.snapshot) permet ALLARGAR-LO fins al
+         *  - El congelat (PNG net del titulillo via Render.frame) permet ALLARGAR-LO fins al
          *    gran (mateixa mecànica que _freezeTemaTitol, amb el desplaçament = durada del
          *    titulillo en lloc de 8s).
          *  - El titulillo INVERTIT (ffmpeg) fa la transició d'entrada al Tema-Títol gran.
@@ -2461,29 +3081,32 @@
                 (c, cfg) => {
                     const rName = (c.name || '').toUpperCase();
                     const rRol = (c.rol || '').toUpperCase();
-                    const V6 = cfg.tracks.video.chyrons;
-                    const V7 = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 7;
-                    // TITOLET (grafismes de l'INSERT): tots a V7, repartits dins del seu
-                    // ítem (el tc del nom no és fiable i no s'han de repartir de pista).
-                    if (this._isTitolet(c)) return [V7];
+                    // ⚠️ Noms de pista correctes: V_CHYRONS = v_chyrons (V7) · V_LLOC = v_lloc (V8).
+                    // (Abans es deien V6/V7 i els seus valors reals JA eren 7/8 → confusió.)
+                    const V_CHYRONS = cfg.tracks.video.chyrons;
+                    const V_LLOC = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 8;
+                    // TITOLET (grafismes de l'INSERT): NO passen per aquí — `_placeTitoletChain`
+                    // els col·loca EN CADENA (targeta + congelat) reservant el rang sencer. Això
+                    // és només la xarxa de seguretat si un TITOLET arribés al bucle genèric.
+                    if (this._isTitolet(c)) return [V_LLOC];
                     // Rètols de LOCALITZACIÓ ("Directe PRESENCIAL <lloc>") i de PROGRAMES:
-                    // V7 preferent (deixen V6 lliure per als noms) i V6 de reserva — COM SEMPRE.
-                    // ⚠️ (2026-09-21) Aquests NO són nom-càrrec: el canvi del tipus Enviat/
-                    // connexió no els ha d'afectar (petició d'usuari: "Directe_PRESENCIAL,
-                    // com estava; a V6 no, a V7 estaven perfectes").
+                    // V_LLOC preferent (deixa V_CHYRONS lliure per als noms) i V_CHYRONS de
+                    // reserva — COM SEMPRE. ⚠️ (2026-09-21) Aquests NO són nom-càrrec: el canvi
+                    // del tipus Enviat/connexió no els ha d'afectar (petició d'usuari:
+                    // "Directe_PRESENCIAL, com estava; a V6 no, a V7 estaven perfectes").
                     if (/DIRECTE[_ ]+PRESENCIAL|DIRECTE[_ ]+PROGRAMES/.test(rName) ||
                         rRol === 'PRESENCIAL' || rRol === 'PROGRAMES' ||
                         rName.indexOf('PROGRAMES') !== -1) {
-                        return [V7, V6];
+                        return [V_LLOC, V_CHYRONS];
                     }
                     // Rètols de connexió pròpiament dits (Enviat / Directe del connector) =
-                    // nom-càrrec del connector: NOMÉS V6, sense V7 de reserva (2026-09-21).
-                    if (this._isConexioWott(c)) return [V6];
-                    return [V6, V7];
+                    // nom-càrrec del connector: NOMÉS V_CHYRONS, sense V_LLOC de reserva (2026-09-21).
+                    if (this._isConexioWott(c)) return [V_CHYRONS];
+                    return [V_CHYRONS, V_LLOC];
                 },
                 "Resto",
                 undefined,
-                { dedupeTitolet: true }
+                { dedupeTitolet: true, chainTitolet: true }
             );
         },
 

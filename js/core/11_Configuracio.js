@@ -16,11 +16,83 @@
     // Tracks alineats amb Profile.json (2026-09-22, remapatge per evitar col·lisions):
     //   v_mp4:1 · v_mascara:2 (MÀSCARA · PROTEGIDA · #126) · v_fondos:3 · v_graf:4
     //   · v_graficos:5 · v_tema:6 · v_chyrons:7 · v_lloc:8
+    // 🎯 TITOLET (2026-10-06 · 3a passada) — detecció del grafisme cremat (rètol mosquit)
+    // al MP4 cleanFeed. Receta: màscara de color #F25F13 ±25 sobre una ROI a la part
+    // baixa del frame, cobertura mínima, agrupació d'intervals per gap, ESCANEIG
+    // ENDAVANT per trams i OCR (bin\ocr.ps1 → Windows.Media.Ocr, tots els idiomes en
+    // una execució) per saber QUIN wott és a cada interval, amb match difús contra el
+    // nom del wott. NO és cap traça de Profile.json (Profile.json no es llegeix enlloc):
+    // `Config.get()` ho exposa amb aquests valors.
+    //
+    // 🔴 Valors RE-MESURATS al log real (TNM V1 2026-10-05, ítem 16, 12 TITOLET):
+    //   · seek d'entrada a ffmpeg: 2,66→0,33 s (t=27,76) i 12,93→0,25 s (t=160,76) amb
+    //     el MATEIX frame (md5 idèntic) → 33 captures: 311 s → ~10 s.
+    //   · 1 captura per interval (al frame de més cobertura) + reintents ≤3 cap endavant.
+    //   · minOff/gapMergeSec baixats: amb 1,0 + 2,0 dos rètols CONSECUTIUS es fusionaven
+    //     (Ceuta + Maricarmen en un interval de 9 s → un wott sense detecció).
+    const TITOLET_DEFAULTS = {
+        enabled: true,
+        dryRun: false,         // ✅ APLICAR (2026-10-06, 2a passada). Per posar-lo en dry-run
+                               //    sense tocar codi: FASTPASS_UI.State.titoletDryRun = true
+                               //    a la consola del panell.
+        roiY: [0.60, 0.85],    // ROI vertical (fracció de l'alçada); X = tot l'ample
+        ocrRoiX: [0, 0.45],    // ROI X només per a la CAPTURA d'OCR: el rètol viu a l'esquerra
+                               //    i a la dreta hi ha grafisme aliè (MESURAT: l'OCR llegia
+                               //    «338 TELEMÁTICOS: 12» del panell de votacions del fons)
+        color: '#F25F13',      // taronja del rètol TITOLET
+        tol: 25,               // tolerància per canal RGB (0-255)
+        minCov: 2.0,           // cobertura mínima del ROI (%) per dir «rètol visible»
+        maxCov: 60,            // cobertura (%) a partir de la qual el ROI és FONS, no text
+        edgeAxes: 'y',         // quines vores desqualifiquen: 'y' (dalt/baix) · 'xy' · 'none'
+        minEdgeFrac: 0.04,     // marge (fracció del ROI) per dir «toca la vora»
+        scanFps: 2,            // 🔴 2 mostres/s (abans 1): a 1 fps la durada tenia ±1 s d'error
+        fps: 25,               // fps del material (frames ↔ segons)
+        minOn: 0.4,            // durada mínima d'un interval (s)
+        minFrames: 2,          // mostres ON mínimes per acceptar un interval (1 = soroll)
+        minOff: 0.3,           // 🔴 buit mínim per separar intervals (abans 1,0)
+        gapMergeSec: 0.6,      // 🔴 fusiona buits < això (abans 2,0: fusionava rètols seguits)
+        scanChunkSec: 45,      // 🔴 trams de l'escaneig endavant (el cursor només avança)
+        longOnSec: 5.0,        // onAir > 5 s (= durada de la targeta) → cadència actual
+        minTailSec: 0.5,       // (LEGACY · 2026-10-06 5a passada) JA NO s'usa a la cadena
+                               //    TITOLET: la part viva és el clip SENCER i el congelat
+                               //    només cobreix fins al final detectat. Es conserva la clau
+                               //    per no invalidar configs desades.
+        ocr: true,             // WHICH per OCR (els accents poden fallar: match difús)
+        ocrLangs: ['es-ES', 'en-US'],   // tots en UNA execució de bin\ocr.ps1 (-Langs)
+        ocrTries: 3,           // intents d'OCR per interval (1r = frame de més cobertura)
+        ocrRetryStepSec: 0.75, // pas cap ENDAVANT entre intents (mai enrere)
+        ocrFuzz: 0.55,         // similitud mínima text OCR ↔ nom del wott (0-1)
+        cache: true,           // desa el pla a C:\temp\titolet_plan_<hash>.json
+        snapTolSec: 1.0,       // col·locació: si l'instant detectat cau a ≤ això del TALL
+                               //    anterior de V1, el TITOLET entra EXACTAMENT a l'inici
+                               //    d'aquell clip (l'«imant»). 🔴 (5a passada, 2026-10-06)
+                               //    Abans s'hi sumaven 10 frames (OFF = 0,40 s) → la targeta
+                               //    entrava 0,4 s tard i l'«imant» no s'hi veia.
+        ocrWeak: 0.7,          // match FEBLE: per sota d'això, si el text de l'interval ja és
+                               //    (millor) d'un ALTRE wott, la parella es REBUTJA. Cas real
+                               //    (TNM V1 ítem 16, 06/10): l'interval de relIn 111 s deia
+                               //    «jung 2025 LEIRE DÍEZ» (d'un altre wott, score 0,889) i el
+                               //    wott orfe «maig 2026 José Luis» (ZAPATERO) s'hi va
+                               //    emparellar amb 0,556 → col·locat 10,5 s abans del seu lloc.
+        refineEntry: true,     // refina l'ENTRADA de cada interval USAT amb un escaneig FI al
+                               //    voltant de `tIn` → ±3 frames en comptes de fins a 12
+                               //    (l'escaneig general va a 2 mostres/s = pas 0,5 s, i el 1r
+                               //    mostreig ON sempre va tard: «uns frames de retraso»)
+        refineFps: 8,          // mostres/s de l'escaneig fi de l'entrada (pas 0,125 s)
+        freezeGrabFrac: 0.6,   // instant del frame congelat = 60 % del clip quan la part viva
+                               //    és el clip SENCER: al final hi ha l'animació de sortida i
+                               //    el PNG quedaria buit (congelat invisible)
+        freezeMaxSec: 15,      // topall del congelat (seguretat): mai més de 15 s de frame
+                               //    congelat, encara que la detecció digui que va durar més
+    };
+
     let _activeConfig = {
         general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 2.5, clipOutMarginSec: 0, clipExtraTailSec: 60 },
         // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
         // guardes de temps, peticions a l'API d'escaletes i OFFSET del MP4).
         programStartHours: { TNV: 21.0, TNM: 14.5, TNC: 13.8333, MAT: 7.9167 },
+        // 🎯 TITOLET: paràmetres de detecció del grafisme cremat (vegeu TITOLET_DEFAULTS).
+        titolet: TITOLET_DEFAULTS,
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\",
@@ -197,7 +269,10 @@
                 //   saltava mai al tall d'obertura de la seva peça (TNC: 12,96s vs tall 15,12s).
                 srtEmergencyTailSec: (cfg.general.srtEmergencyTailSec != null) ? cfg.general.srtEmergencyTailSec : 120,
                 snapWindowDeducedSec: (cfg.general.snapWindowDeducedSec != null) ? cfg.general.snapWindowDeducedSec : 2.5,
-                snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 2.5
+                snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 2.5,
+                // 🎯 TITOLET (2026-10-06): paràmetres de detecció del grafisme cremat.
+                // Còpia fresca (defaults + override) perquè ningú els pugui mutar de retruc.
+                titolet: Object.assign({}, TITOLET_DEFAULTS, cfg.titolet || {})
             };
         },
 

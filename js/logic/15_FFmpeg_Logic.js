@@ -407,6 +407,114 @@
         },
 
         /**
+         * extractRoiSeries: extreu la sèrie de mostres del ROI del rètol TITOLET en
+         * rgb24 cru (un sol .raw = frames encadenats) per comptar-hi la cobertura de
+         * color des de JS (17_TitoletDetect_Logic.js). ZERO lògica aquí: només ffmpeg.
+         *
+         * -ss ABANS de -i = seek d'ENTRADA. 🔴 (2026-10-06, 3a passada) MESURAT amb el
+         * clip real (TNM_V1_CLIP.mp4 251,8 MB, 1080p25, 257 s): amb `-ss` DESPRÉS de `-i`
+         * ffmpeg DECODIFICA des de 0 fins a l'instant demanat i el cost creix amb t
+         * (2,66 s a t=27,76 · 11,84 s a 142,76 · 12,93 s a 160,76) → 33 captures = 5 min.
+         * Amb `-ss` ABANS de `-i` el mateix frame costa 0,25-0,33 s (🟰 45× més ràpid) i
+         * el PNG resultant és BYTE A BYTE IDÈNTIC (md5 igual a t = 74/75/76 i 27/142/160).
+         *
+         * @param {string} sourcePath - MP4 (cleanFeed)
+         * @param {Object} o - { tStart, tDur, roiY:[a,b], w, h, fps, outPath }
+         * @returns {Promise<{ok:boolean, path:string, w:number, h:number, fps:number, error?:string}>}
+         */
+        extractRoiSeries: async function (sourcePath, o) {
+            const opts = o || {};
+            const outPath = opts.outPath || ('C:\\temp\\titolet_roi_' + Date.now() + '.raw');
+            const w = opts.w || 160, h = opts.h || 45;
+            const fps = opts.fps || 1;
+            const rY = opts.roiY || [0.60, 0.85];
+            const y0 = rY[0], yH = Math.max(0.01, rY[1] - rY[0]);
+            try {
+                if (!sourcePath) return { ok: false, path: outPath, error: 'sourcePath buit' };
+                const ffmpegBin = await getFfmpeg();
+                const timestamp = Date.now();
+                const psFile = 'C:\\temp\\titolet_scan_' + timestamp + '.ps1';
+                const doneFile = 'C:\\temp\\titolet_scan_' + timestamp + '_done.txt';
+                const vf = 'crop=iw:ih*' + yH.toFixed(4) + ':0:ih*' + y0.toFixed(4) +
+                    ',scale=' + w + ':' + h + ':flags=area,fps=' + fps;
+                let psContent = '& "' + ffmpegBin + '" -ss ' + (opts.tStart || 0) +
+                    ' -t ' + opts.tDur + ' -i "' + sourcePath + '" -vf "' + vf +
+                    '" -pix_fmt rgb24 -f rawvideo -an -y "' + outPath + '"\r\n';
+                psContent += 'if (Test-Path "' + outPath + '") { Write-Output "OK" > "' + doneFile +
+                    '" } else { Write-Output "FAIL:exit=$LASTEXITCODE" > "' + doneFile + '" }\r\n';
+
+                const cepFs = window.cep.fs;
+                if (!cepFs || !cepFs.writeFile) return { ok: false, path: outPath, error: 'cep.fs.writeFile no disponible' };
+                cepFs.writeFile(psFile, '\uFEFF' + psContent);
+                utils.log('🎯 [titolet] Escanejant ROI del cleanFeed (' + fps + ' fps, ' + w + 'x' + h +
+                    ', y ' + y0 + '-' + rY[1] + ') des de ' + (opts.tStart || 0) + 's…');
+                const psCmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"';
+                await utils.callJSX('IO.executeShell(' + JSON.stringify(psCmd) + ')');
+                await this.waitForFile(doneFile, 1000, 900000);
+                await utils.callJSX('IO.remove(' + JSON.stringify(doneFile) + ')').catch(() => { });
+                await utils.callJSX('IO.remove(' + JSON.stringify(psFile) + ')').catch(() => { });
+                return { ok: true, path: outPath, w: w, h: h, fps: fps, error: null };
+            } catch (e) {
+                utils.log('❌ [titolet] extractRoiSeries: ' + e.message);
+                return { ok: false, path: outPath, w: w, h: h, fps: fps, error: e.message };
+            }
+        },
+
+        /**
+         * extractFramePng: captura UN frame del MP4 retallat a la ROI del rètol (PNG
+         * a mida nativa) per passar-lo a l'OCR (`bin\ocr.ps1`).
+         *
+         * 🔴 (2026-10-06, 3a passada) `-ss` ABANS de `-i`: amb el seek a la sortida
+         * cada captura decodificava el MP4 des de 0 (2,7 s a t=28 · 12,9 s a t=161 i
+         * creixent) i 33 captures es menjaven 5 minuts. Amb el seek a l'entrada:
+         * 0,25-0,33 s i el MATEIX frame (md5 idèntic, mesurat).
+         * `opts.roiX` = [x0, x1] en fracció de l'amplada (null = tot l'ample) per no
+         * llegir text aliè que hi hagi al costat del rètol.
+         * @param {string} sourcePath - MP4 (cleanFeed)
+         * @param {number} tSec - Segon del MP4 a capturar
+         * @param {string} outPath - PNG de sortida
+         * @param {Object} [o] - { roiY:[a,b], roiX:[a,b] }
+         */
+        extractFramePng: async function (sourcePath, tSec, outPath, o) {
+            const opts = o || {};
+            const rY = opts.roiY || [0.60, 0.85];
+            const y0 = rY[0], yH = Math.max(0.01, rY[1] - rY[0]);
+            const rX = opts.roiX || null;
+            let x0 = 0, xW = 1;
+            if (rX && rX.length === 2) {
+                x0 = Math.max(0, Math.min(0.98, Number(rX[0]) || 0));
+                xW = Math.max(0.05, Math.min(1 - x0, (Number(rX[1]) || 1) - x0));
+            }
+            try {
+                if (!sourcePath || !outPath) return { ok: false, path: outPath, error: 'ruta buida' };
+                const ffmpegBin = await getFfmpeg();
+                const timestamp = Date.now();
+                const psFile = 'C:\\temp\\titolet_png_' + timestamp + '.ps1';
+                const doneFile = 'C:\\temp\\titolet_png_' + timestamp + '_done.txt';
+                const vf = 'crop=iw*' + xW.toFixed(4) + ':ih*' + yH.toFixed(4) +
+                    ':iw*' + x0.toFixed(4) + ':ih*' + y0.toFixed(4);
+                let psContent = '& "' + ffmpegBin + '" -ss ' + Number(tSec).toFixed(3) +
+                    ' -i "' + sourcePath + '" -frames:v 1 -vf "' + vf + '" -y "' + outPath + '"\r\n';
+                psContent += 'if (Test-Path "' + outPath + '") { Write-Output "OK" > "' + doneFile +
+                    '" } else { Write-Output "FAIL:exit=$LASTEXITCODE" > "' + doneFile + '" }\r\n';
+
+                const cepFs = window.cep.fs;
+                if (!cepFs || !cepFs.writeFile) return { ok: false, path: outPath, error: 'cep.fs.writeFile no disponible' };
+                cepFs.writeFile(psFile, '\uFEFF' + psContent);
+                const psCmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"';
+                await utils.callJSX('IO.executeShell(' + JSON.stringify(psCmd) + ')');
+                await this.waitForFile(doneFile, 500, 120000);
+                await utils.callJSX('IO.remove(' + JSON.stringify(doneFile) + ')').catch(() => { });
+                await utils.callJSX('IO.remove(' + JSON.stringify(psFile) + ')').catch(() => { });
+                return { ok: true, path: outPath, error: null };
+            } catch (e) {
+                utils.log('❌ [titolet] extractFramePng: ' + e.message);
+                return { ok: false, path: outPath, error: e.message };
+            }
+        },
+
+
+        /**
          * extractClip: Extreu un segment del MP4 original usant ffmpeg -c copy.
          * Executa bin/extract_clip.ps1 via PowerShell i espera que el fitxer es generi.
          *
