@@ -272,7 +272,7 @@ FASTPASS.Clips = {
     /**
      * insert: Insereix un element del Bin (Overwrite) amb durada opcional.
      */
-    insert: function(itemName, trackIdx, startSec, endSec, type) {
+    insert: function(itemName, trackIdx, startSec, endSec, type, keepAudio) {
         try {
             var p = app.project;
             var seq = p.activeSequence;
@@ -319,52 +319,35 @@ FASTPASS.Clips = {
                 lastClip.end = tEnd;
             }
 
-            // 🎯 VERIFICACIÓ AUDIO I SINCRONIA (per a inserció estàndard)
-            // Trobar el clip inserit
-            var clips = targetTrack.clips;
-            var insertedClip = null;
-            for (var i = 0; i < clips.numItems; i++) {
-                if (Math.abs(clips[i].start.seconds - tStart.seconds) < 0.1) {
-                    insertedClip = clips[i];
-                    break;
-                }
-            }
-            if (insertedClip) {
-                try {
-                    var audioComp = null;
-                    for (var c = 0; c < insertedClip.components.numItems; c++) {
-                        if (insertedClip.components[c].matchName === "AE.ADBE Audio") {
-                            audioComp = insertedClip.components[c];
-                            break;
-                        }
-                    }
-                    if (audioComp) {
-                        $.writeln("✅ [JSX] Clip estàndard: component d'audio trobat");
-                    } else {
-                        $.writeln("ℹ️ [JSX] Clip estàndard sense audio.");
-                    }
-                } catch (e) {
-                    $.writeln("⚠️ [JSX] No s'ha pogut verificar l'audio: " + e.message);
-                }
-            }
-    
-            // Eliminar el clip d'audio que Premiere afegeix AUTOMÀTICAMENT a A1
-            // quan s'insereix un clip de vídeo que conté àudio (ex: wotts .mov).
-            // IMPORTANT: Només s'elimina el clip d'audio que coincideix EXACTAMENT
-            // amb el start del vídeo inserit. NO es toquen altres clips d'A1.
-            if (audioComp) {
-                var audioTrackA1 = seq.audioTracks[0];
-                if (audioTrackA1) {
-                    for (var i = audioTrackA1.clips.numItems - 1; i >= 0; i--) {
-                        var aClip = audioTrackA1.clips[i];
-                        if (Math.abs(aClip.start.seconds - insertedClip.start.seconds) < 0.1) {
-                            try {
-                                aClip.remove(true, true);
-                                $.writeln("✅ [JSX] Àudio fantasma eliminat de A1 (wott sense so).");
-                            } catch (e2) {
-                                $.writeln("⚠️ [JSX] Error en eliminar àudio fantasma: " + e2.message);
-                            }
-                            break; // només n'hi ha un
+            // 🎯 ANTI-FANTASMA (2026-10-07): Premiere afegeix AUTOMÀTICAMENT el clip
+            // d'àudio ENLLAÇAT d'un clip amb so (p. ex. wotts .mov) en una pista
+            // d'àudio NOVA en fer overwriteClip. Comprovat en viu: NO cau a A1 ni a la
+            // pista amb target actiu (→ A5/A6), i NO sobreescriu l'àudio de programa.
+            // Aquests àudio-fantasmes (muts) s'acumulaven a l'export.
+            // Si `keepAudio !== true` (grafisme/wott) s'eliminen amb LIFT
+            // (remove(false,false) → sense ripple → no desincronitza res), buscant a
+            // TOTES les pistes (no només A1, error del codi antic). Amb `keepAudio=true`
+            // (cleanFeed MODE FALLBACK) SÍ es vol l'àudio → no s'hi toca.
+            if (keepAudio !== true) {
+                // (2026-10-07) GUARDA PER NOM DE MEDIA: NOMÉS s'elimina el clip d'àudio que
+                // és la MATEIXA font que el clip inserit (Premiere enllaça l'àudio al vídeo
+                // seleccionat → mateix `projectItem.name`). MAI l'àudio de PROGRAMA (mèdia
+                // diferent) encara que comparteixi el `start`. Sense aquesta guarda, qualsevol
+                // insert a un TC on l'àudio de programa arrenca (p. ex. 0 s) s'enduia el clip
+                // sencer d'A1 (l'àudio de programa sol ser UN sol clip llarg).
+                var _insName = (item && item.name) ? String(item.name) : "";
+                var _aTrs = seq.audioTracks;
+                for (var _at = 0; _at < _aTrs.numTracks; _at++) {
+                    var _aTr = _aTrs[_at];
+                    if (!_aTr || !_aTr.clips) continue;
+                    for (var _ac = _aTr.clips.numItems - 1; _ac >= 0; _ac--) {
+                        var _aC = _aTr.clips[_ac];
+                        if (!_aC) continue;
+                        if (Math.abs(_aC.start.seconds - tStart.seconds) >= 0.1) continue;
+                        var _nm = "";
+                        try { _nm = (_aC.projectItem && _aC.projectItem.name) ? String(_aC.projectItem.name) : ""; } catch (eN) { _nm = ""; }
+                        if (_insName && _nm === _insName) {
+                            try { _aC.remove(false, false); } catch (ePh) {}
                         }
                     }
                 }

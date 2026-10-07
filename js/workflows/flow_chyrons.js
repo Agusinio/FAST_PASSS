@@ -1823,35 +1823,17 @@
                     log(`   🛡️ [Titol] ${ttPos.length - ttFinal.length} Tema-Títol(s) descartat(s) per col·lisió de posició`);
                 }
 
-                let placed = 0;
-                const ttPlaced = [];
-                for (let i = 0; i < ttFinal.length; i++) {
-                    const tt = ttFinal[i].tt;
-                    const placeTime = ttFinal[i].time;
-                    ttPlaced.push({ placeTime: placeTime, item: tt.item });
-
-                    // Final del freeze: el següent Tema‑Titol gran, o el final del bloc
-                    let stretchEnd = (i < ttFinal.length - 1) ? ttFinal[i + 1].time : null;
-                    if (stretchEnd === null) stretchEnd = (seqEnd && seqEnd > 0) ? seqEnd : null;
-
-                    log(`📌 [Titol] ${i + 1}/${ttFinal.length} "${String(tt.name).substring(0, 60)}" → ${placeTime.toFixed(2)}s (${ttFinal[i].ref}) · freeze fins ${stretchEnd !== null ? stretchEnd.toFixed(2) + 's' : 'final'}`);
-
-                    try {
-                        const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
-                        if (freezeResult && freezeResult.success) {
-                            placed++;
-                            log(`   🖼️ [Titol] Tema‑Titol col·locat: ${freezeResult.duration.toFixed(1)}s`);
-                        }
-                    } catch (freezeErr) {
-                        log(`   ❌ [Titol] Freeze fallit per ${tt.name}: ${freezeErr.message}`, "ERROR");
-                    }
-                    await getUtils().delay(200);
-                }
+                // (2026-10-07) ORDRE DE COL·LOCACIÓ: el titulillo (§6/§7) s'ha de calcular i
+                // col·locar ABANS que el Tema-Títol gran (§5). `ttPlaced` es deriva ARA de la
+                // planificació `ttFinal` (no cal el gran ja col·locat). Així el gran és l'ÚLTIMA
+                // peça que entra a V6 → cap insert del titulillo (entrant/congelat/sortida) el
+                // pot tapar; abans, el gran entrava primer i el titulillo el "machacava".
+                const ttPlaced = ttFinal.map(x => ({ placeTime: x.time, item: x.tt.item, name: x.tt.name }));
 
                 // ── 6. TRANSICIONS amb el TEMA-TÍTOL PETIT ("titulillo") ──────────────────
                 // (2026-09-21) El titulillo (~1 s, amb animació) s'usa com a transició:
                 // entrant a l'inici del bloc (si el gran va després del conductor) i sortint
-                // (versió invertida per ffmpeg) just abans de cada Tema-Títol gran.
+                // (desaparició del gran) just abans de cada Tema-Títol gran.
                 try {
                     await this._placeTemaTitolTransicions({
                         struct: struct,
@@ -1882,6 +1864,41 @@
                     });
                 } catch (eFg) {
                     log(`   ⚠️ [Titol·Petit·cobertura] ${eFg.message}`, "WARN");
+                }
+
+                // ── 5. TEMA-TÍTOL GRAN (l'ÚLTIMA peça a V6) ───────────────────────────────
+                let placed = 0;
+                for (let i = 0; i < ttFinal.length; i++) {
+                    const tt = ttFinal[i].tt;
+                    const placeTime = ttFinal[i].time;
+                    // Final del freeze: el següent Tema‑Titol gran, o el final del bloc
+                    let stretchEnd = (i < ttFinal.length - 1) ? ttFinal[i + 1].time : null;
+                    if (stretchEnd === null) stretchEnd = (seqEnd && seqEnd > 0) ? seqEnd : null;
+
+                    log(`📌 [Titol] ${i + 1}/${ttFinal.length} "${String(tt.name).substring(0, 60)}" → ${placeTime.toFixed(2)}s (${ttFinal[i].ref}) · freeze fins ${stretchEnd !== null ? stretchEnd.toFixed(2) + 's' : 'final'}`);
+
+                    try {
+                        const freezeResult = await this._freezeTemaTitol(tt.name, placeTime, stretchEnd, tt.name);
+                        if (freezeResult && freezeResult.success) {
+                            placed++;
+                            log(`   🖼️ [Titol] Tema‑Titol col·locat: ${freezeResult.duration.toFixed(1)}s`);
+                        }
+                    } catch (freezeErr) {
+                        log(`   ❌ [Titol] Freeze fallit per ${tt.name}: ${freezeErr.message}`, "ERROR");
+                    }
+                    await getUtils().delay(200);
+                }
+
+                // ── 8. REFRESC nuclear de la UI (2026-10-07) ──────────────────────────────
+                // Després de tantes insercions/moviments via script, Premiere NO redibuixa el
+                // timeline ni el visor: allò que es veu pot NO coincidir amb el contingut real.
+                // `Timeline.refresh()` mou el cabezal ±0.001 s per forçar el repintat del panell
+                // (assegura que el que es mostra és exactament el que hi ha a la seqüència).
+                try {
+                    const rf = await callJSX('Timeline.refresh()');
+                    log(`   🔄 [Titol] Timeline.refresh → ${rf}`);
+                } catch (eRf) {
+                    log(`   ⚠️ [Titol] Timeline.refresh ha fallat: ${eRf.message}`, "WARN");
                 }
 
                 if (placed === 0) {
@@ -2028,16 +2045,20 @@
         },
 
         /**
-         * _placeTemaTitolTransicions: Transicions amb el TEMA-TÍTOL PETIT ("titulillo").
+         * _placeTemaTitolTransicions: Transicions amb el TEMA-TÍTOL PETIT ("titulillo") i la
+         * peça de SORTIDA del gran.
          *
-         * El titulillo és el Tema-Títol d'~1 s (qtrle amb alpha) amb animació d'entrada que
-         * fins ara es descartava. La seva versió INVERTIDA (ffmpeg) fa d'animació de SORTIDA.
+         * El titulillo és el Tema-Títol d'~1 s (qtrle amb alpha) que fa d'identitat/entrada.
+         * La SORTIDA ja NO s'inverteix amb ffmpeg: (2026-10-07) s'usa la pròpia animació de
+         * DESAPARICIÓ que el Wott del Tema-Títol gran porta al final del seu mèdia
+         * (`cfg.temaTitolExit`, 10:00→10:06 = 6 frames) — vegeu `_insertTemaTitolExit`. El revers ffmpeg
+         * del titulillo queda només com a xarxa de seguretat (`useReverseFallback`).
          * Col·locacions, a la pista de Tema-Títol:
          *   • CasB (el Tema-Títol gran va DESPRÉS del conductor): titulillo ENTRANT a l'inici
-         *     del bloc + titulillo SORTINT just abans del primer gran.
-         *   • Amb més d'un Tema-Títol gran: titulillo SORTINT just abans de cada següent
+         *     del bloc + congelat + SORTIDA (desaparició) just abans del primer gran.
+         *   • Amb més d'un Tema-Títol gran: SORTIDA (desaparició) just abans de cada següent
          *     (transició "entre temes").
-         * @param {Object} p - {struct, wottIdx, ttPlaced:[{placeTime}], clipStart, track, minSec, case}
+         * @param {Object} p - {struct, wottIdx, ttPlaced:[{placeTime, item, name}], clipStart, track, minSec, case}
          * @returns {Promise<number>} Nombre de transicions col·locades
          */
         _placeTemaTitolTransicions: async function (p) {
@@ -2047,10 +2068,10 @@
                 return 0;
             }
             log(`   🎬 [Titol·Petit] Titulillo triat: "${String(petit.name).substring(0, 60)}" (${petit.dur.toFixed(2)}s, id=${petit.idNum})`);
-            // (2026-09-22) INVERSIÓ PEREZOSA: el titulillo NOMÉS s'envia a invertir (ffmpeg) si
-            // el bloc necessita de veritat una SORTIDA (si no —p. ex. cas A amb un sol
-            // Tema-Títol gran— no es toca ffmpeg). Abans es generava SEMPRE, encara que després
-            // no s'usés enlloc. (2026-10-01 · #129) Ara es fa a la FASE 0, ABANS de col·locar res.
+            // (2026-10-07) El revers ffmpeg del titulillo JA NO s'usa com a SORTINT: ara és la
+            // peça de desaparició del propi gran (`_insertTemaTitolExit`). Es conserva AQUEST
+            // `getRev` només com a xarxa de seguretat si la peça no es pot col·locar i
+            // `cfg.temaTitolExit.useReverseFallback` està actiu.
             let _revCache = null;
             const getRev = async () => {
                 if (_revCache === null) _revCache = await this._ensureReversedTitolPetit(petit);
@@ -2078,7 +2099,9 @@
                 } catch (eD) { }
                 return estDur;
             };
-            const revStartFor = (target, revDur) => Math.ceil((target - revDur) / REV_FRAME - 1e-6) * REV_FRAME;
+            // IN de la peça de SORTIDA alineat a la rejilla de frames (ceil → MAI més curt
+            // del compte, així el seu `moveToRange` no pot arribar més enllà del pla).
+            const revStartFor = (target, pieceDur) => Math.ceil((target - pieceDur) / REV_FRAME - 1e-6) * REV_FRAME;
             const insertTitol = async (name, start, label, endSec) => {
                 if (!name || !(durP > 0.05) || start < p.clipStart) return false;
                 const esc = getUtils().escape(name);
@@ -2088,25 +2111,13 @@
                 log(`      ${label} → V${p.track} @ ${start.toFixed(2)}s→${endTarget.toFixed(2)}s (${(endTarget - start).toFixed(2)}s) [ins=${ins} · end=${end}]`);
                 return true;
             };
-            // ── FASE 0 · PREPARAR (ffmpeg ABANS de tocar la timeline) ────────────────────
-            // (2026-10-01 · #129) El muntatge va d'ESQUERRA A DRETA i la SORTINT s'ancora al
-            // Tema-Títol gran: per calcular-ne la posició cal la durada del revers. Si la
-            // inversió es fa a mig muntatge (dins del bucle) la durada real encara no es coneix
-            // quan es calcula el pla → el revers quedava 1 frame desplaçat (#128). Ordre:
-            // 1) decidir si cal revers · 2) invertir (UNA vegada) · 3) mesurar durades REALS ·
-            // 4) calcular el pla · 5) aplicar d'esquerra a dreta.
-            let needsRevers = false;
-            for (let i = 0; i < p.ttPlaced.length; i++) {
-                if (i === 0 && p.case !== 'B') continue;
-                // Conservador: es decideix amb el start SENSE arrodonir cap amunt.
-                if ((p.ttPlaced[i].placeTime - durP) >= p.clipStart + 0.10) { needsRevers = true; break; }
-            }
-            let rev = { ok: false, name: '', path: '' };
-            let revDur = snapDur(durP);
-            if (needsRevers) {
-                rev = await getRev();
-                if (rev.ok) revDur = await realDurOf(rev.path, snapDur(durP));
-            }
+            // ── FASE 0 · PREPARAR DUrades ────────────────────────────────────────────────
+            // (2026-10-01 · #129) Fins ara aquí s'invertia el titulillo amb ffmpeg ABANS de
+            // calcular el pla (per conèixer-ne la durada real). (2026-10-07) JA NO: la SORTINT
+            // és una peça del PROPI Tema-Títol gran (cfg.temaTitolExit), així que la seva
+            // durada és una constant de config i no cal tocar ffmpeg ni cap import.
+            const exitCfg = this._temaTitolExitCfg();
+            const exitDur = snapDur(exitCfg.durSec);
             const petitDur = (p.case === 'B') ? await realDurOf(petit.path, snapDur(durP)) : snapDur(durP);
 
             // ── FASE 1 · PLA: TOTES les posicions, calculades ABANS d'inserir res ─────────
@@ -2122,7 +2133,10 @@
                 // (mesurada per ffprobe i alineada a la rejilla de frames). Amb l'estimació del
                 // manifest (1,02 s) l'interval quedava 1 frame més llarg del que toca.
                 const entrantIn = p.clipStart + 0.40;
-                const entrantOut = entrantIn + petitDur;
+                // (2026-10-07) L'OUT va 1 frame ABANS del final teòric: `petitDur` ve de `ceil`
+                // → el clip durava 1 frame MÉS que el mèdia i aquell darrer frame eixia buit.
+                // El congelat (més avall) comença aquí i absorbeix aquell frame.
+                const entrantOut = entrantIn + petitDur - REV_FRAME;
                 plan.push({ kind: 'entrant', name: petit.name, start: entrantIn, end: entrantOut, label: '🟢 [Titol·Petit] ENTRANT' });
                 // (2026-10-01 · #128) CONGELAT entre l'ENTRANT i el SORTINT: un frame congelat del
                 // FINAL del titulillo, estirat fins on comença el revers. Sense això V5 quedava
@@ -2131,28 +2145,29 @@
                 //  calculat queda a 0.)
                 const firstTT = (p.ttPlaced.length > 0) ? p.ttPlaced[0].placeTime : null;
                 if (firstTT !== null) {
-                    const revStart = revStartFor(firstTT, revDur);
-                    if (revStart > entrantOut + 0.20) {
-                        plan.push({ kind: 'congelat', start: entrantOut, end: revStart, label: '🧊 [Titol·Petit] CONGELAT' });
+                    const exitStart = revStartFor(firstTT, exitDur);
+                    if (exitStart > entrantOut + 0.20) {
+                        plan.push({ kind: 'congelat', start: entrantOut, end: exitStart, label: '🧊 [Titol·Petit] CONGELAT' });
                     }
                 }
             }
-            // SORTINT (versió invertida) just abans de cada Tema-Títol gran (el primer, només en CasB)
+            // SORTINT (peça de DESAPARICIÓ del propi gran) just abans de cada Tema-Títol gran
+            // (la del primer, només en CasB).
             for (let i = 0; i < p.ttPlaced.length; i++) {
                 const target = p.ttPlaced[i].placeTime;
-                const start = revStartFor(target, revDur);
+                const start = revStartFor(target, exitDur);
                 if (start < p.clipStart + 0.10) continue;
                 if (i === 0 && p.case !== 'B') continue;
-                if (!rev.ok) {
-                    log(`   ⚠️ [Titol·Petit] Sense versió invertida: no es planifica la SORTINT @ ${start.toFixed(2)}s`, 'WARN');
+                if (!p.ttPlaced[i].name) {
+                    log(`   ⚠️ [Titol·Petit] Sense nom del Tema-Títol gran ${i + 1}: no es planifica la SORTINT @ ${start.toFixed(2)}s`, 'WARN');
                     continue;
                 }
-                plan.push({ kind: 'revers', start: start, end: target, label: `🔴 [Titol·Petit] SORTINT (abans del gran ${i + 1}/${p.ttPlaced.length})` });
+                plan.push({ kind: 'exit', name: p.ttPlaced[i].name, start: start, end: target, label: `🔴 [Titol·Petit] SORTINT (desaparició del gran ${i + 1}/${p.ttPlaced.length})` });
             }
             plan.sort((a, b) => a.start - b.start);
             if (plan.length > 0) {
                 log(`   📋 [Titol·Petit] Pla: ${plan.length} peça(es) d'esquerra a dreta · ` +
-                    `titulillo ${petitDur.toFixed(2)}s${rev.ok ? ' · revers ' + revDur.toFixed(2) + 's' : ''} → ` +
+                    `titulillo ${petitDur.toFixed(2)}s · sortida ${exitDur.toFixed(2)}s (desaparició del gran, mèdia ${exitCfg.atSec.toFixed(2)}s) → ` +
                     plan.map(x => `${x.kind}@${x.start.toFixed(2)}→${x.end.toFixed(2)}s`).join(' | '));
             }
 
@@ -2163,14 +2178,153 @@
                     if (await this._freezeTitulilloStill(petit, p.track, it.start, it.end, it.label)) n++;
                     continue;
                 }
-                // (2026-10-01 · #129) El revers JA està preparat (FASE 0): aquí no es toca ffmpeg,
-                // només es col·loca. Cada peça cau en zona BUIDA perquè s'aplica d'esquerra a dreta
-                // i el pla està calculat amb les durades REALS.
-                const name = (it.kind === 'revers') ? rev.name : it.name;
-                if (await insertTitol(name, it.start, it.label, it.end)) n++;
+                // (2026-10-07) La SORTINT és la peça de DESAPARICIÓ del propi Tema-Títol gran:
+                // retall NO destructiu del seu mèdia (l'ítem JA és al projecte). Si no es pot
+                // col·locar i la xarxa de seguretat està activa, es cau al revers ffmpeg antic.
+                if (it.kind === 'exit') {
+                    const okExit = exitCfg.enabled
+                        ? await this._insertTemaTitolExit(it.name, p.track, it.start, it.end, exitCfg.atSec)
+                        : false;
+                    if (okExit) { n++; continue; }
+                    if (!exitCfg.fallbackRev) continue;
+                    const rv = await getRev();
+                    if (rv.ok) {
+                        if (await insertTitol(rv.name, it.start, it.label + ' · revers ffmpeg', it.end)) n++;
+                    } else {
+                        log(`   ⚠️ [Titol·Petit] Sense peça de desaparició ni versió invertida per a la SORTINT @ ${it.start.toFixed(2)}s`, 'WARN');
+                    }
+                    continue;
+                }
+                if (await insertTitol(it.name, it.start, it.label, it.end)) n++;
             }
             if (n > 0) log(`   ✨ [Titol·Petit] ${n} transició(ns) de titulillo col·locades`, 'INFO');
             return n;
+        },
+
+        /**
+         * _temaTitolExitCfg: Paràmetres de la peça de DESAPARICIÓ del Tema-Títol.
+         *
+         * (2026-10-07) El Wott del Tema-Títol ja porta al FINAL del seu mèdia la seva pròpia
+         * animació de sortida («desaparició del títol petit», 10:00→10:06 = 6 frames). És exactament el
+         * que abans es fabricava invertint el titulillo amb ffmpeg (`_REV.mov`); ara
+         * s'aprofita aquella peça del propi ítem. Vegeu `TEMATTOL_EXIT_DEFAULTS`.
+         * @returns {{enabled:boolean, atSec:number, durSec:number, fallbackRev:boolean}}
+         */
+        _temaTitolExitCfg: function () {
+            let t = {};
+            try {
+                const cfg = FASTPASS_UI.Config.get();
+                t = (cfg && cfg.temaTitolExit) || {};
+            } catch (eT) { t = {}; }
+            const durSec = (Number(t.durSec) > 0.04) ? Number(t.durSec) : 0.24;
+            const atSec = (t.atSec != null && Number(t.atSec) >= 0) ? Number(t.atSec) : 10.0;
+            return {
+                enabled: (t.enabled !== false),
+                atSec: atSec,
+                durSec: durSec,
+                fallbackRev: (t.useReverseFallback !== false)
+            };
+        },
+
+        /**
+         * _insertTemaTitolExit: Col·loca la peça de DESAPARICIÓ d'un Tema-Títol gran al rang
+         * [startSec, endSec], retallada del SEU PROPI mèdia a partir de `atSec`.
+         *
+         * Mateixa tècnica NO DESTRUCTIVA que el congelat del titulillo (`_freezeTitulilloStill`):
+         * 1) `Clips.insert` a un TC lliure LLUNYÀ (col·loca el mèdia sencer i, amb la guarda per nom, neteja l'àudio-fantasma d'AQUEST mèdia, de pas,
+         *    fixa inPoint/outPoint del clip), 2) localitzar-lo pel start, 3) `Clips.trimBounds` fixa el retall, 4) `moveToRange` al rang
+         * exacte (reassigna start/end, NO fa overwriteClip → no trepitja cap clip veí).
+         *
+         * L'ítem JA és al projecte (és el Tema-Títol gran) → cap ffmpeg, cap import, cap `_REV.mov`.
+         * @param {string} name - Nom del wott del Tema-Títol gran
+         * @param {number} track - Pista de Tema-Títol (1-based)
+         * @param {number} startSec - IN al timeline
+         * @param {number} endSec - OUT al timeline (durada = endSec − startSec)
+         * @param {number} atSec - IN del mèdia on arrenca la desaparició
+         * @returns {Promise<boolean>}
+         */
+        _insertTemaTitolExit: async function (name, track, startSec, endSec, atSec) {
+            const utils = getUtils();
+            const dur = endSec - startSec;
+            if (!name || !(dur > 0.05)) return false;
+            const inSec = Math.max(0, Number(atSec) || 0);
+            // Zona temporal LLIURE de la pista (l'insert d'un clip de mèdia gran faria un
+            // overwriteClip de tota la seva durada → a un TC llunyà no toca res).
+            const TEMP = await this._v6FreeTC(track, dur + 2);
+            // (2026-10-07) Snapshot ABANS d'insertar. A Premiere la peça temporal NO sempre
+            // queda EXACTAMENT a TEMP (snapping/deriva) i la cerca estricta per TC (±0,5 s)
+            // fallava → l'exit mai no s'aplicava I `removeAt(TEMP)` no trobava la peça →
+            // clip ORFE a V6 (vist: 596,64→597,04). Ara es localitza per DIFERÈNCIA (clip NOU).
+            let before = [];
+            try { before = (await getClipsLogic().getTrackClips(track, 'video')) || []; } catch (eB) { before = []; }
+            const _key = (c) => (c.name || '') + '@' + (Number(c.start) || 0).toFixed(2);
+            const beforeSet = {};
+            for (const c of before) beforeSet[_key(c)] = true;
+            // (2026-10-07) ATOM NO DESTRUCTIU. `insertWithBounds` és l'aliat del cleanFeed del
+            // MP4: de passada BUIDA A2 sencera, TOT V2 i TOTS els clips d'A1 tret del primer
+            // (amb ripple). Reutilitzar-lo per a la peça de Sortida esborrava el programa (A1
+            // "quasi buit"). Es componen dos àtoms que només toquen el clip objectiu:
+            //   1. `Clips.insert` → col·loca el mèdia sencer a un TC LLIURE (i, amb la seva
+            //      guarda per nom, elimina només l'àudio-fantasma d'AQUEST mèdia).
+            //   2. `Clips.trimBounds` → fixa inPoint/outPoint i força el `end` del clip.
+            const ins = await callJSX(`Clips.insert('${utils.escape(name)}', ${track}, ${TEMP.toFixed(4)}, null, 'video')`);
+            if (String(ins).indexOf('ERR') === 0) {
+                log(`   ⚠️ [Titol·Sortida] insert temporal ha fallat (${ins})`, 'WARN');
+                return false;
+            }
+            await utils.delay(80);
+            // Retall atòmic al mèdia del gran: [inSec, inSec+dur] (p. ex. 10:00→10:06).
+            const tb = await callJSX(`Clips.trimBounds(${TEMP.toFixed(4)}, ${inSec.toFixed(4)}, ${(inSec + dur).toFixed(4)}, ${track}, 'video')`);
+            if (String(tb).indexOf('ERR') === 0) {
+                log(`   ⚠️ [Titol·Sortida] trimBounds ha fallat (${tb})`, 'WARN');
+            }
+            let cl = [], idx = -1, tempStart = TEMP;
+            try {
+                cl = (await getClipsLogic().getTrackClips(track, 'video')) || [];
+                // 1) Cerca estricta per TC
+                for (let i = 0; i < cl.length; i++) {
+                    if (Math.abs(cl[i].start - TEMP) < 0.5) { idx = cl[i].index; tempStart = cl[i].start; break; }
+                }
+                // 2) Cerca ROBUSTA per DIFERÈNCIA: clip NOU dins la zona temporal (TEMP ± 5 s)
+                if (idx < 0) {
+                    for (let i = 0; i < cl.length; i++) {
+                        if (beforeSet[_key(cl[i])]) continue;
+                        if (Math.abs(cl[i].start - TEMP) < 5.0) { idx = cl[i].index; tempStart = cl[i].start; break; }
+                    }
+                }
+            } catch (eIdx) { idx = -1; }
+            if (idx < 0) {
+                try { log(`   🔎 [Titol·Sortida] V${track} clips: ` + cl.map(c => `${(Number(c.start) || 0).toFixed(2)}→${(Number(c.end) || 0).toFixed(2)}`).join(', '), 'WARN'); } catch (eL) { }
+                log(`   ⚠️ [Titol·Sortida] peça temporal no trobada a ${TEMP.toFixed(2)}s → es descarta`, 'WARN');
+                // Escombrar qualsevol clip NOU a la finestra temporal (evita orfes a V6).
+                for (const c of cl) {
+                    if (beforeSet[_key(c)]) continue;
+                    if (Math.abs(c.start - TEMP) < 8.0) { try { await callJSX(`Clips.removeAt(${track}, ${(Number(c.start) || 0).toFixed(4)}, 'video')`); } catch (eS) { } }
+                }
+                return false;
+            }
+            // (2026-10-07) XARXA DE SEGURETAT d'àudio. `Clips.insert` JA elimina l'àudio-fantasma
+            // del MATEIX mèdia (guarda per `projectItem.name`); aquests dos àtoms cobreixen el
+            // cas residual. La peça de Sortida ha de ser NOMÉS vídeo. `removeLinkedAudio`
+            // desenllaça i esborra l'àudio enllaçat del clip temporal (a un TC llunyà → no toca
+            // el programa). `dedupeAudioAt` neteja duplicats NO enllaçats d'A2+ al mateix TC
+            // (a A1 conserva el primer i mai no toca el programa, de nom diferent).
+            try { await callJSX(`Clips.removeLinkedAudio(${track}, ${idx})`); } catch (eAud) { }
+            try { await callJSX(`Clips.dedupeAudioAt(${tempStart.toFixed(4)})`); } catch (eAud2) { }
+            const mv = await callJSX(`Clips.moveToRange(${track}, ${idx}, ${startSec.toFixed(4)}, ${endSec.toFixed(4)}, 'video')`);
+            if (String(mv).indexOf('OK') !== 0) {
+                log(`   ⚠️ [Titol·Sortida] moveToRange ha fallat (${mv}) → es treu la peça temporal`, 'WARN');
+                try { await callJSX(`Clips.removeAt(${track}, ${tempStart.toFixed(4)}, 'video')`); } catch (eRm2) { }
+                return false;
+            }
+            log(`      🔴 [Titol·Sortida] desaparició del gran → V${track} @ ${startSec.toFixed(2)}s→${endSec.toFixed(2)}s (mèdia ${inSec.toFixed(2)}→${(inSec + dur).toFixed(2)}s) [${mv}]`);
+            // (2026-10-07) Verificació del retall: confirma que el clip mostra al timeline
+            // EXACTAMENT el tram de mèdia [inSec, inSec+dur] (p. ex. 10:00→10:06).
+            try {
+                const chk = JSON.parse(await callJSX(`Clips.get(${track}, ${idx}, 'video')`));
+                if (chk) log(`      🔎 [Titol·Sortida] verificació: start=${Number(chk.start).toFixed(2)} end=${Number(chk.end).toFixed(2)} inPoint=${Number(chk.inPoint).toFixed(2)} outPoint=${Number(chk.outPoint).toFixed(2)}`);
+            } catch (eV) { }
+            return true;
         },
 
         /**
@@ -2267,14 +2421,16 @@
          * l'inici del bloc fins a ell. Aquest mètode busca aquests buits i els omple amb la
          * identitat del programa:
          *
-         *     [titulillo animat] → [congelat estirat] → [titulillo invertit] → [Tema-Títol gran]
+         *     [titulillo animat] → [congelat estirat] → [desaparició del gran] → [Tema-Títol gran]
          *
          *  - El titulillo és el Tema-Títol petit (~1s, qtrle amb alpha).
          *  - El congelat (PNG net del titulillo via `_capturePng`: `Render.snapshot` QE primer,
          *    `Render.frame` de reserva) permet ALLARGAR-LO fins al
          *    gran (mateixa mecànica que _freezeTemaTitol, amb el desplaçament = durada del
          *    titulillo en lloc de 8s).
-         *  - El titulillo INVERTIT (ffmpeg) fa la transició d'entrada al Tema-Títol gran.
+         *  - (2026-10-07) La SORTIDA és la pròpia animació de DESAPARICIÓ del Wott del gran
+         *    (`cfg.temaTitolExit`, 10:00→10:06 = 6 frames) — `_insertTemaTitolExit`. El revers ffmpeg del
+         *    titulillo queda com a xarxa de seguretat.
          *  - (2026-09-22) El revers acaba al TC del MARCADOR de l'ítem (`Markers.get()` +
          *    prefix del nº), no a la posició calculada del gran.
          *
@@ -2294,6 +2450,9 @@
                 return 0;
             }
             const durP = petit.dur;
+            // (2026-10-07) Peça de SORTIDA = desaparició del PROPI Tema-Títol gran (vegeu
+            // `_temaTitolExitCfg`). Substitueix el revers ffmpeg del titulillo.
+            const exitCfg = this._temaTitolExitCfg();
             // (2026-09-22) 1 frame @25fps. El titulillo NO s'ha d'estirar més enllà de la seva
             // durada real (si s'estira, el darrer frame es veu buit i "desapareix" un moment) i
             // el congelat ha d'entrar EXACTAMENT on acaba el titulillo (1 frame abans de durP,
@@ -2408,26 +2567,26 @@
                 // sempre d'esquerra a dreta. Amb l'estimació del manifest el revers quedava 1
                 // frame desplaçat (i podia entrar dins del gran si l'estimació era curta).
                 const petitDur = await getPetitDur();
-                let rev = { ok: false, name: '' };
-                let revDur = snapDur(durP);
-                const revStartEst = Math.ceil((endZone - durP) / FRAME - 1e-6) * FRAME;
-                if (revStartEst > gapStart + 0.20) {
-                    rev = await getRev();
-                    if (rev.ok) revDur = await realDurOf(rev.path, snapDur(durP));
-                }
-                const reverseStart = Math.ceil((endZone - revDur) / FRAME - 1e-6) * FRAME;
+                // (2026-10-07) SORTINT = peça de desaparició del propi Tema-Títol gran
+                // (cfg.temaTitolExit). Ja no es prepara cap inversió ffmpeg aquí.
+                const exitDur = snapDur(exitCfg.durSec);
+                const reverseStart = Math.ceil((endZone - exitDur) / FRAME - 1e-6) * FRAME;
                 const sortMax = (mkTime !== null) ? mkTime : ttTime;
-                const sortPosOk = (sortMax - revDur) > gapStart + 0.20;
-                log(`   🕳️ [Titol·Petit·cobertura] Buit de ${gapDur.toFixed(2)}s a V${T} (${gapStart.toFixed(2)}s→${zoneEnd.toFixed(2)}s): titulillo + congelat + revers` +
+                const sortPosOk = (sortMax - exitDur) > gapStart + 0.20;
+                log(`   🕳️ [Titol·Petit·cobertura] Buit de ${gapDur.toFixed(2)}s a V${T} (${gapStart.toFixed(2)}s→${zoneEnd.toFixed(2)}s): titulillo + congelat + desaparició` +
                     ` · sortida fins a ${sortMax.toFixed(2)}s (${mkTime !== null ? 'marcador de l\'ítem ' + ordenats[i].item : 'el gran'})` +
-                    (sortPosOk ? '' : ' [sense espai per al revers]') + '.');
+                    (sortPosOk ? '' : ' [sense espai per a la sortida]') + '.');
 
-                // 1) Titulillo ANIMAT a l'inici del buit (la seva durada REAL, ja a la rejilla)
-                await insEnd(petit.name, gapStart, gapStart + petitDur, '🟢 [cobertura] titulillo ENTRANT');
-                const freezeStart = gapStart + petitDur;
-                // REVERS (titulillo de SALIDA): el seu IN (`reverseStart`, calculat a la
-                // preparació amb la durada REAL) s'ALINEA a la rejilla de frames i el final queda
-                // enganxat EXACTAMENT al Tema-Títol gran (endZone).
+                // 1) Titulillo ANIMAT a l'inici del buit. (2026-10-07) L'OUT va 1 frame ABANS
+                // del final teòric: `petitDur` ve de `ceil` → el clip durava 1 frame MÉS que
+                // el mèdia i aquell darrer frame eixia buit. El congelat comença EXACTAMENT
+                // aquí i absorbeix aquell frame.
+                const entrantOut = gapStart + petitDur - FRAME;
+                await insEnd(petit.name, gapStart, entrantOut, '🟢 [cobertura] titulillo ENTRANT');
+                const freezeStart = entrantOut;
+                // SORTIDA (desaparició del gran): el seu IN (`reverseStart`, alineat a la rejilla
+                // de frames a partir de la durada de config) i el final enganxat EXACTAMENT al
+                // Tema-Títol gran (endZone).
 
                 // 2) CONGELAT: frame congelat del FINAL del titulillo, estirat fins al final de la
                 //    zona (el revers el retallarà pel davant).
@@ -2437,15 +2596,19 @@
                     await this._freezeTitulilloStill(petit, T, freezeStart, zoneEnd, '🧊 [cobertura] congelat estirat');
                 }
 
-                // 3) Titulillo INVERTIT just abans del Tema-Títol gran (transició).
+                // 3) SORTINT (desaparició del gran) just abans del Tema-Títol gran (transició).
                 //    (2026-09-22) Acaba a endZone = TC del MARCADOR de l'ítem.
-                //    (2026-10-01 · #129) La inversió (ffmpeg) JA s'ha fet a la preparació del
-                //    buit; aquí només es col·loca, i només si hi ha espai per al revers.
+                //    (2026-10-07) És un retall del PROPI gran (cfg.temaTitolExit); el revers
+                //    ffmpeg queda només com a xarxa de seguretat (`useReverseFallback`).
                 if (reverseStart > gapStart + 0.20) {
-                    if (rev.ok) {
-                        await insEnd(rev.name, reverseStart, endZone, '🔴 [cobertura] titulillo SORTINT (acaba al marcador del gran)');
-                    } else {
-                        log('   ⚠️ [Titol·Petit·cobertura] Sense versió invertida: no es fa la transició al gran', 'WARN');
+                    const bigName = ordenats[i].name;
+                    const okExit = (exitCfg.enabled && bigName)
+                        ? await this._insertTemaTitolExit(bigName, T, reverseStart, endZone, exitCfg.atSec)
+                        : false;
+                    if (!okExit && exitCfg.fallbackRev) {
+                        const rv = await getRev();
+                        if (rv.ok) await insEnd(rv.name, reverseStart, endZone, '🔴 [cobertura] titulillo SORTINT (revers ffmpeg)');
+                        else log('   ⚠️ [Titol·Petit·cobertura] Sense peça de desaparició ni versió invertida per al gran', 'WARN');
                     }
                 }
                 fets++;

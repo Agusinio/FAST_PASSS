@@ -190,7 +190,9 @@
                         // la duració real.
                         utils.log(`🎬 [FALLBACK] Col·locant MP4 del bloc complet a V1 (sense trim)`);
                         const insertRes = await callJSX(
-                            `Clips.insert('${escapedCfName}', 1, 0, 'video')`
+                            // keepAudio=true: el MP4 del bloc ÉS l'àudio de programa → cal
+                            // conservar el targeting perquè el seu àudio enllaçat caigui a A1.
+                            `Clips.insert('${escapedCfName}', 1, 0, null, 'video', true)`
                         );
                         if (insertRes && insertRes.indexOf('ERR') !== -1) {
                             utils.log(`⚠️ Error insertant MP4 del bloc: ${insertRes}`);
@@ -425,17 +427,29 @@
                     utils.log(`📍 Marcadors IN/OUT col·locats a la seqüència (DESACTIVAT: es delega a placeMarkers('estructura'))`);
 
                     // Verificar el resultat
+                    // (2026-10-07) clipEnd = FINAL REAL del programa = MÀXIM `end` de tots
+                    // els clips de V1. ABANS s'usava Clips.get(1,0) (el PRIMER clip): quan el
+                    // programa ja està tallat en escenes el primer clip acaba a ~9.76 s i el
+                    // TRIM-TAILS (rippleAllOut → rippleOut) TRUNCAVA tot clip que creués el
+                    // target → l'àudio de programa d'A1 quedava 0→9.76 s i podia esborrar
+                    // vídeo posterior. Amb el max end no es retalla mai el programa.
                     const clipDataRaw = await callJSX(`Clips.get(1, 0, 'video')`);
+                    const numV1 = parseInt(await callJSX("Clips.count(1, 'video')") || "0");
                     let clipEnd = 0;
                     try {
                         const clipData = JSON.parse(clipDataRaw);
                         const clipActualDur = clipData.end - clipData.start;
-                        clipEnd = clipData.end;
-                        utils.log(`📐 Clip inserit: start=${clipData.start.toFixed(2)}s end=${clipData.end.toFixed(2)}s inPoint=${clipData.inPoint.toFixed(2)}s outPoint=${clipData.outPoint.toFixed(2)}s durActual=${clipActualDur.toFixed(2)}s (AMB MÀRGENS)`);
-                        utils.log(`🔍 [LOG] Comparació: duradaEsperada=${clipDuration.toFixed(4)}s vs duradaReal=${clipActualDur.toFixed(4)}s | startClip=${clipData.start.toFixed(4)}s | INseq hauria de ser ~${clipData.start.toFixed(4)}s OUTseq hauria de ser ~${clipData.end.toFixed(4)}s`);
+                        utils.log(`📐 Clip inserit (V1[0]): start=${clipData.start.toFixed(2)}s end=${clipData.end.toFixed(2)}s inPoint=${clipData.inPoint.toFixed(2)}s outPoint=${clipData.outPoint.toFixed(2)}s durActual=${clipActualDur.toFixed(2)}s (AMB MÀRGENS)`);
                     } catch(e) {
                         utils.log(`📐 Clip inserit: ${clipDataRaw}`);
                     }
+                    for (let ci = 0; ci < numV1; ci++) {
+                        try {
+                            const cd = JSON.parse(await callJSX(`Clips.get(1, ${ci}, 'video')`));
+                            if (cd && isFinite(cd.end) && cd.end > clipEnd) clipEnd = cd.end;
+                        } catch (e) {}
+                    }
+                    utils.log(`📐 [TRIM-TAILS] Final real de V1 = max end = ${clipEnd.toFixed(2)}s (sobre ${numV1} clips)`);
 
                     // 4g. Retallar coles sobrants de TOTS els tracks al final físic del clip MP4
                     // Això farà que l'àrea de treball s'ajusti automàticament al final del clip,

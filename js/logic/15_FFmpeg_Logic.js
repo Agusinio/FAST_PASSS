@@ -728,8 +728,15 @@
             utils.log(`📥 Important a Premiere (bin: ${binName}): ${filePath}`);
 
             // 1. Assegurar que el bin existeix
+            // (2026-10-07 · BUG) Aquí hi havia `Project.bin(...)` SENSE el prefix `FASTPASS.`:
+            // el panell llançava «ERR:Project.bin is not a function», el bin CHY no es creava i
+            // l'import anava a parar al bin ARREL — tot i que la línia següent deia «Importació
+            // completada». L'API real exposada al panell és `FASTPASS.Project.bin`.
             const safeBin = JSON.stringify(binName);
-            await utils.callJSX(`Project.bin(${safeBin})`);
+            const binRes = await utils.callJSX(`FASTPASS.Project.bin(${safeBin})`, { rawError: true });
+            if (binRes && String(binRes).indexOf('ERR') === 0) {
+                utils.log(`⚠️ [import] No s'ha pogut assegurar el bin "${binName}": ${binRes}`);
+            }
 
             // 2. Importar el fitxer (importFiles espera un JSON array de rutes)
             const safePathsArr = JSON.stringify(JSON.stringify([filePath]));

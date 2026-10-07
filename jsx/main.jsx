@@ -469,9 +469,9 @@ $.global.Clips = {
     audioAround: function(timeSec) {
         return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.audioAround(timeSec) : "ERR";
     },
-    insert: function(n, ti, s, e, t) {
+    insert: function(n, ti, s, e, t, ka) {
         return this._fpUndo("FASTPASS insert V" + ti, function() {
-            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t) : "ERR_NO_CLIPS_MODULE";
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insert(n, ti, s, e, t, ka) : "ERR_NO_CLIPS_MODULE";
         });
     },
     getInPoint: function(ti, ci, type) {
@@ -512,6 +512,14 @@ $.global.Clips = {
     insertWithBounds: function(n, ti, s, inPt, outPt, t) {
         return this._fpUndo("FASTPASS insertBounds V" + ti, function() {
             return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.insertWithBounds(n, ti, s, inPt, outPt, t) : "ERR_NO_CLIPS_MODULE";
+        });
+    },
+    // (2026-10-07) Exposa l'àtom NO destructiu `trimBounds` (retalla inPoint/outPoint d'un
+    // clip JA present a la pista). A diferència d'`insertWithBounds` (que és l'aliat del
+    // cleanFeed del MP4 i BUIDA A2/V2/A1), `trimBounds` NOMÉS toca el clip objectiu.
+    trimBounds: function(s, inPt, outPt, ti, t) {
+        return this._fpUndo("FASTPASS trimBounds V" + ti, function() {
+            return ($.global.FASTPASS.Clips) ? FASTPASS.Clips.trimBounds(s, inPt, outPt, ti, t || "video") : "ERR_NO_CLIPS_MODULE";
         });
     },
     hasClips: function(ti, type) {

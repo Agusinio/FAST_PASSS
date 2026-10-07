@@ -91,6 +91,19 @@
                                //    congelat, encara que la detecció digui que va durar més
     };
 
+    // 🎬 TEMA-TÍTOL · SORTIDA i TRANSICIONS (2026-10-07)
+    // El Wott del Tema-Títol ja porta al FINAL del seu mèdia la seva pròpia animació de
+    // sortida («desaparició del títol petit»), MESURADA per l'usuari: 10:00→10:06 (6 frames
+    // @25fps). És exactament el que abans es fabricava invertint el titulillo amb ffmpeg
+    // (`_REV.mov`). Ara s'aprofita AQUELLA peça: es retalla el mateix ítem (JA al projecte) i es
+    // col·loca on toca → zero ffmpeg, zero import, zero _REV.mov.
+    const TEMATTOL_EXIT_DEFAULTS = {
+        enabled: true,          // false → comportament antic (revers ffmpeg del titulillo)
+        atSec: 10.0,            // IN del mèdia on arrenca la desaparició (10:00)
+        durSec: 0.24,           // durada de la peça (10:06 − 10:00 = 6 frames @25fps)
+        useReverseFallback: true // si la peça no es pot col·locar → revers ffmpeg (xarxa)
+    };
+
     let _activeConfig = {
         general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 2.5, clipOutMarginSec: 0, clipExtraTailSec: 60 },
         // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
@@ -98,6 +111,8 @@
         programStartHours: { TNV: 21.0, TNM: 14.5, TNC: 13.8333, MAT: 7.9167 },
         // 🎯 TITOLET: paràmetres de detecció del grafisme cremat (vegeu TITOLET_DEFAULTS).
         titolet: TITOLET_DEFAULTS,
+        // 🎬 TEMA-TÍTOL: peça de desaparició del propi Wott (vegeu TEMATTOL_EXIT_DEFAULTS).
+        temaTitolExit: TEMATTOL_EXIT_DEFAULTS,
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\",
@@ -277,7 +292,10 @@
                 snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 2.5,
                 // 🎯 TITOLET (2026-10-06): paràmetres de detecció del grafisme cremat.
                 // Còpia fresca (defaults + override) perquè ningú els pugui mutar de retruc.
-                titolet: Object.assign({}, TITOLET_DEFAULTS, cfg.titolet || {})
+                titolet: Object.assign({}, TITOLET_DEFAULTS, cfg.titolet || {}),
+                // 🎬 TEMA-TÍTOL (2026-10-07): peça de desaparició del propi Wott (sortida/
+                // transicions). Còpia fresca (defaults + override) com el titolet.
+                temaTitolExit: Object.assign({}, TEMATTOL_EXIT_DEFAULTS, cfg.temaTitolExit || {})
             };
         },
 
