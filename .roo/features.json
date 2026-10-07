@@ -1009,12 +1009,13 @@
       },
       {
         "id": "#143",
-        "status": "implementat_pendent_test",
+        "status": "tancat",
         "desc": "TITOLET: la targeta col·locada a la timeline durava 5 frames MÉS que el rètol cremat a l'aire (petició d'usuari 2026-10-06).",
         "measure": "Mesurat per l'usuari a la timeline: cada targeta de la cadena TITOLET s'acaba 5 frames (0,20 s a 25 fps) després del final real del rètol cremat, i el congelat arrencava 5 frames tard (buit a l'enllaç vídeo viu → congelat).",
         "root_cause": "La cadena prenia com a durada de la part viva la durada del MÈDIA del wott i, al cas detectat, `detEnd` sense cap descompte: totes dues 5 frames llargues respecte del que es veu a l'aire.",
         "fix": "IMPLEMENTAT 2026-10-06 — js/workflows/flow_chyrons.js `_placeTitoletChain`: nou `TRIM = REV_FRAME * cfg.titolet.cardTrimFrames`. Els frames es retallen del FINAL de la durada TOTAL i de la part VIVA (`liveWant = max(0,5, cardDur − TRIM)`; al cas detectat `want = max(liveWant, detEnd − tStart − TRIM)`), de manera que el congelat entra aquests 5 frames ABANS i la seva LLARGADA no canvia → l'enllaç vídeo viu → congelat queda SENSE buit. Aplica a les branques detectada i encadenada, i el log del pla mostra la traça («viu Xs = clip Ys − 5 frames»). js/core/11_Configuracio.js: `TITOLET_DEFAULTS.cardTrimFrames = 5` (0 = comportament antic). index.html: flow_chyrons ?v=63 · 11_Configuracio ?v=25.",
-        "validation": "`bin/check_js_v8.ps1`: TOTAL 57 | OK 57 | FAIL 0 · `bin/check_dead.ps1`: exit 0 (0 orfes). PENDENT el test a Premiere (cal RECARREGAR el panell per als cache-bust v63/v25).",
+        "validation": "`bin/check_js_v8.ps1`: TOTAL 57 | OK 57 | FAIL 0 · `bin/check_dead.ps1`: exit 0 (0 orfes). ✅ VALIDAT per l'usuari a Premiere (2026-10-07): la targeta del TITOLET ja s'acaba al final real del retol cremat (sense 5 frames de mes) i el congelat entra sense buit a l'enllac viu→congelat.",
+        "commit": "7f5e0d3",
         "date": "2026-10-06"
       },
       {
