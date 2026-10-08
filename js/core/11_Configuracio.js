@@ -35,6 +35,40 @@
         dryRun: false,         // ✅ APLICAR (2026-10-06, 2a passada). Per posar-lo en dry-run
                                //    sense tocar codi: FASTPASS_UI.State.titoletDryRun = true
                                //    a la consola del panell.
+        // 🎯 CONDICIÓ DE DISPARO del rastreig (2026-10-08 · TNM V3 + TOTS els grafismes cremats)
+        // Rols de wott que fan saltar la DETECCIÓ del grafisme cremat (màscara de color +
+        // OCR) i la col·locació al SEU instant real. El rastreig NO es fa mai «per si de cas»:
+        // només quan l'ítem porta wotts d'algun d'aquests rols.
+        //
+        // 🔴 27 ETIQUETES del sistema de ròtols, LITERALS (el sistema les genera
+        //    automàticament al nom: `..._<wottId>_<ETIQUETA>_...`). El matx és d'IGUALTAT,
+        //    no de prefix: `DADA` a seques NO dispara res, cal l'etiqueta sencera
+        //    (`DADA-GRAN`). Única tolerància: majúscules/minúscules i l'estil del separador
+        //    (`DADA-GRAN` ≡ `Dada_Gran` ≡ `DADA GRAN`), perquè el sistema no l'escriu sempre
+        //    igual (`Tema-Titol`, `Nomcarrec`, `Enviat_Sí`, `Directe_PRESENCIAL`…).
+        //      TITOLET · TITOLET GRAN · PREGUNTA · CARTELL · CIS_CEO · CIS_CEO_COMPARADA ·
+        //      CRONOLOGIA · CRONOLOGIA-TITOLS · DADA_COMPARADA · DADA-DIFERENCIAL · DADA-GRAN ·
+        //      DADA-GRAN-DIVISA · DADA-ITEM · DESTACAT · CLASSI-CHAMPIONS · CLASSIFICACIO ·
+        //      CLASSI-MUNDIAL · CLASSI-PRIMERA · CLASSI-SEGONA · GRAFICA-BARRES ·
+        //      GRAFICA_CIRCULAR · IMATGE-CAPTURA · LLISTA · LLISTA-DADES · NOTA · PROGRAMACIO ·
+        //      RANQUING
+        //    Afegir un tipus nou = afegir-ne l'etiqueta aquí (1 línia, cap JSX nou).
+        //
+        // ⚠️ El matx es fa NOMÉS contra el ROL: `chy.rol` i els trossos de ROL del nom
+        //    (`name.split('_')` des de l'índex 7, la part que llegeix `13_Parse.meta`; MAI la
+        //    part del TEXT, índex 5) — si no, un rètol que digués «LES DADES DEL PARO»
+        //    dispararia la família DADA. Com que hi ha etiquetes amb `_` a dins, el nom les
+        //    parteix en trossos i `_burnedGrafTokens` en reuneix fins a 3 per reconstruir-les.
+        //    Noms reals: Wott_TNM_V1_16_00.00_SÁNCHEZ ELS NOMS D'UNA LEGISL_625359_TITOLET_in_setembre 2024_Pablo.00625919.mov
+        //                Wott_MAT_v5_513_00.01_dona pas Barcelona_631037_Nomcarrec_Elisabet Viladomiu_directora Fun.00631331.mov
+        detectRoles: [
+            'TITOLET', 'TITOLET GRAN', 'PREGUNTA', 'CARTELL',
+            'CIS_CEO', 'CIS_CEO_COMPARADA', 'CRONOLOGIA', 'CRONOLOGIA-TITOLS',
+            'DADA_COMPARADA', 'DADA-DIFERENCIAL', 'DADA-GRAN', 'DADA-GRAN-DIVISA', 'DADA-ITEM',
+            'DESTACAT', 'CLASSI-CHAMPIONS', 'CLASSIFICACIO', 'CLASSI-MUNDIAL',
+            'CLASSI-PRIMERA', 'CLASSI-SEGONA', 'GRAFICA-BARRES', 'GRAFICA_CIRCULAR',
+            'IMATGE-CAPTURA', 'LLISTA', 'LLISTA-DADES', 'NOTA', 'PROGRAMACIO', 'RANQUING'
+        ],
         roiY: [0.60, 0.85],    // ROI vertical (fracció de l'alçada); X = tot l'ample
         ocrRoiX: [0, 0.45],    // ROI X només per a la CAPTURA d'OCR: el rètol viu a l'esquerra
                                //    i a la dreta hi ha grafisme aliè (MESURAT: l'OCR llegia
@@ -45,6 +79,51 @@
         maxCov: 60,            // cobertura (%) a partir de la qual el ROI és FONS, no text
         edgeAxes: 'y',         // quines vores desqualifiquen: 'y' (dalt/baix) · 'xy' · 'none'
         minEdgeFrac: 0.04,     // marge (fracció del ROI) per dir «toca la vora»
+        // 🎯 ROI PER ETIQUETA (2026-10-08, 7a passada) — el cas: els 6 PREGUNTA de TNM V3 no
+        // es van detectar (0 intervals: el rètol no viu a la banda mesurada del TITOLET).
+        // `roiPerRole` dóna a CADA etiqueta la SEVA zona de rastreig; `roiDefault` és el
+        // comodí de les que encara no s'han mesurat (avui 26 de 27).
+        //   · Un ítem es rastreja amb la recepta de les seves etiquetes. Si en porta de
+        //     receptes DIFERENTS, es fa UNA passada d'ffmpeg per recepta i cada interval
+        //     només pot assignar-se els wotts del SEU grup (`roleGroups` + `ivGroups`).
+        //   · Claus vàlides per recepta: roiX · roiY · edgeAxes · color · tol · minCov ·
+        //     maxCov · minEdgeFrac · ocrRoiX · roiW · roiH (les que no hi siguin manen del
+        //     nivell base; `roiW`/`roiH` són la graella de mostreig del ROI — 160×45 per
+        //     defecte, pensada per a la banda del TITOLET: una ROI gairebé quadrada amb
+        //     aquesta graella s'aixafaria i el color es desdibuixaria amb el fons).
+        //   · `roiX: null` = tot l'ample (com abans). `roiY`/`roiX` en fracció de la imatge.
+        //   · ⚠️ `edgeAxes` i els llindars de cobertura es refereixen a la ROI: si s'eixampla
+        //     la zona, la MATEIXA xinxeta baixa de cobertura (l'àrea creix) i la vora perd
+        //     valor de filtre → cada recepta ampla porta els seus llindars.
+        roiPerRole: {
+            // TITOLET: MESURAT (2026-10-06, roi_real.raw): xinxeta taronja a la banda baixa
+            // de l'esquerra, ancorada a x=0 → la vora X no pot desqualificar (només la Y).
+            'TITOLET': { roiX: null, roiY: [0.60, 0.85], edgeAxes: 'y' }
+        },
+        // Comodí per a les etiquetes sense mesurar: MITJA IMATGE ESQUERRA, que és on apunta
+        // ja la finestra d'OCR (`ocrRoiX`) i on viuen els rètols d'aquest sistema. La franja
+        // de dalt (mosquit de cadena/sumari) queda FORA; la vora no filtra res (en una ROI
+        // gran tota taca toca la vora) i els llindars s'ajusten a l'àrea nova: una xinxeta
+        // que omplia el 17-27% de la banda del TITOLET aquí baixa a ~9-14% (l'àrea es
+        // multiplica per ~1,8), així que `minCov` baixa per no perdre res i `maxCov` puja
+        // perquè un cartell a pantalla completa no es prengui per fons.
+        roiDefault: {
+            roiX: [0, 0.5], roiY: [0.10, 0.98], edgeAxes: 'none', minCov: 1.2, maxCov: 90,
+            // Graella de mostreig adaptada a la ROI: és gairebé quadrada (0,5 × 0,88 de la
+            // imatge ≈ 960×950 px a 1080p). Amb la graella del TITOLET (160×45) el `crop`+
+            // `scale` (flags=area) l'aixafaria 21× en vertical i el color de la xinxeta es
+            // desdibuixaria amb el fons → fora de tolerància. 96×96 ≈ 10×10 px per cel·la.
+            roiW: 96, roiH: 96
+        },
+        // TC DEL NOM (2026-10-08): ABANS d'escanejar el MP4, mira si el nom del wott ja porta
+        // l'instant d'emissió (`13_Parse.meta` → `parts[4]`, format MM.SS o HH.MM).
+        // ⚠️ Als rètols d'aquesta família el camp sol ser `00.00` (inservible: mesurat al nom
+        // real `Wott_TNM_V3_18_00.00_COM QUEDA EL DECRET D'HABITATG_630060_PREGUNTA_in_…`),
+        // així que el pre-chequeig és CONSERVADOR: només l'accepta si ≥ `tcMinSec`, cau dins
+        // de l'ítem i no és el MATEIX valor a tots els wott. Si no, es detecta com sempre.
+        // Vegeu `flow_chyrons._titoletTcFromName`.
+        tcFromName: true,
+        tcMinSec: 0.5,         // segon mínim creïble d'un TC del nom (0.00 → descartat)
         scanFps: 2,            // 🔴 2 mostres/s (abans 1): a 1 fps la durada tenia ±1 s d'error
         fps: 25,               // fps del material (frames ↔ segons)
         minOn: 0.4,            // durada mínima d'un interval (s)

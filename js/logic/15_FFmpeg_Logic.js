@@ -419,7 +419,7 @@
          * el PNG resultant és BYTE A BYTE IDÈNTIC (md5 igual a t = 74/75/76 i 27/142/160).
          *
          * @param {string} sourcePath - MP4 (cleanFeed)
-         * @param {Object} o - { tStart, tDur, roiY:[a,b], w, h, fps, outPath }
+         * @param {Object} o - { tStart, tDur, roiY:[a,b], roiX:[a,b], w, h, fps, outPath }
          * @returns {Promise<{ok:boolean, path:string, w:number, h:number, fps:number, error?:string}>}
          */
         extractRoiSeries: async function (sourcePath, o) {
@@ -429,13 +429,25 @@
             const fps = opts.fps || 1;
             const rY = opts.roiY || [0.60, 0.85];
             const y0 = rY[0], yH = Math.max(0.01, rY[1] - rY[0]);
+            // (2026-10-08, 7a passada) `opts.roiX` = [x0, x1] en fracció de l'amplada (null =
+            // tot l'ample) amb la MATEIXA normalització que `extractFramePng`: cada ETIQUETA de
+            // grafisme cremat (TITOLET · PREGUNTA · CARTELL…) té la seva zona i l'ítem es
+            // rastreja amb la de les seves etiquetes. Amb [0, 1] la retallada és IDÈNTICA a la
+            // d'abans (mateix .raw: mateixa àrea, mateixa escala).
+            const rX = opts.roiX || null;
+            let x0 = 0, xW = 1;
+            if (rX && rX.length === 2) {
+                x0 = Math.max(0, Math.min(0.98, Number(rX[0]) || 0));
+                xW = Math.max(0.05, Math.min(1 - x0, (Number(rX[1]) || 1) - x0));
+            }
             try {
                 if (!sourcePath) return { ok: false, path: outPath, error: 'sourcePath buit' };
                 const ffmpegBin = await getFfmpeg();
                 const timestamp = Date.now();
                 const psFile = 'C:\\temp\\titolet_scan_' + timestamp + '.ps1';
                 const doneFile = 'C:\\temp\\titolet_scan_' + timestamp + '_done.txt';
-                const vf = 'crop=iw:ih*' + yH.toFixed(4) + ':0:ih*' + y0.toFixed(4) +
+                const vf = 'crop=iw*' + xW.toFixed(4) + ':ih*' + yH.toFixed(4) +
+                    ':iw*' + x0.toFixed(4) + ':ih*' + y0.toFixed(4) +
                     ',scale=' + w + ':' + h + ':flags=area,fps=' + fps;
                 let psContent = '& "' + ffmpegBin + '" -ss ' + (opts.tStart || 0) +
                     ' -t ' + opts.tDur + ' -i "' + sourcePath + '" -vf "' + vf +
@@ -447,7 +459,7 @@
                 if (!cepFs || !cepFs.writeFile) return { ok: false, path: outPath, error: 'cep.fs.writeFile no disponible' };
                 cepFs.writeFile(psFile, '\uFEFF' + psContent);
                 utils.log('🎯 [titolet] Escanejant ROI del cleanFeed (' + fps + ' fps, ' + w + 'x' + h +
-                    ', y ' + y0 + '-' + rY[1] + ') des de ' + (opts.tStart || 0) + 's…');
+                    ', x ' + x0 + '-' + (x0 + xW) + ', y ' + y0 + '-' + rY[1] + ') des de ' + (opts.tStart || 0) + 's…');
                 const psCmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psFile + '"';
                 await utils.callJSX('IO.executeShell(' + JSON.stringify(psCmd) + ')');
                 await this.waitForFile(doneFile, 1000, 900000);

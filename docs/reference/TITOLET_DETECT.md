@@ -1,12 +1,69 @@
 # TITOLET — Detecció automàtica del rètol cremat
 
-> v1.1.0 · 2026-10-06 (4a passada) · `titolet.*` a `Config` · `bin/ocr.ps1` · `js/logic/17_TitoletDetect_Logic.js` · `15_FFmpeg_Logic.js` · `flow_chyrons.js`
+> v1.5.0 · 2026-10-08 (7a passada: **ROI per etiqueta** `roiPerRole`/`roiDefault` + **TC del nom** · 6a: `cardTrimFrames` · artefactes #147/#148) · `titolet.*` a `Config` (`11_Configuracio.js`) · `bin/ocr.ps1` · `js/logic/17_TitoletDetect_Logic.js` (`?v=2`) · `15_FFmpeg_Logic.js` · `flow_chyrons.js` (`?v=69`) · `js/core/utils.js` (`?v=25`)
+>
+> 📄 Estat complet, proves, pendents i **agenda de la sessió següent**: `plans/HANDOFF_2026-10-08_TITOLETS.md`
 
 ## Què fa
 
 Mesura al MP4 `cleanFeed` (el senyal net amb els rètols cremats) **quan entra i quant dura** cada
 TITOLET, i en llegeix el text per OCR per saber **quin wott** és. Amb això la cadena TITOLET deixa
 d'endevinar el congelat: si el rètol va estar a l'aire menys que la targeta, la targeta es **retalla**.
+
+## 🎯 Condició de disparo — quan es rastreja i quan NO (2026-10-08)
+
+El rastreig **no es fa mai per sistema**. S'activa només quan l'ítem de l'escaleta porta wotts
+amb alguna de les **27 etiquetes literals** del sistema de ròtols que hi ha a
+**`titolet.detectRoles`** (a `11_Configuracio.js`). El matx és d'**igualtat** sobre el token
+normalitzat —**mai prefix ni substring**: `DADA` a seques NO dispara res, cal l'etiqueta sencera
+(`DADA-GRAN`)—. L'única tolerància és majúscules/minúscules i l'estil del separador (`_ - .` i
+espai), perquè el sistema no l'escriu sempre igual (`Tema-Titol`, `Nomcarrec`, `Enviat_Sí`,
+`Directe_PRESENCIAL`…).
+
+| Etiquetes (`detectRoles`) | |
+|---------------------------|---|
+| `TITOLET` · `TITOLET GRAN` · `PREGUNTA` · `CARTELL` · `CIS_CEO` · `CIS_CEO_COMPARADA` | |
+| `CRONOLOGIA` · `CRONOLOGIA-TITOLS` · `DADA_COMPARADA` · `DADA-DIFERENCIAL` · `DADA-GRAN` | |
+| `DADA-GRAN-DIVISA` · `DADA-ITEM` · `DESTACAT` · `CLASSI-CHAMPIONS` · `CLASSIFICACIO` | |
+| `CLASSI-MUNDIAL` · `CLASSI-PRIMERA` · `CLASSI-SEGONA` · `GRAFICA-BARRES` · `GRAFICA_CIRCULAR` | |
+| `IMATGE-CAPTURA` · `LLISTA` · `LLISTA-DADES` · `NOTA` · `PROGRAMACIO` · `RANQUING` | |
+
+
+**On es decideix** (única porta d'entrada, `flow_chyrons.js`):
+
+1. Fase **Resto** (`placeChyronResto`) → `_placeChyronsByType(..., { dedupeTitolet: true, chainTitolet: true })`.
+2. `_isBurnedGrafWott(chy)` → `_burnedGrafRole(chy)`: es normalitzen els tokens de
+   `_burnedGrafTokens(chy)` —el camp `chy.rol` **i el tros de ROL del nom** (`name.split('_')`
+   des de l'índex 7, la mateixa part que llegeix `13_Parse.meta`; com que hi ha etiquetes amb `_`
+   a dins el nom les parteix, s'hi afegeixen les unions de fins a 3 trossos:
+   `CIS`+`CEO`+`COMPARADA` → `CIS_CEO_COMPARADA`)— i es compara per **igualtat** amb cada
+   etiqueta; si n'hi encaixa més d'una, mana la **més llarga** (`LLISTA-DADES` abans que
+   `LLISTA`). **Mai** es mira la part del TEXT (índex 5): un rètol que digués «LES DADES DEL
+   PARO» o «LA PREGUNTA DE…» dispararia les famílies `DADA`/`PREGUNTA` sense cap grafisme cremat
+   a l'aire.
+3. Si l'ítem en té ≥1 → `_placeTitoletChain` (detecció `Logic.TitoletDetect` + col·locació).
+   Si no n'hi ha cap → **no es rastreja res** (l'ítem segueix pel bucle genèric de rètols).
+4. Dins de la cadena encara hi ha 2 portes: `titolet.enabled !== false` i que l'**ancoratge**
+   resolgui (`_titoletAnchor`: clip extret de V1 o cleanFeed del manifest amb `ref.offsetSec`) →
+   si no, fallback (cadència actual) sense rastrejar.
+
+**Afegir un tipus nou** = afegir-ne l'etiqueta LITERAL a `titolet.detectRoles` (només JS, cap JSX
+nou). Els logs de la cadena surten etiquetats amb l'etiqueta que l'ha disparada (`p.tag`): amb un
+grafisme DADA-GRAN es llegeix `[Resto] DADA-GRAN detecció: …` en comptes de `TITOLET`. El
+`_dedupeTitolet` també agrupa per etiqueta + text, així dos tipus diferents amb el mateix text no
+es fusionen (ni `DADA-GRAN` i `DADA-ITEM`, que abans compartien el patró `DADA`).
+
+⚠️ **La receta és la mateixa per a tots els tipus**: color `#F25F13` ±25, ROI `[0.60, 0.85]`,
+OCR a l'esquerra… (el taronja del rètol mosquit). Per als grafismes que **no siguin taronges** o
+no visquin en aquesta zona, el rastreig no trobarà res → l'ítem cau al **fallback** (cadència
+actual, sense error). Pendent de mesurar a Premiere: si cal, una 2a passada de rastreig amb altres
+paràmetres (o paràmetres per tipus a `detectRoles`).
+
+⚠️ **Cost**: cada ítem amb wotts d'algunes d'aquestes 27 etiquetes fa la SEVA detecció (ffmpeg +
+OCR, ~10 s per 156 s d'ítem, amb caché de pla a `C:\temp\titolet_plan_<hash>.json`). Com que ara
+hi entren tipus molt freqüents (`NOTA`, `DESTACAT`, `DADA-GRAN`, `LLISTA`…), la fase Resto
+s'allargarà: per retallar-ho, treure etiquetes de `titolet.detectRoles` (o
+`titolet.enabled = false`).
 
 ## Receta (validada a l'ítem 16: 12/12 wotts)
 
@@ -376,3 +433,134 @@ Repetir COL·LOCAR → Resto a l'ítem 16 de TNM V1 i comprovar al log:
    al tall; el refinament pot moure'ls uns frames).
 3. `🧊 … (span X s: viu Y s + congelat Z s)` amb la **part viva sempre igual** (el clip sencer)
    i congelat només a les 2 que ho necessiten.
+
+> ✅ Aquest pendent de la 5a passada queda **superat** per les passades 6a i 7a (vegeu més avall): el
+> comportament «part viva = clip sencer» es va mantenir i validar, i la 6a hi va afegir el retall de 5 frames.
+> El pendent VIU avui és el de **#147/#148** (§ «Artefactes en viu») i el test de la 7a passada.
+
+---
+
+## 6a passada (2026-10-06/07) · BUG #143: la targeta durava 5 frames de més
+
+Petició d'usuari: «es col·loquen amb 5 frames més del que dura realment; treu-los i entra el congelat
+5 frames abans perquè no hi hagi un buit». `_placeTitoletChain` retalla `TRIM = cardTrimFrames / fps`
+(**5 frames = 0,2 s**) del final de la durada TOTAL **i** de la part VIVA → el congelat entra aquests
+5 frames abans i la seva llargada no canvia (l'enllaç queda sense buit). Clau nova
+`titolet.cardTrimFrames = 5` (0 = comportament antic). ✅ **VALIDAT a Premiere** per l'usuari (2026-10-07),
+commit `7f5e0d3`. Detall a `.roo/progress/2026-10-06.md` §6.
+
+## 7a passada (2026-10-08) · ROI PER ETIQUETA + TC DEL NOM
+
+**Problema mesurat** (TNM V3, passada real de les 13:39): els **6 PREGUNTA** d'un ítem → **0 intervals**.
+El rètol d'aquella família **no viu a la banda mesurada del TITOLET** (`roiY 0,60-0,85`) i el detector
+només tenia **UNA** zona de rastreig per a totes les etiquetes.
+Solució (JS pur, zero JSX nou):
+
+### a) `titolet.roiPerRole` + `titolet.roiDefault`
+
+- `roiPerRole[ETIQUETA]` = recepta pròpia de cada etiqueta **mesurada**. Avui només `'TITOLET'`:
+  `{ roiX: null, roiY: [0.60, 0.85], edgeAxes: 'y' }` (mesurat el 2026-10-06 amb `roi_real.raw`: xinxeta
+  taronja a la banda baixa de l'esquerra ancorada a `x=0` → la vora X no pot desqualificar).
+- `roiDefault` = **comodí** de les etiquetes encara no mesurades (26 de 27):
+  `roiX [0, 0.5]` · `roiY [0.10, 0.98]` · `edgeAxes 'none'` · `minCov 1.2` · `maxCov 90` · graella **96×96**.
+  És la meitat esquerra del frame (on apunta ja la finestra d'OCR) i **engloba** la banda del TITOLET.
+  ⚠️ Si s'eixampla la zona, la mateixa xinxeta **baixa de cobertura** (l'àrea creix) i la vora perd valor de
+  filtre → per això el comodí porta els seus propis llindars (una xinxeta del 17-27 % de la banda aquí fa
+  ~9-14 %) i la graella de mostreig s'adapta (`roiW`/`roiH`: amb 160×45 el `crop`+`scale` l'aixafaria 21× i
+  el color es desdibuixaria amb el fons).
+- `_recipeOf(cfg, rol)` → `roiPerRole[rol]` → `roiDefault` → valors base, i informa de la font
+  (`recepta <rol>` / `comodí` / `base`) per al log. Claus vàlides (`ROI_KEYS`): `roiX roiY edgeAxes color
+  tol minCov maxCov minEdgeFrac ocrRoiX roiW roiH` (les absents manen del nivell base).
+
+### b) Un rastreig PER GRUP de receptes
+
+`recipeForRoles(cfg, roles)` deduplica les receptes per signatura; `roleGroups(cfg, roles)` agrupa els wotts
+de cada recepta; `planForItem` fa **una passada d'escaneig per recepta** i `ivGroups` restringeix
+l'assignació (**cap parella interval↔wott pot creuar grups**). Un ítem **només TITOLET** fa 1 sola passada
+(= comportament idèntic a sempre). El comodí ampli **també veu** els intervals del grup TITOLET.
+`_groupAllow` / `_sameGroup` són les guardes de l'assignació.
+
+### c) TC DEL NOM (`tcFromName`)
+
+ABANS de rastrejar el MP4, `_titoletTcFromName(list, cfg)` mira si el nom del wott ja porta l'instant
+d'emissió (`13_Parse.meta` → `parts[4]`, `MM.SS`/`HH.MM`). És **conservador**: només l'accepta si ≥
+`tcMinSec` (0,5 s), cau dins de l'ítem i **no és el mateix valor a tots els wott** (als rètols d'aquesta
+família el camp sol ser `00.00`, inservible). Si cap wott no en té, es detecta com sempre. Els buits de la
+detecció (`found=false`) s'omplen amb el TC del nom (`_titoletCardsFromTc`) i **mai** se sobreescriu una
+detecció d'OCR confirmat: **el vídeo mana**. Logs: `⏱️ … sense detecció: N/M targeta(es) col·locada(es) pel
+TC del nom` i `⏱️ … TC del nom: N targeta(es) que la detecció NO va veure → col·locades pel TC del nom`.
+Es pot desactivar amb `titolet.tcFromName = false`.
+
+### d) Validació (7a passada)
+
+| Prova | Resultat |
+|---|---|
+| `C:\temp\fp\test_role_roi.ps1` (fetch del mòdul REAL + config REAL; pipeline amb vídeo FALS) | **ALL OK** |
+| `T10b` — amb la recepta del TITOLET (la d'abans), els 6 PREGUNTA → | **0/6** (aquesta era la fallada) |
+| `T11` — ítem MIXT: 2 receptes, 4/4 wotts, cap parella interval↔wott creua grups | OK |
+| `T12` — ítem només TITOLET: 1 sola recepta, recepta INTACTA (`x null · 160×45 · vores y`) | OK |
+| `T13` — rol desconegut → comodí que engoleix la banda del TITOLET; rol buit ≠ TITOLET (2 grups) | OK |
+
+⚠️ **Pendent de test a Premiere** (cache-bust **`17_TitoletDetect_Logic.js?v=2`** — fins avui era `?v=1` tot i
+haver canviat +313 línies!): mirar `🔎 [titolet] … N intervals · M tram(s)`, `🧲 … [recepta X | comodí]` i
+`🎯 … detecció: X/Y detectats`.
+
+---
+
+## Artefactes en viu (2026-10-08) · #147 i #148
+
+### #147 · El congelat portava el **vídeo de V1** (PNG de 524 KB en lloc de ~35 KB)
+
+- **Causa arrel**: `_freezeTemaTitol` (a `flow_chyrons.js`) insereix el wott en una zona temporal LLIURE
+  (`TEMP_TC`) i captura allà. Aquell `Clips.insert` **podia fallar i tornar `ERR: …` i el codi continuava
+  igualment**: (1) el nom real del cas portava un `%` literal («…Crèdits al **0%** d'int…») i el JSX fa
+  `decodeURIComponent(itemName)` (`jsx/modules/6_Clips.jsx`) → **«Bad or invalid URI»** → inserció fallida
+  i ignorada; (2) sense clip temporal, el TC de captura `TEMP_TC + (tmpDur − REV_FRAME)` cau damunt del
+  **PROGRAMA (V1)** → el PNG surt amb el vídeo de V1 i l'esborrat posterior peta
+  (`ERR_CLIP_NOT_FOUND_AT_119.12`).
+- **Fix (JS pur, zero JSX nou)**: `js/core/utils.js` → helper **`jsxName(name)`** que escapa el `%` literal
+  a `%25` abans de creuar el pont (usat al freeze i a la col·locació: `escapedWott` / `escapedName`).
+  `_freezeTemaTitol`: guarda `isErrRes` a cada `Clips.insert`; la inserció temporal es **reintenta 3×** i es
+  **VERIFICA** amb `getClipsLogic().getTrackClips()` (cal un clip dins de ±0,5 s de `TEMP_TC` → `tmpClip`);
+  **sense clip temporal verificat NO es captura res** (es col·loca només el clip viu, mai un congelat FALS);
+  `tmpDur` derivat del final REAL del clip verificat (`tmpClip.end`, limitat a `CUT_OFFSET`); la inserció
+  final d'animació també comprova `ERR` (retorna `{success:false}`).
+
+### #148 · La mateixa firma col·locada a V7 **i** V8 al mateix tc
+
+- **Causa arrel**: dues instàncies del mateix rètol amb **dos wottId** i només una tilde de diferència
+  (`…_630083_Firma_Ivan Gutiérrez.00630153.mov` / `…_630175_Firma_Iván Gutiérrez.00630176.mov`).
+  `_regenKey`/`_regenSeq` només reconeixen re-generacions del **mateix** wottId → no es fusionaven; en trobar
+  la pista ocupada, la segona anava a una ALTRA capa.
+- **Fix (JS pur)**: `_sameChyronKey` (identitat d'un rètol per a la SEVA posició: `_regenKey` **sense** el
+  wottId + `_burnedGrafNorm` → ignora generació, wottId, accents, caixa i separadors) i `_dedupeSameChyron`
+  (deixa **un rètol per posició**; mana la versió més NOVA i, si empaten, el wottId més alt). Cablejat al
+  **bucle comú de fases** just després de `_dedupeRegenerations` (val per a Conduct/Titol/Lloc/Nom/Resto).
+  La família **de grafisme cremat es SALTA** (el `tc` del seu nom no és la seva posició: la CADENA en
+  col·loca còpies a l'instant detectat) i els noms **buits o no parsejables NO es dedueixen**.
+
+### Validació headless (#147/#148)
+
+`C:/temp/fp/test_dedupe.html` + `run_test_dedupe.ps1` (fetch dels fitxers REALS del repo, funcions extretes
+amb regex i executades al motor V8 del CEP): **9/9 OK** — `jsxName` (`0%` → `0%25` i `decodeURIComponent`
+torna el nom original byte a byte) · els dos noms reals de la firma donen la mateixa clau i guanya la 630175
+(l'ordre invers dona el mateix) · rètols diferents que comparteixen posició NO es fusionen · PREGUNTA
+intacta · noms buits intactes · regeneracions → 1 amb la generació nova.
+
+⚠️ **Pendent**: passada real a Premiere (panell recarregat amb `utils v25` + `flow_chyrons v69`) → PNG del
+congelat **~35 KB**, cap firma duplicada a V7/V8 i cap sobre-deduplicació de rètols legítims.
+
+---
+
+## 🔜 Sessió següent (agenda acordada 2026-10-08)
+
+1. **Millorar la detecció dels CARTELLS** i de la resta d'etiquetes no mesurades: avui 26 de 27 etiquetes
+   comparteixen el comodí `roiDefault` i la **màscara de color única** `#F25F13 ±25`. Camí: mesurar amb
+   material real per etiqueta → omplir `roiPerRole` (color/tol/ROI/graella/llindars), i si cal suportar
+   **diverses mostres de color** o detecció sense color (canvi de contingut) per als rètols d'imatge.
+2. **Col·locar els NO detectats amb més criteri**: `clip complet + un congelat` per poder-lo deixar llarg,
+   tots **al final** de l'ítem com ara (branca `else` de `_placeTitoletChain`), decidint amb el log al davant
+   el TRIM, el `GAP` i si el congelat pot desbordar el final de l'ítem.
+
+Plan detallat, fitxers implicats, decisions obertes i proves disponibles:
+**`plans/HANDOFF_2026-10-08_TITOLETS.md`** §7.

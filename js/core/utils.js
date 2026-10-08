@@ -841,6 +841,24 @@
             return out;
         },
 
+        /**
+         * jsxName: Nom d'ítem de projecte a punt per creuar el pont JSX.
+         *
+         * Les funcions JSX que RESOLEN un nom (`Clips.insert`, `Project.find`…) fan
+         * `decodeURIComponent(itemName)` (vegeu 6_Clips.jsx). ExtendScript llança
+         * «Bad or invalid URI» si el nom porta un `%` literal (p.ex. un rètol
+         * «…in_Crèdits al 0% d'int…») i LA CRIDA FALLA EN SILENCI.
+         * (2026-10-08) Cas real TNM V3: el wott amb `%` no s'inseria mai → el congelat
+         * del TITOLET capturava el frame del PROGRAMA (PNG de 524 KB en lloc de 35 KB).
+         * S'escapa NOMÉS el `%` (`%25`): els accents ja viatgen com a \uXXXX i
+         * decodeURIComponent no els toca.
+         * @param {string} name
+         * @returns {string}
+         */
+        jsxName: function(name) {
+            return String(name == null ? "" : name).replace(/%/g, "%25");
+        },
+
         escape: function(str) {
             if (!str) return "";
             // Escapem caràcters perillosos per a injecció en literals ExtendScript (ES3).

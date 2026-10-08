@@ -44,6 +44,135 @@
         delay: (ms) => window.FASTPASS_UI.Utils.delay(ms)
     };
 
+    // ─── PUR: ROI per ETIQUETA (2026-10-08, 7a passada) ──────────────────────
+    /** ROI_KEYS: paràmetres del rastreig que una recepta d'etiqueta pot sobreescriure. */
+    const ROI_KEYS = ['roiX', 'roiY', 'edgeAxes', 'color', 'tol', 'minCov', 'maxCov',
+        'minEdgeFrac', 'ocrRoiX', 'roiW', 'roiH'];
+
+    /**
+     * _recipeOf: (PURA) Recepta de rastreig d'UNA etiqueta de rol. Precedència:
+     *   `cfg.roiPerRole[rol]` → `cfg.roiDefault` (comodí) → valors base de `cfg`.
+     * Només toca les claus de `ROI_KEYS`: la resta de `cfg` (OCR, cadència, caché…) no s'hi
+     * barreja, així que la recepta es pot fer servir com a `cfg` de l'escaneig sense perdre res.
+     * @param {Object} cfg - `config.titolet`
+     * @param {string|null} role - etiqueta literal del rol (p.ex. 'PREGUNTA')
+     * @returns {Object} { roiX, roiY, edgeAxes, color, tol, minCov, maxCov, minEdgeFrac,
+     *                     ocrRoiX, from }
+     */
+    function _recipeOf(cfg, role) {
+        const c = cfg || {};
+        const out = {};
+        for (const k of ROI_KEYS) if (c[k] !== undefined) out[k] = c[k];
+        if (out.roiY === undefined) out.roiY = [0.60, 0.85];
+        if (out.roiX === undefined) out.roiX = null;
+        if (out.edgeAxes === undefined) out.edgeAxes = 'y';
+        const per = (c.roiPerRole && role && c.roiPerRole[role]) ? c.roiPerRole[role] : null;
+        const src = per || c.roiDefault || null;
+        if (src) {
+            for (const k of ROI_KEYS) {
+                if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = src[k];
+            }
+        }
+        out.from = per ? ('recepta ' + role) : (c.roiDefault ? 'comodí' : 'base');
+        return out;
+    }
+
+    /** roiOnly: (PURA) Només les claus de ROI d'un `cfg` — el que viatja dins d'un interval
+     *  perquè el refinament i el recàlcul des de la caché el rastrejin amb la SEVA recepta. */
+    function roiOnly(cfg) {
+        const o = {};
+        for (const k of ROI_KEYS) if (cfg && cfg[k] !== undefined) o[k] = cfg[k];
+        return o;
+    }
+
+    /** _hull2: (PURA) unió de dos rangs [a,b]; `null` compta com el rang complet (`def`). */
+    function _hull2(a, b, def) {
+        const x = a || def, y = b || def;
+        return [Math.min(x[0], y[0]), Math.max(x[1], y[1])];
+    }
+
+    /** _maxGrid: (PURA) Graella (roiW/roiH) MÉS FINA de dues cel·les. `undefined` = el valor per
+     *  defecte del codi (160x45), que una recepta pot no declarar. Si cap de les dues en porta,
+     *  el resultat és `undefined` (es manté el defecte). */
+    function _maxGrid(a, b, def) {
+        if (a == null && b == null) return undefined;
+        return Math.max((a == null) ? def : a, (b == null) ? def : b);
+    }
+
+    /** _isect2: (PURA) intersecció de dos rangs; `null` si es queden sense solapament útil. */
+    function _isect2(a, b) {
+        if (!a) return b || null;
+        if (!b) return a;
+        const lo = Math.max(a[0], b[0]), hi = Math.min(a[1], b[1]);
+        return ((hi - lo) >= 0.05) ? [lo, hi] : null;
+    }
+
+    /**
+     * recipeForRoles: (PURA) Recepta d'un ÍTEM sencer = UNIÓ de les receptes de les seves
+     * etiquetes (rectangle que les engloba, color/tol del primer grup, `edgeAxes` només si
+     * tots coincideixen). Serveix per a la clau de caché, els logs i el cas d'una sola
+     * recepta (on la unió és la recepta mateixa). Qui decideix si cal MÉS D'UNA passada
+     * d'escaneig és `roleGroups`.
+     * @param {Object} cfg
+     * @param {Array<string>} roles - una etiqueta per wott (buit = recepta base)
+     * @returns {Object} còpia de `cfg` amb les claus de ROI_KEYS aplicades + `recipe`
+     */
+    function recipeForRoles(cfg, roles) {
+        const c = cfg || {};
+        const list = (roles && roles.length) ? roles.slice() : [null];
+        const recs = list.map(r => _recipeOf(c, r));
+        const eff = Object.assign({}, c);
+        let roiX = recs[0].roiX, roiY = recs[0].roiY, edgeAxes = recs[0].edgeAxes;
+        let color = recs[0].color, tol = recs[0].tol, minEdgeFrac = recs[0].minEdgeFrac;
+        let minCov = recs[0].minCov, maxCov = recs[0].maxCov, ocrRoiX = recs[0].ocrRoiX;
+        let roiW = recs[0].roiW, roiH = recs[0].roiH;
+        const warns = [];
+        for (let i = 1; i < recs.length; i++) {
+            const r = recs[i];
+            roiX = _hull2(roiX, r.roiX, [0, 1]);
+            // Graella de mostreig: mana la MÉS FINA (una ROI ampla amb la graella del TITOLET
+            // deixa el rètol com un punxat). Amb una sola recepta es copia TAL QUAL, que és el
+            // cas que importa: cada passada de rastreig ha de mostrejar amb la SEVA graella.
+            roiW = _maxGrid(roiW, r.roiW, 160);
+            roiH = _maxGrid(roiH, r.roiH, 45);
+            roiY = _hull2(roiY, r.roiY, [0, 1]);
+            if (r.edgeAxes !== edgeAxes) { edgeAxes = 'none'; if (warns.indexOf('edgeAxes') === -1) warns.push('edgeAxes'); }
+            if (r.color !== color && warns.indexOf('color') === -1) warns.push('color');
+            if (r.tol !== tol && warns.indexOf('tol') === -1) warns.push('tol');
+            if (r.minEdgeFrac !== minEdgeFrac && warns.indexOf('minEdgeFrac') === -1) warns.push('minEdgeFrac');
+            // Llindars de cobertura: mana el MÉS PERMISSIU (la unió es mira amb la mateixa vara).
+            minCov = Math.min((minCov != null) ? minCov : 2.0, (r.minCov != null) ? r.minCov : 2.0);
+            maxCov = Math.max((maxCov != null) ? maxCov : 60, (r.maxCov != null) ? r.maxCov : 60);
+            ocrRoiX = _hull2(ocrRoiX, r.ocrRoiX, [0, 1]);
+        }
+        if (roiX && roiX[0] <= 0.001 && roiX[1] >= 0.999) roiX = null;
+        eff.roiX = roiX;
+        eff.roiY = roiY;
+        eff.edgeAxes = edgeAxes;
+        if (color !== undefined) eff.color = color;
+        if (tol !== undefined) eff.tol = tol;
+        if (minEdgeFrac !== undefined) eff.minEdgeFrac = minEdgeFrac;
+        if (minCov !== undefined) eff.minCov = minCov;
+        if (maxCov !== undefined) eff.maxCov = maxCov;
+        // ── Graella de mostreig (roiW/roiH) ──────────────────────────────────────────────
+        // 🔴 Sense això, `recipeForRoles(cfgBase, [unaEtiqueta])` (la recepta amb què cada
+        // passada de rastreig crida `scanMp4`) perdia la graella pròpia de l'etiqueta i
+        // mostrejava una ROI de mitja imatge amb la graella del TITOLET (160x45) → el rètol
+        // quedava reduït a un punxat i es perdia el color. `undefined` manté el defecte.
+        if (roiW !== undefined) eff.roiW = roiW;
+        if (roiH !== undefined) eff.roiH = roiH;
+        // Finestra d'OCR: MAI fora de la zona rastrejada (si no, l'OCR llegiria on no hi ha
+        // rètol: MESURAT que llegia el marcador de votacions del fons).
+        const roiClamp = roiX || [0, 1];
+        const ocrClip = _isect2(ocrRoiX, roiClamp);
+        eff.ocrRoiX = ocrClip || [roiClamp[0], roiClamp[1]];
+        eff.recipe = {
+            roles: list, how: 'unió de ' + recs.length + ' recepta(es)',
+            srcs: recs.map(r => r.from), warns: warns, roiX: roiX, roiY: roiY
+        };
+        return eff;
+    }
+
     /** _hexToRgb: '#F25F13' → {r,g,b} */
     function _hexToRgb(hex) {
         const h = String(hex || '').replace('#', '').trim();
@@ -249,21 +378,73 @@
     }
 
     /**
+     * roleGroups: (PURA) Agrupa els índexs de wott de l'ítem per RECEPTA IDÈNTICA. Cada grup
+     * és una passada d'ffmpeg independent (la seva ROI i els seus llindars) i els seus
+     * intervals només poden assignar-se els wotts del grup (vegeu `_groupAllow`).
+     * @param {Object} cfg
+     * @param {Array<string>} roles - una etiqueta per wott
+     * @returns {Array<{role:string, wotts:Array<number>, recipe:Object}>}
+     */
+    function roleGroups(cfg, roles) {
+        const c = cfg || {};
+        const list = (roles && roles.length) ? roles.slice() : [null];
+        const groups = [], keys = [];
+        for (let i = 0; i < list.length; i++) {
+            const r = _recipeOf(c, list[i]);
+            const k = ROI_KEYS.map(x => JSON.stringify(r[x] === undefined ? null : r[x])).join('|');
+            let gi = keys.indexOf(k);
+            if (gi === -1) {
+                gi = keys.length; keys.push(k);
+                groups.push({ role: list[i], wotts: [], recipe: r });
+            }
+            groups[gi].wotts.push(i);
+        }
+        return groups;
+    }
+
+    /**
+     * _groupAllow: (PURA) Índexs de wott que pot reclamar l'interval `i` quan l'ítem té MÉS
+     * D'UN grup de rastreig (receptes diferents). `null` = sense restricció (un sol grup, o
+     * pla desat sense `ivGroups`).
+     */
+    function _groupAllow(cfg, i) {
+        if (!cfg || !cfg.ivGroups || !cfg.groups) return null;
+        const g = cfg.ivGroups[i];
+        if (g === undefined || g === null) return null;
+        const gr = cfg.groups[g];
+        return (gr && gr.wotts) ? gr.wotts : null;
+    }
+
+    /**
+     * _sameGroup: (PURA) El wott `w` i l'interval `i` són del mateix grup de rastreig?
+     * Sense grups (`ivGroups`/`wottGroups` absents) sempre true (comportament antic).
+     */
+    function _sameGroup(cfg, w, i) {
+        if (!cfg || !cfg.ivGroups || !cfg.wottGroups) return true;
+        const gw = cfg.wottGroups[w], gi = cfg.ivGroups[i];
+        if (gw === undefined || gi === undefined) return true;
+        return gw === gi;
+    }
+
+    /**
      * pickWott: millor wott per a UN text OCR (diagnòstic; el pla usa assignIntervals).
      * @param {string} ocrText
      * @param {Array<string>} names
      * @param {Object} cfg
      * @param {Object|Array} [taken] - wotts JA assignats (map per índex o array): es
      *   descarten. Ho fa servir l'escaneig endavant per no repetir un wott.
+     * @param {Array<number>} [allow] - restricció de grup (2026-10-08, 7a passada): NOMÉS
+     *   aquests índexs són candidats, perquè cada passada de rastreig té la SEVA ROI.
      * @returns {{index:number, score:number, token:string, how:string}}
      */
-    function pickWott(ocrText, names, cfg, taken) {
+    function pickWott(ocrText, names, cfg, taken, allow) {
         const fuzz = (cfg && cfg.ocrFuzz != null) ? cfg.ocrFuzz : 0.55;
         const isTaken = (i) => !!(taken && (taken[i] === true || taken[i] === i + 1));
+        const inGroup = (i) => (!allow || allow.indexOf(i) !== -1);
         let best = { index: -1, score: 0, token: '', how: 'sense-text' };
         if (_normText(ocrText).length < 3) return best;
         for (let i = 0; i < names.length; i++) {
-            if (isTaken(i)) continue;
+            if (isTaken(i) || !inGroup(i)) continue;
             for (const tk of _wottTokens(names[i])) {
                 const s = _scoreText(ocrText, tk);
                 if (s.score > best.score) best = { index: i, score: Math.round(s.score * 1000) / 1000, token: tk, how: s.how };
@@ -300,9 +481,13 @@
         for (let i = 0; i < intervals.length; i++) {
             const txt = ocrTexts[i] || '';
             if (_normText(txt).length < 3) continue;
+            // (2026-10-08, 7a passada) Restricció de grup: si l'ítem es va rastrejar amb MÉS
+            // D'UNA recepta de ROI, aquest interval només pot ser d'un wott del SEU grup.
+            const allow = _groupAllow(cfg, i);
             const per = [];
             let bestW = -1, bestS = 0;
             for (let w = 0; w < names.length; w++) {
+                if (allow && allow.indexOf(w) === -1) continue;
                 let bs = 0, btok = '', bhow = 'lev';
                 for (const tk of _wottTokens(names[w])) {
                     const s = _scoreText(txt, tk);
@@ -385,6 +570,8 @@
             for (let j = 0; j < ivList.length; j++) {
                 if (usedI[j] || blocked[j]) continue;
                 if (j <= prevI || j >= nextI) continue;
+                // (2026-10-08, 7a passada) Amb grups de ROI, l'interval ha de ser del grup del wott.
+                if (!_sameGroup(cfg, w, j)) continue;
                 cands.push(j);
             }
             const noTxt = cands.filter(j => _normText(txtList[j] || '').length < 3);
@@ -625,13 +812,17 @@
         const h = (cfg && cfg.roiH) ? cfg.roiH : 45;
         const sc = await F.extractRoiSeries(mp4, {
             tStart: tStart, tDur: tDur, roiY: (cfg && cfg.roiY) || [0.60, 0.85],
+            roiX: (cfg && cfg.roiX) || null,
             w: w, h: h, fps: (cfg && cfg.scanFps) || 1
         });
         if (!sc.ok) return { ok: false, error: sc.error };
         const buf = _readBinary(sc.path);
         if (!buf) return { ok: false, error: 'no s\'ha pogut llegir el .raw (' + sc.path + ')' };
         const series = analyzeSeries(buf, sc.w, sc.h, {
-            color: cfg.color, tol: cfg.tol, scanFps: sc.fps, minEdgeFrac: cfg.minEdgeFrac, tStart: tStart
+            color: cfg.color, tol: cfg.tol, scanFps: sc.fps, minEdgeFrac: cfg.minEdgeFrac,
+            // ⚠️ `edgeAxes` s'ha de passar EXPLÍCITAMENT: abans no hi era i `_analyzeFrame` hi
+            // queia al seu valor per defecte ('y'), així que una recepta amb 'none' no s'aplicava.
+            edgeAxes: cfg.edgeAxes, tStart: tStart
         });
         try { await utils.callJSX('IO.remove(' + JSON.stringify(sc.path) + ')'); } catch (eR) { }
         return { ok: true, series: series, w: sc.w, h: sc.h, error: null };
@@ -699,7 +890,10 @@
         if (!cfg || cfg.refineEntry === false || !mp4) return;
         for (const f of (found || [])) {
             try {
-                const r = await refineEntry(mp4, f.iv, cfg, label);
+                // (2026-10-08, 7a passada) Cada interval porta la recepta del SEU grup de
+                // rastreig: refinar-lo amb la ROI d'un altre grup no hi veuria el rètol.
+                const cIv = (f.iv && f.iv.recipe) ? Object.assign({}, cfg, f.iv.recipe) : cfg;
+                const r = await refineEntry(mp4, f.iv, cIv, label);
                 if (r && Math.abs(r.delta) >= 0.05) {
                     utils.log('   🔬 [titolet] ' + label + ' interval @ ' + (r.tIn + r.delta).toFixed(2) +
                         's → entrada REFINADA a ' + r.tIn.toFixed(2) + 's (' + (r.delta > 0 ? '−' : '+') +
@@ -715,8 +909,10 @@
      * RECALCULA amb les dades crues (intervals + texts) — no es torna a escanejar.
      *   1 = assignació voraç sense rebutjar texts aliens ni resoldre orfes
      *   2 = (2026-10-06, 5a passada) + matchos febles amb text aliè rebutjats + orfes per ordre
+     *   3 = (2026-10-08, 7a passada) + grups de ROI per etiqueta (cada interval només pot
+     *       assignar-se els wotts del seu grup de rastreig)
      */
-    const ALGO = 2;
+    const ALGO = 3;
 
     /** _hash32: hash estable (djb2) d'un text → clau de caché curta. */
     function _hash32(s) {
@@ -736,7 +932,7 @@
         try {
             if (window.FASTPASS_UI.State && window.FASTPASS_UI.State.titoletNoCache === true) return null;
         } catch (eS) { }
-        const key = JSON.stringify({
+        const obj = {
             mp4: String((p && p.mp4) || '').toLowerCase(),
             tItemStart: (p && p.tItemStart) || 0,
             tScanStart: (p && p.tScanStart) || 0,
@@ -750,8 +946,16 @@
                 ocrRetryStepSec: cfg.ocrRetryStepSec, roiY: cfg.roiY, roiW: cfg.roiW, roiH: cfg.roiH,
                 ocrRoiX: cfg.ocrRoiX, scanChunkSec: cfg.scanChunkSec, edgeAxes: cfg.edgeAxes
             }
-        });
-        return 'C:\\temp\\titolet_plan_' + _hash32(key) + '.json';
+        };
+        // (2026-10-08, 7a passada) La X de la ROI només entra a la clau si RESTRINGEIX (una
+        // recepta d'etiqueta amb mitja imatge): amb `roiX: null` l'escaneig és el de sempre i
+        // la clau ha de continuar sent la mateixa per aprofitar el pla ja desat.
+        if (cfg && cfg.roiX) obj.cfg.roiX = cfg.roiX;
+        // (2026-10-08, 7a passada) Només els ítems amb MÉS D'UNA recepta de ROI necessiten la
+        // signatura dels grups: així la clau dels ítems d'una sola recepta (TITOLET) NO canvia
+        // i el pla que ja tenien desat es continua reaprofitant.
+        if (cfg && cfg.groupsSig) obj.groupsSig = cfg.groupsSig;
+        return 'C:\\temp\\titolet_plan_' + _hash32(JSON.stringify(obj)) + '.json';
     }
 
     /**
@@ -795,7 +999,8 @@
             if (!fs || !fs.writeFile) return;
             fs.writeFile(path, JSON.stringify({
                 v: 2, algo: ALGO, ts: Date.now(), t0: plan.t0, cards: plan.cards, stats: plan.stats,
-                intervals: plan.intervals, ocrTexts: plan.ocrTexts, assign: plan.assign
+                intervals: plan.intervals, ocrTexts: plan.ocrTexts, assign: plan.assign,
+                ivGroups: plan.ivGroups || []
             }));
         } catch (e) { }
     }
@@ -852,6 +1057,10 @@
             ocrTexts: ocrTexts,
             notes: notes || [],
             t0: t0,
+            // (2026-10-08, 7a passada) Grup de rastreig de cada interval (quan l'ítem té més
+            // d'una recepta de ROI): sense això, recalcular el pla des de la caché perdria la
+            // restricció interval ↔ wotts del grup.
+            ivGroups: (cfg && cfg.ivGroups) || [],
             stats: {
                 nWotts: names.length, nIntervals: (intervals || []).length, nMatched: nMatch,
                 nShort: cards.filter(c => c.kind === 'short').length,
@@ -917,18 +1126,44 @@
      *      final es RECALCULA amb totes les dades (`planFromRaw`), i el pla es desa amb els
      *      intervals + els texts per poder-lo recalcular sense tornar a escanejar.
      *
-     * @param {Object} p - { mp4, tItemStart, names, tScanStart, tScanDur, cfg, label }
+     * @param {Object} p - { mp4, tItemStart, names, tScanStart, tScanDur, cfg, label, roles }
      *   tItemStart = segon del MP4 on arrenca l'ítem (marcador) → els temps del pla
      *   queden RELATIUS a l'ítem, que és com els fa servir la cadena TITOLET.
+     *   roles = etiqueta de rol (el 4t camp del nom) de CADA wott, per longitud. Si no
+     *   s'informa, tots es tracten com a 'TITOLET' (la recepta mesurada = comportament antic).
      * @returns {Promise<{ok:boolean, cards:Array, stats:Object, intervals:Array, ocrTexts:Array, error?:string}>}
      */
     async function planForItem(p) {
-        const cfg = p.cfg || {};
+        const cfgBase = p.cfg || {};
         const label = p.label || 'item';
         const empty = (err) => ({ ok: false, error: err, cards: [], stats: {}, intervals: [], ocrTexts: [] });
         try {
             if (!p.mp4) return empty('sense MP4 cleanFeed');
             const names = p.names || [];
+            // ── 🎯 GRUPS DE RASTREIG PER ETIQUETA (2026-10-08, 7a passada) ────────────────
+            // Un ítem pot portar etiquetes de NATURALESA diferent (un TITOLET viu a la banda
+            // baixa; un PREGUNTA, a mitja imatge). Amb una sola ROI mesurada (la del TITOLET)
+            // els PREGUNTA no es veien (0 intervals al cas real de TNM V3). Aquí es fa UNA
+            // passada d'escaneig per RECEPTA de ROI i cada interval només pot assignar-se els
+            // wotts del SEU grup. Amb una sola recepta tot queda EXACTAMENT com abans.
+            const roles = (p.roles && p.roles.length === names.length) ? p.roles : names.map(() => 'TITOLET');
+            const groups = roleGroups(cfgBase, roles);
+            const groupsSig = (groups.length > 1)
+                ? groups.map(g => g.role + '=' + ROI_KEYS.map(k => JSON.stringify(g.recipe[k] === undefined ? null : g.recipe[k])).join(',')).join(';')
+                : null;
+            const grpInfo = { groups: groups.map(g => ({ role: g.role, wotts: g.wotts })), wottGroups: [] };
+            for (let gi = 0; gi < groups.length; gi++) {
+                for (const wi of groups[gi].wotts) grpInfo.wottGroups[wi] = gi;
+            }
+            const cfg = Object.assign({}, recipeForRoles(cfgBase, roles), {
+                groups: grpInfo.groups, wottGroups: grpInfo.wottGroups,
+                groupsSig: groupsSig, ivGroups: []
+            });
+            if (groups.length > 1) {
+                utils.log('🎯 [titolet] ' + label + ': ' + groups.length + ' grups de rastreig (' +
+                    groups.map(g => g.role + ' ×' + g.wotts.length).join(' · ') +
+                    ') → una passada d\'ffmpeg per grup');
+            }
             const cachePath = _planCachePath(p, cfg);
             const hit = _cacheLoad(cachePath);
             if (hit) {
@@ -941,6 +1176,9 @@
                         utils.log('♻️ [titolet] ' + label + ': pla de la CACHÉ RECALCULAT amb l\'algorisme v' +
                             ALGO + ' (v' + (hit.algo || 1) + ' → ' + ALGO + '; dades crues: ' +
                             hit.intervals.length + ' intervals) → no es torna a rastrejar');
+                        // (7a passada) El grup de cada interval també ve de la caché (si hi és):
+                        // sense això, recalcular perdria la restricció interval ↔ grup.
+                        cfg.ivGroups = hit.ivGroups || [];
                         const re = await planFromRaw(p.mp4, hit.intervals, hit.ocrTexts || [], names, t0h, cfg, label);
                         _cacheSave(cachePath, re);
                         return {
@@ -960,40 +1198,59 @@
             const t0 = p.tItemStart || 0;
             const chunk = Math.max(5, (cfg.scanChunkSec != null) ? cfg.scanChunkSec : 45);
             const tStart = Math.max(0, p.tScanStart || 0);
-            let cursor = tStart;
             const endAbs = tStart + Math.max(1, p.tScanDur || 0);
-            const allIvs = [], found = [], taken = {}, ivsText = [];
+            const allIvs = [], found = [], taken = {}, ivsText = [], ivGroups = [];
             let sawWeak = false;
             let nSamples = 0, nChunks = 0, w = cfg.roiW || 160, h = cfg.roiH || 45;
-            while (cursor < endAbs && (found.length < names.length || sawWeak)) {
+            // Wotts trobats que són del grup `gi` (cada grup s'atura quan té els SEUS).
+            const nInGroup = (gi) => {
+                let n = 0;
+                for (const f of found) if (groups[gi].wotts.indexOf(f.w) !== -1) n++;
+                return n;
+            };
+            for (let gi = 0; gi < groups.length; gi++) {
+            const g = groups[gi];
+            const gc = recipeForRoles(cfgBase, [g.role]);
+            if (groups.length > 1) {
+                utils.log('🎯 [titolet] ' + label + ' grup ' + (gi + 1) + '/' + groups.length + ' «' + g.role +
+                    '»: ' + g.wotts.length + ' wott(s) · ROI x ' + (gc.roiX ? (gc.roiX[0] + '→' + gc.roiX[1]) : '0→1') +
+                    ' · y ' + gc.roiY[0] + '→' + gc.roiY[1] + ' · vores ' + gc.edgeAxes +
+                    ' · cov ' + gc.minCov + '-' + gc.maxCov + '% (' + (g.recipe.from || 'base') + ')');
+            }
+            let cursor = tStart;
+            while (cursor < endAbs && (nInGroup(gi) < g.wotts.length || sawWeak)) {
                 const len = Math.min(chunk, endAbs - cursor);
                 nChunks++;
-                const sc = await scanMp4(p.mp4, cursor, len, cfg);
+                const sc = await scanMp4(p.mp4, cursor, len, gc);
                 if (!sc.ok) return empty(sc.error);
                 nSamples += (sc.series || []).length;
                 w = sc.w; h = sc.h;
-                const ivs = groupIntervals(sc.series, cfg);
+                const ivs = groupIntervals(sc.series, gc);
                 utils.log('🎯 [titolet] ' + label + ' tram ' + nChunks + ' [' + cursor.toFixed(1) + 's→' +
                     (cursor + len).toFixed(1) + 's]: ' + (sc.series || []).length + ' mostres (' + sc.w + 'x' + sc.h +
                     ') → ' + ivs.length + ' intervals');
                 for (const iv of ivs) {
                     if (found.length >= names.length && !sawWeak) break;
                     allIvs.push(iv);
+                    // (7a passada) El grup de rastreig de l'interval i la SEVA recepta de ROI:
+                    // el recàlcul i el refinament han de mirar on es va veure el rètol.
+                    ivGroups.push(gi);
+                    iv.recipe = roiOnly(gc);
                     const ivIdx = allIvs.length - 1;
                     const relIn = Math.round((iv.tIn - t0) * 1000) / 1000;
-                    const insts = (cfg.ocr === false) ? [] : _attemptInstants(iv, cfg);
+                    const insts = (gc.ocr === false) ? [] : _attemptInstants(iv, gc);
                     let enc = null, text = '', tUsed = null;
                     for (let k = 0; k < insts.length && !enc; k++) {
-                        const txt = await ocrAtInstant(p.mp4, insts[k], cfg, label + '_' + Math.round(relIn) + '_', k);
+                        const txt = await ocrAtInstant(p.mp4, insts[k], gc, label + '_' + Math.round(relIn) + '_', k);
                         if (txt) {
                             text = txt;
-                            const c = pickWott(txt, names, cfg, taken);
+                            const c = pickWott(txt, names, gc, taken, g.wotts);
                             // 🔴 (5a passada) MATCH FEBLE amb text ALIÈ: si el text ja és (millor)
                             // d'un altre wott, aquest interval és una REPETICIÓ del rètol d'aquell
                             // wott → no es consumeix aquest wott. (Cas real: el ZAPATERO s'hi va
                             // emparellar amb 0,556 i va anar 10,5 s abans del seu lloc.)
-                            const weak = (cfg.ocrWeak != null) ? cfg.ocrWeak : 0.7;
-                            const anyW = c.index >= 0 ? pickWott(txt, names, cfg, null) : null;
+                            const weak = (gc.ocrWeak != null) ? gc.ocrWeak : 0.7;
+                            const anyW = c.index >= 0 ? pickWott(txt, names, gc, null, g.wotts) : null;
                             if (c.index >= 0 && c.score < weak && anyW && anyW.index >= 0 &&
                                 anyW.index !== c.index && anyW.score >= c.score + 0.1) {
                                 sawWeak = true;
@@ -1022,19 +1279,23 @@
                             ' «' + String(names[enc.index]).substring(0, 38) + '» (score ' + enc.score +
                             ', token ' + enc.token + ', via ' + enc.how + '): «' +
                             text.replace(/\r?\n/g, ' | ').substring(0, 70) + '»');
-                    } else if (cfg.ocr !== false) {
+                    } else if (gc.ocr !== false) {
                         utils.log('   ❌ [titolet] ' + label + ' interval @ ' + iv.tIn.toFixed(2) + 's (relIn ' +
                             relIn + 's) descartat: cap wott pendent en ' + insts.length + ' intent(s)');
                     }
                 }
                 cursor += len;      // ← el cursor NOMÉS avança: mai es re-rastreja enrere
             }
+            }
+
             // (5a passada) El pla es RECALCULA amb TOTES les dades (no amb les decisions
             // incrementals de l'escaneig): mateixa assignació que faria la caché recalçada.
+            cfg.ivGroups = ivGroups;
             const plan = await planFromRaw(p.mp4, allIvs, ivsText, names, t0, cfg, label);
             const st = plan.stats;
             utils.log('🎯 [titolet] ' + label + ': ' + st.nMatched + '/' + names.length + ' wotts · ' +
                 allIvs.length + ' intervals · ' + nChunks + ' tram(s) · ' + nSamples + ' mostres (' + w + 'x' + h + ')' +
+                ((groups.length > 1) ? ' · ' + groups.length + ' grups de ROI' : '') +
                 ((found.length >= names.length && !sawWeak) ? ' · ATURAT (tots assignats)' : ' · fi de finestra'));
             _cacheSave(cachePath, plan);
             return {
@@ -1064,6 +1325,14 @@
         levRatio: _levRatio,
         wottTokens: _wottTokens,
         hexToRgb: _hexToRgb,
+        // ── pures: ROI per etiqueta (7a passada) ──
+        recipeOf: _recipeOf,
+        recipeForRoles: recipeForRoles,
+        roleGroups: roleGroups,
+        roiOnly: roiOnly,
+        groupAllow: _groupAllow,
+        sameGroup: _sameGroup,
+        roiKeys: ROI_KEYS,
         // ── orquestració (CEP: ffmpeg + OCR + IO) ──
         ocrText: ocrText,
         scanMp4: scanMp4,

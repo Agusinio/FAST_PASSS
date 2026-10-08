@@ -488,7 +488,9 @@
             const cfg = FASTPASS_UI.Config.get();
             const T_THEME = (parseInt(o.track, 10) > 0) ? parseInt(o.track, 10) : cfg.tracks.video.tematitol;
             const utils = getUtils();
-            const escapedWott = utils.escape(wottName);
+            // (2026-10-08) `jsxName` → el JSX fa `decodeURIComponent` sobre el nom: un `%`
+            // literal ha d'arribar com a `%25` o la inserció falla («Bad or invalid URI»).
+            const escapedWott = utils.escape(utils.jsxName(wottName));
             const CUT_OFFSET = (Number(o.animSec) > 0.1) ? Number(o.animSec) : 8.0;
             // (2026-10-06, 5a passada) La cadena TITOLET passa `freezeSec` explícit: si és 0 no
             // hi ha congelat i no cal fer el viatge sencer del PNG (temporal + captura + import).
@@ -502,28 +504,63 @@
             // amb el vídeo incrustat (l'alfa es perd).
             const TEMP_TC = (Number(o.tempTC) > 0) ? Number(o.tempTC) : await this._v6FreeTC(T_THEME, 12);
             const cutTime = placeTime + CUT_OFFSET;
+            // (2026-10-08) `Clips.insert` pot FALLAR i tornar «ERR: …»/«EXC: …» (p.ex. «Bad or
+            // invalid URI» amb un `%` al nom): abans es cridava a cegues i el flux continuava
+            // com si el clip hi fos.
+            const isErrRes = (r) => /^\s*(ERR|EXC)/i.test(String(r || ''));
 
             // 0. SENSE congelat (5a passada): només el clip d'animació, sense tocar el PNG.
             if (!needFreeze) {
-                await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
+                const rOne = String(await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`) || '');
+                if (isErrRes(rOne)) {
+                    log(`   ❌ [_freeze] Clip NO inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s (${rOne}) → rètol NO col·locat`, "ERROR");
+                    return { success: false, duration: 0 };
+                }
                 await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
                 log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s (SENSE congelat)`);
                 return { success: true, duration: 0 };
             }
 
             // 1. Inserir Wott TEMPORALMENT a la zona lliure (clip sol, sense cap altre clip)
-            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${TEMP_TC}, null, 'video')`);
-            await utils.delay(300);
+            // (2026-10-08) ⚠️ ABANS es cridava a cegues i es capturava el frame igualment. Sense
+            // clip temporal, el TC de captura cau damunt del PROGRAMA i el PNG surt amb el VÍDEO
+            // DE V1 en lloc del grafisme (cas real TNM V3 08/10 13:39: PNG de 524 KB en lloc de
+            // 35 KB + «ERR_CLIP_NOT_FOUND_AT_119.12» en voler esborrar el temporal). Ara es
+            // VERIFICA que el clip hi sigui i, si no s'hi pot posar, es col·loca NOMÉS el clip
+            // viu (sense congelat) en lloc d'un congelat FALS amb imatge del programa.
+            let resTemp = String(await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${TEMP_TC}, null, 'video')`) || '');
+            let tmpClip = null;
+            for (let iIns = 0; iIns < 3; iIns++) {
+                if (iIns > 0) {
+                    await utils.delay(400);
+                    resTemp = String(await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${TEMP_TC}, null, 'video')`) || '');
+                }
+                await utils.delay(300);
+                try {
+                    const clTmp = (await getClipsLogic().getTrackClips(T_THEME, 'video')) || [];
+                    tmpClip = clTmp.filter(c => Math.abs(c.start - TEMP_TC) < 0.5)[0] || null;
+                } catch (eVT) { tmpClip = null; }
+                if (tmpClip) break;
+            }
+            if (!tmpClip) {
+                log(`   ⚠️ [_freeze] Wott temporal NO inserit a V${T_THEME} @ ${TEMP_TC.toFixed(2)}s (${resTemp || 'sense resposta'}) → SENSE congelat: només clip viu`, "WARN");
+                const rLive = String(await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`) || '');
+                if (isErrRes(rLive)) {
+                    log(`   ❌ [_freeze] Ni el clip viu s'ha pogut inserir (${rLive}) → rètol NO col·locat`, "ERROR");
+                    return { success: false, duration: 0 };
+                }
+                await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
+                log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s (SENSE congelat)`);
+                return { success: true, duration: 0 };
+            }
 
             // 2. Capturar l'ÚLTIM frame del wott temporal. El TC es pren del final REAL del
             //    clip temporal (no de TEMP_TC + 8 s: si el mèdia és més curt, aquell instant
             //    cauria fora del clip i el PNG sortiria buit).
             let tmpDur = CUT_OFFSET;
-            try {
-                const clT = (await getClipsLogic().getTrackClips(T_THEME, 'video')) || [];
-                const mine = clT.filter(c => Math.abs(c.start - TEMP_TC) < 0.5)[0];
-                if (mine && isFinite(mine.end) && mine.end > TEMP_TC + 0.05) tmpDur = Math.min(CUT_OFFSET, mine.end - TEMP_TC);
-            } catch (eTD) { }
+            if (tmpClip && isFinite(tmpClip.end) && tmpClip.end > TEMP_TC + 0.05) {
+                tmpDur = Math.min(CUT_OFFSET, tmpClip.end - TEMP_TC);
+            }
             // Instant del frame congelat. (2026-10-06, 5a passada) Amb `opts.frameMid` es captura
             // al 60 % del clip: quan la part viva és el clip SENCER, el darrer frame cau a
             // l'animació de sortida (o al final del mèdia) i el PNG sortiria BUID → «congelat
@@ -565,7 +602,11 @@
             // (2026-10-01 · #129) SENSE endSec: `Clips.insert(..., endSec)` retalla el DARRER clip
             // de la pista (clips[numItems-1].end). El final es fixa amb `Clips.endAt` (cerca pel
             // start → immunitzat a renumeracions de clips).
-            await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`);
+            const resAnim = String(await callJSX(`Clips.insert('${escapedWott}', ${T_THEME}, ${placeTime}, null, 'video')`) || '');
+            if (isErrRes(resAnim)) {
+                log(`   ❌ [_freeze] Clip d'animació NO inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s (${resAnim}) → rètol NO col·locat`, "ERROR");
+                return { success: false, duration: 0 };
+            }
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
             log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s`);
 
@@ -686,10 +727,10 @@
                             how: 'CLIP EXTRET «' + nm + '» (inPoint ' + inPt.toFixed(2) + 's − start ' + startCl.toFixed(2) + 's = ' + (inPt - startCl).toFixed(2) + 's)'
                         };
                     }
-                    log(`   ⚠️ [${p.label}] TITOLET ancoratge: clip extret «${nm}» no trobat a «${folder}» → es prova el cleanFeed`, 'WARN');
+                    log(`   ⚠️ [${p.label}] ${p.tag || 'TITOLET'} ancoratge: clip extret «${nm}» no trobat a «${folder}» → es prova el cleanFeed`, 'WARN');
                 }
             } catch (eC) {
-                log(`   ⚠️ [${p.label}] TITOLET ancoratge: clip de V1 il·legible (${eC.message})`, 'WARN');
+                log(`   ⚠️ [${p.label}] ${p.tag || 'TITOLET'} ancoratge: clip de V1 il·legible (${eC.message})`, 'WARN');
             }
             // ── 2) Xarxa de seguretat: cleanFeed del manifest (ref.offsetSec) ──
             try {
@@ -705,11 +746,21 @@
         },
 
         /**
-         * _placeTitoletChain: COL·LOCACIÓ DELS TITOLET (2026-10-05 · reescrit 2026-10-06).
+         * _placeTitoletChain: COL·LOCACIÓ DELS GRAFISMES CREMATS al seu instant real
+         * (2026-10-05 · reescrit 2026-10-06 · rols ampliats 2026-10-08: 27 tipus de grafisme).
          *
-         * Un ítem pot portar N TITOLET (grafismes de l'INSERT). El rastreig del vídeo cremat
-         * (`Logic.TitoletDetect`) diu QUAN va entrar i QUANT va durar cadascun, així que cada
-         * targeta va al SEU instant real a la timeline:
+         * DISPARO (2026-10-08): aquesta cadena s'activa NOMÉS si l'ítem porta wotts amb una de
+         * les 27 ETIQUETES literals de `titolet.detectRoles` (`_isBurnedGrafWott`): TITOLET ·
+         * TITOLET GRAN · PREGUNTA · CARTELL · CIS_CEO · CIS_CEO_COMPARADA · CRONOLOGIA ·
+         * CRONOLOGIA-TITOLS · DADA_COMPARADA · DADA-DIFERENCIAL · DADA-GRAN · DADA-GRAN-DIVISA ·
+         * DADA-ITEM · DESTACAT · CLASSI-CHAMPIONS · CLASSIFICACIO · CLASSI-MUNDIAL ·
+         * CLASSI-PRIMERA · CLASSI-SEGONA · GRAFICA-BARRES · GRAFICA_CIRCULAR · IMATGE-CAPTURA ·
+         * LLISTA · LLISTA-DADES · NOTA · PROGRAMACIO · RANQUING (vegeu `TITOLET_DEFAULTS.detectRoles`).
+         * La resta d'ítems NO rastregen res (el rastreig no es fa mai «per si de cas»).
+         *
+         * Un ítem pot portar N rètols d'aquesta família (grafismes de l'INSERT). El rastreig del
+         * vídeo cremat (`Logic.TitoletDetect`) diu QUAN va entrar i QUANT va durar cadascun, així
+         * que cada targeta va al SEU instant real a la timeline:
          *
          *     placeTime = mk.time + card.relIn     (relIn = segons dins de l'ítem de VÍDEO)
          *     span      = card.on si és 'short' · mèdia + congelat si no
@@ -739,6 +790,9 @@
             const cfg = p.cfg || FASTPASS_UI.Config.get();
             const list = (p.titolets || []).slice();
             if (list.length === 0) return 0;
+            // Etiqueta de la traça: el rol que HA DISPARAT la detecció (`p.tag`; p.ex. PREGUNTA).
+            // Per defecte 'TITOLET' = comportament antic (logs idèntics als de sempre).
+            const TAG = p.tag || 'TITOLET';
             // Clips de V1 (per l'«imant» al tall). ⚠️ (2026-10-06, FIX) El paràmetre és
             // `p.clipsV1`: llegir-lo com a `clipsV1` lliure llançava
             // `ReferenceError: clipsV1 is not defined` a la 1a targeta detectada i
@@ -763,7 +817,7 @@
             const durs = list.map(c => {
                 const d = PL._resolveWottDur ? PL._resolveWottDur(p.wottIdx, c) : null;
                 const dd = (d && d.dur > 0.1) ? d.dur : ANIM;
-                if (!(d && d.dur > 0.1)) log(`   ⚠️ [${p.label}] TITOLET «${String(c.name).substring(0, 40)}»: durada no resolta → s'assumeix ${ANIM.toFixed(2)}s`, 'WARN');
+                if (!(d && d.dur > 0.1)) log(`   ⚠️ [${p.label}] ${TAG} «${String(c.name).substring(0, 40)}»: durada no resolta → s'assumeix ${ANIM.toFixed(2)}s`, 'WARN');
                 return dd;
             });
             // ── DETECCIÓ TITOLET AL VÍDEO CREMAT (2026-10-06 · 2a passada) ──────
@@ -779,40 +833,93 @@
             // Amb `titolet.dryRun === true` NO es canvia res: només s'informa al log.
             const TT = cfg.titolet || {};
             let ttCards = null, ttPlan = null;
+            // ── TC DEL NOM (2026-10-08, 7a passada) ────────────────────────────────
+            // Abans de rastrejar res: el NOM del wott ja porta un camp `tc` (5è tros). En aquesta
+            // família sol ser `00.00` (farciment) i per això la col·locació no en depèn, però quan
+            // SÍ que porta un TC creïble és l'instant exacte d'emissió i estalvia el rastreig.
+            // Vegeu `_titoletTcFromName` (criteris) i `_titoletCardsFromTc`.
+            const tcSec = this._titoletTcFromName(list, cfg);
+            const nTc = tcSec.filter(x => x !== null).length;
+            if (nTc > 0) {
+                log(`   ⏱️ [${p.label}] ${TAG} TC del nom: ${nTc}/${list.length} wott(s) amb TC creïble` +
+                    (nTc === list.length ? ' → s\'estalvia el rastreig del vídeo' : ' (s\'usaran si la detecció no els veu)'));
+            }
             try {
                 const TD = FASTPASS_UI.Logic.TitoletDetect;
                 if (!TD) {
-                    log(`   ⚠️ [${p.label}] TITOLET detecció: mòdul Logic.TitoletDetect no carregat → fallback`, 'WARN');
+                    log(`   ⚠️ [${p.label}] ${TAG} detecció: mòdul Logic.TitoletDetect no carregat → fallback`, 'WARN');
                 } else if (TT.enabled === false) {
-                    log(`   ⚠️ [${p.label}] TITOLET detecció: desactivada (titolet.enabled = false) → fallback`, 'WARN');
+                    log(`   ⚠️ [${p.label}] ${TAG} detecció: desactivada (titolet.enabled = false) → fallback`, 'WARN');
                 } else {
+                    // ⏱️ Si TOTS els wotts porten un TC creïble al nom, no cal tocar el vídeo:
+                    // les targetes surten del TC (mateixa forma que les detectades).
+                    if (nTc === list.length) {
+                        const bt = this._titoletCardsFromTc(list, tcSec);
+                        ttCards = bt.cards;
+                        ttPlan = { ok: true, cards: bt.cards, stats: bt.stats, cached: false, tc: true };
+                        log(`   ⏱️ [${p.label}] ${TAG} detecció: NO es rastreja el vídeo (els ${nTc} wott(s) porten TC creïble al nom)`);
+                    } else {
                     // ⚠️ (2026-10-06, FIX) El manifest NO es pot llegir amb `p.ctx`: això és el
                     // ctx de COL·LOCACIÓ ({busy, placed}) i `SessionManifest.getPath` fa
                     // `ctx.progData.wott` → TypeError. Es fa servir el ctx de SESSIÓ.
                     const wctx = p.wfCtx || this._wfCtx();
                     const anc = await this._titoletAnchor(p, wctx);
                     if (!anc.ok) {
-                        log(`   ⚠️ [${p.label}] TITOLET detecció: ${anc.why} → fallback`, 'WARN');
+                        log(`   ⚠️ [${p.label}] ${TAG} detecció: ${anc.why} → fallback`, 'WARN');
                     } else {
                         const pad = (TT.scanPadSec != null) ? TT.scanPadSec : 3;
                         // `anc.off`: fileSec = tlSec + off (temps DINS del fitxer a escanejar)
                         const tItemStart = p.mk.time + anc.off;
                         const itemSpan = (itemEnd !== null) ? (itemEnd - p.mk.time) : null;
                         const win = ((itemSpan !== null) ? itemSpan : (TT.scanMaxSec || 300)) + 2 * pad;
-                        log(`   🧭 [${p.label}] TITOLET ancoratge: ${anc.how} → ítem del vídeo @ ${tItemStart.toFixed(2)}s` +
+                        log(`   🧭 [${p.label}] ${TAG} ancoratge: ${anc.how} → ítem del vídeo @ ${tItemStart.toFixed(2)}s` +
                             (itemSpan !== null ? ` (finestra ${Math.min(TT.scanMaxSec || 300, win).toFixed(0)}s)` : " (sense final d'ítem)"));
                         ttPlan = await TD.planForItem({
                             mp4: anc.mp4, names: list.map(c => c.name), tItemStart: tItemStart,
+                            // (2026-10-08, 7a passada) Etiqueta de rol de CADA wott (la del 4t camp
+                            // del nom: `…_18_00.00_TEXT_630060_PREGUNTA_in_…`). El detector en té la
+                            // RECEPTA de ROI (`titolet.roiPerRole`): amb etiquetes de naturalesa
+                            // diferent (TITOLET a la banda baixa, PREGUNTA a mitja imatge) fa una
+                            // passada de rastreig PER GRUP en comptes de buscar-ho tot a la ROI del
+                            // TITOLET (que era el motiu de tenir 0 intervals amb 6 PREGUNTA).
+                            roles: list.map(c => this._burnedGrafRole(c) || ''),
                             tScanStart: Math.max(0, tItemStart - pad),
                             tScanDur: Math.min(TT.scanMaxSec || 300, win),
                             cfg: TT, label: p.label
                         });
                         if (ttPlan && ttPlan.ok) ttCards = ttPlan.cards;
-                        else log(`   ⚠️ [${p.label}] TITOLET detecció fallida (${ttPlan ? ttPlan.error : '?'}) → fallback`, 'WARN');
+                        else log(`   ⚠️ [${p.label}] ${TAG} detecció fallida (${ttPlan ? ttPlan.error : '?'}) → fallback`, 'WARN');
+                    }
                     }
                 }
             } catch (eTT) {
-                log(`   ⚠️ [${p.label}] TITOLET detecció amb error (${eTT.message}) → fallback`, 'WARN');
+                log(`   ⚠️ [${p.label}] ${TAG} detecció amb error (${eTT.message}) → fallback`, 'WARN');
+            }
+            // ── TC DEL NOM als BUITS de la detecció (2026-10-08, 7a passada) ──────────
+            // Si la detecció NO ha vist un wott (`found=false`) però el seu nom porta un TC
+            // creïble, la targeta es col·loca al TC. MAI se sobreescriu una detecció feta amb
+            // OCR confirmat: el vídeo mana. Amb el rastreig apagat/fallit, el pla sencer surt
+            // del TC (les targetes sense TC continuen anant encadenades, com sempre).
+            if (nTc > 0) {
+                const tcCards = this._titoletCardsFromTc(list, tcSec).cards;
+                if (!ttCards) {
+                    ttCards = tcCards;
+                    log(`   ⏱️ [${p.label}] ${TAG} sense detecció: ${nTc}/${list.length} targeta(es) col·locada(es) pel TC del nom`);
+                } else {
+                    let nFill = 0;
+                    for (let i = 0; i < list.length; i++) {
+                        if (!tcCards[i].found) continue;
+                        if (ttCards[i] && ttCards[i].found) continue;
+                        ttCards[i] = tcCards[i]; nFill++;
+                    }
+                    if (nFill > 0) {
+                        log(`   ⏱️ [${p.label}] ${TAG} TC del nom: ${nFill} targeta(es) que la detecció NO va veure → col·locades pel TC del nom`);
+                    }
+                }
+                if (!ttPlan) {
+                    const nf = ttCards.filter(c => c && c.found).length;
+                    ttPlan = { ok: true, stats: { nMatched: nf, nWotts: list.length, nShort: 0, nLong: 0, nNone: list.length - nf }, tc: true };
+                }
             }
             // Durada objectiu de cada targeta: la detectada (curta) o bé mèdia + congelat.
             // Activat (2026-10-06, 2a passada): la detecció ja s'executa de veritat. Es pot
@@ -847,7 +954,7 @@
             const freezeDur = (countFit(FREEZE) === list.length) ? FREEZE : FREEZE_MIN;
             const nPlace = list.length;
             if (freezeDur === FREEZE_MIN) {
-                log(`   🧩 [${p.label}] Cadena TITOLET: ${list.length} targetes amb congelat de ${FREEZE}s no caben a l'ítem (${avail !== null ? avail.toFixed(1) + 's' : 'sense límit'} disponibles) → congelat de ${FREEZE_MIN}s${(avail !== null && avail < totalFor(freezeDur, nPlace)) ? ' · la cadena sobresurt de l\'ítem' : ''}`);
+                log(`   🧩 [${p.label}] Cadena ${TAG}: ${list.length} targetes amb congelat de ${FREEZE}s no caben a l'ítem (${avail !== null ? avail.toFixed(1) + 's' : 'sense límit'} disponibles) → congelat de ${FREEZE_MIN}s${(avail !== null && avail < totalFor(freezeDur, nPlace)) ? ' · la cadena sobresurt de l\'ítem' : ''}`);
             }
             const total = totalFor(freezeDur, nPlace);
             // ── Informe de la detecció (dry-run): cadència actual vs pla detectat ──
@@ -859,13 +966,18 @@
                     planTotal += ((on !== null) ? on : (durs[i] + freezeDur)) + GAP;
                 }
                 planTotal = Math.max(0, planTotal - GAP);
-                const st = ttPlan.stats || {};
-                log(`   🎯 [${p.label}] TITOLET detecció${ttApply ? '' : ' (DRY-RUN: NO s\'aplica)'}: ${st.nMatched}/${st.nWotts} detectats · cadència actual ${total.toFixed(2)}s vs pla ${planTotal.toFixed(2)}s (Δ ${(planTotal - total).toFixed(2)}s) · ${st.nShort} curtes · ${st.nLong} llargues · ${st.nNone} sense detecció`);
+                const st = (ttPlan && ttPlan.stats) || {};
+                log(`   🎯 [${p.label}] ${TAG} detecció${ttApply ? '' : ' (DRY-RUN: NO s\'aplica)'}: ${st.nMatched}/${st.nWotts} detectats · cadència actual ${total.toFixed(2)}s vs pla ${planTotal.toFixed(2)}s (Δ ${(planTotal - total).toFixed(2)}s) · ${st.nShort} curtes · ${st.nLong} llargues · ${st.nNone} sense detecció`);
                 for (let i = 0; i < ttCards.length; i++) {
                     const c = ttCards[i];
-                    if (!c.found) { log(`      · ${i + 1}. «${String(c.wott).substring(0, 38)}» SENSE detecció → fallback`); continue; }
-                    log(`      · ${i + 1}. «${String(c.wott).substring(0, 38)}» mp4 ${c.relIn.toFixed(2)}s→${c.relOut.toFixed(2)}s (${c.on.toFixed(2)}s, cov ${c.maxCov}%, ${c.kind.toUpperCase()}, score ${c.score}, via ${c.how})` +
-                        (c.txt ? ` · text «${c.txt}»` : ' · text NO llegit'));
+                    if (!c || !c.found) { log(`      · ${i + 1}. «${String((c && c.wott) || list[i].name).substring(0, 38)}» SENSE detecció → fallback`); continue; }
+                    // (2026-10-08) Les targetes del TC del nom no tenen `relOut` ni `on`
+                    // (el vídeo no s'ha mirat): es mostren com a `?` en comptes d'error.
+                    const fIn = isFinite(c.relIn) ? c.relIn.toFixed(2) : '?';
+                    const fOut = (c.relOut != null && isFinite(c.relOut)) ? c.relOut.toFixed(2) : '?';
+                    const fOn = (c.on != null && isFinite(c.on)) ? c.on.toFixed(2) : '?';
+                    log(`      · ${i + 1}. «${String(c.wott).substring(0, 38)}» mp4 ${fIn}s→${fOut}s (${fOn}s, cov ${c.maxCov}%, ${c.kind.toUpperCase()}, score ${c.score}, via ${c.how})` +
+                        (c.txt ? ` · text «${c.txt}»` : (c.how === 'tc-nom' ? ' · TC del nom (no s\'ha mirat el vídeo)' : ' · text NO llegit')));
                 }
             }
 
@@ -928,7 +1040,7 @@
                         }
                     }
                     // Quant va viure el rètol cremat (final detectat, en coords de timeline).
-                    const detEnd = (isFinite(c.relOut) && c.relOut > c.relIn) ? (p.mk.time + c.relOut) : null;
+                    const detEnd = (c.relOut != null && isFinite(c.relOut) && c.relOut > c.relIn) ? (p.mk.time + c.relOut) : null;
                     // ── VIU + CONGELAT (2026-10-06, 5a passada · petició d'usuari) ────────
                     // «seria millor que la part de vídeo viva fos homogènia i afegir el
                     // congelat fins on es detecta el final». Per això:
@@ -946,7 +1058,7 @@
                         chy: chy, name: shortName, start: tStart, want: want, liveWant: liveWant,
                         det: true, detEnd: detEnd, relIn: c.relIn, how: how
                     });
-                    log(`   🧲 [${p.label}] TITOLET ${i + 1}/${list.length} «${shortName}» relIn ${c.relIn}s ` +
+                    log(`   🧲 [${p.label}] ${TAG} ${i + 1}/${list.length} «${shortName}» relIn ${c.relIn}s ` +
                         `(cov ${c.maxCov}%) → ${tStart.toFixed(2)}s [${how}] viu ${liveWant.toFixed(2)}s ` +
                         `(= clip ${cardDur.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames)` +
                         ((detEnd !== null && want > liveWant + 0.05) ? ` + congelat ${(want - liveWant).toFixed(2)}s (final detectat ${detEnd.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames)` : ''));
@@ -959,7 +1071,7 @@
                         chy: chy, name: shortName, start: tStart, want: want, liveWant: liveW,
                         det: false, detEnd: null, relIn: null, how: 'encadenat'
                     });
-                    log(`   ⛓️ [${p.label}] TITOLET ${i + 1}/${list.length} «${shortName}» SENSE detecció → ` +
+                    log(`   ⛓️ [${p.label}] ${TAG} ${i + 1}/${list.length} «${shortName}» SENSE detecció → ` +
                         `encadenat a ${tStart.toFixed(2)}s (viu ${liveW.toFixed(2)}s = clip ${cardDur.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames + congelat ${freezeDur.toFixed(2)}s)`);
                     maxEndTl = tStart + want;
                 }
@@ -979,7 +1091,7 @@
                 } else {
                     pl.span = Math.max(0.5, budget);
                     pl.live = Math.max(0.1, Math.min(pl.liveWant, pl.span));
-                    log(`   ✂️ [${p.label}] TITOLET «${pl.name}» retallada a ${pl.span.toFixed(2)}s ` +
+                    log(`   ✂️ [${p.label}] ${TAG} «${pl.name}» retallada a ${pl.span.toFixed(2)}s ` +
                         `(viu ${pl.live.toFixed(2)}s, sense congelat): ${pl.want.toFixed(2)}s no hi caben` +
                         (nextStart !== null ? ` (següent targeta a ${nextStart.toFixed(2)}s)` : '') +
                         (itemEnd !== null ? ` (final d'ítem ${itemEnd.toFixed(2)}s)` : ''), 'WARN');
@@ -1007,7 +1119,7 @@
             for (const pl of planned) {
                 const slot = await this._chooseSlot([V_LLOC, V_CHYRONS], pl.start, pl.span, p.ctx, itemEnd);
                 if (!slot || slot.track === null) {
-                    log(`   ⚠️ [${p.label}] TITOLET «${pl.name}» NO col·locat (sense pista lliure)`, 'WARN');
+                    log(`   ⚠️ [${p.label}] ${TAG} «${pl.name}» NO col·locat (sense pista lliure)`, 'WARN');
                     continue;
                 }
                 if (slot.overlap) nOverlap++;
@@ -1024,16 +1136,16 @@
                 if (fr && fr.success) {
                     placed++;
                     this._addPlaced(p.ctx, slot.track, slot.start, slot.start + span);
-                    log(`   🧊 [${p.label}] TITOLET «${pl.name}»${pl.det ? '' : ' [encadenat]'} → V${slot.track} @ ` +
+                    log(`   🧊 [${p.label}] ${TAG} «${pl.name}»${pl.det ? '' : ' [encadenat]'} → V${slot.track} @ ` +
                         `${slot.start.toFixed(2)}s (span ${span.toFixed(2)}s: viu ${live.toFixed(2)}s + congelat ` +
                         `${freeze.toFixed(2)}s)${movedMsg}`);
                 } else {
-                    log(`   ⚠️ [${p.label}] TITOLET «${pl.name}» NO col·locat (congelat fallit)`, 'WARN');
+                    log(`   ⚠️ [${p.label}] ${TAG} «${pl.name}» NO col·locat (congelat fallit)`, 'WARN');
                 }
                 await utils.delay(150);
             }
             if (nOverlap > 0) {
-                log(`   ⚠️ [${p.label}] ${nOverlap} TITOLET col·locat(s) DAMUNT de material existent: revisa el solapament`, 'WARN');
+                log(`   ⚠️ [${p.label}] ${nOverlap} ${TAG} col·locat(s) DAMUNT de material existent: revisa el solapament`, 'WARN');
             }
             return placed;
         },
@@ -1118,6 +1230,88 @@
         },
 
         /**
+         * _titoletTcFromName: TC d'EMISSIÓ que porta el NOM del wott, en segons.
+         *
+         * El nom té el format `Wott_<PROG>_<BLOQ>_<wottId>_<tc>_<TEXT>_<linia>_<ROL>_…_<fitxer>`:
+         * el camp `tc` (5è tros, `parts[4]`) és el mateix que llegeix `13_Parse.meta` i el que
+         * fa servir la resta de rètols (`chy.tc` → `timeToSeconds`). Aquesta família de
+         * grafismes cremats el porta habitualment a `00.00` (MESURAT al nom real del 08/10:
+         * `Wott_TNM_V3_18_00.00_COM QUEDA EL DECRET D'HABITATG_630060_PREGUNTA_in_…`), i per
+         * això la col·locació NO en depèn: això només és un ATALL per quan SÍ que hi és.
+         *
+         * Criteris de CREDIBILITAT (conservadors — davant del dubte, es detecta com sempre):
+         *   · el wott ha de portar `tc` i el TC ha de valer ≥ `titolet.tcMinSec` (0,5 s);
+         *     `00.00` (el farciment d'aquesta família) queda descartat de seguida.
+         *   · si TOTS els wotts de l'ítem porten el MATEIX TC (>1), no és un TC sinó un camp
+         *     de farciment → s'ignoren TOTS (evita posar 6 targetes al mateix segon).
+         * Es pot desactivar amb `titolet.tcFromName = false`.
+         *
+         * @param {Array<Object>} list - chróns amb `tc` ({name, tc, rol})
+         * @param {Object} cfg - config completa (s'hi llegeix `titolet`)
+         * @returns {Array<number|null>} segons per wott (null = sense TC creïble)
+         */
+        _titoletTcFromName: function (list, cfg) {
+            const TT = ((cfg || FASTPASS_UI.Config.get()).titolet) || {};
+            const n = (list || []).length;
+            const out = [];
+            for (let i = 0; i < n; i++) out.push(null);
+            if (n === 0 || TT.tcFromName === false) return out;
+            const min = (TT.tcMinSec != null) ? TT.tcMinSec : 0.5;
+            const utils = getUtils();
+            for (let i = 0; i < n; i++) {
+                const tc = String(((list[i] || {}).tc) || '').trim();
+                if (!tc) continue;
+                const sec = utils.timeToSeconds(tc);
+                if (!isFinite(sec) || sec + 1e-6 < min) continue;
+                out[i] = Math.round(sec * 1000) / 1000;
+            }
+            const vals = out.filter(s => s !== null);
+            if (vals.length === 0) return out;
+            let same = true;
+            for (const v of vals) { if (Math.abs(v - vals[0]) > 0.05) { same = false; break; } }
+            if (same && vals.length > 1) {
+                log(`   ⏱️ [titolet] TC del nom ${vals[0].toFixed(2)}s IDÈNTIC als ${vals.length} wott(s) → camp de farciment: s'ignora`);
+                return out.map(() => null);
+            }
+            return out;
+        },
+
+        /**
+         * _titoletCardsFromTc: Targetes de col·locació a partir del TC del nom (sense rastrejar
+         * el vídeo). Mateixa forma que les de `Logic.TitoletDetect.composePlan` perquè tota la
+         * cadena (`_placeTitoletChain`) les pugui consumir igual:
+         *   · `relIn` = el TC (segons dins de l'ítem) · `relOut` = null (no se sap quan va
+         *     acabar: el congelat el decideix la cadència, com als wotts sense detecció).
+         *   · `on` = null i `kind` = 'long' → NO es retalla cap targeta per durada.
+         *   · `how` = 'tc-nom' → es veu al log D'ON surt cada targeta.
+         * @param {Array<Object>} list - chróns
+         * @param {Array<number|null>} tcSec
+         * @returns {Object} { cards, stats } (forma de `composePlan`)
+         */
+        _titoletCardsFromTc: function (list, tcSec) {
+            const cards = [];
+            let nFound = 0;
+            for (let i = 0; i < list.length; i++) {
+                const sec = tcSec[i];
+                const found = (sec !== null && sec !== undefined);
+                if (found) nFound++;
+                cards.push({
+                    wott: list[i].name, found: found,
+                    on: null, relIn: found ? sec : null, relOut: null,
+                    kind: 'long', score: 0, token: '', maxCov: 0, ocrAt: null,
+                    how: found ? 'tc-nom' : 'none', txt: ''
+                });
+            }
+            return {
+                cards: cards,
+                stats: {
+                    nMatched: nFound, nWotts: list.length,
+                    nShort: 0, nLong: 0, nNone: list.length - nFound
+                }
+            };
+        },
+
+        /**
          * _isTitolet: És un rètol TITOLET (grafisme de l'INSERT)?
          * OJO: el filtre antic de la fase Resto feia servir name.includes("TITOL")
          * i els TITOLET hi quedaven exclosos (no anaven ni a Titol ni a Resto).
@@ -1128,6 +1322,122 @@
             const n = String((chy && chy.name) || '').toUpperCase();
             const r = String((chy && chy.rol) || '').toUpperCase();
             return n.indexOf('TITOLET') !== -1 || r.indexOf('TITOLET') !== -1;
+        },
+
+        /**
+         * _burnedGrafNorm: Normalitza un token de rol per poder-lo comparar: majúscules,
+         * sense accents i sense separadors (`_ - .` ni espais). Així `CIS_CEO_COMPARADA`,
+         * `CIS-CEO` i `CIS CEO` són el MATEIX: el sistema de ròtols no escriu sempre igual
+         * el separador (`Tema-Titol`, `Nomcarrec`, `Enviat_Sí`…) i això no ha de decidir si
+         * el grafisme es rastreja o no.
+         * @param {string} s
+         * @returns {string}
+         */
+        _burnedGrafNorm: function (s) {
+            return String(s || '').toUpperCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^A-Z0-9]/g, '');
+        },
+
+        /**
+         * _burnedGrafTokens: On es busca el rol, JA normalitzat: el camp `chy.rol` i el
+         * tros de ROL del nom (`name.split('_')`, índex 7 — el que llegeix `13_Parse.meta`).
+         *
+         * Com que hi ha etiquetes amb `_` A DINS (`CIS_CEO_COMPARADA`, `Enviat_Sí`,
+         * `Directe_PRESENCIAL`), el nom les parteix en trossos: s'hi afegeixen les unions
+         * dels 2 trossos següents per reconstruir-les (`CIS`+`CEO`+`COMPARADA`).
+         * L'índex 5 és el TEXT del rètol i NO s'hi busca mai: un títol «LES DADES DEL PARO»
+         * o «LA PREGUNTA DE…» dispararia les famílies DADA/PREGUNTA sense cap grafisme cremat.
+         * @param {Object} chy - {name, rol}
+         * @returns {Array<string>} tokens normalitzats (rol + unions del tros de rol)
+         */
+        _burnedGrafTokens: function (chy) {
+            const out = [];
+            const push = (s) => {
+                const n = this._burnedGrafNorm(s);
+                if (n && out.indexOf(n) === -1) out.push(n);
+            };
+            push(String((chy && chy.rol) || ''));
+            const parts = String((chy && chy.name) || '').split('_');
+            let acc = '';
+            for (let i = 7; i < parts.length && i < 10; i++) {
+                acc += parts[i];
+                push(acc);
+            }
+            return out;
+        },
+
+        /**
+         * _burnedGrafRoles: Etiquetes de rol que disparen la DETECCIÓ del grafisme cremat
+         * (les 27 etiquetes literals del sistema de ròtols, 2026-10-08).
+         * Surten de `Config.get().titolet.detectRoles`; si la clau no hi és, només TITOLET
+         * (comportament antic, 2026-10-05/06). Es tornen TAL COM surten de Config.
+         * @returns {Array<string>}
+         */
+        _burnedGrafRoles: function () {
+            const TT = (FASTPASS_UI.Config.get() || {}).titolet || {};
+            const r = (TT.detectRoles && TT.detectRoles.length) ? TT.detectRoles : ['TITOLET'];
+            return r.map(s => String(s).trim()).filter(s => s.length > 0);
+        },
+
+        /**
+         * _burnedGrafRole: Quina ETIQUETA de `detectRoles` és aquest wott? (`null` si cap).
+         * El matx és d'IGUALTAT sobre el token normalitzat — mai prefix ni substring: `DADA`
+         * a seques NO val, ha de ser l'etiqueta sencera (`DADA-GRAN`). Si n'hi encaixa més
+         * d'una (p.ex. `LLISTA` i `LLISTA-DADES` quan el nom parteix l'etiqueta), mana la MÉS
+         * LLARGA (la més específica). Es torna l'etiqueta tal com surt de Config, que és la
+         * que fan servir els logs (`p.tag`) i el `_dedupeTitolet`.
+         * @param {Object} chy - {name, rol}
+         * @returns {string|null}
+         */
+        _burnedGrafRole: function (chy) {
+            const toks = this._burnedGrafTokens(chy);
+            if (toks.length === 0) return null;
+            const roles = this._burnedGrafRoles();
+            let best = null;
+            let bestLen = 0;
+            for (const t of toks) {
+                for (const r of roles) {
+                    const n = this._burnedGrafNorm(r);
+                    if (n === t && n.length > bestLen) { best = r; bestLen = n.length; }
+                }
+            }
+            return best;
+        },
+
+        /**
+         * _isBurnedGrafWott: El wott és un GRAFISME CREMAT al vídeo?
+         *
+         * CONDICIÓ DE DISPARO del rastreig (color + OCR) i de la col·locació al SEU instant
+         * real: l'ítem porta wotts amb alguna de les 27 ETIQUETES literals de
+         * `titolet.detectRoles`. El rastreig NO es fa mai «per si de cas»: només quan n'hi ha.
+         *   27 tipus de grafisme (TITOLET · TITOLET GRAN · PREGUNTA · CARTELL · CIS_CEO ·
+         *   CIS_CEO_COMPARADA · CRONOLOGIA · CRONOLOGIA-TITOLS · DADA_COMPARADA ·
+         *   DADA-DIFERENCIAL · DADA-GRAN · DADA-GRAN-DIVISA · DADA-ITEM · DESTACAT ·
+         *   CLASSI-CHAMPIONS · CLASSIFICACIO · CLASSI-MUNDIAL · CLASSI-PRIMERA ·
+         *   CLASSI-SEGONA · GRAFICA-BARRES · GRAFICA_CIRCULAR · IMATGE-CAPTURA · LLISTA ·
+         *   LLISTA-DADES · NOTA · PROGRAMACIO · RANQUING) → les 27 etiquetes a Config
+         *   (matx d'IGUALTAT: `DADA` a seques no val, cal `DADA-GRAN`).
+         * @param {Object} chy - {name, rol}
+         * @returns {boolean}
+         */
+        _isBurnedGrafWott: function (chy) {
+            return this._burnedGrafRole(chy) !== null;
+        },
+
+        /**
+         * _burnedGrafTag: Etiqueta per als logs de la cadena: etiquetes LITERALS detectades
+         * (p.ex. `DADA-GRAN` o `DADA-GRAN+PREGUNTA`).
+         * @param {Array} list
+         * @returns {string}
+         */
+        _burnedGrafTag: function (list) {
+            const tags = [];
+            for (const c of (list || [])) {
+                const t = this._burnedGrafRole(c);
+                if (t && tags.indexOf(t) === -1) tags.push(t);
+            }
+            return tags.length ? tags.join('+') : 'GRAFISME CREMAT';
         },
 
         /**
@@ -1211,19 +1521,86 @@
         },
 
         /**
-         * _dedupeTitolet: Deixa NOMÉS un TITOLET per text (la versió més recent).
-         * El sistema genera variants de posició (BAIX/MIG) i versions successives
+         * _sameChyronKey: Identitat d'un rètol per a la SEVA posició, ignorant la versió de
+         * generació I el wottId. Dues còpies amb la mateixa clau són el MATEIX rètol
+         * (mateix programa, bloc, ítem, tc, text i rol) encara que el generador n'hagi
+         * canviat l'ID o l'accentuació del text.
+         * (2026-10-08) Cas real TNM V3: la mateixa firma era al NAS dos cops amb dos wottId
+         * diferents i només canviava la tilde («…630083_Firma_Ivan Gutiérrez» /
+         * «…630175_Firma_Iván Gutiérrez»). `_regenKey` no les fusiona (wottId diferent) i el
+         * motor les col·locava TOTES DUES: la segona, en trobar la pista ocupada, anava a una
+         * ALTRA capa (V7 i V8, mateix tc) → firma duplicada a la timeline.
+         * @param {string} name
+         * @returns {string}
+         */
+        _sameChyronKey: function (name) {
+            let base = this._regenKey(name);            // fora la versió de generació i l'extensió
+            base = base.replace(/_(\d{6,})_/, '_');     // fora el wottId (part 6 del nom)
+            return this._burnedGrafNorm(base);          // majúscules, sense accents ni separadors
+        },
+
+        /**
+         * _dedupeSameChyron: Deixa NOMÉS un rètol per POSICIÓ (ítem + tc + text + rol) encara
+         * que el generador l'hagi tornat a emetre amb un altre wottId o amb accents diferents.
+         * S'aplica a TOTS els wotts de la passada (totes les fases) just després de
+         * `_dedupeRegenerations`, que només veu les re-generacions del MATEIX wottId.
+         * Mana la versió més NOVA (número de generació i, si empaten, wottId més alt).
+         * @param {Array} list
+         * @param {string} label
+         * @returns {Array}
+         */
+        _dedupeSameChyron: function (list, label) {
+            const byKey = {};
+            const out = [];
+            for (const c of (list || [])) {
+                // La família de GRAFISME CREMAT (TITOLET, PREGUNTA, DADA…) NO es dedueix aquí: el
+                // `tc` del seu nom no és la seva posició real (la CADENA els col·loca al SEU
+                // instant detectat i pot necessitar diverses còpies del mateix nom). Els seus
+                // duplicats els gestionen `_dedupeTitolet` i `_dedupeRegenerations`.
+                if (this._isBurnedGrafWott(c)) { out.push(c); continue; }
+                const key = this._sameChyronKey(c.name);
+                // Sense clau (nom buit o no parsejable) NO es dedueix: mai fusionem el que no entenem.
+                if (!key) { out.push(c); continue; }
+                const seq = this._regenSeq(c.name);
+                const id = FASTPASS_UI.Logic.Project._wottIdNum(c.name);
+                const seen = byKey[key];
+                if (seen === undefined) {
+                    byKey[key] = { i: out.length, seq: seq, id: id };
+                    out.push(c);
+                    continue;
+                }
+                if (seq > seen.seq || (seq === seen.seq && id > seen.id)) {
+                    out[seen.i] = c;
+                    seen.seq = seq;
+                    seen.id = id;
+                }
+            }
+            const dropped = (list || []).length - out.length;
+            if (dropped > 0) {
+                log(`   🧬 [${label}] ${dropped} rètol(s) duplicat(s) descartat(s) (mateixa posició, tc i text amb un altre wottId o accent): es queda la versió més nova`);
+            }
+            return out;
+        },
+
+        /**
+         * _dedupeTitolet: Deixa NOMÉS un grafisme cremat per TIPUS + text (la versió més
+         * recent). El sistema genera variants de posició (BAIX/MIG) i versions successives
          * del mateix rètol: n'hi ha prou amb una.
          * (2026-10-02) L'ordre de "més recent" passa a ser el número de GENERACIÓ del
          * nom: el wottId de la part 6 és idèntic entre re-generacions, així que abans
          * es podia quedar la versió VELLA.
+         * (2026-10-08) La clau inclou l'ETIQUETA del rol (`_burnedGrafRole`): `_titoletKey` es
+         * menja la part del rol (índex 7), així que dos grafismes de TIPUS diferent amb el
+         * mateix text (p.ex. DADA-GRAN i LLISTA) s'haurien fusionat i un no es col·locava.
+         * Com que l'etiqueta és LITERAL (i no una família), DADA-GRAN i DADA-ITEM amb el
+         * mateix text tampoc no es fusionen.
          * @param {Array} list
          * @returns {Array}
          */
         _dedupeTitolet: function (list) {
             const byKey = {};
             for (const c of (list || [])) {
-                const key = this._titoletKey(c.name);
+                const key = (this._burnedGrafRole(c) || '') + '|' + this._titoletKey(c.name);
                 const id = FASTPASS_UI.Logic.Project._wottIdNum(c.name);
                 const seq = this._regenSeq(c.name);
                 const cur = byKey[key];
@@ -1514,11 +1891,11 @@
                     // TITOLET: el sistema genera variants de posició i versions del
                     // mateix rètol; es deixa només la més recent de cada text.
                     if (opts && opts.dedupeTitolet) {
-                        const titolets = matching.filter(c => this._isTitolet(c));
-                        if (titolets.length > 1) {
-                            const kept = this._dedupeTitolet(titolets);
-                            log(`   🧩 [${label}] TITOLET al marcador ${mk.fullId}: ${titolets.length} fitxers → ${kept.length} rètol(s) únic(s)`);
-                            matching = matching.filter(c => !this._isTitolet(c)).concat(kept);
+                        const cremats = matching.filter(c => this._isBurnedGrafWott(c));
+                        if (cremats.length > 1) {
+                            const kept = this._dedupeTitolet(cremats);
+                            log(`   🧩 [${label}] GRAFISME CREMAT al marcador ${mk.fullId}: ${cremats.length} fitxers → ${kept.length} rètol(s) únic(s)`);
+                            matching = matching.filter(c => !this._isBurnedGrafWott(c)).concat(kept);
                         }
                     }
                     // RE-GENERACIONS (#133, 2026-10-02): el MATEIX rètol re-generat
@@ -1527,25 +1904,34 @@
                     // trobar la pista ocupada, anaven a una ALTRA capa. Mana la versió
                     // més nova del generador.
                     matching = this._dedupeRegenerations(matching, label);
+                    // (2026-10-08) DUPLICATS per POSICIÓ: el generador pot tornar a emetre el
+                    // mateix rètol amb un ALTRE wottId i accents diferents («Ivan»/«Iván») →
+                    // `_dedupeRegenerations` no els veu com la mateixa generació i tots dos
+                    // s'acaben col·locant (el segon, a una ALTRA capa). S'aplica a TOTES les
+                    // fases perquè aquest bucle és comú a Conduct/Titol/Lloc/Nom/Resto.
+                    matching = this._dedupeSameChyron(matching, label);
                     matching.sort((a, b) => (a.tc || "").localeCompare(b.tc || ""));
                     log(`📌 [${label}] Marcador ${mk.fullId}: ${matching.length} chyron(s)`);
-                    // ── CADENA TITOLET (2026-10-05) ────────────────────────────────
-                    // Els TITOLET (grafismes de l'INSERT) NO entren al bucle genèric: el tc del
-                    // seu nom no és fiable (sempre 00.00) i han d'anar SEMPRE en CADENA — targeta
-                    // + congelat, una darrere l'altra. `_placeTitoletChain` tria pista (V8
+                    // ── CADENA DE GRAFISME CREMAT (2026-10-05 · rols ampliats 2026-10-08) ──
+                    // Els rètols d'aquesta família (TITOLET i, des del 2026-10-08, PREGUNTA —
+                    // TNM V3) NO entren al bucle genèric: el tc del seu nom no és fiable (sempre
+                    // 00.00) i han d'anar SEMPRE en CADENA — targeta + congelat, una darrere
+                    // l'altra, al SEU instant detectat. `_placeTitoletChain` tria pista (V8
                     // preferent, V7 alternativa) i RESERVA el rang sencer a `ctx` ABANS que la
                     // resta de rètols de l'ítem busquin forat (així `_chooseSlot` els aparta sol);
                     // si xoca amb rètols ja col·locats, els aparta o baixa la cadena de pista.
+                    // CONDICIÓ DE DISPARO: `_isBurnedGrafWott` (rols de `titolet.detectRoles`).
                     if (opts && opts.chainTitolet) {
-                        const titolets = matching.filter(c => this._isTitolet(c));
-                        if (titolets.length > 0) {
+                        const cremats = matching.filter(c => this._isBurnedGrafWott(c));
+                        if (cremats.length > 0) {
                             const itemEndChain = await this._itemEndTime(mk, markersFull);
                             placedCount += await this._placeTitoletChain({
-                                mk: mk, itemEnd: itemEndChain, titolets: titolets,
+                                mk: mk, itemEnd: itemEndChain, titolets: cremats,
                                 wottIdx: wottIdx, cfg: cfg, ctx: ctx, label: label,
-                                wfCtx: this._wfCtx(), clipsV1: allClipsV1
+                                wfCtx: this._wfCtx(), clipsV1: allClipsV1,
+                                tag: this._burnedGrafTag(cremats)
                             });
-                            matching = matching.filter(c => !this._isTitolet(c));
+                            matching = matching.filter(c => !this._isBurnedGrafWott(c));
                             if (matching.length === 0) continue;
                         }
                     }
@@ -1635,7 +2021,9 @@
                             }
                             placeEnd = end2;
                         }
-                        const escapedName = getUtils().escape(chy.name);
+                        // (2026-10-08) `jsxName`: el JSX fa `decodeURIComponent` sobre el nom →
+                        // un `%` literal l'ha de rebre com a `%25` o la crida falla en silenci.
+                        const escapedName = getUtils().escape(getUtils().jsxName(chy.name));
                         // (2026-10-01 · #129) SENSE endSec: el JSX l'aplica al DARRER clip de la
                         // pista (vegeu nota de sota) → l'insert cru ja perjudica un altre clip
                         // (a V6, el PNG estirat del Tema-Títol). El final es fixa tot seguit amb
@@ -3261,10 +3649,13 @@
                     // (Abans es deien V6/V7 i els seus valors reals JA eren 7/8 → confusió.)
                     const V_CHYRONS = cfg.tracks.video.chyrons;
                     const V_LLOC = cfg.tracks.video.lloc || cfg.tracks.video.llocdata || 8;
-                    // TITOLET (grafismes de l'INSERT): NO passen per aquí — `_placeTitoletChain`
-                    // els col·loca EN CADENA (targeta + congelat) reservant el rang sencer. Això
-                    // és només la xarxa de seguretat si un TITOLET arribés al bucle genèric.
-                    if (this._isTitolet(c)) return [V_LLOC];
+                    // GRAFISMES CREMATS (des del 2026-10-08: qualsevol de les 27 etiquetes
+                    // literals de `titolet.detectRoles` — TITOLET, PREGUNTA, CARTELL, DADA-GRAN,
+                    // CLASSI-PRIMERA, GRAFICA-BARRES, LLISTA, NOTA…): NO passen per aquí —
+                    // `_placeTitoletChain` els col·loca EN CADENA (targeta + congelat)
+                    // reservant el rang sencer. Això és només la xarxa de seguretat si un
+                    // rètol d'aquesta família arribés al bucle genèric.
+                    if (this._isBurnedGrafWott(c)) return [V_LLOC];
                     // Rètols de LOCALITZACIÓ ("Directe PRESENCIAL <lloc>") i de PROGRAMES:
                     // V_LLOC preferent (deixa V_CHYRONS lliure per als noms) i V_CHYRONS de
                     // reserva — COM SEMPRE. ⚠️ (2026-09-21) Aquests NO són nom-càrrec: el canvi
