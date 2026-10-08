@@ -1102,6 +1102,7 @@
         "validation": "Test headless amb el motor V8 del CEP (C:/temp/fp/test_dedupe.html, que fa fetch dels fitxers REALS del repo i n'extreu les funcions): 9/9 OK — `jsxName`: `0%` → `0%25` i `decodeURIComponent` torna el nom original byte a byte; noms sense `%` intactes. `bin/check_js_v8.ps1` 57 OK / 0 FAIL · `bin/check_dead.ps1` 0 orfes.",
         "validation_expected": "Passada real a Premiere amb el panell RECARREGAT (utils v25 + flow_chyrons v69): el PNG del congelat ha de fer ~35 KB (grafisme, NO un frame de V1), cap línia «ERR_CLIP_NOT_FOUND» en esborrar el temporal i, si el wott temporal no s'hi pot posar, el log ha de dir que es col·loca SENSE congelat en lloc d'un congelat fals.",
         "files": ["js/core/utils.js", "js/workflows/flow_chyrons.js", "index.html"],
+        "commit": "f4fc22f (2026-10-08, HEAD de main · PENDENT DE TEST A PREMIERE)",
         "date": "2026-10-08"
       },
       {
@@ -1114,6 +1115,7 @@
         "validation": "Test headless (C:/temp/fp/test_dedupe.html) 9/9 OK: T1/T2/T3 — els dos noms reals de la firma (630083 «Ivan» / 630175 «Iván») donen la MATEIXA clau → dedupe = 1 i GUANYA la 630175 (i l'ordre invers dona el mateix resultat); T4 — rètols DIFERENTS que comparteixen posició → NO es fusionen (2); T5/T6 — `jsxName`; T7 — família cremada (PREGUNTA) intacta (2 còpies); T8 — noms buits intactes; T9 — regeneracions del mateix rètol → 1, amb la generació nova. `bin/check_js_v8.ps1` 57 OK / 0 FAIL · `bin/check_dead.ps1` 0 orfes.",
         "validation_expected": "Passada real a Premiere amb el panell RECARREGAT (flow_chyrons v69): cap firma duplicada a V7/V8 (log «🧬 [fase] N rètol(s) duplicat(s) descartat(s)») i CAP sobre-deduplicació de rètols legítims que comparteixin posició (dos rètols amb text diferent han de seguir col·locant-se tots dos).",
         "files": ["js/workflows/flow_chyrons.js", "index.html"],
+        "commit": "f4fc22f (2026-10-08, HEAD de main · PENDENT DE TEST A PREMIERE)",
         "date": "2026-10-08"
       }
     ]
@@ -1144,6 +1146,13 @@
       "summary": "Marcadores TNC/TNM/TNV (solo notas) + diagnóstico de arranque lento (#113) + NETEJA del repo (#114: 87→22 .md, bin/ 38→24, SAMPLES fuera del git, 2.235 ficheros de basura fuera) + hallazgo de código muerto (#115, pendiente de verificar).",
       "bugs_resolved": ["#114"],
       "note": "Los handoffs previos (plans/HANDOFF_*) y las sesiones diarias antiguas se fusionaron en docs/archive/ (PLANS_CLOSED.md, SESSIONS.md) el 2026-09-30."
+    },
+    {
+      "date": "2026-10-08",
+      "handoff": "plans/HANDOFF_2026-10-08_TITOLETS.md",
+      "summary": "Documentacio consolidada dels TITOLETS (handoff nou + TITOLET_DETECT.md v1.5.0 amb 6a/7a passada i artefactes) + BUGs #147 (congelat amb el video de V1) i #148 (firma duplicada V7/V8) implementats + cache-bust del modul de deteccio (v1 -> v2). Tot pujat a origin/main (f4fc22f). PENDENT el test a Premiere de #147/#148 i de la 7a passada.",
+      "bugs_resolved": [],
+      "note": "Agenda de la propera sessio: 7.A millorar la deteccio dels CARTELLS (roiPerRole real + colors multiples) i 7.B col.locar els no detectats amb clip sencer i congelat llarg, tots al final."
     }
   ],
 
@@ -1151,7 +1160,7 @@
     "remote": "https://github.com/Agusinio/FAST_PASSS.git  (verificat amb `git remote -v` el 2026-10-06; abans deia FAST_PASSS_81c-LIPO.git per error)",
     "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
-    "status": "Sessió 2026-09-30 pujada a origin/main: 646d295 (cleanup P0-P5 · 218 fitxers) + 71df683 (registres #113-#116) + 5fefff1 (registre V3/#117) + 9a02643 (+596/-28 · BUGs #120-#124: getMediaDuration via ffprobe, ancoratge al cleanfeed real, GF/P2, parelles ruptures↔deduïts, portada hereta Motion) + 4cbed3c (registres #118-#124). PENDENT el test a Premiere dels #120-#124 (cal RECARREGAR el panell per als cache-bust v10/v29/v62/v24). #125 (GF-3 blau) RESOLT I VALIDAT per l'usuari el 30/09 (TNV V1 OK) — PENDENT DE COMMIT: js/workflows/flow_markers.js + index.html (?v=63) + els registres (#125 resolt, #126/#127 nous)."
+    "status": "Sessió 2026-10-08 pujada a origin/main: f4fc22f (10 fitxers, +1598/-89 · BUGs #147 #148 + 7a passada TITOLET: jsxName % → %25 amb congelat verificat, _sameChyronKey/_dedupeSameChyron, roiPerRole/roiDefault + recipeForRoles/roleGroups + tcFromName, cache-bust 17_TitoletDetect_Logic.js?v=2, docs consolidats TITOLET_DETECT.md v1.5.0 + plans/HANDOFF_2026-10-08_TITOLETS.md). Anteriors: a56d4e8 (RESET GENERAL, validat a Premiere) + 95d39b9 (BUG #146 MAPA). PENDENT DE TEST A PREMIERE (cal RECARREGAR el panell → utils v25, flow_chyrons v69, 17_TitoletDetect_Logic v2, 11_Configuracio v29): #147, #148 i la 7a passada. Fora de git a propòsit: bin/build_graph.ps1 i docs/graph/."
   },
 
   "paths": {
