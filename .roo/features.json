@@ -130,6 +130,15 @@
 ",
         "files": ["js/logic/17_TitoletDetect_Logic.js", "bin/ocr.ps1", "js/logic/15_FFmpeg_Logic.js", "js/workflows/flow_chyrons.js", "js/core/11_Configuracio.js"],
         "spec": "docs/reference/TITOLET_DETECT.md"
+      },
+      {
+        "id": "RESET_GENERAL",
+        "name": "Reset General del bloc (botó 🔄)",
+        "status": "implemented_pending_premiere_test",
+        "priority": "high",
+        "description": "Botó 🔄 a la cantonada superior esquerra de la secció INICI (sobre l'etiqueta, a l'esquerra del semàfor ESC; marge 6px, 22×22px). Un clic: (1) tanca el projecte del bloc seleccionat si està obert; (2) esborra la carpeta sencera <base><prog>_PROJECTES/<data>/<V*> (projecte, escaleta local, MP4, manifest, snapshots, anàlisi, logs) via Utils.deleteFolder (Node fs rmSync/rmdirSync recursiu); (3) reinicia l'estat (State.reset preservant HOY/AHIR) i torna a crear el projecte de zero (flux NOU). Confirmació amb diàleg abans d'esborrar. Anti-ghost via classe btn-destructivo.",
+        "files": ["index.html", "style.css", "js/core/utils.js", "js/workflows/flow_mainButton.js", "js/main.js"],
+        "ui": "Botó 🔄 a la cantonada superior esquerra de la secció INICI"
       }
     ],
 
@@ -1043,6 +1052,19 @@
         "files": ["jsx/modules/6_Clips.jsx", "jsx/main.jsx", "js/logic/3_Project_Logic.js"],
         "commit": "BUGs #144 #145 (2026-10-07, HEAD de main)",
         "date": "2026-10-07"
+      },
+      {
+        "id": "#146",
+        "status": "resolt",
+        "desc": "Botó 🎨 MAPA (2 parts, report d'usuari 2026-10-08): (1) el grafisme es col·locava al TC del MARCADOR de l'ítem i no al CABEZAL — amb el cabezal a 38,84 s el grafisme apareixia a 27,84 s i quedava retallat a l'espai del clip d'aquell marcador (3,24 s); (2) el clip col·locat NO es podia estirar («no es pot estirar més enllà de la inserció feta»).",
+        "measure": "PROVES/FASTPASS.log 10:49:42 (TNM V2): 'Inici · CTI=38.84s' → 'Referència = MARCADOR 14 @ 27.84s · espai hàbil fins 31.08s (clip V1[1])' → 'Espai hàbil: 3.24s' → 'V3 retallat a l'espai hàbil (78.44 → 31.08s)'. ffprobe del fitxer triat (ZZZ_GRAFISME\\7 OCTUBRE\\Vertical_SUPREM JA TE LA SENTENCIA TC.mp4) = 50,624 s: el retall a 3,24 s deixava el grafisme sense congelat (no hi havia espai) i col·locat 11 s abans del cabezal.",
+        "root_cause": "(1) PUNT D'ENTRADA: js/workflows/flow_mapa.js::_flow feia `mkRef = _itemAtCti(CTI)` i `refSec = mkRef.time` (feature GRAFISMES_PER_MARCADOR, 2026-09-23): el TC del marcador ANTERIOR al cabezal passava a ser el PUNT D'ENTRADA del grafisme i el clip de V1 d'aquell TC, l'espai hàbil — encara que el cabezal estigués 11 s més endavant, dins d'un altre clip. (2) NO ESTIRABLE: el retall a l'espai hàbil es feia amb `Clips.endAt`, que només mou `clip.end` → el final del TIMELINE quedava curt però l'outPoint del SOURCE restava al final del mèdia → Premiere considerava el material esgotat i no deixava allargar el clip.",
+        "fix": "IMPLEMENTAT 2026-10-08 (zero JSX nou). `_flow`: `ref = _resolveRefClip(CTI)` (1r el clip SELECCIONAT a la pista MP4, 2n el clip de V1 que conté el cabezal, 3r qualsevol altra selecció de vídeo) i `refSec = CTI`, amb guarda: si el cabezal cau FORA del clip de referència (forat o clip seleccionat en una altra posició) s'ancora a l'IN del clip. El MARCADOR només s'usa per triar l'ÍTEM d'escaleta (`_itemAtCti(refSec)`) per a la coincidència de nom. `_placeClips` segueix retallant a l'espai hàbil (final del clip de referència) i hi afegeix el congelat de 3 s si hi cap. (2) RETALL ESTIRABLE: el retall passa de `Clips.endAt` a `Clips.trimBounds(t, inPoint, inPoint+(endLimit−t), TRACK_GRAF, 'video')` (àtom existent, mateix patró que flow_chyrons.js:2277) + nou helper JS `_clipBoundsAt(track, idx)` que llegeix in/out del clip inserit via `Clips.get` (així es preserva l'entrada del source si el ProjectItem porta marques al bin). El congelat de `_freezeGrafEnd` també feia servir `Clips.insert(..., endSec)` + `Clips.endAt` → ara `Clips.trimBounds(grafEnd, 0, dur, …)`. index.html: tooltip del 🎨 + `flow_mapa.js?v=21→23`.",
+        "files": ["js/workflows/flow_mapa.js", "index.html"],
+        "validation": "bin/check_js_v8.ps1: TOTAL 57 | OK 57 | FAIL 0 (08/10) · bin/check_dead.ps1: 0 orfes. COMPROVAT EN VIU per CDP (port 8907, cdp_eval.ps1 a C:/temp/fp) sobre un clip temporal a V3@900 s: A) acabat d'inserir → end=950.6 dur=50.6 outPoint=50.6 (coherent); B) `Clips.endAt(3,900,902)` → end=902 dur=2 però outPoint=50.6 (INCOHERENT = no estirable); C) `Clips.trimBounds(900,0,2,3,'video')` → end=902 dur=2 outPoint=2 (coherent = estirable). El clip de l'usuari ja col·locat es va REPARAR en viu amb `Clips.trimBounds(38.84, 0, 11.28, 3, 'video')` (outPoint 50.6 → 11.28). PENDENT DE VALIDAR per l'usuari a Premiere (cal RECARREGAR el panell pel cache-bust v23). ✅ VALIDAT per l'usuari a Premiere (2026-10-08) amb el panell recarregat (v23): (1) el grafisme s'ancora al CABEZAL i (2) el clip col·locat JA s'estira.",
+        "open": "TANCAT (2026-10-08): l'ancoratge és el CABEZAL (log 11:10:14 → 'Referència = clip SELECCIONAT a V1 V1[5] · entrada a 38.84s · espai hàbil fins 50.12s') i el clip queda coherent i estirable.",
+        "commit": "BUG #146: MAPA (ancoratge al cabezal + retall estirable via Clips.trimBounds) (2026-10-08, HEAD de main)",
+        "date": "2026-10-08"
       }
     ]
   },

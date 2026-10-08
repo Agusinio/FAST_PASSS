@@ -12,7 +12,7 @@
         <div class="upper-left">
         
         <!-- SECTION: SETUP -->
-        <div class="section-container">
+        <div class="section-container" id="secInici">
             <div class="section-label"><span>INICI</span></div>
             <div class="section-content">
                 <div class="setup-top-row">
@@ -122,7 +122,7 @@
                     <button id="btnGrafIpd" class="secondary" title="IPD (zoom 144% + posició) · Ctrl+clic: repassa els clips IPD dels marcadors">IPD</button>
                     <button id="btnGrafIpdPlus" class="secondary" title="IPD+ · Doble finestra VERTICAL: dues parts de la imatge (una a dalt i una a baix) amb fons a sota. Mateixa maquinària que la Doble Finestra (V4/V5 + fons V3) amb un altre perfil de Motion">IPD+</button>
                     <button id="btnGrafDoblePantalla" class="secondary icon-only doble" title="Doble pantalla (horitzontal)">🪟🪟</button>
-                    <button id="btnMapaImport" class="secondary icon-only" title="Mapa: importa els grafismes del tema a la pista de grafismes, amb el PUNT D'ENTRADA del MARCADOR (posa el cabezal sobre el marcador de l'ítem) i un congelat de 3 s al final. Per als marcadors GF de l'escaleta: botó GF (TEST) o pipeline OUT &amp; GO">🎨</button>
+                    <button id="btnMapaImport" class="secondary icon-only" title="Mapa: importa els grafismes del tema a la pista de grafismes DES DEL CABEZAL. L'espai hàbil el marca el clip SELECCIONAT al timeline (o el clip de V1 sota el cabezal) i al final hi va un congelat de 3 s. L'ítem de l'escaleta (coincidència de nom) és el del marcador anterior al cabezal. Per als marcadors GF de l'escaleta: botó GF (TEST) o pipeline OUT &amp; GO">🎨</button>
                     <button id="btnGrafMapa" class="secondary icon-only" title="Mapa zoom">🗺️</button>
                     <button id="btnGrafTotem" class="secondary icon-only" title="Tòtem">🗿</button>
                  </div>
@@ -259,7 +259,7 @@
     <script src="js/workflows/flow_KF.js?v=10"></script>
     <script src="js/workflows/flow_config.js?v=5"></script>
     <script src="js/workflows/flow_assembly.js?v=8"></script>
-<script src="js/workflows/flow_mapa.js?v=21"></script>
+<script src="js/workflows/flow_mapa.js?v=23"></script>
     <script src="js/core/project_registry.js?v=5"></script>
     <script src="js/editor/srt_editor.js?v=74"></script>
     <script src="js/main.js?v=76"></script>

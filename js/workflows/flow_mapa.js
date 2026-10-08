@@ -1,8 +1,11 @@
 /* ============================================================================
  * flow_mapa.js — Botó 🎨 "Gráfica" (grup GRF): importador MAPA
  *
- * (2026-09-18) Amb el clip a substituir SELECCIONAT al timeline (2026-09-22: la
- * REFERÈNCIA és el clip seleccionat, no el cabezal), aquest workflow ofereix 3 opcions:
+ * (2026-10-08) PUNT D'ENTRADA = el CABEZAL. El grafisme arrenca ON ÉS EL CABEZAL i
+ * l'espai hàbil el marca el CLIP SELECCIONAT al timeline (o, si no n'hi ha, el clip
+ * de la pista MP4 que conté el cabezal). El MARCADOR de l'ítem NOMÉS serveix per
+ * triar l'ÍTEM d'escaleta (coincidència de nom amb el fitxer de ZZZ_GRAFISME).
+ * (2026-09-18) Amb el clip a substituir SELECCIONAT al timeline, aquest workflow ofereix 3 opcions:
  *   1) Importar el(s) fitxer(s) de la carpeta del dia que coincideixin amb el nom
  *      de l'ÍTEM D'ESCALETA on és el cabezal.
  *   2) Obrir el navegador de fitxers perquè l'usuari triï.
@@ -11,8 +14,8 @@
  * Carpeta del dia: ...\ZZZ_GRAFISME\<DD MES>  (les subcarpetes són "17 SETEMBRE",
  * NO "2026_09_17" → cal traduir la data del projecte).
  * El material s'importa al BIN "GRAF" i es col·loca a la pista de grafismes, en ordre
- * d'escaleta, des de l'IN del clip seleccionat. Si no hi cap tot, es retallen els clips.
- * Ítem de referència: el del marcador anterior o en la posició del clip seleccionat.
+ * d'escaleta, des del CABEZAL. Si no hi cap tot, es retallen els clips.
+ * Ítem de referència (només per al match del fitxer): el marcador anterior al cabezal.
  * ========================================================================== */
 (function () {
     'use strict';
@@ -228,31 +231,45 @@
                 var cti = parseFloat(await callJSX('Timeline.get()') || '0');
                 L('🗺️ [MAPA] Inici · CTI=' + cti.toFixed(2) + 's');
 
-                // (2026-09-23) REFERÈNCIA = el MARCADOR: el seu TC és el PUNT D'ENTRADA del
-                // grafisme. ABANS era el clip seleccionat (el material entrava al seu IN), cosa
-                // que desalineava el grafisme respecte al marcador de l'ítem (petició d'usuari).
-                // Marcador triat: l'últim amb time <= CTI (mateix criteri que _itemAtCti); si el
-                // cabezal està damunt del marcador, és aquell. Fallback: sense marcadors es
-                // manté el comportament antic (clip seleccionat).
-                var mkRef = await this._itemAtCti(cti);
-                var ref = null, refSec = null;
-                if (mkRef) {
-                    refSec = mkRef.time;
-                    ref = await this._refClipAt(refSec);
-                    L('🗺️ [MAPA] Referència = MARCADOR ' + mkRef.num + ' @ ' + refSec.toFixed(2) +
-                        's ("' + mkRef.nombre + '")' +
-                        (ref ? ' · espai hàbil fins ' + ref.end.toFixed(2) + 's (clip V' + ref.track + '[' + ref.index + '])' : ' · cap clip a V1 en aquest TC → espai hàbil desconegut'));
-                } else {
-                    ref = await this._resolveRefClip(cti);
-                    if (!ref) {
-                        L('⚠️ [MAPA] Ni marcador proper ni clip de referència → no es col·loca res. Posa el cabezal sobre un marcador o selecciona el clip a substituir.', 'WARN');
-                        U().status('MAPA: posa el cabezal en un marcador', 'warn');
-                        return;
-                    }
-                    refSec = ref.start;
-                    L('🗺️ [MAPA] Cap marcador: referència = ' + ref.src + ' V' + ref.track + '[' + ref.index +
-                        '] "' + ref.name + '" ' + ref.start.toFixed(2) + 's→' + ref.end.toFixed(2) + 's', 'WARN');
+                // (2026-10-08) PUNT D'ENTRADA = el CABEZAL (petició d'usuari). El grafisme
+                // arrenca ON ÉS EL CABEZAL i l'ESPAI HÀBIL el marca el CLIP SELECCIONAT
+                // (o el clip de la pista MP4 que conté el cabezal si la selecció s'ha perdut).
+                // ABANS (2026-09-23) l'entrada era el TC del MARCADOR de l'ítem: si el cabezal
+                // anava més enllà del marcador, el grafisme apareixia desplaçat enrere i
+                // retallat a l'espai del clip d'aquell marcador (cas real 08/10: cabezal a
+                // 38.84s → col·locat a 27.84s amb espai de només 3.24s). El MARCADOR ara
+                // NOMÉS tria l'ÍTEM d'escaleta (coincidència de nom), no mou el grafisme.
+                var ref = await this._resolveRefClip(cti);
+                if (!ref) {
+                    L('⚠️ [MAPA] Cap clip de referència (ni seleccionat ni sota el cabezal a ' +
+                        cti.toFixed(2) + 's) → no es col·loca res. Posa el cabezal damunt del clip o selecciona\'l.', 'WARN');
+                    U().status('MAPA: posa el cabezal damunt del clip', 'warn');
+                    return;
                 }
+                // Ancoratge: el cabezal. Si la SELECCIÓ és en un altre lloc (no conté el
+                // cabezal), mana el clip de la pista MP4 que SÍ que el conté (l'espai hàbil
+                // ha de ser on s'està treballant); si no n'hi ha cap (forat entre clips),
+                // s'ancora a l'IN del clip de referència.
+                var refSec = cti;
+                var dins = (cti >= ref.start - 0.001 && cti < ref.end - 0.001);
+                if (!dins) {
+                    var at = await this._refClipAt(cti);
+                    if (at) {
+                        L('🗺️ [MAPA] El clip de referència V' + ref.track + '[' + ref.index + '] no conté el cabezal → ' +
+                            'mana el clip de V1 sota el cabezal (V' + at.track + '[' + at.index + '])');
+                        ref = at;
+                        dins = true;
+                    }
+                }
+                if (!dins) {
+                    refSec = ref.start;
+                    L('🗺️ [MAPA] El cabezal (' + cti.toFixed(2) + 's) és fora del clip de referència V' +
+                        ref.track + '[' + ref.index + '] (' + ref.start.toFixed(2) + 's→' + ref.end.toFixed(2) +
+                        's) → entrada a l\'IN del clip', 'WARN');
+                }
+                L('🗺️ [MAPA] Referència = ' + ref.src + ' V' + ref.track + '[' + ref.index + '] "' + ref.name +
+                    '" (' + ref.start.toFixed(2) + 's→' + ref.end.toFixed(2) + 's) · entrada a ' +
+                    refSec.toFixed(2) + 's · espai hàbil fins ' + ref.end.toFixed(2) + 's');
 
                 var dateDir = this._resolveDateDir();
                 var folder = this._folderForDate(dateDir);
@@ -267,11 +284,12 @@
                 // grafismes → tracks.video.graficos (V3) · congelat → tracks.video.tematitol (V6).
                 this._applyTrackConfig();
 
-                // Ítem d'escaleta = el DEL MARCADOR de referència (ja resolt a mkRef); sense
-                // marcador es fa servir l'ítem del marcador anterior a la posició de referència.
-                var item = mkRef || await this._itemAtCti(refSec);
+                // Ítem d'escaleta (NOMÉS per a la coincidència de nom del fitxer): el marcador
+                // anterior a la posició d'entrada. No mou el grafisme.
+                var item = await this._itemAtCti(refSec);
                 if (!item || !item.nombre) {
-                    L('⚠️ [MAPA] Cap ítem d\'escaleta associat al punt de referència', 'WARN');
+                    L('⚠️ [MAPA] Cap ítem d\'escaleta associat al punt d\'entrada (marcador anterior a ' +
+                        refSec.toFixed(2) + 's)', 'WARN');
                 } else {
                     L('🗺️ [MAPA] Ítem de referència: "' + item.num + ' - ' + item.nombre + '"');
                 }
@@ -688,9 +706,11 @@
                 } catch (eG2) { }
                 L('   📥 [MAPA·freeze] PNG al bin ' + GRAF_BIN + ': "' + pngName + '"');
                 var fzEsc = utils.escape(pngName);
-                await callJSX("Clips.insert('" + fzEsc + "', " + TRACK_GRAF + ", " + grafEnd.toFixed(4) + ", " + (grafEnd + dur).toFixed(4) + ", 'video')");
-                // Clips.insert aplica l'endSec al darrer clip de la pista → fixar-lo per temps.
-                await callJSX("Clips.endAt(" + TRACK_GRAF + ", " + grafEnd.toFixed(4) + ", " + (grafEnd + dur).toFixed(4) + ", 'video')");
+                await callJSX("Clips.insert('" + fzEsc + "', " + TRACK_GRAF + ", " + grafEnd.toFixed(4) + ", null, 'video')");
+                // (2026-10-08) Retall COHERENT (inPoint 0 → outPoint dur): `Clips.endAt` deixava
+                // l'outPoint del source al final del mèdia i el congelat tampoc es podia estirar.
+                await callJSX("Clips.trimBounds(" + grafEnd.toFixed(4) + ", 0, " + dur.toFixed(4) +
+                    ", " + TRACK_GRAF + ", 'video')");
                 L('   🧊 [MAPA·freeze] Congelat "' + pngName + '" a V' + TRACK_GRAF + ' @ ' + grafEnd.toFixed(2) +
                     's → ' + (grafEnd + dur).toFixed(2) + 's (dur ' + dur.toFixed(2) + 's' +
                     (dur < MAX_DUR ? ' · limitat pel clip de V1' : '') + ')');
@@ -798,19 +818,41 @@
         },
 
         /**
-         * _placeClips: Insereix els grafismes a la pista GRAF des de la posició de referència.
-         * (2026-09-22) La referència és el CLIP SELECCIONAT (`sel`): el material s'insereix
-         * al seu IN i l'espai hàbil és el seu rang [start, end] (abans s'usava el cabezal
-         * i el final del clip de V1 sota el CTI).
+         * _clipBoundsAt: inPoint/outPoint del SOURCE d'un clip (per índex) via l'àtom
+         * `Clips.get`. Cal per retallar amb `Clips.trimBounds` sense moure l'entrada del
+         * mèdia (els grafismes entren amb inPoint 0, però un ProjectItem amb marques al bin
+         * pot entrar desplaçat). Retorna null si no es pot llegir.
+         * @param {number} trackIdx - Pista (1-based)
+         * @param {number|null} idx - Índex del clip (el que retorna insertNoAudio)
+         * @returns {Promise<Object|null>} { inPoint, outPoint, start, end } o null
+         */
+        _clipBoundsAt: async function (trackIdx, idx) {
+            if (idx === null || idx === undefined || idx < 0) return null;
+            try {
+                var raw = await callJSX("Clips.get(" + trackIdx + ", " + idx + ", 'video')");
+                if (!raw || raw === 'null' || String(raw).indexOf('ERR') === 0) return null;
+                var c = JSON.parse(raw);
+                return (typeof c.inPoint === 'number') ? c : null;
+            } catch (e) {
+                L('⚠️ [MAPA] No puc llegir in/out del clip V' + trackIdx + '[' + idx + ']: ' + e.message, 'WARN');
+                return null;
+            }
+        },
+
+        /**
+         * _placeClips: Insereix els grafismes a la pista GRAF des de la posició d'entrada.
+         * (2026-10-08) `refSec` és el CABEZAL i l'espai hàbil el marca el CLIP DE REFERÈNCIA
+         * (el SELECCIONAT, o el de V1 sota el cabezal): el grafisme no ha d'invair el clip
+         * següent. (2026-09-22) Abans la referència era sempre el clip seleccionat.
          *
          * @param {Array}  items  - [{ name, dur }] grafismes importats
-         * @param {number} refSec - IN del clip de referència (s)
+         * @param {number} refSec - Posició d'entrada (el CABEZAL) en segons
          * @param {Object} freeze - congelat { name, start, end } o null
          * @param {Object} ref    - clip de referència { track, index, name, start, end } o null
          */
         _placeClips: async function (items, refSec, freeze, ref) {
-            // 1. Espai hàbil: el rang del CLIP DE REFERÈNCIA (o, si no n'hi ha, del clip de la
-            //    pista MP4 que conté la posició de referència — comportament antic).
+            // 1. Espai hàbil: del punt d'entrada (el cabezal) fins al final del CLIP DE
+            //    REFERÈNCIA (el seleccionat, o el de la pista MP4 sota el cabezal).
             var endLimit = null;
             if (ref && typeof ref.end === 'number') {
                 endLimit = ref.end;
@@ -834,10 +876,11 @@
             await this._cleanupTrack(TRACK_GRAF, gNums);
             if (freeze && freeze.name) await this._cleanupTrack(TRACK_FREEZE, [freeze.name]);
 
-            // 3. Inserir en ordre des del IN DEL CLIP DE REFERÈNCIA A DURADA NATURAL del
+            // 3. Inserir en ordre des del PUNT D'ENTRADA (el cabezal) A DURADA NATURAL del
             //    media: NO forcem un endSec calculat (estirar-lo més enllà de la durada real
             //    dona clips falsos). Es mesura el clip inserit i, només si no cap a l'espai
-            //    hàbil (el rang del clip seleccionat), es retalla.
+            //    hàbil (el rang del clip de referència), es retalla amb `Clips.trimBounds`
+            //    perquè el clip quedi ESTIRABLE (vegeu el comentari del retall).
             var t = refSec;
             var grafEnd = refSec;
             for (var p = 0; p < items.length; p++) {
@@ -852,10 +895,21 @@
                 }
                 var clamped = false;
                 if (space !== null && endLimit !== null && realEnd > endLimit + 0.01) {
-                    var rE = await callJSX("Clips.endAt(" + TRACK_GRAF + ", " + t.toFixed(4) + ", " +
-                        endLimit.toFixed(4) + ", 'video')");
+                    // (2026-10-08) EL RETALL HA DE DEIXAR EL CLIP ESTIRABLE. `Clips.endAt`
+                    // només movia el final del TIMELINE i deixava l'outPoint del SOURCE al
+                    // final del mèdia (comprovat en viu 08/10: end=50.12 amb dur=11.28 però
+                    // outPoint=50.6 = els 50,62 s sencers) → Premiere considerava el material
+                    // esgotat i NO deixava allargar el clip («no es pot estirar més enllà de la
+                    // inserció»). `Clips.trimBounds` (àtom existent) fixa inPoint/outPoint i el
+                    // final de manera coherent, i deixa material per estirar a la timeline.
+                    var cb = await this._clipBoundsAt(TRACK_GRAF, ins.idx);
+                    var inPt = (cb && typeof cb.inPoint === 'number') ? cb.inPoint : 0;
+                    var outPt = inPt + (endLimit - t);
+                    var rE = await callJSX("Clips.trimBounds(" + t.toFixed(4) + ", " + inPt.toFixed(4) +
+                        ", " + outPt.toFixed(4) + ", " + TRACK_GRAF + ", 'video')");
                     L('🗺️ [MAPA] V' + TRACK_GRAF + ' retallat a l\'espai hàbil (' + realEnd.toFixed(2) +
-                        ' → ' + endLimit.toFixed(2) + 's) [' + rE + ']');
+                        ' → ' + endLimit.toFixed(2) + 's · source ' + inPt.toFixed(2) + '→' + outPt.toFixed(2) +
+                        's, estirable) [' + rE + ']');
                     realEnd = endLimit;
                     clamped = true;
                 }
@@ -879,9 +933,11 @@
                 var fzEnd = grafEnd;
                 var resF = await callJSX("Clips.insert('" + fzEsc + "', " + TRACK_FREEZE + ", " +
                     refSec.toFixed(4) + ", null, 'video')");
-                // Clips.insert aplica l'endSec al darrer clip de la pista → fixar-lo per temps.
-                var resFE = await callJSX("Clips.endAt(" + TRACK_FREEZE + ", " + refSec.toFixed(4) +
-                    ", " + fzEnd.toFixed(4) + ", 'video')");
+                // (2026-10-08) Retall COHERENT via `Clips.trimBounds` (inPoint 0 → outPoint =
+                // durada volguda): amb `Clips.endAt` l'outPoint quedava al final del mèdia i el
+                // congelat no es podia estirar (mateix defecte que el clip de V3).
+                var resFE = await callJSX("Clips.trimBounds(" + refSec.toFixed(4) + ", 0, " +
+                    Math.max(0, fzEnd - refSec).toFixed(4) + ", " + TRACK_FREEZE + ", 'video')");
                 L('🗺️ [MAPA] V' + TRACK_FREEZE + ' (congelat): "' + freeze.name + '" @ ' +
                     refSec.toFixed(2) + 's → ' + fzEnd.toFixed(2) + 's (final del gràfic de V' +
                     TRACK_GRAF + ') [insert=' + resF + ' · endAt=' + resFE + ']');
