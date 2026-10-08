@@ -3,7 +3,7 @@
   "version": "2.9.5",
   "codename": "LIPO-PRO",
   "description": "Extensión CEP para Adobe Premiere Pro — Automatización de producción de informativos y verticalización 9:16",
-  "updated": "2026-10-07",
+  "updated": "2026-10-08",
 
   "architecture": {
     "tiers": {
@@ -134,11 +134,13 @@
       {
         "id": "RESET_GENERAL",
         "name": "Reset General del bloc (botó 🔄)",
-        "status": "implemented_pending_premiere_test",
+        "status": "resolt",
         "priority": "high",
         "description": "Botó 🔄 a la cantonada superior esquerra de la secció INICI (sobre l'etiqueta, a l'esquerra del semàfor ESC; marge 6px, 22×22px). Un clic: (1) tanca el projecte del bloc seleccionat si està obert; (2) esborra la carpeta sencera <base><prog>_PROJECTES/<data>/<V*> (projecte, escaleta local, MP4, manifest, snapshots, anàlisi, logs) via Utils.deleteFolder (Node fs rmSync/rmdirSync recursiu); (3) reinicia l'estat (State.reset preservant HOY/AHIR) i torna a crear el projecte de zero (flux NOU). Confirmació amb diàleg abans d'esborrar. Anti-ghost via classe btn-destructivo.",
         "files": ["index.html", "style.css", "js/core/utils.js", "js/workflows/flow_mainButton.js", "js/main.js"],
-        "ui": "Botó 🔄 a la cantonada superior esquerra de la secció INICI"
+        "ui": "Botó 🔄 a la cantonada superior esquerra de la secció INICI",
+        "date": "2026-10-08",
+        "validation_user": "VALIDAT PER L'USUARI a Premiere (2026-10-08): «Reset General Testeado y OK. Se puede cerrar y pushear». Tema tancat."
       }
     ],
 

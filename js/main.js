@@ -317,7 +317,44 @@ function applySliderLimits() {
 
         // 3. LLAMADA QUIRÚRGICA:
         // Usamos comillas simples para el envoltorio y dobles para el contenido
-        var result = await utils.callJSX('jsx_BOOTSTRAP("' + safeRoot + '")');
+        // ── DIAGNOSTIC D'ARRENCADA (2026-10-08, TEMPORAL · es pot treure) ──────
+        // L'arrencada arriba a 63 s i TOTS es consumeixen en aquesta crida. Com que
+        // el bootstrap nomes fa 13 $.evalFile petits i ~30 $.writeln, es mesura per
+        // separat per saber qui se'ls menja (tot en JS, sense codi JSX nou):
+        //   P1 = primera crida trivial  -> cost del MOTOR (1a crida de la sessio)
+        //   P2 = $.writeln              -> cost d'una linia de trace del motor
+        //   P3 = jsx_BOOTSTRAP          -> cua al motor | execucio | tornada
+        // HB TEMPORAL (2026-10-08): si el fil del panell esta viu, marca cada 1,5 s.
+        // Marques que segueixen durant l'atac -> el panell viu (qui no respon es
+        // Premiere/el motor). Marques aturades en sec -> bloqueig DINS del panell.
+        var _hbN = 0, _hbT0 = Date.now();
+        var _hb = setInterval(function () {
+            _hbN++;
+            _bootMarkSafe('DIAG HB ' + _hbN + ' viu a +' + (Date.now() - _hbT0) + ' ms');
+            if (_hbN >= 60) { clearInterval(_hb); }
+        }, 1500);
+
+        var _tP1 = Date.now();
+        try { await utils.callJSX("1+1"); } catch (eP1) { }
+        _bootMarkSafe('DIAG P1 ping motor JSX (' + (Date.now() - _tP1) + ' ms)');
+
+        var _tP2 = Date.now();
+        try { await utils.callJSX('$.writeln("fp_probe_writeln")'); } catch (eP2) { }
+        _bootMarkSafe('DIAG P2 $.writeln del motor (' + (Date.now() - _tP2) + ' ms)');
+
+        var _tSend = Date.now();
+        var _sendStr = 'var _fpT0=(new Date()).getTime(),_fpR=jsx_BOOTSTRAP("' + safeRoot + '"),' +
+            '_fpT1=(new Date()).getTime(); _fpR + "|" + _fpT0 + "|" + (_fpT1-_fpT0)';
+        var result = await utils.callJSX(_sendStr);
+        var _tRecv = Date.now();
+        var _fpD = String(result).split("|");
+        if (_fpD.length >= 3 && _fpD[0].indexOf("OK_BOOT") === 0) {
+            var _fpT0 = parseInt(_fpD[1], 10) || _tSend;
+            var _fpExec = parseInt(_fpD[2], 10) || 0;
+            result = _fpD[0];
+            _bootMarkSafe('DIAG P3 bootstrap · cua motor=' + (_fpT0 - _tSend) + ' ms | execucio=' +
+                _fpExec + ' ms | tornada=' + (_tRecv - _fpT0 - _fpExec) + ' ms');
+        }
 
         if (result && result.indexOf("OK") !== -1) {
             window.FASTPASS_UI.Utils.isJsxReady = true; // 📍 ESTA LÍNEA ES VITAL
@@ -355,6 +392,7 @@ function applySliderLimits() {
             var _totBoot = Date.now() - _tBoot;
             _bootMarkSafe('ARRENCADA COMPLETA');
             _bootClosed = true; // a partir d'aquí el log no creix amb els cicles de fons
+            try { clearInterval(_hb); } catch (eHb) { } // HB de diagnòstic: mor amb l'arrencada
             utils.status("⏱️ Panell a punt (" + (Math.round(_totBoot / 100) / 10) + " s)", "info");
             // ── ARRENCADA LENTA → S'OBRE EL LOG TOT SOL (2026-09-29) ────────────
             // Un sol cop per sessió, perquè es vegi QUÈ ha trigat sense haver de
@@ -784,6 +822,11 @@ if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers
         const selectBloc = document.getElementById('bloc');
 
         if (btnSetup) btnSetup.addEventListener('click', () => callWorkflow('Config', 'toggleSetup', true));
+
+        // --- BOTÓ RESET GENERAL (2026-10-07): tanca el projecte del bloc seleccionat,
+        //     n'esborra la carpeta sencera del NAS i el torna a crear de zero ---
+        const btnReset = document.getElementById('btnReset');
+        if (btnReset) btnReset.addEventListener('click', () => callWorkflow('MainButton', 'runReset'));
 
         // --- BOTÓ FER FOTO ESCALETA ---
         const btnFetchEscaleta = document.getElementById('btnFetchEscaleta');

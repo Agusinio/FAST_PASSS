@@ -38,6 +38,106 @@
         },
 
         /**
+         * runReset: (2026-10-07) RESET GENERAL de la selecció actual.
+         * Des de la cantonada superior esquerra (sobre INICI, a l'esquerra del
+         * semàfor ESC) fa, en ordre:
+         *   1) Tanca el projecte del bloc seleccionat si està obert a Premiere.
+         *   2) Esborra la carpeta sencera del bloc (<base><prog>_PROJECTES/<data>/<V*>)
+         *      → projecte, escaleta local, MP4, manifest, snapshots, anàlisi, logs...
+         *   3) Reinicia la sessió (State.reset preservant HOY/AHIR) i torna a crear
+         *      el projecte de zero (flux NOU).
+         * Pensat perquè l'usuari comenci de nou sense anar a mà al NAS.
+         */
+        runReset: async function () {
+            log('♻️ [RESET] Petició de reset general del bloc seleccionat');
+            if (!getUtils().isJsxReady) {
+                log('⚠️ [RESET] Motor JSX encara no preparat. Espera un moment.', 'WARN');
+                getUtils().status("El motor encara no està llest. Torna-ho a provar.", 'warn');
+                return;
+            }
+            const btn = document.getElementById('btnReset');
+            try {
+                // ── Context de treball (com _setupContext, però amb la DATA real de
+                //    treball HOY/AHIR via _targetDateDir) ──
+                const config = FASTPASS_UI.Config.get();
+                const idProg = document.getElementById('programa').value;
+                const progData = config.mapeoProgramas[idProg];
+                const bloque = document.getElementById('bloc').value;
+                const dateDir = (FASTPASS_UI.Core && FASTPASS_UI.Core.Context && FASTPASS_UI.Core.Context._targetDateDir)
+                    ? FASTPASS_UI.Core.Context._targetDateDir()
+                    : (await this._setupContext()).dateDir;
+                const ctx = { config: config, progData: progData, programa: idProg, bloque: bloque, dateDir: dateDir };
+                const folder = getUtils().workFolder(ctx);
+                if (!folder) {
+                    log("⚠️ [RESET] No s'ha pogut resoldre la carpeta del bloc.", 'WARN');
+                    getUtils().status('RESET: no es pot resoldre la carpeta del bloc.', 'error');
+                    return;
+                }
+                const progNom = (progData && (progData.archivo || progData.nombre)) || idProg;
+                const msg = 'RESET GENERAL\n\n' +
+                    "S'esborrarà TOT el contingut de:\n" + folder + '\n\n' +
+                    '(projecte de ' + progNom + ' ' + bloque + ' del ' + dateDir + ')\n\n' +
+                    'I es tornarà a crear de zero. Aquesta acció NO es pot desfer.\nContinua?';
+                if (!confirm(msg)) {
+                    log("↩️ [RESET] Cancel·lat per l'usuari.", 'INFO');
+                    return;
+                }
+                if (btn) { btn.disabled = true; btn.innerText = '⏳'; }
+                getUtils().updateUIState('BUSY');
+
+                // ── 1. TANCAR el projecte del bloc (només si és el d'aquesta carpeta) ──
+                try {
+                    const currentPath = await callJSX("FASTPASS.Project.path()");
+                    if (currentPath && currentPath !== "") {
+                        const normP = currentPath.replace(/\\/g, '/').toLowerCase();
+                        const normF = folder.replace(/\\/g, '/').toLowerCase();
+                        if (normP.indexOf(normF) === 0) {
+                            log('🔒 [RESET] Tancant el projecte obert: ' + currentPath);
+                            await FASTPASS_UI.Logic.Project.close();
+                        } else {
+                            log("ℹ️ [RESET] El projecte obert no és el d'aquesta selecció; no es tanca.", 'INFO');
+                        }
+                    } else {
+                        log('ℹ️ [RESET] No hi ha cap projecte obert a Premiere.', 'INFO');
+                    }
+                } catch (eClose) {
+                    log('⚠️ [RESET] Error tancant el projecte: ' + eClose.message, 'WARN');
+                }
+
+                // ── 2. ESBORRAR la carpeta sencera del bloc ──
+                if (getUtils().deleteFolder(folder)) {
+                    log('🗑️ [RESET] Carpeta esborrada: ' + folder);
+                } else {
+                    log("⚠️ [RESET] No s'ha pogut esborrar del tot la carpeta: " + folder, 'WARN');
+                }
+
+                // ── 3. REINICIAR sessió (preservant el mode HOY/AHIR) i crear de zero ──
+                try {
+                    const prevWorkTarget = (FASTPASS_UI.State && FASTPASS_UI.State.workTarget) || 'today';
+                    if (FASTPASS_UI.State && typeof FASTPASS_UI.State.reset === 'function') {
+                        FASTPASS_UI.State.reset();
+                        FASTPASS_UI.State.workTarget = prevWorkTarget;
+                    }
+                    if (window.FASTPASS_UI.State) window.FASTPASS_UI.State.dateDir = dateDir;
+                    if (window.SrtEditor && typeof window.SrtEditor.reset === 'function') {
+                        window.SrtEditor.reset();
+                    }
+                } catch (eReset) {
+                    log('⚠️ [RESET] Error reiniciant estat: ' + eReset.message, 'WARN');
+                }
+
+                log('🔁 [RESET] Tornant a crear el projecte de zero (flux NOU)...', 'INFO');
+                getUtils().status('RESET: esborrat. Tornant a crear el projecte...', 'warn');
+                await this._runNew();
+            } catch (e) {
+                getUtils().handleError(e, 'Reset');
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerText = '🔄'; }
+                getUtils().updateUIState('READY');
+            }
+        },
+
+        /**
          * _escaletaFromLaterBlock: (2026-09-22) Quan NO hi ha escaleta del NOSTRE bloc, busca al NAS
          * una escaleta del MATEIX DIA i del MATEIX PROGRAMA d'un bloc POSTERIOR (V4, V5...) — que ja
          * conté els ítems del nostre bloc — i la copia al directori del projecte.

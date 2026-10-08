@@ -1183,6 +1183,39 @@
             } catch(e) { 
                 return false; 
             }
+        },
+
+        /**
+         * deleteFolder: Esborra una carpeta sencera (recursiu) del NAS/local.
+         * (2026-10-07) Feature RESET: usa Node fs (rmSync/rmdirSync recursiu), l'única
+         * via robusta per esborrar arbres de directoris des de CEP (cep.fs no té rmdir).
+         * No llança: retorna false si no s'ha pogut (manca de Node, lock, xarxa...).
+         * @param {string} path - Ruta completa de la carpeta a esborrar
+         * @returns {boolean} true si s'ha esborrat (o ja no existia)
+         */
+        deleteFolder: function(path) {
+            if (!path) return false;
+            var norm = path.replace(/\//g, '\\').replace(/[\\]+$/, '');
+            var fs = this._nodeFs();
+            if (fs) {
+                try {
+                    if (typeof fs.rmSync === 'function') {
+                        fs.rmSync(norm, { recursive: true, force: true });
+                        this.log('🗑️ [FS] Carpeta eliminada (rmSync): ' + norm, 'DEBUG');
+                        return true;
+                    }
+                    if (typeof fs.rmdirSync === 'function') {
+                        fs.rmdirSync(norm, { recursive: true });
+                        this.log('🗑️ [FS] Carpeta eliminada (rmdirSync): ' + norm, 'DEBUG');
+                        return true;
+                    }
+                } catch (e) {
+                    this.log("⚠️ [FS] No s'ha pogut esborrar la carpeta " + norm + ': ' + e.message, 'WARN');
+                    return false;
+                }
+            }
+            this.log('⚠️ [FS] Node fs no disponible: no es pot esborrar la carpeta ' + norm, 'WARN');
+            return false;
         }
 
     };
