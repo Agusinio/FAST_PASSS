@@ -82,7 +82,7 @@
         "name": "Render y Exportación",
         "status": "active",
         "priority": "high",
-        "description": "VÍDEO: exportAsMediaDirect a la carpeta del projecte (preset VERTIKAL .epr). PORTADA: duplica el clip de V1 del cabezal a una zona neta (més enllà del final), hi col·loca la 1a portada del tema centrada + captura del frame (Render.snapshot) → PNG amb el MATEIX nom que el MP4.",
+        "description": "VÍDEO: exportAsMediaDirect DIRECTAMENT a la carpeta de publicació `rutas.render1` (EXPORTS PROVISIONALS del NAS public.ad-ccrtv.local) amb el preset VERTIKAL .epr; en acabar, `_publishVideo` COPIA el MP4 a `rutas.render2` (608-1080 del svftpccma) — el destí que coincideix amb la carpeta d'origen s'omet (mai cap re-render, mai cap còpia redundant). PORTADA: duplica el clip de V1 del cabezal a una zona neta (més enllà del final), hi col·loca la 1a portada del tema centrada + captura del frame (Render.snapshot) → PNG escrit a `rutas.portadas` (AAA_PORTADES) amb el nom EXACTE del render de la sessió (`State.lastRenderName`, que hi deixa runVideo; fallback: MP4 més recent de la carpeta de publicació; última xarxa: hora actual).",
         "files": ["js/workflows/flow_render.js", "js/logic/9_Render_Logic.js"],
         "ui": "Sección RENDER: VÍDEO, PORTADA"
       },
@@ -1174,7 +1174,7 @@
     "remote": "https://github.com/Agusinio/FAST_PASSS.git  (verificat amb `git remote -v` el 2026-10-06; abans deia FAST_PASSS_81c-LIPO.git per error)",
     "portable": "E:\\PortableGit\\bin\\git.exe",
     "branch": "main",
-    "status": "Sessió 2026-10-08 pujada a origin/main: f4fc22f (10 fitxers, +1598/-89 · BUGs #147 #148 + 7a passada TITOLET: jsxName % → %25 amb congelat verificat, _sameChyronKey/_dedupeSameChyron, roiPerRole/roiDefault + recipeForRoles/roleGroups + tcFromName, cache-bust 17_TitoletDetect_Logic.js?v=2, docs consolidats TITOLET_DETECT.md v1.5.0 + plans/HANDOFF_2026-10-08_TITOLETS.md). Anteriors: a56d4e8 (RESET GENERAL, validat a Premiere) + 95d39b9 (BUG #146 MAPA). PENDENT DE TEST A PREMIERE (cal RECARREGAR el panell → utils v25, flow_chyrons v69, 17_TitoletDetect_Logic v2, 11_Configuracio v29): #147, #148 i la 7a passada. Fora de git a propòsit: bin/build_graph.ps1 i docs/graph/."
+    "status": "Sessió 2026-10-09 · commit bc64eef (6 fitxers, +312/−34): PUBLICACIÓ D'EXPORTS — el render surt DIRECTE a EXPORTS PROVISIONALS (runVideo + ensureFolders) i `_publishVideo` només COPIA a 608-1080 ometent el destí igual a l'origen; nou `_resolvePortadaName` PUR (prefix PROG_TEMA_ + filtre d'avui) per al nom del PNG a AAA_PORTADES; cache-bust flow_render v28 + 11_Configuracio v33. Validat: check_js_v8 57 OK/0 FAIL · check_dead 0 orfes · test headless 17/17. PENDENT DE TEST A PREMIERE (cal RECARREGAR el panell). ANTERIOR: Sessió 2026-10-08 pujada a origin/main: f4fc22f (10 fitxers, +1598/-89 · BUGs #147 #148 + 7a passada TITOLET: jsxName % → %25 amb congelat verificat, _sameChyronKey/_dedupeSameChyron, roiPerRole/roiDefault + recipeForRoles/roleGroups + tcFromName, cache-bust 17_TitoletDetect_Logic.js?v=2, docs consolidats TITOLET_DETECT.md v1.5.0 + plans/HANDOFF_2026-10-08_TITOLETS.md). Anteriors: a56d4e8 (RESET GENERAL, validat a Premiere) + 95d39b9 (BUG #146 MAPA). PENDENT DE TEST A PREMIERE (cal RECARREGAR el panell → utils v25, flow_chyrons v69, 17_TitoletDetect_Logic v2, 11_Configuracio v29): #147, #148 i la 7a passada. Fora de git a propòsit: bin/build_graph.ps1 i docs/graph/."
   },
 
   "paths": {
@@ -1182,6 +1182,9 @@
     "proyectos_premiere": "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\AAA_PROJECTES PREMIERE VERTICALITZACIO\\PROVES\\",
     "bin": "bin/",
     "docs": "docs/",
-    "plans": "plans/"
+    "plans": "plans/",
+    "exports_video_1": "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\EXPORTS PROVISIONALS",
+    "exports_video_2": "\\\\svftpccma\\videos\\MP4_3CATINFO_VERTICAL\\CONVERTITS_1080-1920\\608-1080",
+    "exports_portades": "\\\\public.ad-ccrtv.local\\Public\\VERTICALITZACIO_INFORMATIUS\\AAA_PORTADES"
   }
 }

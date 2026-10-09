@@ -2,6 +2,12 @@
  * ============================================================================
  * WORKFLOW: RENDER (EXPORTACIÓ) - v2.9.5 Tactical
  * ============================================================================
+ * 📤 PUBLICACIÓ (2026-10-09): el vídeo es renderitza UNA sola vegada I DIRECTAMENT a la
+ *    carpeta de publicació EXPORTS PROVISIONALS (public.ad-ccrtv.local = `rutas.render1`);
+ *    després es COPIA a 608-1080 (svftpccma = `rutas.render2`). El PNG de portada s'escriu
+ *    a AAA_PORTADES amb el nom EXACTE del render de la sessió (`State.lastRenderName`, el
+ *    desa `runVideo` en exportar). Vegeu `_publishVideo` i `runPortada`.
+ * ============================================================================
  */
 
 (function () {
@@ -82,8 +88,9 @@
     }
 
     /**
-     * pickVideoBase: Nom base (sense extensió) del VÍDEO de referència de la carpeta del
-     * projecte, perquè el PNG surti amb la MATEIXA hora que el vídeo ja exportat.
+     * pickVideoBase: Nom base (sense extensió) del VÍDEO de referència de la CARPETA DE
+     * PUBLICACIÓ (2026-10-09: abans era la del projecte), perquè el PNG surti amb la
+     * MATEIXA hora que el vídeo ja exportat.
      * Prioritat: noms amb el prefix PROG_TEMA_ → el MÉS RECENT (el nom acaba en _HH_MM
      * i ordenat desc dóna la darrera hora del dia).
      * @param {Array} files - Llista de la carpeta ({name, created, mtime})
@@ -128,7 +135,10 @@
     FASTPASS_UI.Workflows.Render = {
 
         /**
-         * MP4: Envia la seqüència activa a AME amb nom intel·ligent.
+         * MP4: Renderitza la seqüència activa amb el preset vertical (render DIRECTE de
+         * Premiere, sense AME) DIRECTAMENT a la carpeta de publicació (2026-10-09,
+         * `rutas.render1` = EXPORTS PROVISIONALS) i tot seguit en COPIA una a
+         * `rutas.render2` (608-1080). Un sol render; la resta són còpies de fitxer.
          */
         runVideo: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
@@ -136,8 +146,26 @@
             const config = FASTPASS_UI.Config.get();
 
             try {
-                let outputDir = await callJSX("Context.folder()");
-                if (!outputDir) outputDir = utils.workFolder(window.FASTPASS_UI.State) || config.rutas.destinoBase || "C:\\Temp";
+                // ── DESTÍ DEL RENDER (2026-10-09) ────────────────────────────────
+                // El MP4 s'exporta DIRECTAMENT a la carpeta de publicació
+                // (`rutas.render1` = EXPORTS PROVISIONALS del NAS public.ad-ccrtv.local).
+                // Ordre: 1) rutas.render1 · 2) carpeta del projecte · 3) workFolder.
+                // (Abans l'exportació es feia a la carpeta del projecte i després es
+                // copiava; ara ja no cal el viatge d'anada.)
+                let outputDir = String((config.rutas && config.rutas.render1) || '').trim();
+                if (outputDir) {
+                    log('📤 [Render] Destí del render = carpeta de publicació (rutas.render1): ' + outputDir);
+                } else {
+                    outputDir = await callJSX("Context.folder()");
+                    if (!outputDir) outputDir = getUtils().workFolder(window.FASTPASS_UI.State) || config.rutas.destinoBase || "C:\\Temp";
+                    log('⚠️ [Render] Sense rutas.render1 a la config → es renderitza a: ' + outputDir, 'WARN');
+                }
+                // Ruta NATIVA (\\) i ARBRE DE CARPETES creat ABANS d'exportar (UNC Path
+                // Safety: Premiere és fràgil amb rutes de xarxa que no existeixen).
+                outputDir = String(outputDir).replace(/\//g, '\\').replace(/\\+$/, '');
+                try { getUtils().ensureFolders(outputDir); } catch (eF) {
+                    log('⚠️ [Render] ensureFolders(' + outputDir + '): ' + eF.message, 'WARN');
+                }
                 
                 getUtils().status("Processant nom...", "procesando");
 
@@ -253,13 +281,151 @@
                 if (rDir && String(rDir).indexOf('OK') === 0) {
                     getUtils().status(`OK: ${fileName}`, 'exito');
                     log(`✅ [Render] Exportat${outSec > 0.1 ? ' (retallat a ' + outSec.toFixed(2) + 's)' : ''}: ${fileName}`, 'INFO');
-                    FASTPASS_UI.State.lastRenderName = fileName.replace('.mp4', '');
+                    // ── NOM DEL RENDER: FONT ÚNICA I GARANTIDA (2026-10-09) ──────────
+                    // runPortada (PNG de portada) NO pot deduir el nom de la carpeta del
+                    // projecte perquè el render ja no hi viu: aquí es desa el nom EXACTE
+                    // (amb la seva hora) i la ruta del MP4 publicat, i el PNG s'hi agafa.
+                    FASTPASS_UI.State.lastRenderName = String(fileName).replace(/\.mp4$/i, '');
+                    FASTPASS_UI.State.lastRenderMp4 = outputDir + '\\' + fileName;
+                    // ── PUBLICACIÓ (2026-10-09): 1 render + CÒPIES ───────────────────
+                    // El MP4 S'HA renderitzat directament a EXPORTS PROVISIONALS; aquí
+                    // només es COPIA als altres destins (608-1080). `_publishVideo` omet
+                    // el destí que coincideix amb la carpeta d'origen → mai re-copia ni
+                    // re-renderitza, i tots els destins queden amb el MATEIX fitxer.
+                    // Una còpia que falli NO tomba el render.
+                    const pub = await this._publishVideo(outputDir, fileName, config);
+                    if (pub.ok > 0) {
+                        getUtils().status(`${fileName} → ${pub.ok} destí/ns publicat(s)${pub.copied ? ' · ' + pub.copied + ' còpia/es' : ''}`, 'exito');
+                    }
                 } else {
                     getUtils().status('Render fallit: ' + rDir, 'error');
                     throw new Error('Render fallit: ' + rDir);
                 }
 
             } catch (e) { getUtils().handleError(e, "RenderVideo"); }
+        },
+
+        /**
+         * _copyFile: Copia un fitxer (src → dest) amb el millor mecanisme disponible.
+         *
+         * (2026-10-09) Els MP4 de sortida fan centenars de MB: Node `fs.copyFileSync`
+         * (capa Brain, mateix criteri que `utils.deleteFolder`) és l'única via que no
+         * travessa el pont ExtendScript ni carrega el fitxer a la memòria ES3. Si Node
+         * no està disponible, es recorre a l'àtom JSX existent `IO.copyFile` (File.copy).
+         *
+         * @param {string} src - Ruta completa d'origen
+         * @param {string} dest - Ruta completa de destí (amb nom de fitxer)
+         * @returns {Promise<string>} "OK" o "ERR:..."
+         */
+        _copyFile: async function (src, dest) {
+            const fs = getUtils()._nodeFs();
+            if (fs && typeof fs.copyFileSync === 'function') {
+                try {
+                    fs.copyFileSync(String(src).replace(/\//g, '\\'), String(dest).replace(/\//g, '\\'));
+                    return 'OK';
+                } catch (eN) {
+                    log(`⚠️ [Render] Node copyFileSync ha fallat (${eN.message}) → provo via JSX`, 'WARN');
+                }
+            }
+            try {
+                return await callJSX(`IO.copyFile('${getUtils().escape(src)}', '${getUtils().escape(dest)}')`);
+            } catch (eJ) { return 'ERR: ' + eJ.message; }
+        },
+
+        /**
+         * _publishVideo: PUBLICA el MP4 ja renderitzat a les carpetes de PUBLICACIÓ.
+         *
+         * (2026-10-09 · revisat) El vídeo es renderitza UNA sola vegada I DIRECTAMENT a
+         * `config.rutas.render1` (EXPORTS PROVISIONALS del NAS public.ad-ccrtv.local), que
+         * per tant és la carpeta D'ORIGEN: aquest mètode la reconeix i NO la torna a
+         * copiar (el fitxer ja hi és). Els altres destins — `config.rutas.render2`
+         * (608-1080 del svftpccma) — es fan PER CÒPIA. MAI es torna a renderitzar.
+         * Àtoms: `utils.ensureFolders` (crea l'arbre UNC abans de copiar) + `_copyFile`.
+         *
+         * @param {string} srcDir - Carpeta on s'ha renderitzat el MP4 (= rutas.render1)
+         * @param {string} fileName - Nom del MP4 (amb extensió)
+         * @param {Object} config - Config.get()
+         * @returns {Promise<{ok:number, copied:number, inPlace:number, fail:number, details:string[]}>}
+         */
+        _publishVideo: async function (srcDir, fileName, config) {
+            const res = { ok: 0, copied: 0, inPlace: 0, fail: 0, details: [] };
+            const rutas = (config && config.rutas) ? config.rutas : {};
+            const dests = [
+                { label: 'PUB1 · EXPORTS PROVISIONALS', dir: rutas.render1 },
+                { label: 'PUB2 · 608-1080',             dir: rutas.render2 }
+            ];
+            const norm = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+$/, '');
+            const srcFolder = norm(srcDir);
+            const src = srcFolder + '\\' + fileName;
+            for (let i = 0; i < dests.length; i++) {
+                const d = dests[i];
+                if (!d.dir) {
+                    log(`⚠️ [Render] ${d.label}: sense ruta a la config → s'omet`, 'WARN');
+                    continue;
+                }
+                const dir = norm(d.dir);
+                // El render JA ha sortit en aquesta carpeta (és el destí de l'exportació):
+                // no hi ha res a copiar. Es compta com a destí OK (publicat de fet).
+                if (dir.toUpperCase() === srcFolder.toUpperCase()) {
+                    res.inPlace++; res.ok++;
+                    res.details.push(d.label + ' (origen del render)');
+                    log(`📤 [Render] ${d.label} · ja hi és (carpeta d'origen del render, sense còpia): ${src}`);
+                    continue;
+                }
+                const dest = dir + '\\' + fileName;
+                // La carpeta del NAS ha d'existir ABANS de copiar: Premiere és fràgil amb UNC.
+                try { getUtils().ensureFolders(dir); } catch (eF) { }
+                const r = await this._copyFile(src, dest);
+                if (r === 'OK') {
+                    res.ok++; res.copied++; res.details.push(d.label + ' OK');
+                    log(`📤 [Render] ${d.label} · copiat: ${dest}`);
+                } else {
+                    res.fail++; res.details.push(d.label + ' ' + r);
+                    log(`❌ [Render] ${d.label} · NO copiat (${r}): ${dest}`, 'ERROR');
+                }
+            }
+            if (res.ok === 0) {
+                log(`⚠️ [Render] El MP4 NO s'ha publicat a cap destí (${res.details.join(' | ')})`, 'WARN');
+            }
+            return res;
+        },
+
+        /**
+         * _resolvePortadaName: Decideix el NOM BASE (sense extensió) del PNG de portada.
+         *
+         * (2026-10-09) El render va DIRECTAMENT a la carpeta de publicació, així que el nom
+         * del PNG NO es pot deduir de la carpeta del projecte (hi hauria 0 MP4). Ordre:
+         *   1) `lastRenderName` (State, el nom EXACTE del render d'aquesta sessió) si el seu
+         *      prefix coincideix amb la seqüència activa.
+         *   2) MP4 més recent de la carpeta de publicació amb el mateix prefix
+         *      (`pickVideoBase`; cas de panell recarregat, que buida State).
+         *   3) `refBase` (buildRenderName amb l'hora actual) — última xarxa.
+         * ⚠️ La carpeta de publicació és COMPARTIDA (tots els programes i temes): només
+         * s'accepta un MP4 amb el MATEIX prefix PROG_TEMA_ i, si n'hi ha d'avui, només els
+         * d'avui. Un MP4 d'un altre tema o d'un altre dia donaria al PNG un nom que no
+         * correspon al vídeo que s'acaba d'exportar.
+         * Mètode PUR (sense I/O ni JSX) per poder-se testejar fora de Premiere.
+         *
+         * @param {string} lastRenderName - State.lastRenderName ('' si no n'hi ha)
+         * @param {string} refPrefix - "PROG_TEMA_" de la seqüència activa (majúscules)
+         * @param {string} refBase - Nom amb l'hora actual (sense extensió)
+         * @param {Array|null} files - Llistat de la carpeta de publicació (o null)
+         * @returns {{name:string, src:'sessio'|'publicacio'|'hora'}}
+         */
+        _resolvePortadaName: function (lastRenderName, refPrefix, refBase, files) {
+            const lastBase = String(lastRenderName || "");
+            if (lastBase && (!refPrefix || lastBase.toUpperCase().indexOf(refPrefix) === 0)) {
+                return { name: lastBase, src: 'sessio' };
+            }
+            const now = new Date();
+            const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const all = (files || []).filter(function (f) {
+                return refPrefix ? (f.name || '').toUpperCase().indexOf(refPrefix) === 0 : true;
+            });
+            const today = all.filter(function (f) { return (f.created || f.mtime || 0) >= midnight; });
+            const fromFolder = pickVideoBase(today.length ? today : all, null);
+            if (fromFolder) return { name: fromFolder, src: 'publicacio' };
+            return { name: refBase, src: 'hora' };
         },
 
         /**
@@ -335,8 +501,14 @@
          *      el mecanisme que funciona · 2026-10-06) i `Render.frame` com a reserva.
          *   5. Neteja: s'esborren NOMÉS la còpia i la portada (per TEMPS) i el cabezal
          *      torna on era. No es toca cap mute/lock de cap pista.
-         *   6. El PNG va a la MATEIXA carpeta que el MP4 i amb EXACTAMENT el mateix nom
-         *      (inclosa l'hora): PROG_TEMA_13_15.mp4 → PROG_TEMA_13_15.png
+         *   6. El PNG va a la carpeta de PORTADES PUBLICADES (`config.rutas.portadas`,
+         *      AAA_PORTADES del NAS; 2026-10-09) i amb EXACTAMENT el mateix nom que el
+         *      MP4 (inclosa l'hora): PROG_TEMA_13_15.mp4 → PROG_TEMA_13_15.png.
+         *      ⚠️ (2026-10-09) El nom JA NO es dedueix del MP4 de la carpeta del projecte
+         *      (allà no hi ha res: el render va DIRECTE a EXPORTS PROVISIONALS). Es pren
+         *      de `State.lastRenderName`, que `runVideo` hi deixa en exportar; si el
+         *      panell s'ha recarregat, es busca el MP4 més recent de la carpeta de
+         *      publicació; i com a última xarxa, l'hora actual.
          */
         runPortada: async function () {
             if (!(await getUtils().validateActiveSequence())) return;
@@ -519,32 +691,56 @@
                 await callJSX(`Timeline.set(${tempTC})`);
                 await utils.delay(500);
 
-                // Destí: la MATEIXA carpeta que el MP4 i amb EXACTAMENT el mateix nom.
+                // ── 6b. DESTÍ del PNG: carpeta de PORTADES PUBLICADES (2026-10-09) ──
+                // `config.rutas.portadas` = AAA_PORTADES del NAS. La carpeta del projecte
+                // només queda com a últim recurs si la config no en porta cap.
+                const norm = (p) => String(p || "").replace(/\//g, "\\").replace(/\\+$/, "");
                 const projFolder = await callJSX("Context.folder()");
-                let outDir = (projFolder && String(projFolder).indexOf('ERR') !== 0) ? projFolder : '';
+                let outDir = norm((projFolder && String(projFolder).indexOf('ERR') !== 0) ? projFolder : '');
                 if (!outDir) {
-                    outDir = utils.workFolder(window.FASTPASS_UI.State) || config.rutas.destinoBase || "C:\\Temp";
-                    log(`⚠️ [Portada] Context.folder() no vàlid ("${projFolder}") → destí alternatiu: ${outDir}`, "WARN");
+                    outDir = norm(utils.workFolder(window.FASTPASS_UI.State) || config.rutas.destinoBase || "C:\\Temp");
+                    log(`⚠️ [Portada] Context.folder() no vàlid ("${projFolder}") → recurs alternatiu: ${outDir}`, "WARN");
                 }
-                // NOM del PNG: el MATEIX que el vídeo que JA és a la carpeta del projecte
-                // (inclosa l'hora), no l'hora actual.
+                let pngDir = norm(config.rutas && config.rutas.portadas);
+                if (!pngDir) {
+                    pngDir = outDir;
+                    log(`⚠️ [Portada] Sense carpeta de portades a la config → el PNG va a la del projecte: ${pngDir}`, "WARN");
+                }
+
+                // ── 6c. NOM del PNG: FONT GARANTIDA (2026-10-09) ─────────────────
+                // ⚠️ El render JA NO viu a la carpeta del projecte: runVideo exporta
+                // DIRECTAMENT a la carpeta de publicació (rutas.render1), o sigui que el nom
+                // del PNG NO es pot deduir d'allà. S'ASSEGURA així, per ordre de confiança:
+                //   1) State.lastRenderName ← nom EXACTE del render d'aquesta sessió (el desa
+                //      runVideo en exportar; prefix verificat contra la seqüència activa).
+                //   2) MP4 més recent de la CARPETA DE PUBLICACIÓ amb el prefix PROG_TEMA_
+                //      (cobreix el cas d'haver recarregat el panell, que buida State).
+                //   3) buildRenderName() amb l'hora actual (última xarxa; avisa amb WARN).
                 const refBase = buildRenderName(await callJSX('Context.activeSeq()')).replace(/\.mp4$/i, "");
                 const refPrefix = refBase.replace(/_\d{2}_\d{2}$/, '_').toUpperCase();
+                const lastBase = String(state.lastRenderName || "");
+                const lastOk = !!(lastBase && (!refPrefix || lastBase.toUpperCase().indexOf(refPrefix) === 0));
+                // Carpeta de publicació = on runVideo hi ha deixat el MP4 (rutas.render1).
+                // Només s'hi llegeix si State no porta el nom (cap llistat NAS innecessari).
+                const pubDir = norm(config.rutas && config.rutas.render1) || outDir;
                 let files = null;
-                try { files = await utils.readFolder(outDir); } catch (eL) { log("⚠️ [Portada] No puc llistar la carpeta: " + eL.message, "WARN"); }
-                const videoBase = pickVideoBase(files, refPrefix);
-                let nameBase = videoBase || state.lastRenderName || "";
-                if (videoBase) {
-                    log(`🎬 [Portada] Vídeo de referència a la carpeta: ${videoBase}.mp4 → el PNG serà ${videoBase}.png`);
-                } else if (nameBase) {
-                    log(`🎬 [Portada] Cap .mp4 a la carpeta · s'usa el darrer render d'aquesta sessió: ${nameBase}.mp4`, "WARN");
-                } else {
-                    nameBase = refBase;
-                    log(`⚠️ [Portada] Cap .mp4 de referència: el PNG es nomenarà amb l'hora actual (${nameBase})`, "WARN");
+                if (!lastOk) {
+                    try { files = await utils.readFolder(pubDir); } catch (eL) { log("⚠️ [Portada] No puc llistar la carpeta: " + eL.message, "WARN"); }
+                    if (files === null) log(`⚠️ [Portada] Lectura FALLIDA de ${pubDir} (null ≠ carpeta buida)`, "WARN");
                 }
-                const destPath = `${outDir}\\${nameBase}.png`;
-                utils.ensureFolders(outDir);
-                log(`📸 [Portada] Captura a ${destPath} (t=${tempTC}s) | carpeta projecte=${projFolder}`);
+                const pick = this._resolvePortadaName(lastOk ? lastBase : "", refPrefix, refBase, files);
+                const nameBase = pick.name;
+                if (pick.src === 'sessio') {
+                    log(`🎬 [Portada] Nom del PNG: ${nameBase}.png ← render d'aquesta sessió` +
+                        (state.lastRenderMp4 ? ` (${state.lastRenderMp4})` : ""));
+                } else if (pick.src === 'publicacio') {
+                    log(`🎬 [Portada] Nom del PNG: ${nameBase}.png ← MP4 de la carpeta de publicació (${pubDir})`);
+                } else {
+                    log(`⚠️ [Portada] Cap MP4 de referència a ${pubDir}: el PNG es nomenarà amb l'hora actual (${nameBase})`, "WARN");
+                }
+                const destPath = `${pngDir}\\${nameBase}.png`;
+                utils.ensureFolders(pngDir);
+                log(`📸 [Portada] Captura a ${destPath} (t=${tempTC}s) | portades=${pngDir} | publicació=${norm(config.rutas && config.rutas.render1)}`);
 
                 // S'escriu DIRECTAMENT al destí final amb QE (com el freeze dels chyrons):
                 // exportFrameQE ja crea la carpeta si cal i funciona amb rutes UNC. Evitem
