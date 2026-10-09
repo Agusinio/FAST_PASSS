@@ -564,3 +564,91 @@ congelat **~35 KB**, cap firma duplicada a V7/V8 i cap sobre-deduplicació de r�
 
 Plan detallat, fitxers implicats, decisions obertes i proves disponibles:
 **`plans/HANDOFF_2026-10-08_TITOLETS.md`** §7.
+
+---
+
+## 8a passada (2026-10-09) · MULTI-COLOR per etiqueta (`facets`)
+
+### a) El gris clar de referència: **#DCDCDC** (mesurat al vídeo)
+
+Petició d'usuari: «en el clip del V2 (TNM MIGDIA 2026-10-07), a 1 min 7 s, tens un gris a la dreta que és
+el gris clar de referència; obre el clip i mesura'l per fer servir el valor a la detecció del gris clar».
+
+Mesura sobre `…\2026_10_07\V2\TNM_V2_CLIP.mp4` (1920×1080 · 25 fps · 236,76 s), frame a **t = 67,0 s**
+(`C:\temp\fp\frames\v2_67,0.png`, informes `C:\temp\fp\v2_gray.txt` / `v2_gray2.txt` / `v2_gray3.txt`):
+
+| Zona mesurada | Resultat |
+|---|---|
+| `x[1420..1900) y[60..1020)` (460.800 px) | **#DCDCDC al 100,00 %** · `unics=1` (placa plana) |
+| `x[1600..1880) y[200..880)` (190.400 px) | **#DCDCDC al 100 %** |
+| Estabilitat t = 66,5 / 67 / 67,5 / 68 | **#DCDCDC** sempre (53,7–54,8 % del frame) |
+| Paper del document (contrast) | #FFFFFF (33,2 %) |
+| Franja d'identitat de l'esquerra `x[0..109] y[0..1079]` | #FF6C12 (5,7 %) |
+
+- Coincideix amb el PNG de grafismes (**#DBDADA**) → **Δ ≤ 2 per canal: `tol ±25` cobreix els dos**.
+- En aquest clip **no hi ha cap grafisme** (és un pla de document), i això el fa ideal com a mesura de
+  **terra de fons**: el gris de referència hi surt a **5,1 %** (capsa LLISTA), **8,6 %** (RANQUING),
+  **5,3 %** (DADA-ITEM) i **13,5 %** (ROI comodí) — aquests són els llindars a superar per no fer falsos positius.
+- ⚠️ La franja taronja #FF6C12 **entra dins de** `#F35E13 ±25` (ΔR 12 · ΔG 14 · ΔB 1) però, com que
+  omple la ROI de dalt a baix (`y1 = 1,000`), **la guarda `edgeAxes:'y'` la descarta**.
+
+### b) Mecanisme: `facets` (un color + una zona + uns llindars per faceta)
+
+Una recepta de `titolet.roiPerRole` pot declarar `facets` (llista). Claus d'una faceta:
+`color` · `tol` (si falta, els de la recepta) · **`roiX`/`roiY` propis** (fracció de frame; si falten, la
+zona de la recepta) · `minCov` · `maxCov` · `edgeAxes` · `minEdgeFrac`.
+
+- **Un frame és ON si ALGUNA faceta hi passa**, a la SEVA zona i amb els SEUS llindars (`_frameSummary`).
+- **Una sola passada d'ffmpeg**: s'extreu el rectangle que ENGLOBA totes les zones (hull, ho calcula
+  `_recipeOf`) i cada color només compta dins la seva (`_facetRect` → cel·les de la graella).
+- La cobertura de cada faceta es mesura **sobre l'àrea de la SEVA zona** → els llindars es llegeixen igual
+  que en una recepta d'un sol color (les xifres mesurades dels PNG segueixen servint).
+- `ROI_KEYS` incorpora `facets` → entra a la **clau de grup** de rastreig i a la **clau de caché del pla**
+  (canviar facetes invalida el pla) + `ALGO = 4`.
+- **Sense `facets` tot queda EXACTAMENT com abans** (color únic + llindars de la recepta).
+
+### c) 🎨 Què buscar a cada tipus (colors + zona)
+
+| Tipus | Zona (fracció de frame) | Colors a buscar | Estat |
+|---|---|---|---|
+| TITOLET | `x 0–0,48` · `y 0,61–0,83` (BAIX) | taronja #F35E13 | ✅ mesurat (recepta actual) |
+| TITOLET GRAN | `x 0–0,72` · `y 0,21–0,43` (DALT) / `0,37–0,59` (MIG) | taronja | ⏳ pendent (avui cau al comodí) |
+| PREGUNTA (I / D) | `x 0–0,443` / `0,555–1` · `y 0,402–0,61` | taronja (barra) | ⏳ pendent |
+| CARTELL | `x 0,038–0,286` · `y 0,213–0,884` | taronja (placa sencera) → `roiY [0.15,0.95]` | ⏳ pendent |
+| LLISTA / LLISTA-DADES | `x 0–0,41` · `y 0,24–0,78` | **taronja** (fila activa, `minCov 2,5`) **+ gris clar #DCDCDC** (placa, `minCov 30` · `maxCov 97` · vores `none`) | ✅ **implementat** (llindars del gris provisionals) |
+| RANQUING | `x 0–0,47` · `y 0,31–0,70` | taronja + gris clar #DCDCDC (idèntic criteri) | ✅ implementat |
+| DADA-ITEM | `x 0–0,35` · `y 0,36–0,74` | taronja + gris clar #DCDCDC | ✅ implementat |
+| DADA_COMPARADA | `x 0–0,546` · `y 0,332–0,728` | taronja (3,89 % frame) + gris clar (placa) | ⏳ pendent |
+| DADA-GRAN / -DIVISA | `x 0–0,260` · `y 0,337–0,669` | taronja (0,84 %) + gris clar | ⏳ pendent |
+| DADA-DIFERENCIAL (I/E/base) | `x 0–0,523` / `0,454–1` / `0–0,247` · `y 0,316–0,773` | taronja (1,5 / 1,8 / **0,50 %**) | ⏳ pendent (el base és molt fluix) |
+| DESTACAT (I/E) | `x 0–0,304` / `0,686–1` · `y 0,258–0,681` | taronja | ⏳ pendent |
+| GRAFICA-BARRES | `x 0–0,354` · `y 0,170–0,879` | taronja (barres, 6,64 %) | ⏳ pendent |
+| CRONOLOGIA / -TITOLS | `x 0,046–0,143` / `–0,252` · `y 0,355–0,682` | taronja (1,2 %) | ⏳ pendent |
+| NOTA (I/D) | `x 0–0,331` / `0,664–0,957` · `y 0,634–0,831` | taronja (barra de 12 px, 0,33 %) | ⏳ pendent (banda pròpia) |
+| CLASSI-* / CLASSIFICACIO / PROGRAMACIO | — | — | ⏳ sense mesurar |
+| CIS_CEO / CIS_CEO_COMPARADA | `x 0–0,298` · `y 0,231–0,508` | **sense taronja**: #F1C800 · #00D4B6 · #450001 = **logos de partit (varien)** | 🛑 sense firma de color |
+| IMATGE-CAPTURA | `x 0,038–0,353` · `y 0,191–0,884` | **sense taronja** (fotografia) | 🛑 sense firma de color |
+
+Pendents per tancar la taula: **gris fosc #393939** (cos de files) a les taules, la zona interior exacta de
+cada placa, i els tipus sense mesurar (CLASSI-*, PROGRAMACIO). Cal **una mostra amb LLISTA/RANQUING/DADA-ITEM**
+per fixar el `minCov` del gris (avui provisional, marge ≥3,5× sobre el terra de fons mesurat).
+
+### d) Validació (8a passada)
+
+| Prova | Resultat |
+|---|---|
+| `bin/check_js_v8.ps1` (motor V8) | **57 fitxers · OK 57 · FAIL 0** (exit 0) |
+| `bin/check_dead.ps1` | **0 orfes** (exit 0) |
+| `C:\temp\fp\facet_test.html` + `run_facet_test.ps1` (motor REAL, frames sintètics rgb24) | **11/11 OK** |
+
+Els 11 casos: color únic intacte (`on` undefined, cov 8,73 %) · la faceta taronja fa ON el frame · **placa
+grisa al 91 % amb ZERO taronja → ON** (aquest és el cas nou) · gris **pla al 100 % → descartat** per
+`maxCov 97` (guarda de fons) · **zona pròpia de la faceta**: gris fora de la seva zona = 0 % i no dispara ·
+`_facetRect` [0,0.5] → cel·les 0..50 · la ROI de la recepta **engloba** les zones de les facetes (hull) ·
+facetes diferents → **2 grups** de rastreig · `groupIntervals` fa cas del veredicte `on` · les facetes
+**canvien la clau de caché** · `_facetLog` informa color, zona i llindars.
+
+⚠️ **Pendent de test a Premiere** (panell RECARREGAT: **`11_Configuracio.js?v=31`** ·
+**`17_TitoletDetect_Logic.js?v=3`**): en un ítem amb LLISTA/RANQUING/DADA-ITEM, mirar al log
+`🎨 [titolet] … colors N: #F35E13@x… (2.5-45%, vores y) + #DCDCDC@x… (30-97%, vores none)` i que els
+intervals surtin **sense falsos positius** en plans de fons gris (document, plató).

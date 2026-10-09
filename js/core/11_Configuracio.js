@@ -98,7 +98,80 @@
         roiPerRole: {
             // TITOLET: MESURAT (2026-10-06, roi_real.raw): xinxeta taronja a la banda baixa
             // de l'esquerra, ancorada a x=0 → la vora X no pot desqualificar (només la Y).
-            'TITOLET': { roiX: null, roiY: [0.60, 0.85], edgeAxes: 'y' }
+            'TITOLET': { roiX: null, roiY: [0.60, 0.85], edgeAxes: 'y' },
+
+            // ── DETECTORS PER FAMÍLIA (2026-10-09) ──────────────────────────────────────
+            // MESURAT als PNG de `...\PROVES\GRAFISMES INTEGRATS` i al clip TNM_V3 (235
+            // mostres @1 fps). Taules completes: C:\temp\fp\GRAFISMES_ANALISI.md
+            //  · Color CREMAT al vídeo (≠ PNG per la correcció d'espai de color, 1-3
+            //    unitats/canal): taronja #F35E13 · cos de files #393939 · text #FCFCFC.
+            //    Els PNG porten #F46115 / #3A3A3A. ±25 cobreix tots dos.
+            //  · GRIS CLAR de referència (plaques de fons) = #DCDCDC. MESURAT al vídeo el
+            //    2026-10-09 (TNM_V2 t=67 s, placa plana al 100,00 % —un sol color, 460.800 px—
+            //    i ESTABLE a t=66,5/67/67,5/68). Als PNG és #DBDADA → ±25 cobreix tots dos.
+            //  · 🎨 MULTI-COLOR per etiqueta (2026-10-09): una recepta pot declarar `facets`
+            //    = LLISTA de colors, CADA UN amb la seva ZONA (`roiX`/`roiY` propis en fracció
+            //    de frame; si no en declara, la de la recepta) i els seus llindars. Un frame és
+            //    ON si ALGUNA faceta hi passa. L'escaneig és UNA sola passada: s'extreu el
+            //    rectangle que engloba totes les zones i cada color només compta dins la seva.
+            //    Vegeu `17_TitoletDetect_Logic._frameSummary` / `_facetRect`.
+            //  · 🔴 El color sol NO discrimina: una manifestació (banderes UGT/CCOO, xalecos,
+            //    pancarta) dona 13-16 % de taronja a la banda esquerra — MÉS que un grafisme
+            //    real (DADA-DIFERENCIAL 0,7 %). Baixar la tolerància a ±4 no ho arregla.
+            //    El filtre que salva és la GUARDA DE VORA (`edgeAxes:'y'`): el taronja de
+            //    vídeo omple la banda de dalt a baix (y1=1,000) i es descarta. MESURAT:
+            //    edge 'y' + minCov 1,2-3,0 → 7 intervals ON i 0 falsos en 235 frames;
+            //    edge 'none' → 3-4 intervals falsos. NO posar 'none' en una capsa ampla.
+            //  · `roiY` = capsa on viu la taronja (bbox del PNG + marge) i NO ha de tocar
+            //    les vores (minEdgeFrac 0,04): el CARTELL (taronja y 0,214-0,884) necessita
+            //    y[0.15,0.95] o el detector el prendria per fons.
+            //  · `roiW`/`roiH` = graella de mostreig ≈ 10 px per cel·la a 1080p (una cel·la
+            //    més grossa que el detall el dilueix amb el fons i surt de tolerància).
+            //
+            // LLISTA / LLISTA-DADES (placa de files; la fila ACTIVA és la taronja)
+            //   alpha x[0,0.358] / [0,0.400] · y[0.248,0.764] · taronja y[0.695,0.764] →
+            //   2,12 % / 2,61 % de frame = 9,6 % / 11,8 % de la capsa (minCov 2,5 → 3,8×/4,7×)
+            //   🎨 2 COLORS: la fila taronja (com fins ara) O la PLACA gris clar. La placa
+            //   ocupa TOTA la capsa → la faceta no hi declara zona pròpia (hereta la de la
+            //   recepta). `edgeAxes:'none'` perquè la placa SÍ que toca les vores de la capsa
+            //   (amb 'y' es descartaria ella mateixa) i `maxCov 97` perquè una placa porta
+            //   files i text a dins (no és plana al 100 %) mentre que un fons de gris que
+            //   ompli la capsa sencera SÍ que ho és.
+            //   ⚠️ `minCov 30` és PROVISIONAL: MESURAT en un pla SENSE grafisme (TNM_V2
+            //   t=67 s) el gris de fons arriba a 5,1 % aquí (13,5 % a la ROI comodí) → 30 hi
+            //   deixa ~6× de marge, però PENDENT DE VALIDAR amb un clip amb LLISTA real.
+            'LLISTA': { roiX: [0, 0.41], roiY: [0.24, 0.78], edgeAxes: 'y',
+                color: '#F35E13', tol: 25, minCov: 2.5, maxCov: 45, roiW: 79, roiH: 58,
+                facets: [
+                    { color: '#F35E13', tol: 25 },
+                    { color: '#DCDCDC', tol: 25, minCov: 30, maxCov: 97, edgeAxes: 'none' }
+                ] },
+            'LLISTA-DADES': { roiX: [0, 0.41], roiY: [0.24, 0.78], edgeAxes: 'y',
+                color: '#F35E13', tol: 25, minCov: 2.5, maxCov: 45, roiW: 79, roiH: 58,
+                facets: [
+                    { color: '#F35E13', tol: 25 },
+                    { color: '#DCDCDC', tol: 25, minCov: 30, maxCov: 97, edgeAxes: 'none' }
+                ] },
+            // RANQUING (la 1a fila és la taronja) · alpha x[0,0.461] y[0.317,0.693] ·
+            //   taronja x[0,0.460] y[0.409,0.477] → 2,94 % de frame = 16,0 % de la capsa (6,4×)
+            //   🎨 2 COLORS: fila taronja O placa gris clar (mateixos criteris que LLISTA;
+            //   el gris de fons mesurat aquí és 8,6 % → 30 deixa 3,5× de marge).
+            'RANQUING': { roiX: [0, 0.47], roiY: [0.31, 0.70], edgeAxes: 'y',
+                color: '#F35E13', tol: 25, minCov: 2.5, maxCov: 45, roiW: 90, roiH: 42,
+                facets: [
+                    { color: '#F35E13', tol: 25 },
+                    { color: '#DCDCDC', tol: 25, minCov: 30, maxCov: 97, edgeAxes: 'none' }
+                ] },
+            // DADA-ITEM (la fila taronja va al mig, entre la capçalera i la fila fosca) ·
+            //   alpha x[0,0.334] y[0.374,0.723] · taronja x[0,0.333] y[0.473,0.598] →
+            //   3,74 % de frame = 28,2 % de la capsa (9,4×)
+            //   🎨 2 COLORS: fila taronja O placa gris clar (gris de fons mesurat aquí: 5,3 %).
+            'DADA-ITEM': { roiX: [0, 0.35], roiY: [0.36, 0.74], edgeAxes: 'y',
+                color: '#F35E13', tol: 25, minCov: 3.0, maxCov: 45, roiW: 67, roiH: 41,
+                facets: [
+                    { color: '#F35E13', tol: 25 },
+                    { color: '#DCDCDC', tol: 25, minCov: 30, maxCov: 97, edgeAxes: 'none' }
+                ] }
         },
         // Comodí per a les etiquetes sense mesurar: MITJA IMATGE ESQUERRA, que és on apunta
         // ja la finestra d'OCR (`ocrRoiX`) i on viuen els rètols d'aquest sistema. La franja

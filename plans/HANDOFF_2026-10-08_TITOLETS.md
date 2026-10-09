@@ -197,6 +197,44 @@ graella 96×96) i **totes** comparteixen la **mateixa màscara de color** `#F25F
 (imatge/retol a pantalla completa), un `DADA-GRAN`, un `NOTA` o una `LLISTA` no tenen per què ser taronges
 ni viure a l'esquerra → **no es troben i cauen al fallback**.
 
+**📏 MESURA REAL (2026-10-08, 15:31) — `TNM_V3_CLIP.mp4`, 8 mostres** · mètode: `C:\temp\fp\measure_cartell.ps1`
+(ffmpeg 384×216, mimica exacta del `crop`+`scale` del pipeline amb graella per cel·la; taronja `#F25F13 ±25`, gris `#383838 ±16`).
+
+Geometria del cartell (IDÈNTICA a t=98,2 · 100 · 130):
+- **barra taronja**: bbox y 87..110 de 216 = **0,403..0,514** (y360px 145..185) · **x 0..169 = 44,3% de l'ample, ancorada a x=0** · 16 files ≥25% d'ample.
+- **cos gris `#383838`**: files 112..140 (t=100) i 112..156 (t=130) = **0,519..0,653 / 0,519..0,727**, pic 44,3-62,0% d'ample.
+- A **t=98,0** la barra JA hi és però encara és GRISA (`TAG naranja: AUSENT`) → l'animació va de gris a taronja.
+
+| instant | contingut | comodí `y[.10,.98] x[0,.5]` 96×96 | cartell `y[.32,.78]` 96×48 | cartellT `y[.35,.70]` 96×48 | titolet `y[.60,.85]` 160×45 |
+|---|---|---|---|---|---|
+| 96,0 | decorat dia | 0,00 | 0,00 | 0,00 | 0,00 |
+| 98,0 | tall (barra encara grisa) | 0,00 | 0,00 | 0,00 | 0,00 |
+| **98,2** | **cartell** | **7,93** | **15,86** | **21,22** | 0,00 |
+| **100,0** | **cartell** | **7,93** | **15,86** | **21,22** | 0,00 |
+| 111,0 | plató | 0,00 | 0,00 | 0,00 | 0,00 |
+| **130,0** | **cartell** | **7,95** | **15,86** | **21,44** | 0,00 |
+| 140,0 | plató | 0,00 | 0,00 | 0,00 | 0,00 |
+| 155,0 | decorat fosc | 0,00 | 0,00 | 0,00 | 0,00 |
+
+(màscara TARONJA, % de la ROI. Els mateixos instants amb la màscara GRISA: 96,0 → 1,41/2,32/3,23/2,31 · 111,0 → 0,46/0,56/0,91/1,01 · **155,0 → 13,55/12,85/9,94/16,79**)
+
+**Conclusions (amb dades, no amb intuïció):**
+1. **El cartell d'aquesta família SÍ que és taronja**: la barra `#F25F13` (y 0,40-0,51) hi és a TOTS els frames de cartell ⇒ la màscara
+   actual ja el veu; el que fallava era la **zona** (banda del TITOLET y 0,60-0,85 → **0,00% sempre**, l'origen dels 6 PREGUNTA a 0 intervals).
+2. **El comodí de la 7a passada ja el caça**: 7,93-7,95% amb `minCov 1.2` (marge **6,6×**) i **0,00% als 4 negatius** ⇒ aquest cas ja està cobert;
+   només falta el test a Premiere (apartat 6).
+3. **El GRIS NO pot entrar a la màscara** (descartat per dades): amb `#383838 ±16` el decorat fosc sense cap rètol (t=155) dóna **13,55%**
+   i el cartell real **17,07%** al mateix ROI ⇒ **sense marge** (a la banda cartell: 12,85% vs 26,30%, marge 2×). El cos gris només valdria
+   com a SEGON senyal (co-presència amb la barra), mai sol.
+4. **Banda pròpia `y[0.32,0.78] x[0,0.5]` (roiW 96 · roiH 48)**: apuja el senyal del cartell a **15,86%** (21,2-21,4% amb `y[0.35,0.70]`)
+   i manté **0,00%** als quatre negatius ⇒ permet pujar `minCov` a ~4-5 (llindar absolut ≈19k px contra ≈11k del comodí = ~1,7× més estricte).
+5. **Cost**: una recepta amb valors DIFERENTS crea un grup d'ffmpeg propi (`roleGroups` dedueix per signatura d'`ROI_KEYS`) ⇒ +1 passada
+   per ítem que barregi aquesta etiqueta amb les del comodí. Una recepta amb la MATEIXA signatura no canvia res (mateix grup).
+
+**Decisió pendent (usuari)**: (a) deixar el comodí tal com està i validar a Premiere · (b) recepta pròpia de `PREGUNTA`/`CARTELL` amb banda
+estreta + `minCov` alt · (c) si hi ha cartells **sense barra taronja** (imatge pura), cal mesurar-ne un altre i entrar a §7A.3 (detecció
+sense color / diferència de frames).
+
 **Camí previst (JS pur; JSX tancat)**:
 
 1. **Mesurar amb material real abans de tocar res** (mètode de les passades 2a/7a): triar un ítem del NAS

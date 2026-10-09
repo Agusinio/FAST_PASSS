@@ -1,10 +1,22 @@
 /**
  * ============================================================================
- * LOGIC: TITOLET DETECT - v1.1.0 (2026-10-06)
+ * LOGIC: TITOLET DETECT - v1.2.0 (2026-10-09)
  * Detecció del grafisme cremat (rètol mosquit) al MP4 cleanFeed
  * ============================================================================
  * Llegeix el MP4 cleanFeed, mesura QUAN surt el rètol TITOLET (color #F25F13)
  * i QUANT dura, i en llegeix el text per OCR per saber QUIN wott és.
+ *
+ * 🎨 MULTI-COLOR PER ETIQUETA (2026-10-09, 8a passada; petició d'usuari: «detectar més
+ * d'un color per tipus de grafisme, i definir per a cada tipus quins colors i en quina
+ * zona s'han de buscar»). Una recepta pot declarar `facets`: una LLISTA de colors, CADA
+ * UN amb la seva ZONA (`roiX`/`roiY` propis en fracció de frame; si no en declara, la de
+ * la recepta) i els seus PROPIS llindars (`minCov`/`maxCov`/`edgeAxes`/`minEdgeFrac`).
+ *   · Un frame és ON si ALGUNA faceta hi passa (`_frameSummary` → `frame.on`).
+ *   · La cobertura de cada faceta es mesura sobre l'ÀREA DE LA SEVA ZONA (no sobre el
+ *     conjunt) → els llindars es poden llegir igual que en una recepta d'un sol color.
+ *   · L'escaneig segueix sent UNA sola passada d'ffmpeg: s'extreu el rectangle que
+ *     ENGLOBA totes les zones (hull) i cada color només compta dins la seva (`_facetRect`).
+ *   · Sense `facets` tot queda EXACTAMENT com abans (color únic + llindars de la recepta).
  *
  * Receta validada a l'ítem 16 (12/12 wotts trobats):
  *   - ROI: X = tot l'ample, Y = 0,60-0,85 (mosquit de la part baixa).
@@ -47,7 +59,7 @@
     // ─── PUR: ROI per ETIQUETA (2026-10-08, 7a passada) ──────────────────────
     /** ROI_KEYS: paràmetres del rastreig que una recepta d'etiqueta pot sobreescriure. */
     const ROI_KEYS = ['roiX', 'roiY', 'edgeAxes', 'color', 'tol', 'minCov', 'maxCov',
-        'minEdgeFrac', 'ocrRoiX', 'roiW', 'roiH'];
+        'minEdgeFrac', 'ocrRoiX', 'roiW', 'roiH', 'facets'];
 
     /**
      * _recipeOf: (PURA) Recepta de rastreig d'UNA etiqueta de rol. Precedència:
@@ -73,6 +85,16 @@
                 if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = src[k];
             }
         }
+        // 🎨 MULTI-COLOR (2026-10-09, 8a passada): la ROI de la recepta ha d'ENGLOBAR les
+        // zones de totes les facetes — l'escaneig fa UNA sola passada (hull) i després
+        // cada color només compta dins la seva zona (`_facetRect`). Si la ROI no les
+        // inclou, la zona queda FORA del que s'ha extret i la faceta mai no hi veu res.
+        const fs = _facetsOf(out);
+        for (const f of fs) {
+            if (f.roiX) out.roiX = _hull2(out.roiX, f.roiX, [0, 1]);
+            if (f.roiY) out.roiY = _hull2(out.roiY, f.roiY, [0, 1]);
+        }
+        if (out.roiX && out.roiX[0] <= 0.001 && out.roiX[1] >= 0.999) out.roiX = null;
         out.from = per ? ('recepta ' + role) : (c.roiDefault ? 'comodí' : 'base');
         return out;
     }
@@ -126,6 +148,11 @@
         let color = recs[0].color, tol = recs[0].tol, minEdgeFrac = recs[0].minEdgeFrac;
         let minCov = recs[0].minCov, maxCov = recs[0].maxCov, ocrRoiX = recs[0].ocrRoiX;
         let roiW = recs[0].roiW, roiH = recs[0].roiH;
+        // 🎨 MULTI-COLOR (2026-10-09, 8a passada): la unió d'etiquetes ha d'unir també les
+        // FACETES (colors + zones). Si no, un ítem que mescla etiquetes amb facetes diferents
+        // es rastrejaria amb les d'una de sola. Els grups (`roleGroups`) les porten igualment
+        // SEVES (una passada per grup): això només afecta la clau de caché i els logs.
+        let facets = _facetsOf(recs[0]).slice();
         const warns = [];
         for (let i = 1; i < recs.length; i++) {
             const r = recs[i];
@@ -144,6 +171,11 @@
             minCov = Math.min((minCov != null) ? minCov : 2.0, (r.minCov != null) ? r.minCov : 2.0);
             maxCov = Math.max((maxCov != null) ? maxCov : 60, (r.maxCov != null) ? r.maxCov : 60);
             ocrRoiX = _hull2(ocrRoiX, r.ocrRoiX, [0, 1]);
+            const rf = _facetsOf(r);
+            for (const f of rf) {
+                const k = JSON.stringify(f);
+                if (!facets.some(x => JSON.stringify(x) === k)) facets.push(f);
+            }
         }
         if (roiX && roiX[0] <= 0.001 && roiX[1] >= 0.999) roiX = null;
         eff.roiX = roiX;
@@ -161,6 +193,8 @@
         // quedava reduït a un punxat i es perdia el color. `undefined` manté el defecte.
         if (roiW !== undefined) eff.roiW = roiW;
         if (roiH !== undefined) eff.roiH = roiH;
+        // 🎨 MULTI-COLOR: les facetes unides de totes les etiquetes de l'ítem.
+        if (facets.length) eff.facets = facets;
         // Finestra d'OCR: MAI fora de la zona rastrejada (si no, l'OCR llegiria on no hi ha
         // rètol: MESURAT que llegia el marcador de votacions del fons).
         const roiClamp = roiX || [0, 1];
@@ -193,57 +227,178 @@
     }
 
     /**
-     * _analyzeFrame: mesura UN frame RGB24 del ROI.
-     * cov = % de píxels que casen amb el color (±tol per canal) sobre el total del ROI.
-     * edge = la taca toca alguna vora del ROI (marge minEdgeFrac) → es descarta.
+     * _analyzeRect: mesura UN color dins un RECTANGLE de cel·les de la graella (`rect`, en
+     * cel·les; `null` = tota la graella).
+     * cov = % de píxels que casen amb el color (±tol per canal) sobre l'ÀREA DEL RECTANGLE
+     * (no de la graella) → els llindars d'una faceta es llegeixen igual que els d'un color únic.
+     * `axes` diu QUINES vores (del rectangle) desqualifiquen la taca:
+     *   'y' (per defecte) = només dalt/baix. MESURAT amb dades reals (TN Migdia 2026-10-05,
+     *      roi_real.raw): el rètol TITOLET és una xinxeta ancorada a l'ESQUERRA del frame
+     *      (x0 = 0 SEMPRE) → comprovar les vores X el descartava TOT (0 intervals). El que
+     *      sí que delata un FONS de grafisme és que la taca ompli el ROI de dalt a baix.
+     *   'xy' = les quatre vores (comportament estricte original) · 'none' = cap.
      */
-    function _analyzeFrame(buf, off, w, h, rgb, tol, minEdgeFrac, axes) {
+    function _analyzeRect(buf, off, w, h, rgb, tol, minEdgeFrac, axes, rect) {
+        const cx0 = (rect && rect.cx0 != null) ? rect.cx0 : 0;
+        const cx1 = (rect && rect.cx1 != null) ? rect.cx1 : w;
+        const cy0 = (rect && rect.cy0 != null) ? rect.cy0 : 0;
+        const cy1 = (rect && rect.cy1 != null) ? rect.cy1 : h;
+        const rw = Math.max(1, cx1 - cx0), rh = Math.max(1, cy1 - cy0);
         let count = 0;
-        let x0 = w, x1 = -1, y0 = h, y1 = -1;
-        for (let y = 0; y < h; y++) {
+        let x0 = rw, x1 = -1, y0 = rh, y1 = -1;
+        for (let y = cy0; y < cy1; y++) {
             const row = off + y * w * 3;
-            for (let x = 0; x < w; x++) {
+            for (let x = cx0; x < cx1; x++) {
                 const p = row + x * 3;
                 const r = _byteAt(buf, p), g = _byteAt(buf, p + 1), b = _byteAt(buf, p + 2);
                 if (Math.abs(r - rgb.r) <= tol && Math.abs(g - rgb.g) <= tol && Math.abs(b - rgb.b) <= tol) {
                     count++;
-                    if (x < x0) x0 = x;
-                    if (x > x1) x1 = x;
-                    if (y < y0) y0 = y;
-                    if (y > y1) y1 = y;
+                    const rx = x - cx0, ry = y - cy0;
+                    if (rx < x0) x0 = rx;
+                    if (rx > x1) x1 = rx;
+                    if (ry < y0) y0 = ry;
+                    if (ry > y1) y1 = ry;
                 }
             }
         }
-        const cov = (count * 100) / (w * h);
-        // `axes` diu QUINES vores desqualifiquen la taca:
-        //   'y' (per defecte) = només dalt/baix. MESURAT amb dades reals (TN Migdia
-        //     2026-10-05, roi_real.raw): el rètol TITOLET és una xinxeta ancorada a
-        //     l'ESQUERRA del frame (x0 = 0 SEMPRE) → comprovar les vores X el descartava
-        //     TOT (0 intervals). El que sí que delata un FONS de grafisme és que la taca
-        //     ompli el ROI de dalt a baix.
-        //   'xy' = les quatre vores (comportament estricte original) · 'none' = cap.
+        const cov = (count * 100) / (rw * rh);
         const ax = axes || 'y';
         let edge = false;
         if (count > 0) {
-            const mx = Math.max(1, Math.round(w * minEdgeFrac));
-            const my = Math.max(1, Math.round(h * minEdgeFrac));
-            const eX = (ax.indexOf('x') !== -1) && ((x0 < mx) || (x1 >= w - mx));
-            const eY = (ax.indexOf('y') !== -1) && ((y0 < my) || (y1 >= h - my));
+            const mx = Math.max(1, Math.round(rw * minEdgeFrac));
+            const my = Math.max(1, Math.round(rh * minEdgeFrac));
+            const eX = (ax.indexOf('x') !== -1) && ((x0 < mx) || (x1 >= rw - mx));
+            const eY = (ax.indexOf('y') !== -1) && ((y0 < my) || (y1 >= rh - my));
             edge = eX || eY;
         }
         return { cov: cov, x0: x0, x1: x1, y0: y0, y1: y1, edge: edge };
     }
 
     /**
+     * _analyzeFrame: mesura UN frame RGB24 del ROI amb UN color (àlies de `_analyzeRect` amb
+     * tota la graella). Es manté perquè és l'eina dels ajustos manuals i dels tests.
+     */
+    function _analyzeFrame(buf, off, w, h, rgb, tol, minEdgeFrac, axes) {
+        return _analyzeRect(buf, off, w, h, rgb, tol, minEdgeFrac, axes, null);
+    }
+
+    // ─── PUR: MULTI-COLOR (2026-10-09, 8a passada) ───────────────────────────
+    /**
+     * _facetsOf: (PURA) Facetes VÀLIDES d'una recepta (`[]` si no n'hi ha cap). Una faceta
+     * sense `color` propi hereta el de la recepta; sense `roiX`/`roiY`, la zona de la recepta.
+     */
+    function _facetsOf(cfg) {
+        const f = (cfg && cfg.facets) ? cfg.facets : null;
+        if (!f || !f.length) return [];
+        const out = [];
+        for (const x of f) {
+            if (!x) continue;
+            if (x.color === undefined && !cfg.color) continue;
+            out.push(x);
+        }
+        return out;
+    }
+
+    /** _facetLog: text curt de les facetes (color@zona(llindars)) per als logs. */
+    function _facetLog(cfg) {
+        const fs = _facetsOf(cfg);
+        if (!fs.length) return '';
+        const parts = [];
+        for (const f of fs) {
+            const c = (f.color !== undefined) ? f.color : cfg.color;
+            const zx = f.roiX || cfg.roiX || [0, 1], zy = f.roiY || cfg.roiY || [0, 1];
+            const own = (f.roiX || f.roiY) ? '' : '*';
+            const mn = (f.minCov != null) ? f.minCov : cfg.minCov;
+            const mx = (f.maxCov != null) ? f.maxCov : cfg.maxCov;
+            const ax = (f.edgeAxes !== undefined) ? f.edgeAxes : cfg.edgeAxes;
+            parts.push(c + '@x' + zx[0] + '-' + zx[1] + own + ' y' + zy[0] + '-' + zy[1] +
+                ' (' + mn + '-' + mx + '%, vores ' + ax + ')');
+        }
+        return parts.join(' + ');
+    }
+
+    /**
+     * _facetRect: (PURA) Zona d'una FACETA (fracció de FRAME) → cel·les de la graella w×h de
+     * la ROI mare (`hull`). `null` = la faceta no declara zona → tota la ROI mare (és el
+     * comportament d'un color únic: la cobertura es mesura sobre tota la graella).
+     */
+    function _facetRect(f, hullX, hullY, w, h) {
+        const zx = (f && f.roiX) ? f.roiX : null;
+        const zy = (f && f.roiY) ? f.roiY : null;
+        if (!zx && !zy) return null;
+        const HX = (hullX && hullX.length === 2) ? hullX : [0, 1];
+        const HY = (hullY && hullY.length === 2) ? hullY : [0, 1];
+        const sx = Math.max(1e-6, HX[1] - HX[0]), sy = Math.max(1e-6, HY[1] - HY[0]);
+        const a = zx || HX, b = zy || HY;
+        let cx0 = Math.floor((((a[0] - HX[0]) / sx) * w));
+        let cx1 = Math.ceil((((a[1] - HX[0]) / sx) * w));
+        let cy0 = Math.floor((((b[0] - HY[0]) / sy) * h));
+        let cy1 = Math.ceil((((b[1] - HY[0]) / sy) * h));
+        cx0 = Math.max(0, Math.min(w - 1, cx0));
+        cx1 = Math.max(cx0 + 1, Math.min(w, cx1));
+        cy0 = Math.max(0, Math.min(h - 1, cy0));
+        cy1 = Math.max(cy0 + 1, Math.min(h, cy1));
+        return { cx0: cx0, cx1: cx1, cy0: cy0, cy1: cy1 };
+    }
+
+    /**
+     * _frameSummary: (PURA) Mètrica d'UN frame amb la RECEPTA sencera.
+     *   · Sense `facets` → un sol color amb els llindars de la recepta (`on` queda `undefined`:
+     *     qui decideix si el frame és ON és `groupIntervals`, com sempre).
+     *   · Amb `facets` → mira CADA color dins la SEVA zona: el frame és ON (`on: true`) si
+     *     ALGUNA faceta passa els SEUS llindars i no se l'ha descartat la vora. `cov`/`edge`
+     *     són de la faceta GUANYADORA (la que passa amb més cobertura; si cap passa, la de
+     *     més cobertura) → `maxCov`/`bestT` i l'OCR segueixen triant el frame bo.
+     * @returns {{cov:number, edge:boolean, on:(boolean|undefined), facet:number,
+     *            facets:(Array|null), x0:number, x1:number, y0:number, y1:number}}
+     */
+    function _frameSummary(buf, off, w, h, cfg) {
+        const c = cfg || {};
+        const fs = _facetsOf(c);
+        const mef0 = (c.minEdgeFrac != null) ? c.minEdgeFrac : 0.04;
+        if (!fs.length) {
+            const m = _analyzeRect(buf, off, w, h, _hexToRgb(c.color),
+                (c.tol != null) ? c.tol : 25, mef0, c.edgeAxes, null);
+            return {
+                cov: m.cov, edge: m.edge, on: undefined, facet: -1, facets: null,
+                x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1
+            };
+        }
+        const det = [];
+        let best = -1, pass = -1;
+        for (let k = 0; k < fs.length; k++) {
+            const f = fs[k];
+            const m = _analyzeRect(buf, off, w, h,
+                _hexToRgb((f.color !== undefined) ? f.color : c.color),
+                (f.tol != null) ? f.tol : ((c.tol != null) ? c.tol : 25),
+                (f.minEdgeFrac != null) ? f.minEdgeFrac : mef0,
+                (f.edgeAxes !== undefined) ? f.edgeAxes : c.edgeAxes,
+                _facetRect(f, c.roiX, c.roiY, w, h));
+            const mn = (f.minCov != null) ? f.minCov : ((c.minCov != null) ? c.minCov : 2.0);
+            const mx = (f.maxCov != null) ? f.maxCov : ((c.maxCov != null) ? c.maxCov : 60);
+            det.push({
+                k: k, color: (f.color !== undefined) ? f.color : c.color, cov: m.cov,
+                edge: m.edge, min: mn, max: mx,
+                on: (m.cov >= mn) && (m.cov < mx) && !m.edge,
+                x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1
+            });
+            if (best === -1 || det[k].cov > det[best].cov) best = k;
+            if (det[k].on && (pass === -1 || det[k].cov > det[pass].cov)) pass = k;
+        }
+        const win = (pass !== -1) ? det[pass] : det[best];
+        return {
+            cov: win.cov, edge: win.edge, on: (pass !== -1), facet: win.k, facets: det,
+            x0: win.x0, x1: win.x1, y0: win.y0, y1: win.y1
+        };
+    }
+
+    /**
      * analyzeFrameAt: mesura UN frame concret d'una sèrie rgb24 (cobertura, bbox i si
-     * toca les vores). És l'eina per AJUSTAR la ROI amb dades reals (dry-run/log).
+     * toca les vores), amb la recepta sencera (multi-color si en porta). És l'eina per
+     * AJUSTAR la ROI amb dades reals (dry-run/log).
      */
     function analyzeFrameAt(buf, w, h, i, cfg) {
-        const rgb = _hexToRgb(cfg.color);
-        return _analyzeFrame(buf, i * w * h * 3, w, h, rgb,
-            (cfg.tol != null) ? cfg.tol : 25,
-            (cfg.minEdgeFrac != null) ? cfg.minEdgeFrac : 0.04,
-            cfg.edgeAxes);
+        return _frameSummary(buf, i * w * h * 3, w, h, cfg);
     }
 
     /**
@@ -251,28 +406,32 @@
      * mètrica de cada mostra.
      * @param {string|Uint8Array} buf - buffer de tota la sèrie (frames seguits)
      * @param {number} w · @param {number} h - dimensions del ROI de cada frame
-     * @param {Object} cfg - { color, tol, scanFps, minEdgeFrac, tStart }
-     * @returns {Array<{i:number,t:number,cov:number,edge:boolean}>}
+     * @param {Object} cfg - { color, tol, scanFps, minEdgeFrac, edgeAxes, tStart } i, si
+     *   la recepta és MULTI-COLOR, { roiX, roiY, facets, minCov, maxCov } (les zones de
+     *   les facetes es resolen amb la graella w×h: vegeu `_facetRect`).
+     * @returns {Array<{i:number,t:number,cov:number,edge:boolean,on:(boolean|undefined)}>}
+     *   `on` només hi és quan la recepta porta `facets` (decideix `groupIntervals`).
      */
     function analyzeSeries(buf, w, h, cfg) {
-        const rgb = _hexToRgb(cfg.color);
-        const tol = (cfg.tol != null) ? cfg.tol : 25;
         const fps = cfg.scanFps || 1;
         const tStart = (cfg.tStart != null) ? cfg.tStart : 0;
-        const minEdgeFrac = (cfg.minEdgeFrac != null) ? cfg.minEdgeFrac : 0.04;
         const frameBytes = w * h * 3;
         const total = Math.floor((buf.length || 0) / frameBytes);
         const out = [];
         for (let i = 0; i < total; i++) {
-            const m = _analyzeFrame(buf, i * frameBytes, w, h, rgb, tol, minEdgeFrac, cfg.edgeAxes);
-            out.push({ i: i, t: tStart + i / fps, cov: Math.round(m.cov * 1000) / 1000, edge: m.edge });
+            const m = _frameSummary(buf, i * frameBytes, w, h, cfg);
+            out.push({
+                i: i, t: tStart + i / fps, cov: Math.round(m.cov * 1000) / 1000,
+                edge: m.edge, on: m.on
+            });
         }
         return out;
     }
 
     /**
      * groupIntervals: converteix la sèrie de mostres en intervals ON (rètol visible).
-     * Un frame és ON si cov >= minCov i !edge. S'hi fusiona tot buit <= (minOff+gapMergeSec)
+     * Un frame és ON si cov >= minCov i !edge — o segons el veredicte `on` de la mostra, que
+     * és el cas de les receptes MULTI-COLOR (`facets`). S'hi fusiona tot buit <= (minOff+gapMergeSec)
      * i es descarten els intervals més curts que minOn o amb menys de `minFrames`
      * mostres ON (una sola mostra a 1 fps és soroll de rètol, no un rètol).
      * El rètol es considera viu fins a 1/scanFps després de l'última mostra ON.
@@ -299,7 +458,12 @@
         let cur = null, lastOn = null;
         for (let i = 0; i < frames.length; i++) {
             const f = frames[i];
-            if (!((f.cov >= minCov) && (f.cov < maxCov) && !f.edge)) continue;
+            // 🎨 MULTI-COLOR (2026-10-09, 8a passada): amb `facets`, cada mostra ja porta el
+            // SEU veredicte (`f.on`, calculat amb els llindars de cada color a la seva zona)
+            // i aquí no s'hi tornen a aplicar els de la recepta. Sense facetes, comportament
+            // de sempre (el frame és ON si cov >= minCov, < maxCov i no toca les vores).
+            const on = (f.on !== undefined) ? !!f.on : ((f.cov >= minCov) && (f.cov < maxCov) && !f.edge);
+            if (!on) continue;
             if (cur && lastOn !== null && (f.t - lastOn) > gapSplit) { raw.push(cur); cur = null; }
             if (!cur) cur = { tIn: f.t, tOut: f.t, maxCov: f.cov, nFrames: 0, bestT: f.t };
             cur.tOut = f.t;
@@ -822,7 +986,12 @@
             color: cfg.color, tol: cfg.tol, scanFps: sc.fps, minEdgeFrac: cfg.minEdgeFrac,
             // ⚠️ `edgeAxes` s'ha de passar EXPLÍCITAMENT: abans no hi era i `_analyzeFrame` hi
             // queia al seu valor per defecte ('y'), així que una recepta amb 'none' no s'aplicava.
-            edgeAxes: cfg.edgeAxes, tStart: tStart
+            edgeAxes: cfg.edgeAxes, tStart: tStart,
+            // 🎨 MULTI-COLOR (2026-10-09, 8a passada): les facetes necessiten la ROI MARE (el
+            // rectangle que s'ha extret) per situar la zona de cada color dins la graella, i
+            // els llindars de la recepta com a herència de les facetes que no els declaren.
+            roiX: cfg.roiX, roiY: cfg.roiY, facets: cfg.facets,
+            minCov: cfg.minCov, maxCov: cfg.maxCov
         });
         try { await utils.callJSX('IO.remove(' + JSON.stringify(sc.path) + ')'); } catch (eR) { }
         return { ok: true, series: series, w: sc.w, h: sc.h, error: null };
@@ -911,8 +1080,10 @@
      *   2 = (2026-10-06, 5a passada) + matchos febles amb text aliè rebutjats + orfes per ordre
      *   3 = (2026-10-08, 7a passada) + grups de ROI per etiqueta (cada interval només pot
      *       assignar-se els wotts del seu grup de rastreig)
+     *   4 = (2026-10-09, 8a passada) + MULTI-COLOR per etiqueta (`facets`): un frame és ON si
+     *       alguna faceta hi passa a la SEVA zona amb els SEUS llindars
      */
-    const ALGO = 3;
+    const ALGO = 4;
 
     /** _hash32: hash estable (djb2) d'un text → clau de caché curta. */
     function _hash32(s) {
@@ -951,6 +1122,10 @@
         // recepta d'etiqueta amb mitja imatge): amb `roiX: null` l'escaneig és el de sempre i
         // la clau ha de continuar sent la mateixa per aprofitar el pla ja desat.
         if (cfg && cfg.roiX) obj.cfg.roiX = cfg.roiX;
+        // 🎨 MULTI-COLOR (2026-10-09, 8a passada): canviar les facetes (colors, zones o
+        // llindars) canvia el resultat → ha d'invalidar el pla desat. Només entren a la clau
+        // quan n'hi ha, així els ítems sense facetes conserven la seva clau de sempre.
+        if (cfg && cfg.facets && cfg.facets.length) obj.cfg.facets = cfg.facets;
         // (2026-10-08, 7a passada) Només els ítems amb MÉS D'UNA recepta de ROI necessiten la
         // signatura dels grups: així la clau dels ítems d'una sola recepta (TITOLET) NO canvia
         // i el pla que ja tenien desat es continua reaprofitant.
@@ -1217,6 +1392,13 @@
                     ' · y ' + gc.roiY[0] + '→' + gc.roiY[1] + ' · vores ' + gc.edgeAxes +
                     ' · cov ' + gc.minCov + '-' + gc.maxCov + '% (' + (g.recipe.from || 'base') + ')');
             }
+            // 🎨 MULTI-COLOR (8a passada): si la recepta del grup porta colors (facets), es diu
+            // un cop per grup — color, zona i llindars de CADA faceta (l'* = zona de la recepta).
+            const flog = _facetLog(gc);
+            if (flog) {
+                utils.log('   🎨 [titolet] ' + label + ' grup ' + (gi + 1) + '/' + groups.length +
+                    ' «' + g.role + '» colors ' + _facetsOf(gc).length + ': ' + flog);
+            }
             let cursor = tStart;
             while (cursor < endAbs && (nInGroup(gi) < g.wotts.length || sawWeak)) {
                 const len = Math.min(chunk, endAbs - cursor);
@@ -1333,6 +1515,12 @@
         groupAllow: _groupAllow,
         sameGroup: _sameGroup,
         roiKeys: ROI_KEYS,
+        // ── pures: MULTI-COLOR per etiqueta (8a passada) ──
+        facetsOf: _facetsOf,
+        facetLog: _facetLog,
+        facetRect: _facetRect,
+        analyzeRect: _analyzeRect,
+        frameSummary: _frameSummary,
         // ── orquestració (CEP: ffmpeg + OCR + IO) ──
         ocrText: ocrText,
         scanMp4: scanMp4,
