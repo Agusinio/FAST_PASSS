@@ -565,8 +565,10 @@
             // al 60 % del clip: quan la part viva és el clip SENCER, el darrer frame cau a
             // l'animació de sortida (o al final del mèdia) i el PNG sortiria BUID → «congelat
             // invisible» (l'usuari ho veia com un congelat innecessari).
-            const grabFrac = (cfg && cfg.titolet && Number(cfg.titolet.freezeGrabFrac) > 0)
-                ? Number(cfg.titolet.freezeGrabFrac) : 0;
+            // (2026-10-12) `opts.grabFrac` permet que cada flux tingui el SEU instant de
+            // captura (TITOLET vs TRADUCCIÓ); si no arriba, mana la clau del TITOLET.
+            const grabFrac = (Number(o.grabFrac) > 0) ? Number(o.grabFrac)
+                : ((cfg && cfg.titolet && Number(cfg.titolet.freezeGrabFrac) > 0) ? Number(cfg.titolet.freezeGrabFrac) : 0);
             const grabOff = (o.frameMid === true && grabFrac > 0)
                 ? Math.min(tmpDur - REV_FRAME, Math.max(REV_FRAME, tmpDur * grabFrac))
                 : (tmpDur - REV_FRAME);
@@ -632,6 +634,143 @@
             log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V${T_THEME} @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
             
             return { success: true, duration };
+        },
+
+        /**
+         * _isStillMedia: El mèdia d'aquest rètol és una IMATGE FIXA (PNG/JPG…)?
+         * Un mèdia fix s'estira sense límit (Premiere el manté) → mai necessita congelat.
+         * @param {string} name
+         * @returns {boolean}
+         */
+        _isStillMedia: function (name) {
+            return /\.(png|jpe?g|tiff?|psd|bmp|gif|eps|ai)$/i.test(String(name || ''));
+        },
+
+        /**
+         * _tradMediaDur: Durada REAL (segons) del mèdia d'un rètol, 0 si no es pot resoldre.
+         *
+         * És la dada que decideix si cal CONGELAR la cua d'una traducció: si el mèdia és més
+         * CURT que l'espai del seu slot, `Clips.insert` + `Clips.endAt(slotEnd)` l'estiraria
+         * més enllà del mèdia i la cua quedaria BUIDA.
+         *
+         * Fonts EXACTES (mai estimacions per mida de fitxer: `_resolveWottDur` amb `src`
+         * 'mida*' estima amb un bitrate calibrat del bin i un error del 20 % faria decidir
+         * malament):
+         *   1. Durada del DOM al bin CHY (`_resolveWottDur`, fonts 'bin'/'bin~norm'/'bin~id').
+         *   2. Durada de l'ítem del projecte (`Logic.Project.getDuration` → JSX
+         *      `Project.itemDuration`).
+         * Un mèdia FIX (PNG) sempre retorna 0: s'estira sense problema.
+         *
+         * @param {Object} chy - chyron {name, rol, tc, path}
+         * @param {Object} wottIdx - índex de `Logic.Project.getWottIndex()` (pot ser null)
+         * @returns {Promise<number>} segons, o 0 si no es pot resoldre
+         */
+        _tradMediaDur: async function (chy, wottIdx) {
+            const name = String((chy && chy.name) || '');
+            if (!name || this._isStillMedia(name)) return 0;
+            const PL = FASTPASS_UI.Logic.Project;
+            try {
+                const r = (PL && PL._resolveWottDur) ? PL._resolveWottDur(wottIdx, chy) : null;
+                if (r && r.dur > 0.1 && /^bin/.test(String(r.src || ''))) return r.dur;
+            } catch (eD) { }
+            try {
+                const d = await PL.getDuration(name);
+                if (d > 0.1) return d;
+            } catch (eD2) { }
+            return 0;
+        },
+
+        /**
+         * _placeTradSlot: Col·loca UN rètol de traducció al seu slot [start, end] SENSE
+         * estirar-lo més enllà del seu mèdia.
+         *
+         * 🧊 PROBLEMA (2026-10-12): l'espai assignat a una traducció pot ser més LLARG que la
+         * durada del seu mèdia. Com que `Clips.insert` (overwrite) sempre col·loca la durada
+         * COMPLETA del mèdia i tot seguit es fixava el final amb `Clips.endAt(slotEnd)`, el clip
+         * quedava ESTIRAT més enllà del mèdia → cua BUIDA (clip al timeline, sense imatge).
+         *
+         * ✅ SOLUCIÓ: si `mediaDur < slot`, la part viva és el clip SENCER (durada del mèdia) i
+         * la cua s'omple amb el CONGELAT del seu darrer frame, amb la MATEIXA mecànica del
+         * Tema-Títol (`_freezeTemaTitol`: clip temporal a la zona lliure del final del timeline
+         * + `_capturePng` + import al bin CHY + PNG estirat). Zero JSX nou.
+         *
+         * @param {Object} p - {chy, track, start, end, mediaDur, tempTC, label}
+         *   · `mediaDur` = durada real del mèdia (0 = no resolta → comportament antic).
+         *   · `tempTC` = TC de la zona LLIURE del final del timeline (el cridador el calcula amb
+         *     `_emptyProgramTC`: el PROGRAMA ha de ser BUID perquè el PNG conservi l'ALPHA del
+         *     rètol i no s'endugui cap frame de vídeo congelat a dins). Si no arriba, es calcula.
+         * @returns {Promise<{ok:boolean, mode:'live'|'freeze', live:number, media:number, err?:string}>}
+         */
+        _placeTradSlot: async function (p) {
+            const utils = getUtils();
+            const cfg = FASTPASS_UI.Config.get();
+            const TR = (cfg && cfg.traduccio) ? cfg.traduccio : {};
+            const tag = p.label || 'Traducció';
+            const name = String((p.chy && p.chy.name) || '');
+            const track = parseInt(p.track, 10);
+            const start = Number(p.start);
+            const end = Number(p.end);
+            const span = Math.max(0.2, end - start);
+            const media = (Number(p.mediaDur) > 0.1) ? Number(p.mediaDur) : 0;
+            const minFreeze = (Number(TR.freezeMinSec) > 0) ? Number(TR.freezeMinSec) : 0.12;
+            const short = String(name).substring(0, 34);
+            // (2026-10-08) `jsxName`: el JSX fa `decodeURIComponent` sobre el nom → un `%`
+            // literal ha d'arribar com a `%25` o la inserció falla en silenci.
+            const escapedName = utils.escape(utils.jsxName(name));
+            const isErrRes = (r) => /^\s*(ERR|EXC)/i.test(String(r || ''));
+            // Insert SENSE endSec (el JSX l'aplicaria al DARRER clip de la pista: quirk de
+            // l'API) i final fixat amb `Clips.endAt`, que cerca el clip PER TEMPS.
+            const insertLive = async () => {
+                const rIns = String(await callJSX(`Clips.insert('${escapedName}', ${track}, ${start.toFixed(4)}, null, 'video')`) || '');
+                if (isErrRes(rIns)) return rIns;
+                return String(await callJSX(`Clips.endAt(${track}, ${start.toFixed(4)}, ${end.toFixed(4)}, 'video')`) || '');
+            };
+            // ── Sense congelat: el mèdia ja cobreix el slot (o no s'ha pogut resoldre) ──
+            const wantFreeze = (TR.freezeTail !== false) && media > 0.1 && (span - media) >= minFreeze;
+            if (!wantFreeze) {
+                const rLive = await insertLive();
+                if (isErrRes(rLive)) {
+                    log(`      ❌ [${tag}] «${short}…» clip NO inserit a V${track} @ ${start.toFixed(2)}s (${rLive})`, "ERROR");
+                    return { ok: false, mode: 'live', live: span, media: media, err: rLive };
+                }
+                if (!(media > 0.1) && !this._isStillMedia(name)) {
+                    log(`      ⚠️ [${tag}] «${short}…» durada del mèdia NO resolta → col·locat estirat a ${span.toFixed(2)}s: si el slot és més llarg que el mèdia, la cua quedarà buida`, "WARN");
+                }
+                return { ok: true, mode: 'live', live: span, media: media, trim: rLive };
+            }
+
+            // ── Congelat de la cua: part viva = clip sencer · cua = PNG del frame congelat ──
+            // El congelat cobreix TOTA la cua (`span − media`): és l'espai que s'ha de veure
+            // amb el rètol, no pas buit.
+            const freeze = Math.max(0, span - media);
+            let tempTC = (Number(p.tempTC) > 0) ? Number(p.tempTC) : 0;
+            if (!(tempTC > 0)) {
+                // Xarxa: sense una zona de PROGRAMA BUID, el PNG s'enduria el vídeo de sota
+                // (l'alpha es perd) → es calcula aquí mateix.
+                tempTC = await this._emptyProgramTC(media + 2);
+            }
+            const fr = await this._freezeTemaTitol(name, start, end, tag, {
+                track: track,
+                animSec: media,
+                tempTC: tempTC,
+                freezeSec: freeze,
+                frameMid: true,
+                grabFrac: (Number(TR.freezeGrabFrac) > 0) ? Number(TR.freezeGrabFrac) : undefined
+            });
+            if (fr && fr.success) {
+                log(`      🧊 [${tag}] «${short}…» → V${track} @ ${start.toFixed(2)}s→${end.toFixed(2)}s (viu ${media.toFixed(2)}s + congelat ${freeze.toFixed(2)}s)`);
+                return { ok: true, mode: 'freeze', live: media, media: media, freeze: freeze, tempTC: tempTC };
+            }
+
+            // Xarxa: si el congelat falla, es col·loca el clip ESTIRAT (comportament antic) per
+            // no deixar el slot sense rètol.
+            log(`      ⚠️ [${tag}] «${short}…» congelat FALLIT → es col·loca estirat (${span.toFixed(2)}s)`, "WARN");
+            const rBack = await insertLive();
+            if (isErrRes(rBack)) {
+                log(`      ❌ [${tag}] «${short}…» clip NO inserit a V${track} @ ${start.toFixed(2)}s (${rBack})`, "ERROR");
+                return { ok: false, mode: 'live', live: span, media: media, err: rBack };
+            }
+            return { ok: true, mode: 'live', live: span, media: media, trim: rBack };
         },
 
         /**
@@ -3527,6 +3666,20 @@
                 for (const entry of struct) { if (entry.id) structureById[entry.id] = entry; }
 
                 let placedCount = 0;
+                // (2026-10-12) CONGELAT DE LA CUA: la durada REAL del mèdia de cada traducció
+                // decideix si el slot s'ha d'omplir amb un congelat (`_placeTradSlot`).
+                const wottIdxTr = await FASTPASS_UI.Logic.Project.getWottIndex();
+                // Xarxa de seguretat: l'insert del PNG estirat és un `overwriteClip` i pot tocar
+                // clips veïns de la pista → instantània prèvia + reparació amb `_repararClipsV7`
+                // (la mateixa xarxa que fa servir Repartir). Només s'actua si hi ha hagut
+                // congelat: el camí sense congelat queda intacte.
+                let snapTrad = [];
+                try {
+                    const clTrad = (await getClipsLogic().getTrackClips(T_TRAD, 'video')) || [];
+                    snapTrad = clTrad.map(c => ({ name: c.name, start: c.start, end: c.end }));
+                } catch (eSnapT) { log(`   ⚠️ [Traducció] no s'ha pogut llegir V${T_TRAD} per a la reparació: ${eSnapT.message}`, "WARN"); }
+                const placedRanges = [];
+                let frozeCount = 0;
                 for (const mk of markersFull) {
                     const entry = structureById[mk.fullId];
                     if (!entry || !entry.chyrons || entry.chyrons.length === 0) continue;
@@ -3606,22 +3759,55 @@
                         };
                         group.sort((a, b) => extractSeq(a) - extractSeq(b));
                         const N = group.length;
-                        log(`   📦 [Traducció] TC=${tc}: ${N} clips @ ${refStart.toFixed(2)}s (dur=${clipDur.toFixed(2)}s) ← ${refWhy}`);
+                        const slotDur = clipDur / N;
+                        log(`   📦 [Traducció] TC=${tc}: ${N} clips @ ${refStart.toFixed(2)}s (dur=${clipDur.toFixed(2)}s, slot ${slotDur.toFixed(2)}s) ← ${refWhy}`);
+                        // (2026-10-12) Durada REAL del mèdia de cada traducció del grup (font
+                        // EXACTA: DOM del bin → ítem del projecte). Si el mèdia és més CURT que el
+                        // slot, la cua s'ha d'omplir amb un CONGELAT: estirar el clip deixaria la
+                        // cua BUIDA (clip al timeline sense imatge).
+                        const trMedia = {};
+                        for (const t of group) trMedia[t.name] = await this._tradMediaDur(t, wottIdxTr);
+                        const minFz = (cfg.traduccio && Number(cfg.traduccio.freezeMinSec) > 0) ? Number(cfg.traduccio.freezeMinSec) : 0.12;
+                        const maxMedia = Math.max.apply(null, group.map(t => trMedia[t.name] || 0).concat([0]));
+                        const needFz = (N > 0) && group.some(t => (trMedia[t.name] || 0) > 0.1 && (slotDur - trMedia[t.name]) >= minFz);
+                        let tempTC = 0;
+                        if (needFz) {
+                            // Zona temporal del final del timeline amb el PROGRAMA BUID (a TOTES
+                            // les pistes de vídeo): el congelat d'un rètol amb ALPHA només el
+                            // conserva si no hi ha vídeo a sota. Sempre més enllà del final del
+                            // grup (els slots que col·loquem viuen dins del programa).
+                            tempTC = Math.max(await this._emptyProgramTC(maxMedia + 2),
+                                Math.ceil((refStart + clipDur + 5) / REV_FRAME) * REV_FRAME);
+                            log(`   🧊 [Traducció] TC=${tc}: mèdia més curt que el slot → la cua s'omple amb el CONGELAT del frame · zona temporal ${tempTC.toFixed(2)}s`);
+                        }
                         for (let i = 0; i < N; i++) {
-                            const slotDur = clipDur / N;
                             const placeTime = refStart + slotDur * i;
                             const placeEnd = (i === N - 1) ? refStart + clipDur : refStart + slotDur * (i + 1);
-                            const escapedName = getUtils().escape(group[i].name);
-                            // (2026-09-28) Insert SENSE endSec: el JSX l'aplicaria al DARRER clip de
-                            // la pista i el retallaria (quirk de l'API). La durada es fixa amb
-                            // Clips.endAt, que cerca el clip PER TEMPS. Mateixa lliçó que a
-                            // repartirChyronTraduccio.
-                            await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${placeTime.toFixed(4)}, null, 'video')`);
-                            const tRes = await callJSX(`Clips.endAt(${T_TRAD}, ${placeTime.toFixed(4)}, ${placeEnd.toFixed(4)}, 'video')`);
-                            log(`      ✅ [${i+1}/${N}] → V${T_TRAD} @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s (${tRes})`);
+                            // (2026-10-12) `_placeTradSlot`: clip SENCER (durada del mèdia) + cua
+                            // congelada, en comptes d'estirar el clip més enllà del mèdia.
+                            const rSlot = await this._placeTradSlot({
+                                chy: group[i], track: T_TRAD, start: placeTime, end: placeEnd,
+                                mediaDur: trMedia[group[i].name] || 0, tempTC: tempTC, label: 'Traducció'
+                            });
+                            if (!rSlot || !rSlot.ok) {
+                                log(`      ⚠️ [${i+1}/${N}] NO col·locat (${rSlot ? rSlot.err : '?'})`, "WARN");
+                                continue;
+                            }
                             placedCount++;
+                            placedRanges.push([placeTime, placeEnd]);
+                            if (rSlot.mode === 'freeze') {
+                                frozeCount++;
+                            } else {
+                                log(`      ✅ [${i+1}/${N}] → V${T_TRAD} @ ${placeTime.toFixed(2)}s→${placeEnd.toFixed(2)}s (${rSlot.trim})`);
+                            }
                         }
                     }
+                }
+                // (2026-10-12) Reparació de veïns: només si algun slot ha necessitat el congelat
+                // (l'insert del PNG estirat pot haver tocat clips de la pista).
+                if (frozeCount > 0) {
+                    log(`🧊 [Traducció] ${frozeCount} slot(s) amb la cua CONGELADA (clip sencer + PNG del frame).`);
+                    await this._repararClipsV7(T_TRAD, snapTrad, placedRanges, 'Traducció');
                 }
                 if (placedCount === 0) {
                     log("⚠️ [Traducció] Cap traducció.", "WARN");
@@ -3687,9 +3873,12 @@
          * @param {number} track  - Pista (1-based)
          * @param {Array}  snap   - [{name,start,end}] posició original dels clips NO nostres
          * @param {Array}  placed - [[start,end]] rangs que hem col·locat (no es reparen si hi cauen)
+         * @param {string} [tag]  - Etiqueta dels logs (per defecte «Repartir»; 2026-10-12 el
+         *   flux TRAD/COLOCAR també la fa servir amb el congelat de la cua).
          * @returns {number} Nombre de clips restaurats
          */
-        _repararClipsV7: async function (track, snap, placed) {
+        _repararClipsV7: async function (track, snap, placed, tag) {
+            const TAG = tag || 'Repartir';
             if (!snap || snap.length === 0) return 0;
             let total = 0;
             // 2 passades: restaurar un clip pot tornar a tocar el seu veí.
@@ -3702,14 +3891,14 @@
                         if (raw && raw !== 'null') cur.push(JSON.parse(raw));
                     }
                 } catch (eR) {
-                    log(`   ⚠️ [Repartir] no s'ha pogut llegir la pista per reparar: ${eR.message}`, "WARN");
+                    log(`   ⚠️ [${TAG}] no s'ha pogut llegir la pista per reparar: ${eR.message}`, "WARN");
                     return total;
                 }
                 let fixed = 0;
                 for (const s0 of snap) {
                     const dins = placed.some(p => (s0.start < p[1] - 0.05) && (s0.end > p[0] + 0.05));
                     if (dins) {
-                        log(`   ⚠️ [Repartir] "${s0.name}" (${s0.start.toFixed(2)}-${s0.end.toFixed(2)}s) no es repara: el seu lloc original l'ocupa un slot repartit`, "WARN");
+                        log(`   ⚠️ [${TAG}] "${s0.name}" (${s0.start.toFixed(2)}-${s0.end.toFixed(2)}s) no es repara: el seu lloc original l'ocupa un slot repartit`, "WARN");
                         continue;
                     }
                     let best = null, bestD = Infinity;
@@ -3726,19 +3915,19 @@
                         const esc = getUtils().escape(s0.name);
                         await callJSX(`Clips.insert('${esc}', ${track}, ${s0.start.toFixed(4)}, null, 'video')`);
                         const r2 = await callJSX(`Clips.endAt(${track}, ${s0.start.toFixed(4)}, ${s0.end.toFixed(4)}, 'video')`);
-                        log(`   🩹 [Repartir] "${s0.name}" havia estat esborrat per un insert → re-insertat @ ${s0.start.toFixed(2)}-${s0.end.toFixed(2)}s (${r2})`, "WARN");
+                        log(`   🩹 [${TAG}] "${s0.name}" havia estat esborrat per un insert → re-insertat @ ${s0.start.toFixed(2)}-${s0.end.toFixed(2)}s (${r2})`, "WARN");
                         fixed++; total++;
                         continue;
                     }
                     if (Math.abs(best.start - s0.start) > 0.05 || Math.abs(best.end - s0.end) > 0.05) {
                         const r = await callJSX(`Clips.moveToRange(${track}, ${best.index}, ${s0.start.toFixed(4)}, ${s0.end.toFixed(4)}, 'video')`);
-                        log(`   🩹 [Repartir] "${s0.name}" tocat per un insert [${best.start.toFixed(2)}-${best.end.toFixed(2)}] → restaurat a [${s0.start.toFixed(2)}-${s0.end.toFixed(2)}]s (${r})`, "WARN");
+                        log(`   🩹 [${TAG}] "${s0.name}" tocat per un insert [${best.start.toFixed(2)}-${best.end.toFixed(2)}] → restaurat a [${s0.start.toFixed(2)}-${s0.end.toFixed(2)}]s (${r})`, "WARN");
                         fixed++; total++;
                     }
                 }
                 if (fixed === 0) break;
             }
-            if (total > 0) log(`🩹 [Repartir] ${total} clip(s) d'altres blocs restaurats a la seva posició original.`);
+            if (total > 0) log(`🩹 [${TAG}] ${total} clip(s) d'altres blocs restaurats a la seva posició original.`);
             return total;
         },
 
@@ -3781,6 +3970,10 @@
                 }
                 selectedV3.sort((a, b) => a.start - b.start);
                 selectedV1.sort((a, b) => a.start - b.start);
+                // (2026-10-12) Índex de durades del bin CHY: decideix si la cua d'un slot
+                // necessita CONGELAT (mèdia més curt que l'espai).
+                let wottIdxRep = null;
+                try { wottIdxRep = await FASTPASS_UI.Logic.Project.getWottIndex(); } catch (eWI) { }
 
                 const groups = [];
                 let currentGroup = [selectedV3[0]];
@@ -3995,19 +4188,43 @@
                     const seqToChy = new Map();
                     for (const chy of group) seqToChy.set(extractSeq(chy), chy);
 
+                    // (2026-10-12) Durada REAL del mèdia de cada traducció del tram (font exacta:
+                    // DOM del bin → ítem del projecte). Si el mèdia és més CURT que el slot, la
+                    // cua s'omple amb un CONGELAT (`_placeTradSlot`): estirar el clip deixaria la
+                    // cua BUIDA (clip al timeline sense imatge).
+                    const trMedia = {};
+                    for (const c of group) trMedia[c.name] = await this._tradMediaDur({ name: c.name }, wottIdxRep);
+                    const minFz = (cfg.traduccio && Number(cfg.traduccio.freezeMinSec) > 0) ? Number(cfg.traduccio.freezeMinSec) : 0.12;
+                    let tempTCRep = 0;   // zona temporal dels congelats (es calcula al 1r que calgui)
+
                     for (let s = 0; s < M; s++) {
                         const seqNum = s + 1;
                         const chy = seqToChy.get(seqNum) || null;
                         if (!chy) { log(`      ⬜ [${seqNum}/${M}] buit`); continue; }
                         const slotStart = bStart + slotDur * s;
                         const slotEnd = bStart + slotDur * (s + 1);   // l'últim acaba exactament al límit
-                        const escapedName = getUtils().escape(chy.name);
-                        // Insert SENSE endSec: el JSX l'aplicaria al DARRER clip de la pista
-                        // (quirk de l'API) i podria retallar traduccions d'altres blocs.
-                        await callJSX(`Clips.insert('${escapedName}', ${T_TRAD}, ${slotStart.toFixed(4)}, null, 'video')`);
-                        // Durada exacta del slot, per temps (immunitzat a renumeració de clips).
-                        const trimRes = await callJSX(`Clips.endAt(${T_TRAD}, ${slotStart.toFixed(4)}, ${slotEnd.toFixed(4)}, 'video')`);
-                        // Verificació de la durada real del clip col·locat.
+                        const media = trMedia[chy.name] || 0;
+                        if (!(tempTCRep > 0) && media > 0.1 && (slotDur - media) >= minFz) {
+                            // Zona temporal del FINAL del timeline amb el PROGRAMA BUID (a TOTES
+                            // les pistes): el congelat d'un rètol amb ALPHA només el conserva si
+                            // no hi ha vídeo a sota. Es calcula ARA perquè els veïns apartats ja
+                            // són a la pista i són el material més llunyà.
+                            tempTCRep = Math.max(await this._emptyProgramTC(media + 2),
+                                Math.ceil((limit + 5) / REV_FRAME) * REV_FRAME);
+                            log(`   🧊 [Repartir] Tram ${gi+1}: mèdia (${media.toFixed(2)}s) més curt que el slot (${slotDur.toFixed(2)}s) → la cua s'omple amb el CONGELAT del frame · zona temporal ${tempTCRep.toFixed(2)}s`);
+                        }
+                        // (2026-10-12) `_placeTradSlot`: clip SENCER (durada del mèdia) + cua
+                        // congelada, en comptes d'estirar el clip més enllà del mèdia.
+                        const rSlot = await this._placeTradSlot({
+                            chy: { name: chy.name }, track: T_TRAD, start: slotStart, end: slotEnd,
+                            mediaDur: media, tempTC: tempTCRep, label: 'Repartir'
+                        });
+                        if (!rSlot || !rSlot.ok) {
+                            log(`      ⚠️ [${seqNum}/${M}] NO col·locat (${rSlot ? rSlot.err : '?'})`, "WARN");
+                            continue;
+                        }
+                        // Verificació de la durada real de la PART VIVA (el clip del mèdia).
+                        const expected = (rSlot.mode === 'freeze') ? rSlot.live : slotDur;
                         let chkDur = null;
                         try {
                             const chkRaw = await callJSX(`Clips.at(${T_TRAD}, ${(slotStart + 0.02).toFixed(4)}, 'video')`);
@@ -4016,10 +4233,13 @@
                         } catch (eCk) { }
                         placedRanges.push([slotStart, slotEnd]);
                         placedCount++;
-                        log(`      ✅ [${seqNum}/${M}] → V${T_TRAD} @ ${slotStart.toFixed(2)}→${slotEnd.toFixed(2)}s (${slotDur.toFixed(2)}s) | retall: ${trimRes}` +
-                            ((chkDur !== null && Math.abs(chkDur - slotDur) > 0.15) ? ` ⚠️ durada real ${chkDur.toFixed(2)}s` : ''));
-                        if (String(trimRes).indexOf('OK') !== 0) {
-                            log(`      ⚠️ [Repartir] no s'ha pogut fixar la durada de la traducció @ ${slotStart.toFixed(2)}s (${trimRes})`, "WARN");
+                        const detall = (rSlot.mode === 'freeze')
+                            ? `viu ${rSlot.live.toFixed(2)}s + congelat ${rSlot.freeze.toFixed(2)}s`
+                            : `retall: ${rSlot.trim}`;
+                        log(`      ${rSlot.mode === 'freeze' ? '🧊' : '✅'} [${seqNum}/${M}] → V${T_TRAD} @ ${slotStart.toFixed(2)}→${slotEnd.toFixed(2)}s (${slotDur.toFixed(2)}s | ${detall})` +
+                            ((chkDur !== null && Math.abs(chkDur - expected) > 0.15) ? ` ⚠️ durada real ${chkDur.toFixed(2)}s` : ''));
+                        if (rSlot.mode !== 'freeze' && String(rSlot.trim).indexOf('OK') !== 0) {
+                            log(`      ⚠️ [Repartir] no s'ha pogut fixar la durada de la traducció @ ${slotStart.toFixed(2)}s (${rSlot.trim})`, "WARN");
                         }
                         if (s % 3 === 2) await getUtils().delay(100);
                     }

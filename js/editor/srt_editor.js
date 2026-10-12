@@ -1425,22 +1425,29 @@
         /**
          * _setEditWindow: Fixa la finestra d'edició al tram dels subtítols actuals
          * (#132): [primer inici − marge esquerre, últim final + marge dret].
+         * El marge esquerre (`general.srtEditMarginLeftSec`, defecte 0,4 s) s'ancora al
+         * primer clip o a l'IN del clip (el que sigui més tardà) i NO pot quedar-se'l
+         * el terra de l'eix: si el primer clip ja està a tocar de l'IN, el borde queda
+         * igualment a `mL` del clip (abans el terra `_axisOrigin` anul·lava el marge).
          * Cridat pels botons IN i OUT de l'editor. Sense entrades → s'allibera.
          */
         _setEditWindow: function () {
             if (!this._entries || this._entries.length === 0) { this._clearEditWindow(); return; }
             var cfg = (window.FASTPASS_UI.Config && window.FASTPASS_UI.Config.get) ? window.FASTPASS_UI.Config.get() : null;
             var mR = (cfg && cfg.srtEditMarginRightSec != null) ? Number(cfg.srtEditMarginRightSec) : 4;
-            var mL = (cfg && cfg.srtEditMarginLeftSec != null) ? Number(cfg.srtEditMarginLeftSec) : 1;
+            var mL = (cfg && cfg.srtEditMarginLeftSec != null) ? Number(cfg.srtEditMarginLeftSec) : 0.4;
             if (!isFinite(mR) || mR < 0) mR = 4;
-            if (!isFinite(mL) || mL < 0) mL = 1;
+            if (!isFinite(mL) || mL < 0) mL = 0.4;
             var first = this._entries[0].startSec;
             var lastEnd = this._entries[this._entries.length - 1].endSec;
             var minStart = this._axisOrigin || 0;
-            this._editWinStart = Math.max(minStart, first - mL);
+            // Àncora = el més tardà entre el primer clip i l'IN del clip. El terra a 0 evita
+            // que el regle dibuixi temps negatius si el clip carregat comença a 0.
+            var anchor = Math.max(first, minStart);
+            this._editWinStart = Math.max(0, anchor - mL);
             this._editWinEnd = lastEnd + mR;
             log("📝 SRT_EDIT: Finestra d'edició [" + this._editWinStart.toFixed(2) + "s → " + this._editWinEnd.toFixed(2) +
-                "s] (media, marges -" + mL + "s/+" + mR + "s) · clip sencer = " +
+                "s] (media, marges -" + mL + "s/+" + mR + "s · àncora " + anchor.toFixed(2) + "s) · clip sencer = " +
                 (0).toFixed(0) + "→" + ((this._maxSec || 0) - minStart).toFixed(1) + "s");
         },
 

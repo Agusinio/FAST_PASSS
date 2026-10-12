@@ -256,8 +256,24 @@
         useReverseFallback: true // si la peça no es pot col·locar → revers ffmpeg (xarxa)
     };
 
+    // 🗣️ TRADUCCIÓ (2026-10-12) — col·locació dels rètols de traducció (TRAD/COLOCAR i
+    // REPARTIR). L'espai assignat a una traducció (el seu «slot») pot ser MÉS LLARG que la
+    // durada del seu mèdia: col·locar-la sencera amb `Clips.endAt` l'estirava més enllà del
+    // mèdia i la cua quedava BUIDA (clip al timeline, sense imatge). Ara la cua s'omple amb
+    // el CONGELAT del darrer frame del propi clip — la MATEIXA mecànica del Tema-Títol
+    // (`_freezeTemaTitol`: clip temporal a la zona lliure del final del timeline + captura +
+    // PNG estirat). Zero JSX nou.
+    const TRADUCCIO_DEFAULTS = {
+        freezeTail: true,      // false → comportament antic (estirar el clip més enllà del mèdia)
+        freezeMinSec: 0.12,    // cua mínima (s) que val la pena congelar: per sota d'això es deixa
+                               //    estirat (3 frames a 25 fps: inapreciable)
+        freezeGrabFrac: 0.6    // instant del frame congelat (fracció del clip): amb el clip SENCER
+                               //    com a part viva, el darrer frame pot ser l'animació de sortida
+                               //    (congelat invisible) → 60 % = estat estable del rètol
+    };
+
     let _activeConfig = {
-        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 2.5, clipOutMarginSec: 0, clipExtraTailSec: 60 },
+        general: { autor: "AGUS", guarda: 22, debug: false, handles: 20, tcOffset: 0, clipInOffset: 10, zonaInOffset: 10, srtEmergencyTailSec: 120, snapWindowDeducedSec: 2.5, snapWindowFaroSec: 2.5, clipOutMarginSec: 0, clipExtraTailSec: 60, srtEditMarginLeftSec: 0.4 },
         // Hora d'inici d'emissió de cada programa (font ÚNICA per a tota l'extensió:
         // guardes de temps, peticions a l'API d'escaletes i OFFSET del MP4).
         programStartHours: { TNV: 21.0, TNM: 14.5, TNC: 13.8333, MAT: 7.9167 },
@@ -265,6 +281,9 @@
         titolet: TITOLET_DEFAULTS,
         // 🎬 TEMA-TÍTOL: peça de desaparició del propi Wott (vegeu TEMATTOL_EXIT_DEFAULTS).
         temaTitolExit: TEMATTOL_EXIT_DEFAULTS,
+        // 🗣️ TRADUCCIÓ: congelat de la cua quan el slot és més llarg que el mèdia
+        // (vegeu TRADUCCIO_DEFAULTS).
+        traduccio: TRADUCCIO_DEFAULTS,
         rutas: {
             plantilla: "\\\\nas1.ad-ccrtv.local\\informatius\\001 RECURSOS\\XXX Recursos AGUS - NO TOCAR!!!!\\PROJECTE 3CatInfo_NET.prproj",
             conductors: "\\\\DSMEDIA07\\portal324\\PROJECTE 9x16 PREMIERE 2\\CHYRONS CONDUCTORS\\",
@@ -440,6 +459,11 @@
                 //   l'error residual d'ancoratge pot arribar a ~2 s i amb 1,5 s el faro no
                 //   saltava mai al tall d'obertura de la seva peça (TNC: 12,96s vs tall 15,12s).
                 srtEmergencyTailSec: (cfg.general.srtEmergencyTailSec != null) ? cfg.general.srtEmergencyTailSec : 120,
+                // - srtEditMarginLeftSec: marge ESQUERRE (segons) de la finestra d'edició de
+                //   l'editor SRT: quant de marge es veu ABANS del primer clip de subtítols.
+                //   Defecte 0,4 s (= el pad d'IN de 10 frames) → el borde esquerre del canvas
+                //   queda a l'IN del clip; amb 0 el primer clip queda EXACTAMENT al borde.
+                srtEditMarginLeftSec: (cfg.general.srtEditMarginLeftSec != null) ? cfg.general.srtEditMarginLeftSec : 0.4,
                 snapWindowDeducedSec: (cfg.general.snapWindowDeducedSec != null) ? cfg.general.snapWindowDeducedSec : 2.5,
                 snapWindowFaroSec: (cfg.general.snapWindowFaroSec != null) ? cfg.general.snapWindowFaroSec : 2.5,
                 // 🎯 TITOLET (2026-10-06): paràmetres de detecció del grafisme cremat.
@@ -447,7 +471,10 @@
                 titolet: Object.assign({}, TITOLET_DEFAULTS, cfg.titolet || {}),
                 // 🎬 TEMA-TÍTOL (2026-10-07): peça de desaparició del propi Wott (sortida/
                 // transicions). Còpia fresca (defaults + override) com el titolet.
-                temaTitolExit: Object.assign({}, TEMATTOL_EXIT_DEFAULTS, cfg.temaTitolExit || {})
+                temaTitolExit: Object.assign({}, TEMATTOL_EXIT_DEFAULTS, cfg.temaTitolExit || {}),
+                // 🗣️ TRADUCCIÓ (2026-10-12): congelat de la cua dels rètols de traducció.
+                // Còpia fresca (defaults + override) com el titolet.
+                traduccio: Object.assign({}, TRADUCCIO_DEFAULTS, cfg.traduccio || {})
             };
         },
 
