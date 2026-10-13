@@ -32,6 +32,12 @@
 
     FASTPASS_UI.Workflows.Chyrons = {
 
+        // (2026-10-13) Marca de sessió: l'índex del bin CHY ja s'ha recarregat amb
+        // `getWottIndex(true)` dins del run actual (vegeu `_tradMediaDur`). Evita
+        // re-escanejar el bin una vegada per traducció. Es reinicia a cada entrada
+        // de TRAD (`placeChyronTraduccio`) i REPARTIR (`repartirChyronTraduccio`).
+        _tradIdxReloaded: false,
+
         // ═══════════════════════════════════════════════════════════════
         // ASSEMBLATGE AUTOMÀTIC (THE MAGIC)
         // ═══════════════════════════════════════════════════════════════
@@ -653,13 +659,28 @@
          * CURT que l'espai del seu slot, `Clips.insert` + `Clips.endAt(slotEnd)` l'estiraria
          * més enllà del mèdia i la cua quedaria BUIDA.
          *
-         * Fonts EXACTES (mai estimacions per mida de fitxer: `_resolveWottDur` amb `src`
-         * 'mida*' estima amb un bitrate calibrat del bin i un error del 20 % faria decidir
-         * malament):
+         * Fonts, per ordre de confiança:
          *   1. Durada del DOM al bin CHY (`_resolveWottDur`, fonts 'bin'/'bin~norm'/'bin~id').
          *   2. Durada de l'ítem del projecte (`Logic.Project.getDuration` → JSX
          *      `Project.itemDuration`).
+         *   3. (2026-10-13) Estimació per MIDA de fitxer (`src` 'mida*').
          * Un mèdia FIX (PNG) sempre retorna 0: s'estira sense problema.
+         *
+         * ⚠️ (2026-10-13) PER QUÈ L'ESTIMACIÓ JA S'ACCEPTA (abans es rebutjava per disseny):
+         * el test d'usuari del TNM V3 (13/10 10:11, 5 trad. al tram [34.64→51.00]) va sortir
+         * amb «durada del mèdia NO resolta → col·locat estirat» a TOTS els slots. Dues causes
+         * reals, totes dues al log:
+         *   · `⏱️ Bin CHY: 19 fitxers, 0 amb durada del DOM` → en aquest projecte
+         *     `projectItem.duration` NO és numèric per a CAP ítem (el DOM no dóna durades).
+         *   · l'índex del bin s'indexa ABANS d'importar les traduccions i es guarda per nom de
+         *     projecte (`_wottIdxCache`): la fase Traducció corre DESPRÉS de Titol/Lloc/Nom →
+         *     sense entrada al bin no hi ha NI durada NI mida per estimar-la.
+         * Conseqüència: el congelat no s'activava mai i, amb un slot més llarg que el mèdia,
+         * la cua quedava BUIDA (just el bug que el congelat del 12/10 havia d'evitar).
+         * Mesurat amb ffprobe als fitxers reals (NAS VERTICALITZACIO): 6.000 s i 260,7 MB →
+         * 43,5 MB/s CONSTANTS, i el default del codi (43.500.000 B/s) hi encaixa (±5 %), prou
+         * per decidir el congelat (llindar `freezeMinSec` = 0,12 s). El risc d'error del 20 %
+         * que va motivar rebutjar-la NO es compleix en aquesta família de ProRes.
          *
          * @param {Object} chy - chyron {name, rol, tc, path}
          * @param {Object} wottIdx - índex de `Logic.Project.getWottIndex()` (pot ser null)
@@ -669,14 +690,49 @@
             const name = String((chy && chy.name) || '');
             if (!name || this._isStillMedia(name)) return 0;
             const PL = FASTPASS_UI.Logic.Project;
-            try {
-                const r = (PL && PL._resolveWottDur) ? PL._resolveWottDur(wottIdx, chy) : null;
-                if (r && r.dur > 0.1 && /^bin/.test(String(r.src || ''))) return r.dur;
-            } catch (eD) { }
+            const short = name.substring(0, 34);
+            // 1) DOM del bin CHY (nom → norm → ID).
+            let r = null;
+            try { r = (PL && PL._resolveWottDur) ? PL._resolveWottDur(wottIdx, chy) : null; } catch (eD) { }
+            if (r && r.dur > 0.1 && /^bin/.test(String(r.src || ''))) return r.dur;
+            // 1b) (2026-10-13) XARXA: l'índex pot ser VELL (indexat abans d'importar les
+            //     traduccions). Es recarrega UNA vegada per run i es reintenta.
+            if (!this._tradIdxReloaded) {
+                this._tradIdxReloaded = true;
+                try {
+                    const fresh = await PL.getWottIndex(true);
+                    const r2 = PL._resolveWottDur(fresh, chy);
+                    if (r2 && r2.dur > 0.1) {
+                        if (/^bin/.test(String(r2.src || ''))) {
+                            log(`   📏 [Traducció] «${short}…» durada del DOM resolta en recarregar l'índex del bin CHY: ${r2.dur.toFixed(2)}s`);
+                            return r2.dur;
+                        }
+                        r = r2;      // estimació per mida → la decideix el pas 3
+                    }
+                } catch (eR) { log(`   ⚠️ [Traducció] no s'ha pogut recarregar l'índex del bin CHY: ${eR.message}`, "WARN"); }
+            }
+            // 2) Durada de l'ítem del projecte.
             try {
                 const d = await PL.getDuration(name);
                 if (d > 0.1) return d;
             } catch (eD2) { }
+            // 3) ÚLTIM RECURS (2026-10-13): estimació per mida de fitxer.
+            //    ⚠️ CORRECCIÓ MESURADA: el default de `_resolveWottDur` (43.500.000 B/s)
+            //    agafa el bitrate com a MB/s decimals, però els ProRes 422 HQ verticals del
+            //    canal són a 43,45 MiB/s = 45.560.000 B/s → sobreestima un 4,7 % (ffprobe als
+            //    fitxers reals: 273.365.736 B = 6.000 s). Aquí es corregeix i, a més, se
+            //    subestima un pèl a posta (`× 0,995`): el congelat comença 1-3 frames ABANS
+            //    del final real del clip viu → se SOLAPA amb el mateix rètol (invisible) i
+            //    MAI deixa forat. Sobreestimar deixaria 7 frames sense rètol en un clip de 6 s.
+            if (r && r.dur > 0.1) {
+                const est = r.dur * 0.9548 * 0.995;      // 43,5/45,56 MB/s · marge de solapament
+                if (est > 0.1 && est < 600) {
+                    log(`   📏 [Traducció] «${short}…» durada ESTIMADA per mida de fitxer: ${est.toFixed(2)}s ` +
+                        `(brut ${r.dur.toFixed(2)}s, ${r.src}` + (r.size > 0 ? `, ${(r.size / 1048576).toFixed(1)} MB` : '') +
+                        `) — el DOM no la dóna`, "WARN");
+                    return est;
+                }
+            }
             return 0;
         },
 
@@ -3668,6 +3724,10 @@
                 let placedCount = 0;
                 // (2026-10-12) CONGELAT DE LA CUA: la durada REAL del mèdia de cada traducció
                 // decideix si el slot s'ha d'omplir amb un congelat (`_placeTradSlot`).
+                // (2026-10-13) `_tradMediaDur` pot recarregar l'índex del bin si el nom no
+                // hi és (índex indexat abans d'importar les traduccions): una recàrrega per
+                // run, no una per traducció.
+                this._tradIdxReloaded = false;
                 const wottIdxTr = await FASTPASS_UI.Logic.Project.getWottIndex();
                 // Xarxa de seguretat: l'insert del PNG estirat és un `overwriteClip` i pot tocar
                 // clips veïns de la pista → instantània prèvia + reparació amb `_repararClipsV7`
@@ -3962,16 +4022,20 @@
                     allV3.push(clip);
                     if (clip.selected) selectedV3.push(clip);
                 }
-                log(`🎯 [Repartir] V1: ${selectedV1.length}, Trad (V7): ${selectedV3.length}`);
+                // (2026-10-13) El rètol deia «(V7)» fix, però `T_TRAD` surt de
+                // `cfg.tracks.video.lloc` (= V8 al perfil dels TNs) → el log enganyava.
+                log(`🎯 [Repartir] V1: ${selectedV1.length}, Trad (V${T_TRAD}): ${selectedV3.length}`);
                 if (selectedV3.length === 0 || selectedV1.length === 0) {
-                    log("⚠️ [Repartir] Selecciona Trad (V7) + V1 amb Ctrl+clic.", "WARN");
-                    getUtils().status("Selecciona Trad (V7) + V1", "warn");
+                    log(`⚠️ [Repartir] Selecciona Trad (V${T_TRAD}) + V1 amb Ctrl+clic.`, "WARN");
+                    getUtils().status(`Selecciona Trad (V${T_TRAD}) + V1`, "warn");
                     return;
                 }
                 selectedV3.sort((a, b) => a.start - b.start);
                 selectedV1.sort((a, b) => a.start - b.start);
                 // (2026-10-12) Índex de durades del bin CHY: decideix si la cua d'un slot
                 // necessita CONGELAT (mèdia més curt que l'espai).
+                // (2026-10-13) Una recàrrega d'índex per run com a màxim (vegeu `_tradMediaDur`).
+                this._tradIdxReloaded = false;
                 let wottIdxRep = null;
                 try { wottIdxRep = await FASTPASS_UI.Logic.Project.getWottIndex(); } catch (eWI) { }
 
@@ -4084,7 +4148,16 @@
                         ? Math.min.apply(null, groups[gi + 1].map(c => c.start))
                         : null;
                     const selOrd = selectedV1.slice().sort((a, b) => a.start - b.start);
-                    let idx0 = selOrd.findIndex(c => c.end > gFirst + 0.05);
+                    // (2026-10-13) L'EXTENSIÓ DEL TRAM 1 la marca la SELECCIÓ des del SEU
+                    // PRIMER clip, no des del clip que conté la 1a traducció. Motiu (test
+                    // d'usuari TNM V3 13/10): selecció de 5 clips [24.12→51.00] amb les 5
+                    // traduccions a 34.64 (on les va deixar COLOCAR) → el tram s'ancorava a
+                    // 34.64 i sortia de 16.36s (slot 3.27s) en comptes de 26.88s (slot
+                    // 5.38s): els 4 clips seleccionats d'abans s'ignoraven.
+                    // Els trams SEGÜENTS mantenen l'ancoratge al clip que conté el SEU inici
+                    // perquè el tram k no envaeixi el material del tram k−1 (`idx1` del tram
+                    // anterior ja s'atura al clip previ al començament del següent).
+                    let idx0 = (gi === 0) ? 0 : selOrd.findIndex(c => c.end > gFirst + 0.05);
                     if (idx0 < 0) idx0 = selOrd.length - 1;              // cap clip conté l'inici → el darrer
                     let idx1 = selOrd.length - 1;                        // …fins a l'últim clip seleccionat
                     if (gNextFirst !== null) {
