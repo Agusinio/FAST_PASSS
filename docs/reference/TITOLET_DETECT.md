@@ -1,6 +1,6 @@
 # TITOLET — Detecció automàtica del rètol cremat
 
-> v1.5.0 · 2026-10-08 (7a passada: **ROI per etiqueta** `roiPerRole`/`roiDefault` + **TC del nom** · 6a: `cardTrimFrames` · artefactes #147/#148) · `titolet.*` a `Config` (`11_Configuracio.js`) · `bin/ocr.ps1` · `js/logic/17_TitoletDetect_Logic.js` (`?v=2`) · `15_FFmpeg_Logic.js` · `flow_chyrons.js` (`?v=69`) · `js/core/utils.js` (`?v=25`)
+> v1.7.0 · 2026-10-14 (7a passada: **ROI per etiqueta** `roiPerRole`/`roiDefault` + **TC del nom** · 6a: `cardTrimFrames` · artefactes #147/#148 · **#158** dues zones TITOLET · **#159/#159b** marge de mèdia + congelat ancorat al final real) · `titolet.*` a `Config` (`11_Configuracio.js`) · `bin/ocr.ps1` · `js/logic/17_TitoletDetect_Logic.js` (`?v=2`) · `15_FFmpeg_Logic.js` · `flow_chyrons.js` (`?v=73`) · `js/core/utils.js` (`?v=25`)
 >
 > 📄 Estat complet, proves, pendents i **agenda de la sessió següent**: `plans/HANDOFF_2026-10-08_TITOLETS.md`
 
@@ -652,3 +652,76 @@ facetes diferents → **2 grups** de rastreig · `groupIntervals` fa cas del ver
 **`17_TitoletDetect_Logic.js?v=3`**): en un ítem amb LLISTA/RANQUING/DADA-ITEM, mirar al log
 `🎨 [titolet] … colors N: #F35E13@x… (2.5-45%, vores y) + #DCDCDC@x… (30-97%, vores none)` i que els
 intervals surtin **sense falsos positius** en plans de fons gris (document, plató).
+
+---
+
+## 9a passada (2026-10-14) · DUES ZONES de TITOLET (#158) + MARGE DE MÈDIA (#159)
+
+### a) #158 · La segona zona del TITOLET (TN COMARQUES)
+
+El rètol TITOLET **no viu sempre a la mateixa banda**: mesurat al `TNC_V1_CLIP.mp4` del 14/10 viu a
+**y 0,367-0,578** (banda MITJANA, color `#F85818`), mentre que a TN Migdia/TNV viu a **y 0,60-0,85**.
+Amb la recepta d'una sola zona (mesurada el 2026-10-05) el TNC donava **0 intervals** → els 6 TITOLET
+de l'ítem 04 sortien per CADÈNCIA. `roiPerRole['TITOLET']` passa a **dues facetes del MATEIX color**:
+
+| Faceta | Zona | Per a |
+|---|---|---|
+| baixa (hereva, sense `roiY` propi) | `y[0.60, 0.85]` | TNM / TNV |
+| mitjana (nova) | `y[0.32, 0.62]` | TNC |
+
+- `_recipeOf` calcula la ROI mare com el **hull** de les zones (y 0,32-0,85) → **una sola passada** d'ffmpeg.
+- ⚠️ Una ROI ampla ÚNICA no serveix: la **lona** de l'inici del bloc (y 0,356-0,722) queda dins i no toca
+  cap vora → 1 interval FALS (7 en comptes de 6). Amb facetes, cada zona conserva la seva guarda de vora.
+- La caché del pla s'invalida sola: `facets` entra a la clau (`_planCachePath`).
+- Validació headless amb el clip real (2 fps, 160x45): recepta vella → **0 intervals** · nova → **6/6 i
+  0 falsos** · regressió TNM_V1 (12/10) + TNV_V1 (13/10): la faceta mitjana fa **0 ON**.
+
+### b) #159 · La part VIVA mai no pot ser més llarga que el mèdia
+
+`Clips.endAt` **no allarga un clip més enllà del seu mèdia**: si s'hi demana una durada més llarga, el
+clip s'acaba ABANS i el PNG del congelat (que entra a `cutTime = placeTime + animSec`) deixa un **forat
+entremig** — el rètol desapareix un moment i torna congelat. I la durada del wott pot ser una
+**ESTIMACIÓ** (mida del fitxer ÷ bitrate quan el bin no té la durada del DOM — log real 14/10:
+`⏱️ [Tema-Titol] Bin CHY: 9 fitxers, 0 amb durada del DOM`), que pot quedar LLARGA.
+
+| Punt | Regla |
+|---|---|
+| `titolet.liveHoldBackSec` (**nou**, 1.0) | marge de seguretat que es retalla del **FINAL** de la part viva; 0 = comportament antic |
+| `_placeTitoletChain` (dos camins: detectat i encadenat) | `part viva = max(0,5 , cardDur − TRIM − liveHold)` |
+| Guarda proporcional | `liveHold = min(liveHoldBackSec, cardDur × 0,25)`: en wotts curts (1-2 s) el marge sencer es menjaria l'animació d'ENTRADA |
+| Llargada de la targeta | **NO canvia**: `want = viu + freezeDur + liveHold` → el congelat creix el mateix que s'escurça la part viva (5,09 + 3,00 = 4,09 + 4,00 = **8,09 s**); amb final detectat (`detEnd`) mana la detecció |
+| Log de cada targeta | porta la FONT de la durada i el marge: `viu 4,09s = clip 5,29s [mida] − 5 frames − marge 1,00s` |
+
+Fonts de durada que logueja la targeta: `[bin]`/`[bin~norm]`/`[bin~id]` = durada del DOM (exacta) ·
+`[mida]`/`[mida~est]` = estimada per mida ÷ bitrate · `[assumit]` = ni això (ANIM 5 s).
+
+El congelat és un **PNG estirat (elàstic)**, sense límit de mèdia → entra 1 s abans i la cadena queda
+**sense buit**; el rètol és a l'aire fins al final detectat i només es descarta l'últim segon
+d'animació (el frame congelat ja és el grafisme format: `freezeGrabFrac` = 60 % del clip). L'alternativa
+«comprovar el mèdia abans d'inserir» (ffprobe/bin DOM) s'ha descartat per lenta i innecessària.
+
+**Què mirar al log** (TNC V1, ítem 04): `🧲/⛓️ … viu X s = clip Y s [mida] − 5 frames − marge 1.00s` i,
+sobretot, que `🎞️ [_freeze] Clip animació inserit a V8 @ A s→B s` vagi seguit de
+`✅ [_freeze] PNG … @ B s` amb **el mateix instant** (cap forat).
+
+### c) #159b · On arrenca EXACTAMENT el congelat (1 frame de forat)
+
+Test d'usuari del mateix dia: **quedava 1 frame de separació** entre el grafisme i el seu congelat.
+Causa: `Clips.endAt` (final del clip viu) i `Clips.insert` (inici del PNG) **arrodoneixen cada instant a
+la graella de frames PER SEPARAT i no en el mateix sentit** — mesurat: part viva de **4,09 s** a 35,20 s
+→ el clip s'acaba al **frame 982 (39,28 s)** i el PNG s'inseria al **983 (39,32 s)** = **0,04 s = 1 frame**
+de forat. Amb el marge de #159 això passava a TOTES les targetes perquè el final de la part viva ja no
+queia a la graella (5,29 − 0,20 − 1,00 = 4,09 → frame 102,25).
+
+| Punt | Regla |
+|---|---|
+| `_freezeTemaTitol` (JS:630) | després de fixar el clip viu, **llegeix el seu final REAL** amb `Clips.at(track, placeTime + 0,02)` → `.end` (el mateix patró de verificació que `Repartir`, JS:4328) |
+| `cutReal` | inici del PNG = `.end` real (fallback `cutTime` si la lectura falla) → **el congelat arrenca on acaba el recorte** |
+| `stretchEnd` | **no es toca**: la llargada de la targeta és la mateixa; el congelat creix/decrescut ≤ 1 frame |
+| Log | `🧷 [_freeze] Congelat ancorat al FINAL REAL del grafisme: 39,29s→39,28s (−1 frame/s)` |
+| Verificació | `🔗 [_freeze] Junt clip viu → congelat OK: viu fins 39,28s, PNG a 39,28s (0 frames)` · **WARN** `⚠️ FORAT de N s (N frames)` si no s'enganxen |
+
+Regla general per a qualsevol inserció de grafisme + congelat: **mai predir on acabarà el clip; llegir-ho**
+(`Clips.at`), perquè l'arrodoniment de Premiere no és determinista ni en el sentit (de vegades allarga el
+clip i el PNG el retallaria).
+

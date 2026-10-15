@@ -66,6 +66,46 @@
         },
 
         /**
+         * _resolveProjectDateDir: (2026-10-14 · BUG #156) Data REAL del PROJECTE OBERT
+         * (YYYY_MM_DD) derivada de la ruta del .prproj amb l'àtom JSX ja existent
+         * `FASTPASS.Project.path()` — mateix criteri que Core.AssemblyContext
+         * (assembly_context.js:74-109).
+         *
+         * PER QUÈ EXISTEIX: `State.projectDateDir` es pot perdre a mig sessió (el poll
+         * d'estat el desancorava amb UNA sola lectura buida de Registry.activeProjectName)
+         * i aleshores `_targetDateDir()` cau a la data del SISTEMA. Cas real
+         * (2026-10-14 09:22): amb el projecte de 13/10 obert, la FOTO va demanar a
+         * digition l'escaleta de HOY → "No s'ha localitzat cap clean feed amb títol
+         * [TN VESPRE [senyal net]] per la data/hora [2026-10-14 21:00:00]" → cap
+         * snapshot nou (les V3/V4 del 13/10 amb 022f agrupat no van arribar mai).
+         *
+         * @returns {Promise<string|null>} 'YYYY_MM_DD' del projecte obert, o null si no es pot resoldre.
+         */
+        _resolveProjectDateDir: async function () {
+            const u = getUtils();
+            try {
+                const raw = await u.callJSX("FASTPASS.Project.path()");
+                if (!raw || String(raw).toLowerCase().indexOf('.prproj') === -1) return null;
+                const normPath = String(raw).replace(/\\/g, '/');
+                let cfg = null;
+                try { cfg = FASTPASS_UI.Config.get(); } catch (eCfg) { cfg = null; }
+                if (cfg && cfg.rutas && cfg.rutas.destinoBase) {
+                    const baseNorm = String(cfg.rutas.destinoBase).replace(/\\/g, '/').replace(/\/+$/, '');
+                    // Projecte fora de l'arbre de treball (PROVES): no s'hi pot ancorar res.
+                    if (normPath.indexOf(baseNorm) !== 0) return null;
+                }
+                const parts = normPath.split('/');
+                for (let i = 0; i < parts.length; i++) {
+                    if (/^\d{4}_\d{2}_\d{2}$/.test(parts[i])) return parts[i];
+                }
+                return null;
+            } catch (e) {
+                u.log('⚠️ [dateDir] Data del projecte obert no resoluble: ' + e.message, 'DEBUG');
+                return null;
+            }
+        },
+
+        /**
          * _onMainClick: Handler central del botó MAIN.
          *   - Clic normal → executa l'acció de l'estat visible (CREAR/ACTUALITZAR...).
          *   - Ctrl+clic (mode correcció) → recalcula l'estat per AHIR i executa.

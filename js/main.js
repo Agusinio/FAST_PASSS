@@ -872,6 +872,36 @@ if (btnMarksC1) btnMarksC1.addEventListener('click', () => callWorkflow('Markers
                     } catch (eDate) {
                         utils.log('[Fetch] No s\'ha pogut resoldre la data de treball: ' + eDate.message, 'WARN');
                     }
+                    // ── PRIORITAT 0 · DATA DEL PROJECTE OBERT (2026-10-14 · BUG #156) ──────
+                    // `State.projectDateDir` es pot perdre a mig sessió (el poll d'estat el
+                    // desancorava amb una sola lectura buida de Registry.activeProjectName) i
+                    // aleshores `_targetDateDir()` cau a la data del SISTEMA → la FOTO demanava
+                    // l'escaleta de HOY amb un projecte d'AHIR obert (cas real 2026-10-14 09:22:
+                    // "No s'ha localitzat cap clean feed amb títol [TN VESPRE [senyal net]] per
+                    // la data/hora [2026-10-14 21:00:00]") → cap snapshot nou al projecte.
+                    // Es re-deriva de la ruta del .prproj (`FASTPASS.Project.path()`, àtom JSX
+                    // existent) i es re-ancora `projectDateDir` per a tota la resta del flux.
+                    if (!useYesterdayFoto) {
+                        let projDateDir = null;
+                        try {
+                            const ctxDate = window.FASTPASS_UI.Core && window.FASTPASS_UI.Core.Context;
+                            if (ctxDate && ctxDate._resolveProjectDateDir) {
+                                projDateDir = await ctxDate._resolveProjectDateDir();
+                            }
+                        } catch (eProjDate) { projDateDir = null; }
+                        if (projDateDir) {
+                            const StFoto = window.FASTPASS_UI.State;
+                            if (StFoto && StFoto.projectDateDir !== projDateDir) {
+                                utils.log('📍 [Fetch] Re-ancorant la data de treball a la del PROJECTE OBERT: '
+                                    + (StFoto.projectDateDir || 'null') + ' → ' + projDateDir, 'WARN');
+                                StFoto.projectDateDir = projDateDir;
+                            }
+                            if (projDateDir !== fotoDateDir) {
+                                utils.log('📍 [Fetch] FOTO re-datada pel projecte obert: ' + fotoDateDir + ' → ' + projDateDir, 'WARN');
+                                fotoDateDir = projDateDir;
+                            }
+                        }
+                    }
                     if (window.FASTPASS_UI && window.FASTPASS_UI.State) {
                         window.FASTPASS_UI.State.dateDir = fotoDateDir;
                     }
@@ -1518,6 +1548,11 @@ window.addEventListener('resize', function () { sizeVideoToFit(true); });
 // wotts + chyrons) amb crides JSX síncirones que BLOQUEGEN la UI del panell.
 // Per això: (a) no se solapen (guard _ctxRefreshBusy) i (b) s'espacien a 60 s.
 var _ctxRefreshBusy = false;
+// (2026-10-14 · BUG #156) Comptador de cicles seguits sense projecte actiu llegit pel
+// Registry. Calen 2 (~2 min) per desancorar `State.projectDateDir`: una sola lectura buida
+// (poll de Registry limitat a 1 cicle/2 s, System.clear() del mouseenter, etc.) no pot
+// deixar la sessió sense data de treball.
+var _projDateMissTicks = 0;
 setInterval(async function () {
     var srA = window.FASTPASS_UI && FASTPASS_UI.Editor && FASTPASS_UI.Editor.SrtEditor;
     if (srA && (srA._isPlaying || srA._timelineRunning)) return;
@@ -1533,9 +1568,19 @@ setInterval(async function () {
     var regA = window.FASTPASS_UI.Registry;
     if (StA && StA.projectDateDir) {
         var activeA = regA ? regA.activeProjectName : null;
+        if (activeA) _projDateMissTicks = 0;   // projecte actiu llegit OK: el comptador torna a zero
         if (!activeA) {
-            StA.projectDateDir = null;
-            StA.lastOpenedProjectName = "";
+            // (2026-10-14 · BUG #156) El desancoratge silenciós d'una sola lectura era la
+            // causa que la FOTO demanés l'escaleta de HOY amb un projecte d'AHIR obert.
+            _projDateMissTicks++;
+            if (_projDateMissTicks < 2) {
+                FASTPASS_UI.Utils.log('⚠️ [dateDir] Cap projecte actiu detectat (' + _projDateMissTicks + '/2). Es conserva projectDateDir=' + StA.projectDateDir, 'DEBUG');
+            } else {
+                FASTPASS_UI.Utils.log('🔓 [dateDir] Desancorant projectDateDir=' + StA.projectDateDir + ' (2 cicles seguits sense projecte actiu)', 'WARN');
+                StA.projectDateDir = null;
+                StA.lastOpenedProjectName = "";
+                _projDateMissTicks = 0;
+            }
         } else if (StA.lastOpenedProjectName && activeA === StA.lastOpenedProjectName) {
             var todayA = (FASTPASS_UI.Utils.getFormattedDate() || '').replace(/["\s]/g, '').trim();
             if (todayA && StA.projectDateDir !== todayA) return;

@@ -1,0 +1,38 @@
+#!/bin/sh
+# ============================================================================
+# FAST >>> PASS - pre-commit: PORTA QUE IMPEDEIX LA CONTAMINACIO DEL PENDRIVE
+# ============================================================================
+# Creada 2026-10-13 (BUG #155).
+# Motiu: la familia de codi mort (flux_*.js x7, 10_Eines.js, 12_Estat.js,
+# 13_Registre.js, 14_Sintesi.js, logger.js, 20_Sessio.js, 21_Aplicacio.js,
+# 22_Escaneig.js, 23_Analisi.js, 31..37_*.js i els .jsx 10_Sistema/11_Entorn/
+# 12_Arxiu/19_Diagnosi/20_Projecte/30..34) mes la carpeta INFO/ han tornat
+# 4 vegades (9/04, 23/07, 29/09, 13/10) des de restauracions d'un arbre antic
+# del pendrive (E:\FAST_PASSS). Aquesta porta impedeix COMMITEJAR-LOS.
+#
+# Instal.lacio:  powershell -NoProfile -ExecutionPolicy Bypass -File bin/install_hooks.ps1
+# ============================================================================
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$ROOT" || exit 0
+
+PWSH="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+[ -x "$PWSH" ] || PWSH="powershell"
+
+# ── 1. Senyal inequivoc d'arbre antic restaurat ────────────────────────────
+if [ -d "INFO" ]; then
+    echo "COMMIT BLOQUEJAT: hi ha la carpeta INFO/ (restes de l'arbre antic del pendrive)."
+    echo "  Esborra-la:  Remove-Item -Recurse -Force INFO"
+    exit 1
+fi
+
+# ── 2. Codi mort: cap fitxer de js/ o jsx/ sense carregador ────────────────
+"$PWSH" -NoProfile -ExecutionPolicy Bypass -File "bin/check_dead.ps1" > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "COMMIT BLOQUEJAT: hi ha CODI MORT a js/ o jsx/ (orfes o nomenclatura vella)."
+    echo "  Informe: C:\\temp\\fp\\dead_code.txt"
+    echo "  Detall:  powershell -NoProfile -ExecutionPolicy Bypass -File ./bin/check_dead.ps1"
+    exit 1
+fi
+
+exit 0

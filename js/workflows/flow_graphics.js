@@ -152,15 +152,24 @@
                 );
                 const waCrudo = analysis.crudo || {};
 
-                const waInCrudo  = (waCrudo.workAreaIn !== undefined && waCrudo.workAreaIn !== null) ? waCrudo.workAreaIn : 0;
-                const waOutCrudo = (waCrudo.workAreaOut !== undefined && waCrudo.workAreaOut !== null) ? waCrudo.workAreaOut : (clips[clips.length - 1] ? clips[clips.length - 1].end : 0);
+                // 🛡️ (2026-10-14) Un NaN al JSON de la fase 'crudo' faria que el snap i el
+                // range() sortissin NaN (→ cap WorkArea aplicat). numOr() ho neutralitza.
+                const numOr = function (v, d) { return isFinite(parseFloat(v)) ? parseFloat(v) : d; };
+                const waInCrudo  = numOr(waCrudo.workAreaIn, 0);
+                const waOutCrudo = numOr(waCrudo.workAreaOut, (clips[clips.length - 1] ? clips[clips.length - 1].end : 0));
 
                 // Snap a corte más cercano
                 const snapIn  = this._snapSimple(waInCrudo, clipCuts);
                 const snapOut = this._snapSimple(waOutCrudo, clipCuts);
 
-                // Aplicar WorkArea en Premiere
-                await callJSX("Timeline.setWorkArea(" + snapIn + ", " + snapOut + ")");
+                // 🛡️ (2026-10-14) `Timeline.setWorkArea()` NO EXISTEIX al bridge (l'àtom va
+                // desaparèixer i la crida fallava en SILENCI: l'àrea de treball no s'aplicava
+                // mai i el "corxet" de l'Out no es movia). S'aplica amb els àtoms VIGENTS:
+                // `Timeline.range()` fixa IN/OUT i `Timeline.zoomToSelection()` sincronitza
+                // l'ÀREA DE TREBALL amb el IN/OUT (i porta el cabezal a l'inici del rang).
+                const rRange = await callJSX("Timeline.range(" + snapIn + ", " + snapOut + ")");
+                const rZoom  = await callJSX("Timeline.zoomToSelection()");
+                log("📐 [INOUT Cocinado] WorkArea aplicat (range + zoomToSelection): " + rRange + " | " + rZoom);
 
                 // Colocar marcadores de validación a ±1s (color naranja = 3)
                 const validIn  = snapIn + 1.0;

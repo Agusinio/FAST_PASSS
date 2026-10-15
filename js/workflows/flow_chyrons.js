@@ -414,7 +414,13 @@
                 if (out0 > 0 && out0 < tc + 1) {
                     outRestore = out0;
                     await callJSX(`Timeline.out(${(tc + 2).toFixed(3)})`);
-                    log(`   📐 [_capture] Out point ampliat ${out0.toFixed(2)}s → ${(tc + 2).toFixed(2)}s (per exportar el frame)`);
+                    // 🛡️ (2026-10-14) Es VERIFICA el valor REAL: si l'Out no s'amplia de
+                    // veritat, QE no exporta el frame (PNG absent o NEGRE).
+                    const realOut = parseFloat(await callJSX('Timeline.getOut()') || '0');
+                    log(`   📐 [_capture] Out point ampliat ${out0.toFixed(2)}s → ${(tc + 2).toFixed(2)}s (per exportar el frame) · real=${realOut.toFixed(2)}s`);
+                    if (!isFinite(realOut) || realOut < tc + 1) {
+                        log(`   ⚠️ [_capture] L'Out point NO s'ha ampliat de veritat (real=${realOut}s < ${(tc + 1).toFixed(2)}s) · la captura pot sortir NEGRA o no escriure's`, 'WARN');
+                    }
                 }
             } catch (eOut) { }
             let res = '', via = '';
@@ -617,6 +623,32 @@
             }
             await callJSX(`Clips.endAt(${T_THEME}, ${placeTime}, ${cutTime}, 'video')`);
             log(`   🎞️ [_freeze] Clip animació inserit a V${T_THEME} @ ${placeTime.toFixed(2)}s→${cutTime.toFixed(2)}s`);
+            // (2026-10-14 · #159b) ON ARRENCA EL CONGELAT: `Clips.endAt` (final del clip viu) i
+            // `Clips.insert` (inici del PNG) arrodoneixen cada instant a la graella de frames
+            // PER SEPARAT i no sempre en el mateix sentit. Mesurat per l'usuari (part viva de
+            // 4,09 s a 35,20 s): el clip s'acaba al frame 982 (39,28 s) i el PNG s'inseria al
+            // 983 (39,32 s) → **1 FRAME DE FORAT** entre el grafisme i el seu congelat. El remei
+            // és preguntar a
+            // Premiere on acaba REALMENT el clip acabat d'inserir (`Clips.at` → `.end`, el
+            // mateix patró de verificació que `Repartir`, JS:4328) i ancorar-hi el PNG: arrenca
+            // exactament on acaba el recorte (mai abans → no retalla el grafisme; mai després →
+            // no deixa forat). El final (`stretchEnd`) NO es toca: la llargada de la targeta és
+            // la mateixa i el congelat creix el que s'ha escurçat la part viva.
+            let cutReal = cutTime;
+            try {
+                const atRaw = await callJSX(`Clips.at(${T_THEME}, ${(placeTime + 0.02).toFixed(4)}, 'video')`);
+                const oAt = (atRaw && atRaw !== 'null') ? JSON.parse(atRaw) : null;
+                if (oAt && isFinite(oAt.end) && Number(oAt.end) > placeTime + 0.05) {
+                    cutReal = Number(oAt.end);
+                    const dFr = Math.round((cutReal - cutTime) / REV_FRAME);
+                    if (Math.abs(cutReal - cutTime) > 0.005) {
+                        log(`   🧷 [_freeze] Congelat ancorat al FINAL REAL del grafisme: ${cutTime.toFixed(2)}s→${cutReal.toFixed(2)}s (${dFr > 0 ? '+' : ''}${dFr} frame/s; ` +
+                            `cobert ${(cutReal - cutTime).toFixed(3)}s = ${cutReal > cutTime ? 'allarga el congelat' : 'escurça el congelat'})`);
+                    }
+                }
+            } catch (eAt) {
+                log(`   ⚠️ [_freeze] Final real del clip viu NO llegit (${eAt.message}) → congelat a ${cutTime.toFixed(2)}s`, "WARN");
+            }
 
             // 5. Importar PNG al bin CHY (el congelat ja és a snapPath: `_capturePng` prova
             //    `Render.snapshot` (via QE `exportFramePNG`) i deixa `Render.frame` de reserva;
@@ -625,19 +657,36 @@
             const importPayload = JSON.stringify([snapPath]);
             await callJSX(`IO.importFiles('${utils.escape(importPayload)}', 'CHY')`);
 
-            // 6. Determinar durada i inserir PNG estirat a la pista des de cutTime fins a stretchEnd
+            // 6. Determinar durada i inserir PNG estirat a la pista des de cutReal fins a stretchEnd
+            //    (`cutReal` = final REAL del grafisme, JS:630; `stretchEnd` segueix sent el final
+            //    de la targeta → el congelat absorbeix el recorte de la part viva).
             let duration;
             if (stretchEnd !== null && stretchEnd !== undefined) {
-                duration = Math.max(stretchEnd - cutTime, 0.5);
+                duration = Math.max(stretchEnd - cutReal, 0.5);
             } else {
                 const timelineDur = parseFloat(await callJSX("Timeline.duration()") || "0");
-                duration = Math.max(timelineDur - cutTime, 0.5);
+                duration = Math.max(timelineDur - cutReal, 0.5);
             }
             // (2026-10-01 · #129) Insert sense endSec + `endAt` (vegeu punt 4): el PNG estirat
             // no ha de retallar el darrer clip de la pista.
-            await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutTime}, null, 'video')`);
-            await callJSX(`Clips.endAt(${T_THEME}, ${cutTime}, ${cutTime + duration}, 'video')`);
-            log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V${T_THEME} @ ${cutTime.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
+            await callJSX(`Clips.insert('${utils.escape(fileName)}', ${T_THEME}, ${cutReal}, null, 'video')`);
+            await callJSX(`Clips.endAt(${T_THEME}, ${cutReal}, ${cutReal + duration}, 'video')`);
+            log(`   ✅ [_freeze] PNG "${fileName}" → CHY → V${T_THEME} @ ${cutReal.toFixed(2)}s dur=${duration.toFixed(1)}s (fi=${stretchEnd !== null ? stretchEnd.toFixed(2) : 'final'})s`);
+            // (2026-10-14 · #159b) VERIFICACIÓ del junt: el PNG ha d'arrencar on acaba el clip
+            // viu (±1 frame). Mateixa xarxa que `Repartir` (JS:4328): llegir la realitat, no
+            // confiar en el càlcul.
+            try {
+                const frRaw = await callJSX(`Clips.at(${T_THEME}, ${(cutReal + 0.02).toFixed(4)}, 'video')`);
+                const oFr = (frRaw && frRaw !== 'null') ? JSON.parse(frRaw) : null;
+                if (oFr && isFinite(oFr.start)) {
+                    const forat = Number(oFr.start) - cutReal;
+                    if (Math.abs(forat) <= REV_FRAME + 0.005) {
+                        log(`   🔗 [_freeze] Junt clip viu → congelat OK: viu fins ${cutReal.toFixed(2)}s, PNG a ${Number(oFr.start).toFixed(2)}s (${(forat / REV_FRAME).toFixed(0)} frames)`);
+                    } else {
+                        log(`   ⚠️ [_freeze] FORAT de ${forat.toFixed(2)}s (${(forat / REV_FRAME).toFixed(0)} frames) entre el grafisme (${cutReal.toFixed(2)}s) i el congelat (${Number(oFr.start).toFixed(2)}s)`, 'WARN');
+                    }
+                }
+            } catch (eFr) { }
             
             return { success: true, duration };
         },
@@ -1008,10 +1057,15 @@
             const start = p.mk.time + OFF;
             const itemEnd = (p.itemEnd && p.itemEnd > start + 0.5) ? p.itemEnd : null;
             const avail = (itemEnd !== null) ? (itemEnd - start) : null;
-            // Durada real de cada targeta (ffprobe si el mèdia ja és al projecte)
+            // Durada real de cada targeta (ffprobe si el mèdia ja és al projecte) i la SEVA
+            // FONT: `bin`/`bin~*` = durada del DOM (exacta) · `mida`/`mida~est` = ESTIMADA per
+            // la mida del fitxer ÷ bitrate (pot quedar curta o LLARGA) · `assumit` = ni això
+            // (s'assumeix ANIM). La font decideix el marge de seguretat de la part viva.
+            const durSrc = [];
             const durs = list.map(c => {
                 const d = PL._resolveWottDur ? PL._resolveWottDur(p.wottIdx, c) : null;
                 const dd = (d && d.dur > 0.1) ? d.dur : ANIM;
+                durSrc.push((d && d.dur > 0.1) ? String(d.src || '?') : 'assumit');
                 if (!(d && d.dur > 0.1)) log(`   ⚠️ [${p.label}] ${TAG} «${String(c.name).substring(0, 40)}»: durada no resolta → s'assumeix ${ANIM.toFixed(2)}s`, 'WARN');
                 return dd;
             });
@@ -1196,6 +1250,21 @@
             // congelat entra AQUESTS 5 frames ABANS i l'enllaç vídeo viu → congelat queda
             // SENSE buit (la llargada del congelat no canvia). Vegeu `titolet.cardTrimFrames`.
             const TRIM = REV_FRAME * ((TT.cardTrimFrames != null) ? Number(TT.cardTrimFrames) : 5);
+            // ── MARGE DE MÈDIA (2026-10-14 · petició d'usuari) ─────────────────────────────
+            // 🔴 La part VIVA és l'ÚNIC insert amb MÈDIA al darrere (el congelat és un PNG
+            // estirat, elàstic): si s'hi demana més durada que el mèdia real, `Clips.endAt` no
+            // allarga res — el clip s'ACABA ABANS i queda un BUIT entre el clip i el congelat
+            // (el rètol desapareix un moment i torna congelat). I la durada del wott pot ser una
+            // ESTIMACIÓ (mida del fitxer ÷ bitrate quan el bin no en té la durada del DOM:
+            // mesurat al log real del 14/10, «Bin CHY: 9 fitxers, 0 amb durada del DOM»).
+            // ✅ Marge de seguretat (`liveHoldBackSec` = 1 s): es retalla del FINAL de la part
+            // viva i el congelat hi entra ABANS, de manera que la cadena queda SENSE buit i el
+            // rètol és a l'aire fins al final detectat. Només s'estalvia l'últim segon
+            // d'animació — el frame congelat ja és el grafisme format (`freezeGrabFrac` = 60 %).
+            // 🛡️ Mai es retalla més del 25 % del clip: en wotts curts (1-2 s) el marge sencer es
+            // menjaria l'animació d'ENTRADA i el grafisme no arribaria format a l'aire.
+            const liveHoldCfg = (TT.liveHoldBackSec != null) ? Math.max(0, Number(TT.liveHoldBackSec)) : 1.0;
+            const liveHold = (mediaDur) => Math.min(liveHoldCfg, Math.max(0, mediaDur * 0.25));
             const orderIdx = [];
             for (let i = 0; i < list.length; i++) {
                 const c = ttCards ? ttCards[i] : null;
@@ -1246,8 +1315,12 @@
                     // part viva diferent (mesurat: 0,5 s … 5,2 s), un congelat de 0,5 s forçat
                     // a totes i, a les «llargues», un congelat de 3 s que sobrepassava el
                     // final detectat (75,40→78,40 s quan el rètol cremat s'acabava a 76,50 s).
-                    const liveWant = Math.max(0.5, cardDur - TRIM);
-                    let want = (detEnd !== null) ? Math.max(liveWant, detEnd - tStart - TRIM) : (liveWant + freezeDur);
+                    const liveWant = Math.max(0.5, cardDur - TRIM - liveHold(cardDur));
+                    // Sense final detectat, la targeta conserva la SEVA LLARGADA: el marge només
+                    // mou la frontera viu → congelat (el congelat creix el mateix que s'escurça la
+                    // part viva) → la cadència i el lloc dels rètols no canvien. Amb `detEnd` mana
+                    // la detecció (el congelat hi arriba igual: `want` no depèn de `liveWant`).
+                    let want = (detEnd !== null) ? Math.max(liveWant, detEnd - tStart - TRIM) : (liveWant + freezeDur + liveHold(cardDur));
                     want = Math.min(want, liveWant + freezeMax);
                     planned.push({
                         chy: chy, name: shortName, start: tStart, want: want, liveWant: liveWant,
@@ -1255,19 +1328,20 @@
                     });
                     log(`   🧲 [${p.label}] ${TAG} ${i + 1}/${list.length} «${shortName}» relIn ${c.relIn}s ` +
                         `(cov ${c.maxCov}%) → ${tStart.toFixed(2)}s [${how}] viu ${liveWant.toFixed(2)}s ` +
-                        `(= clip ${cardDur.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames)` +
+                        `(= clip ${cardDur.toFixed(2)}s [${durSrc[i]}] − ${(TRIM / REV_FRAME).toFixed(0)} frames − marge ${liveHold(cardDur).toFixed(2)}s)` +
                         ((detEnd !== null && want > liveWant + 0.05) ? ` + congelat ${(want - liveWant).toFixed(2)}s (final detectat ${detEnd.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames)` : ''));
                     if (tStart + want > maxEndTl) maxEndTl = tStart + want;
                 } else {
                     const tStart = maxEndTl + GAP;
-                    const liveW = Math.max(0.5, cardDur - TRIM);
-                    const want = liveW + freezeDur;
+                    const liveW = Math.max(0.5, cardDur - TRIM - liveHold(cardDur));
+                    // Llargada intacta: `+ liveHold` al congelat (vegeu el camí detectat).
+                    const want = liveW + freezeDur + liveHold(cardDur);
                     planned.push({
                         chy: chy, name: shortName, start: tStart, want: want, liveWant: liveW,
                         det: false, detEnd: null, relIn: null, how: 'encadenat'
                     });
                     log(`   ⛓️ [${p.label}] ${TAG} ${i + 1}/${list.length} «${shortName}» SENSE detecció → ` +
-                        `encadenat a ${tStart.toFixed(2)}s (viu ${liveW.toFixed(2)}s = clip ${cardDur.toFixed(2)}s − ${(TRIM / REV_FRAME).toFixed(0)} frames + congelat ${freezeDur.toFixed(2)}s)`);
+                        `encadenat a ${tStart.toFixed(2)}s (viu ${liveW.toFixed(2)}s = clip ${cardDur.toFixed(2)}s [${durSrc[i]}] − ${(TRIM / REV_FRAME).toFixed(0)} frames − marge ${liveHold(cardDur).toFixed(2)}s + congelat ${(freezeDur + liveHold(cardDur)).toFixed(2)}s)`);
                     maxEndTl = tStart + want;
                 }
             }

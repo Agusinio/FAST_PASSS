@@ -44,14 +44,22 @@
          */
         _save: async function (path, data) {
             const json    = JSON.stringify(data, null, 2);
-            const escaped = json.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            // (2026-10-13) El payload viaja DENTRO de un literal de cadena JSX: los saltos
+            // de línea del pretty-print (indent 2) rompen el literal → evalScript falla y
+            // el fichero NO se escribe nunca (todas las carpetas analisis_estructura del
+            // NAS estaban creadas y vacías, del 2026-09-29 al 2026-10-13). Misma receta
+            // que flow_markers.js:3288 / Utils.escape.
+            const escaped = json.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n');
             // (2026-09-24) La carpeta del bloc (o la seva subcarpeta analisis_estructura)
             // pot no existir encara al primer run → la creem ABANS d'escriure.
             try {
                 const dir = path.substring(0, path.lastIndexOf('/'));
                 if (dir) await window.FASTPASS_UI.Utils.ensureFolders(dir);
             } catch (eF) { /* noop */ }
-            await callJSX("IO.writeTxt('" + path + "', '" + escaped + "')");
+            const wRes = await callJSX("IO.writeTxt('" + path + "', '" + escaped + "')");
+            if (typeof wRes === 'string' && wRes.indexOf('ERR') === 0) {
+                log("⚠️ [Analysis] IO.writeTxt ha fallat: " + wRes + " → " + path);
+            }
         },
 
         /**

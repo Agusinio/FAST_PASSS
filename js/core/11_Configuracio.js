@@ -98,7 +98,23 @@
         roiPerRole: {
             // TITOLET: MESURAT (2026-10-06, roi_real.raw): xinxeta taronja a la banda baixa
             // de l'esquerra, ancorada a x=0 → la vora X no pot desqualificar (només la Y).
-            'TITOLET': { roiX: null, roiY: [0.60, 0.85], edgeAxes: 'y' },
+            // 🎨 (2026-10-14) DUES ZONES, MATEIX COLOR: el rètol TITOLET NO viu sempre a la
+            // banda baixa. MESURAT al TNC V1 del 2026-10-14 (TNC_V1_CLIP.mp4, 1920x1080,
+            // 6 TITOLET): la xinxeta de TN COMARQUES està a y 0,367-0,578 (banda MITJANA,
+            // x 0-0,5) → amb la ROI [0.60,0.85] donava 0 intervals i la cadena queia al
+            // fallback de cadència (6 targetes encadenades a ~9 s en comptes del seu instant).
+            // Una sola ROI ampla NO serveix: amb y[0.30,0.85] el taronja d'imatge del mateix
+            // clip (una lona a y 0,356-0,722, 8,13 % del frame) queda DINS la ROI i no en
+            // toca les vores → 1 interval FALS (mesurat: 7 en comptes de 6). Amb DUES facetes
+            // cada zona té LA SEVA guarda de vora i el taronja d'imatge el descarten les dues
+            // (la lona travessa les dues zones de dalt a baix).
+            // MESURAT amb el clip real (2 fps, 160x45, hull y 0,32-0,85, guarda 'y'):
+            // 6/6 rètols detectats (56,7/75,7/91,7/108,7/122,7/136,2 s del clip) i 0 falsos.
+            'TITOLET': { roiX: null, roiY: [0.60, 0.85], edgeAxes: 'y',
+                facets: [
+                    { color: '#F25F13', tol: 25 },                    // baixa: TNM/TNV (mesurat 2026-10-05)
+                    { color: '#F25F13', tol: 25, roiY: [0.32, 0.62] } // mitjana: TNC (mesurat 2026-10-14)
+                ] },
 
             // ── DETECTORS PER FAMÍLIA (2026-10-09) ──────────────────────────────────────
             // MESURAT als PNG de `...\PROVES\GRAFISMES INTEGRATS` i al clip TNM_V3 (235
@@ -241,6 +257,18 @@
                                //    congelat queda SENSE buit. 0 = comportament antic.
         freezeMaxSec: 15,      // topall del congelat (seguretat): mai més de 15 s de frame
                                //    congelat, encara que la detecció digui que va durar més
+        liveHoldBackSec: 1.0,  // 🔴 (2026-10-14 · petició d'usuari) La part VIVA de la targeta
+                               //    (l'inserit del wott) MAI pot ser més llarga que el mèdia
+                               //    real. La durada del wott pot ser una ESTIMACIÓ (mida de
+                               //    fitxer ÷ bitrate quan el bin no en té la durada del DOM) i
+                               //    si s'estira més enllà del mèdia, `Clips.endAt` no allarga
+                               //    res: el clip s'acaba ABANS i queda un BUIT fins al congelat.
+                               //    Marge de seguretat = 1 s: es retalla del FINAL de la part
+                               //    viva (el congelat, que és un PNG elàstic, hi entra abans →
+                               //    l'enllaç queda SENSE buit). Grafisme complet a l'aire fins
+                               //    al final detectat, només s'estalvia l'últim segon
+                               //    d'animació (el frame congelat ja és el grafisme format:
+                               //    `freezeGrabFrac` = 60 % del clip). 0 = comportament antic.
     };
 
     // 🎬 TEMA-TÍTOL · SORTIDA i TRANSICIONS (2026-10-07)

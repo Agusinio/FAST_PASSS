@@ -65,6 +65,32 @@
         return /IPD/i.test(num + ' ' + titol);
     }
 
+    /**
+     * FORCED_STRUCTURAL_SUFFIXES (2026-10-14 · BUG #156b): sufijos que l'escaleta marca
+     * com a ESTRUCTURALS encara que l'ítem arribi amb `durada:0:00` o amb `agrupacio:null`:
+     *   'f'    → "off" (veus en off de continuïtat: obre el bloc, durada 0:00)
+     *   'i'    → intro,  'lead' → careta d'entrada
+     *   'dir'  → directe,  'dp' → doble pantalla de plató
+     * ABANS aquest set vivia dins de _classifyItems (només classificació). Ara és de MÒDUL
+     * perquè també l'han de fer servir el COLOR (_getColorIdx) i el MARCADOR D'INICI (F2):
+     * "estructural" ha de voler dir el mateix a totes les fases.
+     */
+    var FORCED_STRUCTURAL_SUFFIXES = new Set(['lead', 'i', 'dp', 'dir', 'f']);
+
+    /**
+     * hasForcedStructuralSuffix(num): el sufix normalitzat del num ('022f' → 'f',
+     * '02 GF-1' → 'gf1') és un dels ESTRUCTURALS FORÇATS? Normalització ÚNICA via
+     * Markers._normSuffix (BUG #122), perquè l'escaleta escriu " gf ", " GF-1", etc.
+     * @param {string|number} num
+     * @returns {boolean}
+     */
+    function hasForcedStructuralSuffix(num) {
+        try {
+            var suf = FASTPASS_UI.Workflows.Markers._normSuffix(num);
+            return (suf !== null && suf !== undefined && FORCED_STRUCTURAL_SUFFIXES.has(suf));
+        } catch (eFs) { return false; }
+    }
+
     FASTPASS_UI.Workflows.Markers = {
 
         // ═══════════════════════════════════════════════════════════════
@@ -247,6 +273,8 @@
         // agrupacio == null + durada == 0 → 4 (Groc, gràfics)
         // agrupacio == null + durada > 0 → 1 (Vermell)
         // num/titol amb "IPD" → 7 (Turquesa, IPD DINS el bloc)
+        // (2026-10-14 · BUG #156b) agrupacio == null + durada == 0 + sufix ESTRUCTURAL
+        //   forçat ('f','i','dir','dp','lead') → 6 (Blau): és capçalera del bloc, no gràfic
         // ═══════════════════════════════════════════════════════════════
 
         _getColorIdx: function (line) {
@@ -272,6 +300,14 @@
             if (parts.length === 2) dSec = parts[0] * 60 + parts[1];
             else if (parts.length === 3) dSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
             else dSec = (typeof parts[0] === 'number') ? parts[0] : 0;
+            // (2026-10-14 · BUG #156b) CAPÇALERA ESTRUCTURAL DE DURADA ZERO → BLAU (6).
+            // Cas real TNV_V1 13/10 (`022f` "off", durada 0:00, agrupacio null al manifest
+            // capturat abans de refrescar l'escaleta): queia al fallback de durada 0 → GROC
+            // (4), el mateix color que un gràfic, i el seu marcador xocava amb el d'inici a
+            // 00:00. Els ítems 'f'/'i'/'dir'/'dp'/'lead' SÓN del bloc (obren el bloc), no
+            // material aliè. NOMÉS amb durada 0: un 'dir'/'dp' AMB durada que no és del bloc
+            // (BUG #110) ha de continuar sent VERMELL (1).
+            if (dSec === 0 && !line.agrupacio && hasForcedStructuralSuffix(line.num)) return 6;
             return dSec === 0 ? 4 : 1;
         },
 
@@ -325,7 +361,10 @@
 
             const getRawDuradaSec = (line) => parseDurada(line.durada || '0:00');
 
-            const FORCED_STRUCTURAL_SUFFIXES = new Set(['lead', 'i', 'dp', 'dir', 'f']);
+            // (2026-10-14 · BUG #156b) El set d'estructurals forçats viu al MÒDUL
+            // (FORCED_STRUCTURAL_SUFFIXES) i el sufix es compara NORMALITZAT (_normSuffix,
+            // BUG #122). ABANS aquí es comparava el sufix amb espais i guions (" gf-1") i no
+            // casava mai. Semàntica per als números purs: idèntica ('' → estructural).
 
             var self = this;
             const isGraphicByNum = function (num) { return self._isGraphicByNum(num); };
@@ -335,7 +374,7 @@
                 const clean = num.toString().toLowerCase().trim();
                 const match = clean.match(/^\d+(.*)$/);
                 if (!match || match[1] === '') return true;
-                return FORCED_STRUCTURAL_SUFFIXES.has(match[1]);
+                return hasForcedStructuralSuffix(num);
             };
 
             const structuralItems = [];
@@ -1051,9 +1090,30 @@
                 var tSec = reader.tcToSeconds(tc);
                 if (tSec === null || tSec === undefined) continue;
                 var pos = tlClipStartSec + (tSec - refF1);
-                if (!(pos >= 0)) {
-                    log('   ⏭️ [Ungrouped] ' + (ug.num || '?') + ': cau fora del clip (' + pos.toFixed(2) + 's). Saltant.');
-                    continue;
+                // (2026-10-14 · BUG #156) XARXA DE SEGURETAT — CLAMP A 0 A LA CAPÇALERA DEL BLOC.
+                // Abans, qualsevol posició < 0 es DESCARTAVA en silenci, mentre que F2·Deduced
+                // (l.1215) i el propi JSX (8_Markers.jsx:201-203) ja clampen a 0. Cas real
+                // TNV_V1 13/10: `022f` "off" (ítem d'entrada del bloc, prevista 21:02:12 = world
+                // 75732 = worldBlockStartSec, sense OnAir) queia a pos = 11 + (75732 - 75744)
+                // = -1.00 s → `⏭️ cau fora del clip (-1.00s). Saltant.` → sense marcador.
+                // El descart no es pot treure a cegues: els ítems NO agrupats són material aliè
+                // al bloc (escaleta del programa sencer) i un d'ells pot caure molt abans del
+                // clip; clamar-los tots a 0 ompliria el 00:00 de marcadors falsos. Per això
+                // només es clampa si l'ítem és a la CAPÇALERA del bloc (dins el marge), que és
+                // quan la posició negativa és un artefacte d'ancoratge (refF1 s'imanta al primer
+                // ítem amb OnAir REAL, que va DESPRÉS de l'entrada).
+                if (pos < 0) {
+                    var HEAD_MARGIN_SEC = 120;
+                    var blkStart = (manifest && manifest.ref && manifest.ref.worldBlockStartSec != null)
+                        ? Number(manifest.ref.worldBlockStartSec) : NaN;
+                    var refCap = isFinite(blkStart) ? blkStart : refF1;
+                    if (tSec >= refCap - HEAD_MARGIN_SEC) {
+                        log('   🔧 [Ungrouped] ' + (ug.num || '?') + ': cau fora del clip (' + pos.toFixed(2) + 's) però és capçalera del bloc → clamp a 0.');
+                        pos = 0;
+                    } else {
+                        log('   ⏭️ [Ungrouped] ' + (ug.num || '?') + ': cau fora del clip (' + pos.toFixed(2) + 's). Saltant.');
+                        continue;
+                    }
                 }
                 // (2026-10-05 · BUG #140) AJUST AL CORTE MÉS PROPER: aquesta fase és l'ÚLTIMA
                 // del pipeline OUT&GO (js/main.js runFullPipelineOut), o sigui que corre
@@ -1079,6 +1139,91 @@
             log('🔴 [Ungrouped] Moguts: ' + (result.moved || 0) + ' | Nous: ' + (result.created || 0) + ' | Total: ' + (result.placed || 0) + '. ✓ FINALITZAT.');
         },
 
+        /**
+         * _horaRefSec: hora de REFERÈNCIA d'un ítem d'escaleta en segons de timeline (l'OnAir
+         * real si en té; si no, la prevista). `null` si no es pot resoldre.
+         * Compartit per totes les fases que han de triar o situar l'ítem d'inici (F2, F3, CAPA0
+         * · BUG #156b) perquè totes mesurin igual.
+         * @param {object} item
+         * @param {object} reader - EscaletaReader (de ctxData)
+         * @returns {number|null} segons
+         */
+        _horaRefSec: function (item, reader) {
+            if (!item || !reader) return null;
+            var on = item.horaEntradaOnAir;
+            var ref = (on && on !== '00:00:00' && String(on).trim() !== '') ? on : item.horaEntradaPrevista;
+            var sec = reader.tcToSeconds(ref);
+            return (sec === null || sec === undefined || isNaN(sec)) ? null : sec;
+        },
+
+        /**
+         * _pickStartItem: (2026-10-14 · BUG #156b) QUIN ítem porta el MARCADOR D'INICI (00:00)?
+         *
+         * REGLA (única, alineada amb CAPA0 del 2026-09-25): el PRIMER ítem ESTRUCTURAL del bloc
+         * EN ORDRE D'ESCALETA. "Estructural" és la classificació de `_classifyItems` (els GRÀFICS
+         * P2/GF/TE/ft… ja queden fora), NO `isItemEstructural` (durada > 0): la capçalera d'un
+         * bloc pot ser un ítem de durada 0:00 ('022f' = "off", cas 13/10 TNV_V1).
+         *
+         * PER QUÈ IMPORTA (queixa d'usuari 2026-10-14): el marcador d'inici porta el PREFIX de
+         * l'ítem, i `placeByPrefixes` fa UPSERT per prefix → si l'inici s'assignava a '022'
+         * (EMILIO DELGADO, OnAir 21:02:24 → 12,00s), el marcador d'aquest ítem es MOVIA de la
+         * seva hora real a 00:00 i l'off ('022f', durada 0:00) es quedava amb un marcador groc
+         * aliè a sobre → dos marcadors al mateix TC i fora d'ordre d'escaleta.
+         *
+         * @param {Array} structuralItems - de `_classifyItems` (ordre d'escaleta)
+         * @param {Array} [ungroupedItems] - ítems NO agrupats dins el bloc (ctxData.ungroupedItems)
+         * @param {Function} horaRefSec - (item) → segons de referència | null
+         * @param {Array} [graphicItems] - de `_classifyItems` (per excloure gràfics mal classificats)
+         * @returns {Object|null} { item, num }
+         */
+        _pickStartItem: function (structuralItems, ungroupedItems, horaRefSec, graphicItems) {
+            // (2026-09-25, unificat 2026-10-14) El marcador d'INICI NO pot caure mai en un GRÀFIC
+            // (P2/GF/MAPA/TE…): als gràfics els toca la seva pròpia capa. TNC V2: «04 P2-2» va
+            // sortir classificat com a estructural i s'enduia el 🔒 d'inici (queixa d'usuari).
+            var grafNums = {};
+            for (var gi = 0; gi < ((graphicItems || []).length); gi++) {
+                grafNums[String((graphicItems[gi] || {}).num || '').trim().toLowerCase()] = true;
+            }
+            var pick = null, pickSec = null;
+            for (var si = 0; si < ((structuralItems || []).length); si++) {
+                var cand = structuralItems[si];
+                if (!cand || !cand.num) continue;
+                var cn = String(cand.num).trim();
+                if (grafNums[cn.toLowerCase()] === true || cn.toUpperCase().indexOf('P2') !== -1) {
+                    log('   🟠 [Inici] S\'omet "' + cn + '": és GRÀFIC → anirà a la capa de gràfics');
+                    continue;
+                }
+                pick = cand;
+                pickSec = (typeof horaRefSec === 'function') ? horaRefSec(cand) : null;
+                break;
+            }
+
+            // (2026-10-14 · BUG #156b) CAPÇALERA ENCARA NO AGRUPADA AL MANIFEST: si l'escaleta
+            // es va capturar ABANS que el realitzador agrupés l'ítem de capçalera (13/10 TNV_V1:
+            // '022f' "off", durada 0:00, agrupacio:null), `lines`/`structuralItems` no el contenen
+            // i l'inici tornaria a caure sobre '022' amb el xoc de 00:00. Només s'accepta si és
+            // ESTRUCTURAL FORÇAT ('f','i','dir','dp','lead') i la seva hora és a la CAPÇALERA
+            // (≤ l'inici calculat): un '02dir' de mig bloc (BUG #110, agr=null a 21:05) queda fora.
+            if (pickSec !== null && ungroupedItems && ungroupedItems.length) {
+                var head = null, headSec = null;
+                for (var i = 0; i < ungroupedItems.length; i++) {
+                    var ug = ungroupedItems[i];
+                    if (!ug || !ug.num || !hasForcedStructuralSuffix(ug.num)) continue;
+                    var t = horaRefSec(ug);
+                    if (t === null || t === undefined || t > pickSec + 0.5) continue;
+                    if (headSec === null || t < headSec) { head = ug; headSec = t; }
+                }
+                if (head && headSec !== null && headSec < pickSec - 0.5) {
+                    log('   🟠 [Inici] Capçalera no agrupada al manifest: ' + head.num + ' @' + headSec.toFixed(2) +
+                        's passa a ser el marcador d\'inici en lloc de ' + ((pick && pick.num) ? pick.num : '?') +
+                        ' @' + pickSec.toFixed(2) + 's');
+                    pick = head;
+                }
+            }
+            if (!pick || !pick.num) return null;
+            return { item: pick, num: String(pick.num) };
+        },
+
         // ═══════════════════════════════════════════════════════════════
         // 🟢 F2: placeDeducedOnAirMarkers — Marcadors deduïts (OnAir indirecte)
         // ═══════════════════════════════════════════════════════════════
@@ -1087,7 +1232,7 @@
 
             const ctxData = await getAssemblyContext().loadAssemblyContext();
             if (!ctxData) { log('⚠️ [F2·Deduced] loadAssemblyContext ha fallat.'); return; }
-            const { manifest, reader, lines, clips } = ctxData;
+            const { manifest, reader, lines, clips, ungroupedItems } = ctxData;
 
             const classData = this._classifyItems(lines);
             const { structuralItems } = classData;
@@ -1122,15 +1267,15 @@
             // 1r estructural és "08i" (va abans del "10" a l'escaleta). L'usuari confirma
             // manualment on comença l'ítem clicant IN, per tant aquest marcador viu a 0 i
             // porta el seu número i nom.
-            var startItem = null;
-            for (var ls0 = 0; ls0 < lines.length; ls0++) {
-                var cand0 = lines[ls0];
-                if (!cand0 || !cand0.num) continue;
-                if (reader.isItemEstructural(cand0)) { startItem = cand0; break; }
-            }
+            // (2026-10-14 · BUG #156b) La selecció viu a `_pickStartItem` (regla única, la
+            // mateixa que CAPA0): "estructural" = classificació de `_classifyItems`, NO
+            // `isItemEstructural` (durada > 0) → la capçalera d'un bloc pot ser un 'off' 0:00.
+            var _horaRefF2 = function (it) { return this._horaRefSec(it, reader); }.bind(this);
+            var startPick = this._pickStartItem(structuralItems, ungroupedItems, _horaRefF2, classData.graphicItems);
+            var startItem = startPick ? startPick.item : null;
             var placedByStart = {};
-            if (startItem && startItem.num) {
-                var startNum = String(startItem.num);
+            if (startPick) {
+                var startNum = startPick.num;
                 var hasStartMarker = false;
                 for (var mi2 = 0; mi2 < allMarkersF2.length; mi2++) {
                     var mk2 = allMarkersF2[mi2];
@@ -1138,14 +1283,19 @@
                         if (_extractPrefixF2(mk2.comments || '') === startNum) { hasStartMarker = true; break; }
                     }
                 }
-                if (!hasStartMarker) {
-                    var startTitol = (startItem.titol || '').substring(0, 60).trim();
-                    var startComment = startTitol ? (startNum + ' - ' + startTitol) : startNum;
-                    placements.push({ prefix: startNum, timeSec: 0, comment: startComment, colorIdx: 6, name: 'color=6' });
-                    itemPositions.set(startNum, 0);
-                    placedByStart[startNum] = true;
-                    log('🟠 [F2·Deduced] Marcador d\'inici: "' + startComment + '" a 00:00 (1r ítem del bloc)');
-                }
+                var startTitol = (startItem.titol || '').substring(0, 60).trim();
+                var startComment = startTitol ? (startNum + ' - ' + startTitol) : startNum;
+                // (2026-10-14 · BUG #156b) SEMPRE s'upserta (abans només si no existia): el
+                // marcador pot existir amb un color VELL (l'off groc de la passa anterior) i
+                // l'upsert per prefix és idempotent a 00:00 → només refresca color/nom.
+                placements.push({ prefix: startNum, timeSec: 0, comment: startComment, colorIdx: 6, name: 'color=6' });
+                itemPositions.set(startNum, 0);
+                placedByStart[startNum] = true;
+                // (2026-10-14 · BUG #156b) Publicar el prefix d'inici: la resta de fases el
+                // consulten (`_iniciPrefix`) per no moure ni sobreescriure el 00:00 — F3 (re-col·
+                // locació), SEP (separació GAP), F5 (inferits, l'única que no tenia guarda).
+                this._iniciPrefix = startNum;
+                log('🟠 [F2·Deduced] Marcador d\'inici: "' + startComment + '" a 00:00 (1r ítem estructural del bloc' + (hasStartMarker ? ', refrescat' : '') + ')');
             }
 
             // ── Construir mapa auxiliar: per a cada ítem deduït, trobar límits faro ──
@@ -1272,7 +1422,7 @@
 
             const ctxData = await getAssemblyContext().loadAssemblyContext();
             if (!ctxData) { log('⚠️ [F3·Coinc] loadAssemblyContext ha fallat.'); return; }
-            const { manifest, reader, lines, clips } = ctxData;
+            const { manifest, reader, lines, clips, ungroupedItems } = ctxData;
 
             const classData = this._classifyItems(lines);
             const { structuralItems } = classData;
@@ -1303,6 +1453,12 @@
 
             var placements = [];
 
+            // (2026-10-14 · BUG #156b) Qui és l'ÍTEM D'INICI del bloc (regla única, vegeu
+            // `_pickStartItem`): NOMÉS el seu marcador a 00:00 és intocable per F3.
+            var _horaRefF3 = function (it) { return this._horaRefSec(it, reader); }.bind(this);
+            var _startPickF3 = this._pickStartItem(structuralItems, ungroupedItems, _horaRefF3, classData.graphicItems);
+            var startNumF3 = _startPickF3 ? _startPickF3.num : null;
+
             for (var si = 0; si < structuralItems.length; si++) {
                 var line = structuralItems[si];
                 var onAir = line.horaEntradaOnAir;
@@ -1315,6 +1471,11 @@
                 // 1r ítem del bloc a 00:00 ("Marcador d'inici"). F3 no el pot tornar a la seva
                 // OnAir, si no el 00:00 desapareix (queixa d'usuari 2026-09-24: "per què no
                 // apareix el marker de 00:00?"). Es detecta pel prefix del comentari.
+                // (2026-10-14 · BUG #156b) PERÒ la protecció és NOMÉS per a l'ÍTEM QUE ÉS
+                // L'INICI (`_pickStartItem`, la mateixa regla que F2): si qualsevol ítem amb un
+                // marcador heretat a 00:00 quedés blindat, el `022` que una passa anterior va
+                // deixar clavat a 0 (quan l'inici era seu) NO es re-col·locaria mai a la seva
+                // hora real (OnAir 21:02:24 → 12,00s) i l'off seguiria xocant amb ell.
                 var _mkActualF3 = null;
                 for (var mf3 = 0; mf3 < existingMarkers.length; mf3++) {
                     var _pf3 = this._extractPrefixFromComment(existingMarkers[mf3].comments || '');
@@ -1324,8 +1485,11 @@
                     }
                 }
                 if (_mkActualF3 !== null && isFinite(_mkActualF3) && _mkActualF3 <= 0.15) {
-                    log('   ⏭️ [F3·Coinc] ' + (line.num || '?') + ': marcador d\'inici a 00:00 → no es mou (el protegeix F2)');
-                    continue;
+                    if (startNumF3 === null || String(line.num || '').toLowerCase() === startNumF3.toLowerCase()) {
+                        log('   ⏭️ [F3·Coinc] ' + (line.num || '?') + ': marcador d\'inici a 00:00 → no es mou (el protegeix F2)');
+                        continue;
+                    }
+                    log('   🔧 [F3·Coinc] ' + (line.num || '?') + ': tenia un marcador heretat a 00:00 però l\'inici del bloc és ' + startNumF3 + ' → es re-col·loca a la seva hora real');
                 }
 
                 var targetSec = reader.tcToSeconds(onAir);
@@ -2108,22 +2272,13 @@
             const classData = this._classifyItems(lines);
             log('🟦 [CAPA0] Items: ' + ((classData.structuralItems || []).length) + ' estructurals · ' +
                 ((classData.graphicItems || []).length) + ' gràfics · ' + ((classData.farosItems || []).length) + ' amb OnAir');
-            // (2026-09-25) El marcador d'INICI NO pot ser un ítem GRÀFIC (P2/GF/MAPA/TE…):
-            // als gràfics els toca la seva pròpia capa (al final). TNC V2: "04 P2-2" sortia com
-            // a estructural i s'enduia el 🔒 d'inici ✗ (queixa d'usuari 2026-09-25).
-            const _grafNums = {};
-            (classData.graphicItems || []).forEach(function (g) { _grafNums[String(g.num || '').trim().toLowerCase()] = true; });
-            let first = null;
-            for (let _fi = 0; _fi < (classData.structuralItems || []).length; _fi++) {
-                const _cand = classData.structuralItems[_fi];
-                const _candNum = String(_cand.num || '').trim();
-                if (_grafNums[_candNum.toLowerCase()] === true || _candNum.toUpperCase().indexOf('P2') !== -1) {
-                    log('🟦 [CAPA0] S\'omet "' + _candNum + '": és GRÀFIC → anirà a la capa de gràfics (al final)');
-                    continue;
-                }
-                first = _cand;
-                break;
-            }
+            // (2026-09-25, unificat 2026-10-14) La tria de l'ítem d'inici (1r ESTRUCTURAL del
+            // bloc en ordre d'escaleta, MAI un gràfic P2/GF/MAPA) viu ara a `_pickStartItem` —
+            // la MATEIXA regla que fan servir F2 i F3 (BUG #156b) — perquè el 🔒 de les 00:00
+            // no depengui de quina fase l'ha col·locat.
+            const _horaRef0 = function (it) { return this._horaRefSec(it, ctxData.reader); }.bind(this);
+            const _start0 = this._pickStartItem(classData.structuralItems, ctxData.ungroupedItems, _horaRef0, classData.graphicItems);
+            const first = _start0 ? _start0.item : null;
             if (first) {
                 const pfx = String(first.num || '').trim();
                 const comment = (first.num ? first.num + ' - ' : '') + String(first.titol || '').substring(0, 60);
@@ -2488,10 +2643,42 @@
             var placements = [];
             var inferits = 0;
 
+            // (2026-10-14 · BUG #156b) GUARDA DEL MARCADOR D'INICI (forat documentat a
+            // features.json, acord 30/09 «F5 és l'única fase sense guarda»): `placeByPrefixes`
+            // fa UPSERT per PREFIX → deduir un ítem que sosté el 00:00 ESBORRAVA el marcador
+            // d'inici i el recreava a mig bloc (cas real '01dp'). Es detecta pel prefix
+            // d'inici publicat per F2 (`_iniciPrefix`) o per un marcador existent a ≤0,15 s.
+            var iniciPfx = this._iniciPrefix ? String(this._iniciPrefix).trim().toLowerCase() : null;
+            var iniciTime = null;
+            for (var pk in posByPrefix) {
+                if (posByPrefix[pk] <= 0.15 && (iniciTime === null || posByPrefix[pk] < iniciTime)) {
+                    iniciTime = posByPrefix[pk];
+                    if (!iniciPfx) iniciPfx = String(pk).toLowerCase();
+                }
+            }
+            if (iniciPfx !== null) log('   🔒 [F5·Inferits] Marcador d\'inici protegit: ' + iniciPfx + (iniciTime !== null ? ' @' + iniciTime.toFixed(2) + 's' : ''));
+
             for (var u = 0; u < unplacedItems.length; u++) {
                 var line = unplacedItems[u];
                 var num = String(line.num || '');
                 if (!num) continue;
+
+                // (2026-10-14 · BUG #156b) F5 MAI toca l'ítem que sosté el 00:00 (vegeu la nota
+                // de dalt): ni el prefix d'inici, ni cap marcador heretat a 0,00 s, ni els
+                // marcadors CONGELATS per una capa anterior (`_frozen` de CAPA1, mateix idioma
+                // que fa servir la separació).
+                if (iniciPfx !== null && num.toLowerCase() === iniciPfx) {
+                    log('   ⏭️ [F5·Inferits] ' + num + ': és el marcador d\'inici (00:00) → no es toca.');
+                    continue;
+                }
+                if (posByPrefix[num] !== undefined && posByPrefix[num] <= 0.15) {
+                    log('   ⏭️ [F5·Inferits] ' + num + ': ja té marcador a ' + Number(posByPrefix[num]).toFixed(2) + 's (inici del bloc) → no es toca.');
+                    continue;
+                }
+                if (this._frozen && this._frozen[num.toLowerCase()] === true) {
+                    log('   ⏭️ [F5·Inferits] ' + num + ': marcador congelat per una capa anterior → no es toca.');
+                    continue;
+                }
                 var idx = (orderIdx[num] !== undefined) ? orderIdx[num] : -1;
                 if (idx < 0) { log('⚠️ [F5·Inferits] ' + num + ': no consta a l\'escaleta del bloc. Saltant.', 'WARN'); continue; }
 
@@ -2506,6 +2693,11 @@
                     if (nf && posByPrefix[nf] !== undefined) { nextTime = posByPrefix[nf]; nextNum = nf; break; }
                 }
                 var lo = (prevTime !== null) ? prevTime : ((typeof clips[0].start === 'number') ? clips[0].start : 0);
+                // (2026-10-14 · BUG #156b) El 00:00 és del MARCADOR D'INICI: si l'ítem no té veí
+                // anterior amb marcador, el terra de la seva finestra passa a ser l'inici (mai
+                // 0,00 s) i, en comptar com a veí, s'hi aplica el marge de 0,5 s → cap ítem
+                // inferit pot quedar enganxat al marcador d'inici.
+                if (prevNum === null && iniciTime !== null && lo <= iniciTime + 0.05) { lo = iniciTime; prevNum = iniciPfx; }
                 var hi = (nextTime !== null) ? nextTime : clips[clips.length - 1].end;
                 log('   🔎 [F5·Inferits] ' + num + ': finestra [' + (prevNum || '—') + '@' + lo.toFixed(2) + 's → ' + (nextNum || '—') + '@' + hi.toFixed(2) + 's]');
                 if (hi - lo < 1.0) {

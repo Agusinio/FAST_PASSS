@@ -128,11 +128,14 @@
             log("📍 [INOUT Crudo] Capturant WorkArea del timeline...");
             try {
                 const ctx = await FASTPASS_UI.Workflows.MainButton._setupContext();
-                const waIn  = parseFloat(await callJSX("Timeline.getWorkAreaIn()"));
-                const waOut = parseFloat(await callJSX("Timeline.getWorkAreaOut()"));
+                // 🛡️ (2026-10-14) `Timeline.getWorkAreaIn/Out()` NO EXISTEIXEN al bridge: les
+                // crides tornaven "[]" → parseFloat = NaN i la fase 'crudo' quedava amb NaN
+                // (i el Cocinado hi tornava a ensopegar). Es llegeix el IN/OUT real.
+                const waIn  = parseFloat(await callJSX("Timeline.getIn()"));
+                const waOut = parseFloat(await callJSX("Timeline.getOut()"));
                 await FASTPASS_UI.Logic.Analysis.appendPhase(ctx, 'crudo', {
-                    workAreaIn: waIn,
-                    workAreaOut: waOut,
+                    workAreaIn: isFinite(waIn) ? waIn : 0,
+                    workAreaOut: isFinite(waOut) ? waOut : 0,
                     capturedAt: new Date().toISOString()
                 });
                 getUtils().status("INOUT Crudo capturat", "exito");

@@ -309,6 +309,12 @@ aparezca en ellas es CÓDIGO MUERTO. Escanear una copia externa: `-BaseDir "E:\F
 > Probado por hash: los `flux_*.js` que reaparecieron el 29/09 (`c757b1e`) son **byte a byte
 > idénticos** a los de abril que siguen viviendo en esas copias, con el mismo mtime conservado.
 > → **Nunca copiar/restaurar un árbol del pendrive encima del repo sin pasar `check_dead.ps1`.
+>
+> 🔒 **Blindatge (2026-10-13, BUG #155)**: `bin/hooks/pre-commit` (versionat) + `bin/install_hooks.ps1`.
+> El hook **BLOQUEJA el commit** si existeix `INFO/` o si `check_dead.ps1` surt amb codi 1. Reinstal·lar
+> (`bin/install_hooks.ps1`) si es clona el repo o es regenera `.git/` (els hooks NO es versionen).
+> La **4a reaparició** (13/10) va portar 33 orfes amb mtime d'abril i la carpeta `INFO/` (29 fitxers,
+> gener-abril 2026, docs pre-neteja) — tots dos esborrats.
 
 ### Higiene de salidas (anti-contaminación / anti-truncado)
 ```powershell
